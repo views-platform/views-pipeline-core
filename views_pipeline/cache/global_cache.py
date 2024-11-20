@@ -104,9 +104,7 @@ class GlobalCache(metaclass=GlobalCacheMeta):
             self.set(key, value)
 
     def local_imports(self):
-        from meta_tools.utils import utils_model_paths  # To avoid circular dependency
-
-        self.utils_model_paths = utils_model_paths
+        pass
 
     def ensure_cache_file_exists(self):
         """
