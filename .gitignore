@@ -197,7 +197,7 @@ cython_debug/
 *.pkl 
 
 # folders
-**/wandb/
+#**/wandb/
 **/notebooks/
 
 # mac specific 
