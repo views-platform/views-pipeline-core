@@ -9,13 +9,13 @@ import signal
 from views_pipeline_core.managers.path_manager import ModelPath
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 
 class GlobalCacheMeta(type):
     def __getitem__(cls, key):
-        instance = cls()
+        instance = cls()    
         return instance[key]
 
     def __setitem__(cls, key, value):

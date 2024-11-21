@@ -23,7 +23,7 @@ def ensure_log_directory(log_path: str) -> None:
 
 
 def setup_logging(
-    model_path: Path, default_level: int = logging.INFO, env_key: str = "LOG_CONFIG"
+    logging_path: Path, default_level: int = logging.INFO, env_key: str = "LOG_CONFIG"
 ) -> logging.Logger:
     """
     Setup the logging configuration from a YAML file and return the root logger.
@@ -48,9 +48,9 @@ def setup_logging(
     # CONFIG_LOGS_PATH = Path(__file__).parent / "logging.yaml"
     if _logs_in_model_dir:
         try:
-            COMMON_LOGS_PATH = ModelPath(model_path).logging
-            if not COMMON_LOGS_PATH.exists():
-                COMMON_LOGS_PATH.mkdir(parents=True, exist_ok=True)
+            # logging_path = ModelPath(model_path).logging
+            if not logging_path.exists():
+                logging_path.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             logging.warning(f"Failed to create log directory with exception: {e}")
         # Load YAML configuration
@@ -67,7 +67,7 @@ def setup_logging(
             for handler in config.get("handlers", {}).values():
                 if "filename" in handler and "{LOG_PATH}" in handler["filename"]:
                     handler["filename"] = handler["filename"].replace(
-                        "{LOG_PATH}", str(COMMON_LOGS_PATH)
+                        "{LOG_PATH}", str(logging_path)
                     )
                     ensure_log_directory(handler["filename"])
 
