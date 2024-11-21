@@ -4,7 +4,7 @@ import sys
 import os
 import signal
 from unittest.mock import patch
-from views_pipeline.cache.global_cache import GlobalCache, cleanup_cache_file, signal_handler
+from views_pipeline_core.cache.global_cache import GlobalCache, cleanup_cache_file, signal_handler
 
 @pytest.fixture(scope="function")
 def cache_file(tmp_path):

@@ -6,7 +6,7 @@ from pathlib import Path
 import threading
 import atexit
 import signal
-from views_pipeline.managers.path_manager import ModelPath
+from views_pipeline_core.managers.path_manager import ModelPath
 PATH = Path(__file__)
 if 'views_pipeline' in PATH.parts:
     PATH_ROOT = Path(*PATH.parts[:PATH.parts.index('views_pipeline') + 1])

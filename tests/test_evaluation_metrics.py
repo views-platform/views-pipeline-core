@@ -4,7 +4,7 @@ import properscoring as ps
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 # WARNING: mean_squared_error is deprecated!
 import wandb
-from views_pipeline.evaluation.metrics import EvaluationMetrics, generate_metric_dict
+from views_pipeline_core.evaluation.metrics import EvaluationMetrics, generate_metric_dict
 
 
 @pytest.fixture

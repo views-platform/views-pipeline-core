@@ -2,7 +2,7 @@
 
 import pytest
 import sys
-from views_pipeline.cli.utils import parse_args, validate_arguments
+from views_pipeline_core.cli.utils import parse_args, validate_arguments
 
 def test_parse_args_default():
     """

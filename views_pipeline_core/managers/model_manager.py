@@ -1,9 +1,9 @@
 import sys
 from abc import abstractmethod
-from views_pipeline.managers.path_manager import ModelPath
-from views_pipeline.wandb.utils import add_wandb_monthly_metrics, generate_wandb_log_dict, log_wandb_log_dict
+from views_pipeline_core.managers.path_manager import ModelPath
+from views_pipeline_core.wandb.utils import add_wandb_monthly_metrics, generate_wandb_log_dict, log_wandb_log_dict
 from typing import Union, Optional, List, Dict
-from views_pipeline.data.dataloaders import ViewsDataLoader
+from views_pipeline_core.data.dataloaders import ViewsDataLoader
 import logging
 import importlib
 import wandb

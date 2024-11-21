@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 import sys
 from pathlib import Path
 
-from views_pipeline.wandb.utils import (
+from views_pipeline_core.wandb.utils import (
     add_wandb_monthly_metrics,
     generate_wandb_log_dict,
     log_wandb_log_dict,

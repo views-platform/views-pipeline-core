@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import sys
-from views_pipeline.managers.path_manager import ModelPath
+from views_pipeline_core.managers.path_manager import ModelPath
 
 @pytest.fixture
 def temp_dir(tmp_path):

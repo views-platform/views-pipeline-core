@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
-from views_pipeline.managers.path_manager import ModelPath, EnsemblePath
-from views_pipeline.data.dataloaders import ViewsDataLoader
-from views_pipeline.managers.model_manager import ModelManager
+from views_pipeline_core.managers.path_manager import ModelPath, EnsemblePath
+from views_pipeline_core.data.dataloaders import ViewsDataLoader
+from views_pipeline_core.managers.model_manager import ModelManager
 import wandb
 import pandas as pd
 from pathlib import Path
