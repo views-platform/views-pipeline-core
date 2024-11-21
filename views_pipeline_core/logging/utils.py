@@ -56,9 +56,9 @@ def setup_logging(
         # Load YAML configuration
         # path = os.getenv(env_key, CONFIG_LOGS_PATH)
         try:
-            # Import the logging.yaml file from views_pipeline.configs and read it
+            # Import the logging.yaml file from views_pipeline_core.configs and read it
             with importlib.resources.open_text(
-                "views_pipeline.configs", "logging.yaml"
+                "views_pipeline_core.configs", "logging.yaml"
             ) as file:
                 config = yaml.safe_load(file)
             logging.info(f"Logging configuration is imported successfully")
