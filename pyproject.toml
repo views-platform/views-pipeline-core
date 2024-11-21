@@ -2,7 +2,11 @@
 name = "views_pipeline_core"
 version = "0.1.0"
 description = ""
-authors = ["Borbála Farkas <borbala.farkas@pcr.uu.se>"]
+authors = [
+    "Borbála Farkas <borbala.farkas@pcr.uu.se>",
+    "Dylan Pinheiro <dylpin@prio.org>",
+    "Xiaolong Sun <xiaolong.sun@pcr.uu.se>"
+]
 readme = "README.md"
 
 [tool.poetry.dependencies]
