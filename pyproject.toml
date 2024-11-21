@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "views_pipeline"
+name = "views_pipeline_core"
 version = "0.1.0"
 description = ""
 authors = ["Borbála Farkas <borbala.farkas@pcr.uu.se>"]
