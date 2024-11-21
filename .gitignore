@@ -171,23 +171,23 @@ cython_debug/
 #.idea/
 
 # media files
-*.esp
-*.tiff
-*.pyc
-*.zip
-*.JPG
-*.jpg
-*.mp4
-*.png
-*.svg
-*.jpeg
-*.gif
+# *.esp
+# *.tiff
+# *.pyc
+# *.zip
+# *.JPG
+# *.jpg
+# *.mp4
+# *.png
+# *.svg
+# *.jpeg
+# *.gif
 
 # presentation files
-*.pptx
-*.ppt
-*.pdf
-*.html
+# *.pptx
+# *.ppt
+# *.pdf
+# *.html
 
 # data files
 *.csv
