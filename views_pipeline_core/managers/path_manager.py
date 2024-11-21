@@ -63,9 +63,9 @@ class ModelPath:
     # _meta_tools = None
 
     @classmethod
-    def _initialize_class_paths(cls):
+    def _initialize_class_paths(cls, current_path: Path) -> None:
         """Initialize class-level paths."""
-        cls._root = cls.find_project_root()
+        cls._root = cls.find_project_root(current_path=current_path)
         # cls._models = cls._root / Path(cls._target + "s")
         # cls._common_utils = cls._root / "common_utils"
         # cls._common_configs = cls._root / "common_configs"
@@ -74,10 +74,10 @@ class ModelPath:
         # cls._common_logs = cls._root / "common_logs"
 
     @classmethod
-    def get_root(cls) -> Path:
+    def get_root(cls, current_path: Path) -> Path:
         """Get the root path."""
         if cls._root is None:
-            cls._initialize_class_paths()
+            cls._initialize_class_paths(current_path=current_path)
         return cls._root
 
     @classmethod
@@ -86,41 +86,6 @@ class ModelPath:
         if cls._root is None:
             cls._initialize_class_paths()
         return cls._root / Path(cls._target + "s")
-
-    # @classmethod
-    # def get_common_utils(cls) -> Path:
-    #     """Get the common utils path."""
-    #     if cls._common_utils is None:
-    #         cls._initialize_class_paths()
-    #     return cls._common_utils
-
-    # @classmethod
-    # def get_common_configs(cls) -> Path:
-    #     """Get the common configs path."""
-    #     if cls._common_configs is None:
-    #         cls._initialize_class_paths()
-    #     return cls._common_configs
-
-    # @classmethod
-    # def get_common_querysets(cls) -> Path:
-    #     """Get the common querysets path."""
-    #     if cls._common_querysets is None:
-    #         cls._initialize_class_paths()
-    #     return cls._common_querysets
-
-    # @classmethod
-    # def get_meta_tools(cls) -> Path:
-    #     """Get the meta tools path."""
-    #     if cls._meta_tools is None:
-    #         cls._initialize_class_paths()
-    #     return cls._meta_tools
-
-    # @classmethod
-    # def get_common_logs(cls) -> Path:
-    #     """Get the common logs path."""
-    #     if cls._common_logs is None:
-    #         cls._initialize_class_paths()
-    #     return cls._common_logs
 
     @classmethod
     def check_if_model_dir_exists(cls, model_name: str) -> bool:
@@ -143,7 +108,7 @@ class ModelPath:
         Generates a unique hash for the ModelPath instance.
 
         Args:
-            model_name_or_path (str or Path): The model name or path.
+            model_name (str or Path): The model name.
             validate (bool): Whether to validate paths and names.
             target (str): The target type (e.g., 'model').
 
@@ -209,7 +174,7 @@ class ModelPath:
         return False
     
     @staticmethod
-    def find_project_root(marker="LICENSE.md") -> Path:
+    def find_project_root(current_path: Path, marker="LICENSE.md") -> Path:
         """
         Finds the base directory of the project by searching for a specific marker file or directory.
         Args:
@@ -221,7 +186,7 @@ class ModelPath:
             FileNotFoundError: If the marker file/directory is not found up to the root directory.
         """
         # Start from the current directory and move up the hierarchy
-        current_path = Path(__file__).resolve().parent
+        current_path = Path(current_path).resolve().parent
         while current_path != current_path.parent:  # Loop until we reach the root directory
             if (current_path / marker).exists():
                 return current_path
@@ -231,13 +196,13 @@ class ModelPath:
         )
 
     def __init__(
-        self, model_name_or_path: Union[str, Path], validate: bool = True
+        self, model_path: Union[str, Path], validate: bool = True
     ) -> None:
         """
         Initializes a ModelPath instance.
 
         Args:
-            model_name_or_path (str or Path): The model name or path.
+            model_path (str or Path): The model name or path.
             validate (bool, optional): Whether to validate paths and names. Defaults to True.
             target (str, optional): The target type (e.g., 'model'). Defaults to 'model'.
         """
@@ -253,7 +218,7 @@ class ModelPath:
         self._force_cache_overwrite = False
 
         # Common paths
-        self.root = self.__class__.get_root()
+        self.root = self.__class__.get_root(current_path=Path(model_path))
         self.models = self.__class__.get_models()
         # self.common_utils = self.__class__.get_common_utils()
         # self.common_configs = self.__class__.get_common_configs()
@@ -276,7 +241,7 @@ class ModelPath:
             "use_global_cache",
         ]
 
-        self.model_name = self._process_model_name(model_name_or_path)
+        self.model_name = self._process_model_name(model_path)
         self._instance_hash = self.generate_hash(
             self.model_name, self._validate, self.target
         )
@@ -293,7 +258,7 @@ class ModelPath:
         if self.use_global_cache:
             self._write_to_global_cache()
 
-    def _process_model_name(self, model_name_or_path: Union[str, Path]) -> str:
+    def _process_model_name(self, model_path: Union[str, Path]) -> str:
         """
         Processes the input model name or path and returns a valid model name.
 
@@ -301,7 +266,7 @@ class ModelPath:
         If the input is a model name, it validates the name format.
 
         Args:
-            model_name_or_path (Union[str, Path]): The model name or path to process.
+            model_path (Union[str, Path]): The model name or path to process.
 
         Returns:
             str: The processed model name.
@@ -314,10 +279,10 @@ class ModelPath:
             'my_model'
         """
         # Should fail as violently as possible if the model name is invalid.
-        if self._is_path(model_name_or_path):
-            logger.debug(f"Path input detected: {model_name_or_path}")
+        if self._is_path(model_path):
+            logger.debug(f"Path input detected: {model_path}")
             try:
-                result = ModelPath.get_model_name_from_path(model_name_or_path)
+                result = ModelPath.get_model_name_from_path(model_path)
                 if result:
                     logger.debug(f"Model name extracted from path: {result}")
                     return result
@@ -328,12 +293,12 @@ class ModelPath:
             except Exception as e:
                 logger.error(f"Error extracting model name from path: {e}")
         else:
-            if not self.validate_model_name(model_name_or_path):
+            if not self.validate_model_name(model_path):
                 raise ValueError(
                     f"Invalid {self.target} name. Please provide a valid {self.target} name that follows the lowercase 'adjective_noun' format."
                 )
-            logger.debug(f"{self.target.title()} name detected: {model_name_or_path}")
-            return model_name_or_path
+            logger.debug(f"{self.target.title()} name detected: {model_path}")
+            return model_path
 
     def _handle_global_cache(self) -> None:
         """
