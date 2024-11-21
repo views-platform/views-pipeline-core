@@ -5,6 +5,7 @@ import os
 from views_pipeline_core.managers.path_manager import ModelPath
 from views_pipeline_core.cache.global_cache import GlobalCache
 import importlib.resources
+from pathlib import Path
 
 _logs_in_model_dir = True
 
@@ -22,7 +23,7 @@ def ensure_log_directory(log_path: str) -> None:
 
 
 def setup_logging(
-    model_name: str, default_level: int = logging.INFO, env_key: str = "LOG_CONFIG"
+    model_path: Path, default_level: int = logging.INFO, env_key: str = "LOG_CONFIG"
 ) -> logging.Logger:
     """
     Setup the logging configuration from a YAML file and return the root logger.
@@ -47,7 +48,7 @@ def setup_logging(
     # CONFIG_LOGS_PATH = Path(__file__).parent / "logging.yaml"
     if _logs_in_model_dir:
         try:
-            COMMON_LOGS_PATH = ModelPath(model_name).logging
+            COMMON_LOGS_PATH = ModelPath(model_path).logging
             if not COMMON_LOGS_PATH.exists():
                 COMMON_LOGS_PATH.mkdir(parents=True, exist_ok=True)
         except Exception as e:
