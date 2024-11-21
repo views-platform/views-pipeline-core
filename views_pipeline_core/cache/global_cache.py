@@ -7,13 +7,6 @@ import threading
 import atexit
 import signal
 from views_pipeline_core.managers.path_manager import ModelPath
-PATH = Path(__file__)
-if 'views_pipeline' in PATH.parts:
-    PATH_ROOT = Path(*PATH.parts[:PATH.parts.index('views_pipeline') + 1])
-    sys.path.insert(0, str(PATH_ROOT))
-else:
-    raise ValueError("The 'views_pipeline' directory was not found in the provided path.")
-
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s"

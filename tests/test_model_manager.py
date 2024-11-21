@@ -15,7 +15,7 @@ def mock_model_path():
     Yields:
         MagicMock: The mock object for ModelPath.
     """
-    with patch("views_pipeline.managers.path_manager.ModelPath") as mock:
+    with patch("views_pipeline_core.managers.path_manager.ModelPath") as mock:
         yield mock
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def mock_ensemble_path():
     Yields:
         MagicMock: The mock object for EnsemblePath.
     """
-    with patch("views_pipeline.managers.path_manager.EnsemblePath") as mock:
+    with patch("views_pipeline_core.managers.path_manager.EnsemblePath") as mock:
         yield mock
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def mock_dataloader():
     Yields:
         MagicMock: The mock object for ViewsDataLoader.
     """
-    with patch("views_pipeline.data.dataloaders.ViewsDataLoader") as mock:
+    with patch("views_pipeline_core.data.dataloaders.ViewsDataLoader") as mock:
         mock_instance = mock.return_value
         mock_instance._path_raw = "/path/to/raw"
         yield mock

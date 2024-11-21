@@ -35,7 +35,7 @@ def test_initialization_with_valid_name(temp_dir):
     # Patch the class-level attributes and methods to use the temporary directory structure
     with patch.object(EnsemblePath, '_root', project_root):
         with patch.object(EnsemblePath, 'get_models', return_value=project_root / "ensembles"):
-            with patch('views_pipeline.managers.path_manager.EnsemblePath._get_model_dir', return_value=ensemble_dir):
+            with patch('views_pipeline_core.managers.path_manager.EnsemblePath._get_model_dir', return_value=ensemble_dir):
                 # Initialize the EnsemblePath instance with a valid ensemble name
                 ensemble_path_instance = EnsemblePath(ensemble_name_or_path="test_ensemble", validate=True)
                 # Assert that the ensemble name and directories are correctly set
@@ -54,7 +54,7 @@ def test_initialization_with_invalid_name(temp_dir):
     # Patch the class-level attributes and methods to use the temporary directory structure
     with patch.object(EnsemblePath, '_root', project_root):
         with patch.object(EnsemblePath, 'get_models', return_value=project_root / "ensembles"):
-            with patch('views_pipeline.managers.path_manager.EnsemblePath._get_model_dir', return_value=None):
+            with patch('views_pipeline_core.managers.path_manager.EnsemblePath._get_model_dir', return_value=None):
                 # Assert that initializing with an invalid ensemble name raises a ValueError
                 with pytest.raises(ValueError):
                     EnsemblePath(ensemble_name_or_path="invalidensemble", validate=True)

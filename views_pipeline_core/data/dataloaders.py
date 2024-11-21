@@ -4,12 +4,12 @@ import pandas as pd
 import logging
 from pathlib import Path
 from datetime import datetime
-from views_pipeline.configs import drift_detection
-from views_pipeline.files.utils import create_data_fetch_log_file
-from views_pipeline.managers.path_manager import ModelPath
+from views_pipeline_core.configs import drift_detection
+from views_pipeline_core.files.utils import create_data_fetch_log_file
+from views_pipeline_core.managers.path_manager import ModelPath
 from typing import Dict
 from ingester3.ViewsMonth import ViewsMonth
-from views_pipeline.data.utils import ensure_float64
+from views_pipeline_core.data.utils import ensure_float64
 
 logger = logging.getLogger(__name__)
 

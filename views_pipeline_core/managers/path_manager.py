@@ -346,7 +346,7 @@ class ModelPath:
             Exception: If there is an error accessing the global cache.
         """
         try:
-            from views_pipeline.cache.global_cache import GlobalCache
+            from views_pipeline_core.cache.global_cache import GlobalCache
 
             cached_instance = GlobalCache[self._instance_hash]
             if cached_instance and not self._force_cache_overwrite:
@@ -365,7 +365,7 @@ class ModelPath:
 
         Adds the model instance to the global cache using the instance hash as the key.
         """
-        from views_pipeline.cache.global_cache import GlobalCache
+        from views_pipeline_core.cache.global_cache import GlobalCache
 
         if GlobalCache[self._instance_hash] is None:
             logger.debug(

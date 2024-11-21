@@ -1,5 +1,5 @@
 import logging
-from views_pipeline.managers.path_manager import ModelPath
+from views_pipeline_core.managers.path_manager import ModelPath
 
 logger = logging.getLogger(__name__)
 
