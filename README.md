@@ -1,6 +1,7 @@
-# views_pipeline_core
+# ViEWS Pipeline Core
 
 ![GitHub License](https://img.shields.io/github/license/views-platform/views-pipeline-core)
+![GitHub branch check runs](https://img.shields.io/github/check-runs/views-platform/views-pipeline-core/main)
 ![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/views-platform/views-pipeline-core)
 
 <div style="width: 100%; max-width: 1500px; height: 400px; overflow: hidden; position: relative;">
