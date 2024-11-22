@@ -374,7 +374,7 @@ class ModelPath:
         self._sys_paths = None
         # if self.common_querysets not in sys.path:
         #     sys.path.insert(0, str(self.common_querysets))
-        self.queryset_path = self._build_absolute_directory(Path(f"queryset_{self.model_name}.py"))
+        self.queryset_path = self.configs / Path(f"config_queryset.py")
         self._queryset = None
 
         # Initialize model-specific directories only if the class is ModelPath
