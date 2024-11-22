@@ -3,6 +3,7 @@
 ![GitHub License](https://img.shields.io/github/license/views-platform/views-pipeline-core)
 ![GitHub branch check runs](https://img.shields.io/github/check-runs/views-platform/views-pipeline-core/main)
 ![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/views-platform/views-pipeline-core)
+![GitHub Release](https://img.shields.io/github/v/release/views-platform/views-pipeline-core)
 
 <div style="width: 100%; max-width: 1500px; height: 400px; overflow: hidden; position: relative;">
   <img src="https://pbs.twimg.com/profile_banners/1237000633896652800/1717069203/1500x500" alt="VIEWS Twitter Header" style="position: absolute; top: -50px; width: 100%; height: auto;">
