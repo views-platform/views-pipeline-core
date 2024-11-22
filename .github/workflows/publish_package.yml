@@ -1,0 +1,30 @@
+name: Publish Package
+
+on:
+  release:
+    types:
+        - published
+  workflow_dispatch: # enables manual triggering
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11" 
+
+    - name: Install Poetry
+      run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+  
+    - name: Build the package
+      run: poetry build
+  
+    - name: Publish to PyPI
+      run: poetry publish --username __token__ --password $PYPI_TOKEN
