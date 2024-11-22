@@ -26,6 +26,7 @@ jobs:
 
     - name: Install dependencies
       run: |
+        sudo apt install postgresql
         poetry install 
 
     - name: Run tests
