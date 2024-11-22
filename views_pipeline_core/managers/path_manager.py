@@ -357,37 +357,18 @@ class ModelPath:
         self.data = self._build_absolute_directory(Path("data"))
         self.data_generated = self._build_absolute_directory(Path("data/generated"))
         self.data_processed = self._build_absolute_directory(Path("data/processed"))
-        self.data_raw = self._build_absolute_directory(Path("data/raw"))
-        self.src = self._build_absolute_directory(Path("src")) 
-        self.architectures = self._build_absolute_directory(Path("src/architectures"))
-        self.dataloaders = self._build_absolute_directory(Path("src/dataloaders"))
-        self.forecasting = self._build_absolute_directory(Path("src/forecasting"))
-        self.management = self._build_absolute_directory(Path("src/management"))
-        self.offline_evaluation = self._build_absolute_directory(
-            Path("src/offline_evaluation")
-        )
         self.reports = self._build_absolute_directory(Path("reports"))
-        # self._templates = self.meta_tools / "templates"
-        self.training = self._build_absolute_directory(Path("src/training"))
-        self.utils = self._build_absolute_directory(Path("src/utils"))
-        self.visualization = self._build_absolute_directory(Path("src/visualization"))
         self._sys_paths = None
-        # if self.common_querysets not in sys.path:
-        #     sys.path.insert(0, str(self.common_querysets))
-        self.queryset_path = self.configs / Path(f"config_queryset.py")
+        self.queryset_path = self._build_absolute_directory(Path("configs/config_queryset.py"))
         self._queryset = None
-
+        print(self.queryset_path)
         # Initialize model-specific directories only if the class is ModelPath
         if self.__class__.__name__ == "ModelPath":
             self._initialize_model_specific_directories()
 
     def _initialize_model_specific_directories(self) -> None:
-        self.architectures = self._build_absolute_directory(Path("src/architectures"))
         self.data_raw = self._build_absolute_directory(Path("data/raw"))
         self.notebooks = self._build_absolute_directory(Path("notebooks"))
-        self.online_evaluation = self._build_absolute_directory(
-            Path("src/online_evaluation")
-        )
 
     def _initialize_scripts(self) -> None:
         """
@@ -401,15 +382,7 @@ class ModelPath:
             self._build_absolute_directory(Path("configs/config_meta.py")),
             self._build_absolute_directory(Path("main.py")),
             self._build_absolute_directory(Path("README.md")),
-            # self._build_absolute_directory(
-            #     Path("src/forecasting/generate_forecast.py")
-            # ),
-            # self._build_absolute_directory(
-            #     Path("src/management/execute_model_runs.py")
-            # ),
-            # self._build_absolute_directory(
-            #     Path("src/management/execute_model_tasks.py")
-            # ),
+            self._build_absolute_directory(Path("configs/config_queryset.py"))
         ]
         # Initialize model-specific directories only if the class is ModelPath
         if self.__class__.__name__ == "ModelPath":
@@ -471,15 +444,27 @@ class ModelPath:
         #     error = f"Common queryset directory {self.common_querysets} does not exist. Please create it first using `make_new_scripts.py` or set validate to `False`."
         #     logger.error(error)
         #     raise FileNotFoundError(error)
+
         if self._validate and self._check_if_dir_exists(self.queryset_path):
             try:
-                self._queryset = importlib.import_module(self.queryset_path.stem)
+                spec = importlib.util.spec_from_file_location(
+                    self.queryset_path.stem, self.queryset_path
+                )
+                self._queryset = importlib.util.module_from_spec(spec)
+                sys.modules[self.queryset_path.stem] = self._queryset
+                spec.loader.exec_module(self._queryset)
             except Exception as e:
                 logger.error(f"Error importing queryset: {e}")
                 self._queryset = None
             else:
                 logger.debug(f"Queryset {self.queryset_path} imported successfully.")
-                return self._queryset.generate() if self._queryset else None
+                if hasattr(self._queryset, "generate"):
+                    return self._queryset.generate()
+                # return self._queryset.generate() if self._queryset else None
+                else:
+                    logger.warning(
+                        f"Queryset {self.queryset_path} does not have a `generate` method. Continuing..."
+                    )
         else:
             logger.warning(
                 f"Queryset {self.queryset_path} does not exist. Continuing..."
@@ -528,107 +513,6 @@ class ModelPath:
                     return directory.name
                 return None
         return directory
-
-    @DeprecationWarning
-    def add_paths_to_sys(self) -> List[str]:
-        """
-        (Will be deprecated soon) Adds the necessary paths for the current model to the system path (sys.path).
-
-        This method checks if paths for another model are already added to sys.path. If so, it logs an error and exits.
-        If no paths are added yet, it initializes the _sys_paths attribute and adds the relevant paths to sys.path.
-
-        Steps:
-        1. Iterate through the current sys.path to detect if paths for another model are already added.
-        2. If paths for another model are found, log an error and return.
-        3. If _sys_paths is None, initialize it as an empty list.
-        4. Iterate through the instance's attributes and add paths that are:
-        - Path objects
-        - Absolute paths
-        - Existing directories
-        5. Extend sys.path with the collected paths.
-        6. Handle potential AttributeError if sys.path is not found.
-
-        Returns:
-            list: The list of paths added to sys.path.
-
-        Raises:
-            AttributeError: If sys.path is not found.
-        """
-        for path in sys.path:
-            path = Path(path)
-            if str(self.target + "s") in path.parts:
-                try:
-                    model_name = ModelPath.get_model_name_from_path(path)
-                except:
-                    continue
-                if model_name != self.model_name:
-                    logger.error(
-                        f"Paths for another {self.target} ('{model_name}') are already added to sys.path. Please remove them first by calling remove_paths_from_sys()."
-                    )
-                    return
-                if model_name == self.model_name:
-                    logger.debug(
-                        f"Path {str(path)} for '{model_name}' is already added to sys.path. Skipping..."
-                    )
-        if self._sys_paths is None:
-            self._sys_paths = []
-        for attr, value in self.__dict__.items():
-            # value = getattr(self, attr)
-            if str(attr) not in self._ignore_attributes:
-                if (
-                    isinstance(value, Path)
-                    and value.is_absolute()
-                    and self._check_if_dir_exists(value)
-                    and str(value) not in sys.path
-                ):
-                    sys.path.insert(0, str(value))
-                    if str(value) in sys.path:
-                        self._sys_paths.append(str(value))
-                        logger.debug(f"Added path to sys.path: {str(value)}")
-                    else:
-                        logger.warning(f"Unable to add path to sys.path: {str(value)}")
-                else:
-                    logger.warning(
-                        f"Skipping path: {value}. Does not exist or already in sys.path."
-                    )
-        return self._sys_paths
-
-    @DeprecationWarning
-    def remove_paths_from_sys(self) -> bool:
-        """
-        Removes the paths added by the current model from the system path (sys.path).
-
-        This method checks if _sys_paths is not None and attempts to remove each path from sys.path.
-        If a path is not found in sys.path, it logs a warning and skips it.
-        Finally, it sets _sys_paths to None.
-
-        Steps:
-        1. Check if _sys_paths is not None.
-        2. Iterate through _sys_paths and remove each path from sys.path.
-        3. Log the removal of each path.
-        4. Handle ValueError if a path is not found in sys.path.
-        5. Set _sys_paths to None.
-
-        Raises:
-            ValueError: If a path is not found in sys.path.
-        """
-        if self._sys_paths is not None:
-            for path in self._sys_paths:
-                try:
-                    sys.path.remove(path)
-                    if path not in sys.path:
-                        logger.debug(f"Removed path from sys.path: {path}")
-                    else:
-                        logger.warning(f"Unable to remove path '{path}'. Continuing...")
-                except ValueError:
-                    logger.warning(f"Path '{path}' not found in sys.path. Skipping...")
-            self._sys_paths = None
-            return True
-        else:
-            logger.error(
-                f"{self.model_name} paths not found in sys.path. Add paths by calling add_paths_to_sys()."
-            )
-            return False
 
     def view_directories(self) -> None:
         """

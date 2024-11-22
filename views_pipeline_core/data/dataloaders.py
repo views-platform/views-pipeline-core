@@ -115,10 +115,10 @@ class ViewsDataLoader:
         queryset_base = self._model_path.get_queryset()  # just used here..
         if queryset_base is None:
             raise RuntimeError(
-                f"Could not find queryset for {self._model_name} in common_querysets"
+                f"Could not find queryset for {self._model_name}"
             )
         else:
-            logger.info(f"Found queryset for {self._model_name} in common_querysets")
+            logger.info(f"Found queryset for {self._model_name}")
 
         df, alerts = queryset_base.publish().fetch_with_drift_detection(
             start_date=self.month_first,
