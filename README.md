@@ -1,5 +1,7 @@
 # views_pipeline_core
 
+![PyPI - License](https://img.shields.io/pypi/l/views_pipeline_core)
+
 <div style="width: 100%; max-width: 1500px; height: 400px; overflow: hidden; position: relative;">
   <img src="https://pbs.twimg.com/profile_banners/1237000633896652800/1717069203/1500x500" alt="VIEWS Twitter Header" style="position: absolute; top: -50px; width: 100%; height: auto;">
 </div>
