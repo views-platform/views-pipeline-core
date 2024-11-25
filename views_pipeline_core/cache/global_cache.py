@@ -64,7 +64,7 @@ class GlobalCache(metaclass=GlobalCacheMeta):
             self.local_imports()
             if filepath is None:
                 filepath = (
-                    ModelPath.find_project_root(current_path=Path(__file__)) / ".global_cache.pkl"
+                    ModelPath.get_models() / ".global_cache.pkl"
                 )
             self.filepath = filepath
             self.cache = {}

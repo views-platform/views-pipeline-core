@@ -5,6 +5,7 @@ import importlib
 import hashlib
 from typing import Union, Optional, List, Dict
 import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class ModelPath:
     """
 
     _target = "model"
-    _use_global_cache = True
+    _use_global_cache = False
     __instances__ = 0
     # Class variables for paths
     _root = None
@@ -186,14 +187,21 @@ class ModelPath:
             FileNotFoundError: If the marker file/directory is not found up to the root directory.
         """
         # Start from the current directory and move up the hierarchy
-        current_path = Path(current_path).resolve().parent
-        while current_path != current_path.parent:  # Loop until we reach the root directory
-            if (current_path / marker).exists():
-                return current_path
-            current_path = current_path.parent
-        raise FileNotFoundError(
-            f"{marker} not found in the directory hierarchy. Unable to find project root."
-        )
+        try:
+            # if os.environ["VIEWS_MODEL_PATH"]:
+            #     current_path = Path(os.environ["VIEWS_MODEL_PATH"])
+            # else:
+            current_path = Path(current_path).resolve().parent
+            while current_path != current_path.parent:  # Loop until we reach the root directory
+                if (current_path / marker).exists():
+                    return current_path
+                current_path = current_path.parent
+                print(current_path)
+        except Exception as e:
+            # logger.error(f"Error finding project root: {e}")
+            raise FileNotFoundError(
+                f"{marker} not found in the directory hierarchy. Unable to find project root. {current_path}"
+            )
 
     def __init__(
         self, model_path: Union[str, Path], validate: bool = True
@@ -246,7 +254,7 @@ class ModelPath:
             self.model_name, self._validate, self.target
         )
 
-        if self.use_global_cache:
+        if self.use_global_cache is True:
             self._handle_global_cache()
 
         self._initialize_directories()
@@ -255,7 +263,7 @@ class ModelPath:
             f"ModelPath instance {ModelPath.__instances__} initialized for {self.model_name}."
         )
 
-        if self.use_global_cache:
+        if self.use_global_cache is True:
             self._write_to_global_cache()
 
     def _process_model_name(self, model_path: Union[str, Path]) -> str:
