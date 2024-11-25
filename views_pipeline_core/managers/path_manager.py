@@ -196,7 +196,6 @@ class ModelPath:
                 if (current_path / marker).exists():
                     return current_path
                 current_path = current_path.parent
-                print(current_path)
         except Exception as e:
             # logger.error(f"Error finding project root: {e}")
             raise FileNotFoundError(
