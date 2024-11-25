@@ -50,7 +50,7 @@ The VIEWS machine learning pipeline involves several key processes:
 - **Deploying:** Implementing models in a production environment to generate monthly true-future forecasts 
 
 ## Pipeline Documentation
-High-level documentation on the pipeline and its components can be found in the folder [`documentation`](https://github.com/views-platform/views_pipeline_core/tree/main/documentation). For a comprehensive understanding of the terms and concepts used, please consult the [`Glossary`](https://github.com/views-platform/views_pipeline_core/blob/main/documentation/glossary.md). To explore the rationale behind our architectural choices, visit the [`Architectural Decision Records (ADRs)`](https://github.com/views-platform/views_pipeline_core/blob/main/documentation/ADRs/README.md).
+High-level documentation on the pipeline and its components can be found in the folder [`documentation`](https://github.com/views-platform/views-pipeline-core/tree/main/documentation). For a comprehensive understanding of the terms and concepts used, please consult the [`Glossary`](https://github.com/views-platform/views-pipeline-core/blob/main/documentation/glossary.md). To explore the rationale behind our architectural choices, visit the [`Architectural Decision Records (ADRs)`](https://github.com/views-platform/views-pipeline-core/tree/main/documentation/ADRs).
 
 Additionally, refer to READMEs and docstrings of various functions and classes in the source code.
 
