@@ -29,7 +29,7 @@ Use our [interactive data dashboard](https://data.viewsforecasting.org/) to expl
 
 
 ## Repository Contents, Structure, and Explanations
-![VIEWS pipeline diagram](documentation/pipeline_diagram001.png)
+![VIEWS pipeline diagram](https://raw.githubusercontent.com/views-platform/views-pipeline-core/main/documentation/pipeline_diagram001.png)
 
 ### Repository Contents
 
