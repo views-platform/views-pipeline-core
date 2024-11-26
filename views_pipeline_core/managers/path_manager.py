@@ -189,7 +189,7 @@ class ModelPath:
         """
         if current_path is None:
             current_path = Path(pyprojroot.here())
-            print("HERE ", current_path)
+            # print("HERE ", current_path)
         # Start from the current directory and move up the hierarchy
         try:
             # if os.environ["VIEWS_MODEL_PATH"]:
@@ -200,7 +200,7 @@ class ModelPath:
                 if (current_path / marker).exists():
                     return current_path
                 current_path = current_path.parent
-                print("CURRENT PATH ", current_path)
+                # print("CURRENT PATH ", current_path)
         except Exception as e:
             # logger.error(f"Error finding project root: {e}")
             raise FileNotFoundError(
