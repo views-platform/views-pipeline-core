@@ -15,23 +15,14 @@ def temp_dir(tmp_path):
     Returns:
         tuple: A tuple containing the project root directory and the model directory.
     """
-    project_root = tmp_path / "views_pipeline"
+    project_root = tmp_path / "views_models"
     project_root.mkdir()
-    (project_root / "LICENSE.md").touch()
+    (project_root / ".gitignore").touch()
     models_dir = project_root / "models"
     models_dir.mkdir()
     model_dir = models_dir / "test_model"
     model_dir.mkdir()
     # Create necessary subdirectories
-    (model_dir / "src/architectures").mkdir(parents=True)
-    (model_dir / "src/dataloaders").mkdir(parents=True)
-    (model_dir / "src/forecasting").mkdir(parents=True)
-    (model_dir / "src/management").mkdir(parents=True)
-    (model_dir / "src/offline_evaluation").mkdir(parents=True)
-    (model_dir / "src/online_evaluation").mkdir(parents=True)
-    (model_dir / "src/training").mkdir(parents=True)
-    (model_dir / "src/utils").mkdir(parents=True)
-    (model_dir / "src/visualization").mkdir(parents=True)
     (model_dir / "artifacts").mkdir(parents=True)
     (model_dir / "configs").mkdir(parents=True)
     (model_dir / "data/generated").mkdir(parents=True)
@@ -39,10 +30,6 @@ def temp_dir(tmp_path):
     (model_dir / "data/raw").mkdir(parents=True)
     (model_dir / "notebooks").mkdir(parents=True)
     (model_dir / "reports").mkdir(parents=True)
-    (project_root / "common_utils").mkdir(parents=True)
-    (project_root / "common_configs").mkdir(parents=True)
-    (project_root / "meta_tools/templates").mkdir(parents=True)
-    (project_root / "common_querysets").mkdir(parents=True)
     return project_root, model_dir
 
 def test_initialization_with_valid_name(temp_dir):
@@ -89,11 +76,12 @@ def test_is_path(temp_dir):
     """
     project_root, _ = temp_dir
     # Initialize the ModelPath instance without validation
-    model_path_instance = ModelPath(model_path="test_model", validate=False)
-    # Assert that the project root is a valid path
-    assert model_path_instance._is_path(project_root) == True
-    # Assert that a non-existent path is not valid
-    assert model_path_instance._is_path("non_existent_path") == False
+    with patch.object(ModelPath, '_root', project_root):
+        model_path_instance = ModelPath(model_path="test_model", validate=False)
+        # Assert that the project root is a valid path
+        assert model_path_instance._is_path(project_root) == True
+        # Assert that a non-existent path is not valid
+        assert model_path_instance._is_path("non_existent_path") == False
 
 def test_get_model_dir(temp_dir):
     """
@@ -126,10 +114,10 @@ def test_build_absolute_directory(temp_dir):
             with patch('views_pipeline_core.managers.path_manager.ModelPath._get_model_dir', return_value=model_dir):
                 # Initialize the ModelPath instance with a valid model name
                 model_path_instance = ModelPath(model_path="test_model", validate=True)
-                # Build an absolute directory path for "src/architectures"
-                abs_dir = model_path_instance._build_absolute_directory(Path("src/architectures"))
+                # Build an absolute directory path for "artifacts"
+                abs_dir = model_path_instance._build_absolute_directory(Path("artifacts"))
                 # Assert that the absolute directory path is correct
-                assert abs_dir == model_dir / "src/architectures"
+                assert abs_dir == model_dir / "artifacts"
 
 # def test_add_paths_to_sys(temp_dir):
 #     """

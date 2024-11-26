@@ -6,6 +6,7 @@ import hashlib
 from typing import Union, Optional, List, Dict
 import re
 import os
+import pyprojroot
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class ModelPath:
     # _meta_tools = None
 
     @classmethod
-    def _initialize_class_paths(cls, current_path: Path) -> None:
+    def _initialize_class_paths(cls, current_path: Path = None) -> None:
         """Initialize class-level paths."""
         cls._root = cls.find_project_root(current_path=current_path)
         # cls._models = cls._root / Path(cls._target + "s")
@@ -75,7 +76,7 @@ class ModelPath:
         # cls._common_logs = cls._root / "common_logs"
 
     @classmethod
-    def get_root(cls, current_path: Path) -> Path:
+    def get_root(cls, current_path: Path = None) -> Path:
         """Get the root path."""
         if cls._root is None:
             cls._initialize_class_paths(current_path=current_path)
@@ -175,7 +176,7 @@ class ModelPath:
         return False
     
     @staticmethod
-    def find_project_root(current_path: Path, marker="LICENSE.md") -> Path:
+    def find_project_root(current_path: Path = None, marker=".gitignore") -> Path:
         """
         Finds the base directory of the project by searching for a specific marker file or directory.
         Args:
@@ -186,6 +187,9 @@ class ModelPath:
         Raises:
             FileNotFoundError: If the marker file/directory is not found up to the root directory.
         """
+        if current_path is None:
+            current_path = Path(pyprojroot.here())
+            print("HERE ", current_path)
         # Start from the current directory and move up the hierarchy
         try:
             # if os.environ["VIEWS_MODEL_PATH"]:
@@ -196,6 +200,7 @@ class ModelPath:
                 if (current_path / marker).exists():
                     return current_path
                 current_path = current_path.parent
+                print("CURRENT PATH ", current_path)
         except Exception as e:
             # logger.error(f"Error finding project root: {e}")
             raise FileNotFoundError(
@@ -225,7 +230,7 @@ class ModelPath:
         self._force_cache_overwrite = False
 
         # Common paths
-        self.root = self.__class__.get_root(current_path=Path(model_path))
+        self.root = self.__class__.get_root()
         self.models = self.__class__.get_models()
         # self.common_utils = self.__class__.get_common_utils()
         # self.common_configs = self.__class__.get_common_configs()
