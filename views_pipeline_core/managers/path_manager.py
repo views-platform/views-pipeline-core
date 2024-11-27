@@ -647,9 +647,9 @@ class EnsemblePath(ModelPath):
     _target = "ensemble"
 
     @classmethod
-    def _initialize_class_paths(cls):
+    def _initialize_class_paths(cls, current_path: Path = None) -> None:
         """Initialize class-level paths for ensemble."""
-        super()._initialize_class_paths()
+        super()._initialize_class_paths(current_path=current_path)
         cls._models = cls._root / Path(cls._target + "s")
         # Additional ensemble-specific initialization...
 
@@ -665,7 +665,7 @@ class EnsemblePath(ModelPath):
         """
         super().__init__(ensemble_name_or_path, validate)
         # Additional ensemble-specific initialization...
-        print(self._validate)
+        # print(self._validate)
 
     def _initialize_directories(self) -> None:
         """

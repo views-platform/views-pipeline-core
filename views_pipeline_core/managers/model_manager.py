@@ -299,7 +299,7 @@ class ModelManager:
         ]
         return artifact_files
 
-    def _get_latest_model_artifact(self, path_artifact, run_type):
+    def _get_latest_model_artifact(self, path_artifact: Path, run_type: str) -> Path:
         """
         Retrieve the path (pathlib path object) latest model artifact for a given run type based on the modification time.
 
@@ -420,6 +420,21 @@ class ModelManager:
 
         return f'{path_generated}/{generated_file_type}_{steps}_{run_type}_{timestamp}.pkl'
 
+    @property
+    def configs(self) -> Dict:
+        """
+        Get the combined meta, deployment and hyperparameters configuration.
+
+        Returns:
+            dict: The configuration object.
+        """
+        
+        config = {
+            **self._config_hyperparameters,
+            **self._config_meta,
+            **self._config_deployment,
+        }
+        return config
 
 
 if __name__ == "__main__":
