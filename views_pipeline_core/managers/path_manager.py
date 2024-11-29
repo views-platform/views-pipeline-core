@@ -373,9 +373,10 @@ class ModelPath:
         self.data_processed = self._build_absolute_directory(Path("data/processed"))
         self.reports = self._build_absolute_directory(Path("reports"))
         self._sys_paths = None
-        self.queryset_path = self._build_absolute_directory(Path("configs/config_queryset.py"))
+        if self.__class__._target == "model":
+            self.queryset_path = self._build_absolute_directory(Path("configs/config_queryset.py"))
         self._queryset = None
-        print(self.queryset_path)
+        # print(self.queryset_path)
         # Initialize model-specific directories only if the class is ModelPath
         if self.__class__.__name__ == "ModelPath":
             self._initialize_model_specific_directories()
@@ -676,17 +677,17 @@ class EnsemblePath(ModelPath):
         # Call the parent class's _initialize_directories method
         super()._initialize_directories()
         # Initialize ensemble-specific directories only if the class is EnsemblePath
-        if self.__class__.__name__ == "EnsemblePath":
-            self._initialize_ensemble_specific_directories()
+        # if self.__class__.__name__ == "EnsemblePath":
+        #     self._initialize_ensemble_specific_directories()
 
-    def _initialize_ensemble_specific_directories(self):
-        self.reports_figures = self._build_absolute_directory(Path("reports/figures"))
-        self.reports_papers = self._build_absolute_directory(Path("reports/papers"))
-        self.reports_plots = self._build_absolute_directory(Path("reports/plots"))
-        self.reports_slides = self._build_absolute_directory(Path("reports/slides"))
-        self.reports_timelapse = self._build_absolute_directory(
-            Path("reports/timelapse")
-        )
+    # def _initialize_ensemble_specific_directories(self):
+    #     self.reports_figures = self._build_absolute_directory(Path("reports/figures"))
+    #     self.reports_papers = self._build_absolute_directory(Path("reports/papers"))
+    #     self.reports_plots = self._build_absolute_directory(Path("reports/plots"))
+    #     self.reports_slides = self._build_absolute_directory(Path("reports/slides"))
+    #     self.reports_timelapse = self._build_absolute_directory(
+    #         Path("reports/timelapse")
+    #     )
 
     def _initialize_scripts(self) -> None:
         """
@@ -696,26 +697,26 @@ class EnsemblePath(ModelPath):
         """
         super()._initialize_scripts()
         # Initialize ensemble-specific scripts only if the class is EnsemblePath
-        if self.__class__.__name__ == "EnsemblePath":
-            self._initialize_ensemble_specific_scripts()
+    #     if self.__class__.__name__ == "EnsemblePath":
+    #         self._initialize_ensemble_specific_scripts()
 
-    def _initialize_ensemble_specific_scripts(self):
-        """
-        Initializes the ensemble-specific scripts by appending their absolute paths
-        to the `self.scripts` list.
+    # def _initialize_ensemble_specific_scripts(self):
+    #     """
+    #     Initializes the ensemble-specific scripts by appending their absolute paths
+    #     to the `self.scripts` list.
 
-        The paths are built using the `_build_absolute_directory` method.
+    #     The paths are built using the `_build_absolute_directory` method.
 
-        Returns:
-            None
-        """
-        self.scripts += [
-            self._build_absolute_directory(Path("artifacts/model_metadata_dict.py")),
-            self._build_absolute_directory(
-                Path("src/offline_evaluation/evaluate_ensemble.py")
-            ),
-            self._build_absolute_directory(Path("src/training/train_ensemble.py")),
-            self._build_absolute_directory(Path("src/utils/utils_check.py")),
-            self._build_absolute_directory(Path("src/utils/utils_run.py")),
-            self._build_absolute_directory(Path("src/visualization/visual.py")),
-        ]
+    #     Returns:
+    #         None
+    #     """
+    #     self.scripts += [
+    #         self._build_absolute_directory(Path("artifacts/model_metadata_dict.py")),
+    #         self._build_absolute_directory(
+    #             Path("src/offline_evaluation/evaluate_ensemble.py")
+    #         ),
+    #         self._build_absolute_directory(Path("src/training/train_ensemble.py")),
+    #         self._build_absolute_directory(Path("src/utils/utils_check.py")),
+    #         self._build_absolute_directory(Path("src/utils/utils_run.py")),
+    #         self._build_absolute_directory(Path("src/visualization/visual.py")),
+    #     ]
