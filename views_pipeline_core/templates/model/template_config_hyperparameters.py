@@ -1,15 +1,17 @@
 from views_pipeline_core.templates.utils import save_script
 from pathlib import Path
+import logging
 
+logger = logging.getLogger(__name__)
 
-def generate(script_dir: Path) -> bool:
+def generate(script_path: Path) -> bool:
     """
     Generates a script that defines a function for obtaining hyperparameter configurations
     necessary for model training.
 
     Parameters:
-        script_dir (Path):
-            The directory where the generated deployment configuration script will be saved.
+        script_path (Path):
+            The path where the generated deployment configuration script will be saved.
             This should be a valid writable path.
 
     Returns:
@@ -32,4 +34,4 @@ def get_hp_config():
     }}
     return hyperparameters
 """
-    return save_script(script_dir, code)
+    return save_script(script_path, code)

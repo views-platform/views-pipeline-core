@@ -1,14 +1,15 @@
 from views_pipeline_core.templates.utils import save_script
 from pathlib import Path
+import logging
+logger = logging.getLogger(__name__)
 
-
-def generate(script_dir: Path, model_name: str, model_algorithm: str) -> bool:
+def generate(script_path: Path, model_name: str, model_algorithm: str) -> bool:
     """
     Generates a script that defines the `get_meta_config` function for model metadata.
 
     Parameters:
-        script_dir (Path):
-            The directory where the generated deployment configuration script will be saved.
+        script_path (Path):
+            The path where the generated deployment configuration script will be saved.
             This should be a valid writable path.
 
         model_name (str):
@@ -41,4 +42,4 @@ def generate(script_dir: Path, model_name: str, model_algorithm: str) -> bool:
     }}
     return meta_config
 """
-    return save_script(script_dir, code)
+    return save_script(script_path, code)

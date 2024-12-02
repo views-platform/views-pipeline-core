@@ -1,14 +1,15 @@
 from views_pipeline_core.templates.utils import save_script
 from pathlib import Path
+import logging
+logger = logging.getLogger(__name__)
 
-
-def generate(script_dir: Path, model_name: str) -> bool:
+def generate(script_path: Path, model_name: str) -> bool:
     """
     Generates a Python script that defines the `generate` function for configuring input data for model training
     using the viewser library.
 
     Args:
-        script_dir (Path): The directory where the generated deployment configuration script will be saved.
+        script_path (Path): The path where the generated deployment configuration script will be saved.
                            This should be a valid writable path.
         model_name (str): The name of the model for which the input data configuration is being generated.
                           This name is used to identify the relevant data in the viewser queryset.
@@ -58,4 +59,4 @@ def generate():
 
     return queryset_base
 """
-    return save_script(script_dir, code)
+    return save_script(script_path, code)

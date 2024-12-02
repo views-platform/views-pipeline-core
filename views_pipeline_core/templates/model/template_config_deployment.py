@@ -3,12 +3,10 @@ from views_pipeline_core.templates.utils import save_script
 from pathlib import Path
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 def generate(
-    script_dir: Path,
+    script_path: Path,
     deployment_type: str = "shadow",
     additional_settings: Dict[str, any] = None,
 ) -> bool:
@@ -16,7 +14,7 @@ def generate(
     Generates a script that defines the `get_deployment_config` function for configuring the deployment status and settings.
 
     Parameters:
-        script_dir (Path): The directory where the generated deployment configuration script will be saved.
+        script_path (Path): The path where the generated deployment configuration script will be saved.
                            This should be a valid writable path.
         deployment_type (str, optional):
             The type of deployment. Must be one of "shadow", "deployed", "baseline", or "deprecated".
@@ -72,4 +70,4 @@ def get_deployment_config():
     deployment_config = {deployment_config}
     return deployment_config
 """
-    return save_script(script_dir, code)
+    return save_script(script_path, code)
