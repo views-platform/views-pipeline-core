@@ -22,9 +22,12 @@ jobs:
     - name: Install Poetry
       run: |
           curl -sSL https://install.python-poetry.org | python3 -
-  
-    - name: Build the package
-      run: poetry build
+
+    - name: Validate Version
+      run: |
+        latest_version=$(curl -s https://pypi.org/pypi/views-pipeline-core/json | jq -r .info.version)
+        new_version=$(python -c "import toml; print(toml.load('pyproject.toml')['tool']['poetry']['version'])")
+        python -c "from packaging.version import parse; assert parse('$new_version') > parse('$latest_version'), 'Version must be higher than $latest_version'"
   
     - name: Publish to PyPI
-      run: poetry publish --username __token__ --skip-existing --password ${{ secrets.PYPI_TOKEN }}
+      run: poetry publish --build --username __token__ --password ${{ secrets.PYPI_TOKEN }}
