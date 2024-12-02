@@ -13,9 +13,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-
-
-
 # ============================================================ Model Manager ============================================================
 
 
@@ -58,6 +55,66 @@ class ModelManager:
             )
         self._data_loader = ViewsDataLoader(model_path=self._model_path)
 
+    @staticmethod
+    def _resolve_evaluation_sequence_number(eval_type: str) -> int:
+        """
+        Resolve the evaluation length based on the evaluation type.
+
+        Args:
+            eval_type (str): The type of evaluation to perform (e.g., standard, long, complete, live).
+
+        Returns:
+            int: The evaluation length.
+        """
+        if eval_type == "standard":
+            return 12
+        elif eval_type == "long":
+            return 36
+        elif eval_type == "complete":
+            return None # currently set as None because sophisticated calculation is needed
+        elif eval_type == "live":
+            return 12
+        else:
+            raise ValueError(f"Invalid evaluation type: {eval_type}")
+
+    @staticmethod
+    def _generate_model_file_name(run_type: str, timestamp: str) -> str:
+        """
+        Generates a model file name based on the run type, and timestamp.
+
+        Args:
+            run_type (str): The type of run (e.g., calibration, testing).
+            timestamp (str): The timestamp of the model file.
+
+        Returns:
+            str: The generated model file name.
+        """
+
+        return f"{run_type}_model_{timestamp}.pkl"
+
+    @staticmethod
+    def _generate_output_file_name( 
+            generated_file_type: str, 
+            run_type: str, 
+            timestamp: str,
+            sequence_number: int) -> str:
+        """
+        Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
+
+        Args:
+            generated_file_type (str): The type of generated file (e.g., predictions, output, evaluation).
+            sequence_number (int): The sequence number.
+            run_type (str): The type of run (e.g., calibration, testing).
+
+        Returns:
+            str: The generated prediction file name.
+        """
+        # logger.info(f"sequence_number: {sequence_number}")
+        if sequence_number is not None:
+            return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}.pkl"
+        else:
+            return f"{generated_file_type}_{run_type}_{timestamp}.pkl"
+
     def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
         """
         Loads and executes a configuration method from a specified script.
@@ -84,6 +141,7 @@ class ModelManager:
                     return getattr(config_module, config_method)()
             except (AttributeError, ImportError) as e:
                 logger.error(f"Error loading config from {script_name}: {e}")
+
         return None
 
     def _update_single_config(self, args) -> Dict:
@@ -103,6 +161,7 @@ class ModelManager:
         }
         config["run_type"] = args.run_type
         config["sweep"] = False
+
         return config
 
     def _update_sweep_config(self, args) -> Dict:
@@ -121,151 +180,9 @@ class ModelManager:
         config["parameters"]["name"] = {"value": self._config_meta["name"]}
         config["parameters"]["depvar"] = {"value": self._config_meta["depvar"]}
         config["parameters"]["algorithm"] = {"value": self._config_meta["algorithm"]}
+
         return config
-
-    def execute_single_run(self, args) -> None:
-        """
-        Executes a single run of the model, including data fetching, training, evaluation, and forecasting.
-
-        Args:
-            args: Command line arguments.
-        """
-        self.config = self._update_single_config(args)
-        self._project = f"{self.config['name']}_{args.run_type}"
-
-        try:
-            with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
-                self._data_loader.get_data(
-                    use_saved=args.saved,
-                    validate=True,
-                    self_test=args.drift_self_test,
-                    partition=args.run_type,
-                )
-            wandb.finish()
-
-            self._execute_model_tasks(
-                config=self.config,
-                train=args.train,
-                eval=args.evaluate,
-                forecast=args.forecast,
-                artifact_name=args.artifact_name,
-            )
-        except Exception as e:
-            logger.error(f"Error during single run execution: {e}")
-
-    def execute_sweep_run(self, args) -> None:
-        """
-        Executes a sweep run of the model, including data fetching and hyperparameter optimization.
-
-        Args:
-            args: Command line arguments.
-        """
-        self.config = self._update_sweep_config(args)
-        self._project = f"{self.config['name']}_sweep"
-
-        try:
-            with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
-                self._data_loader.get_data(
-                    use_saved=args.saved,
-                    validate=True,
-                    self_test=args.drift_self_test,
-                    partition=args.run_type,
-                )
-            wandb.finish()
-
-            sweep_id = wandb.sweep(
-                self.config, project=self._project, entity=self._entity
-            )
-            wandb.agent(sweep_id, self._execute_model_tasks, entity=self._entity)
-        except Exception as e:
-            logger.error(f"Error during sweep run execution: {e}")
-
-    def _execute_model_tasks(
-        self,
-        config: Optional[Dict] = None,
-        train: Optional[bool] = None,
-        eval: Optional[bool] = None,
-        forecast: Optional[bool] = None,
-        artifact_name: Optional[str] = None,
-    ) -> None:
-        """
-        Executes various model-related tasks including training, evaluation, and forecasting.
-
-        Args:
-            config (dict, optional): Configuration object containing parameters and settings.
-            train (bool, optional): Flag to indicate if the model should be trained.
-            eval (bool, optional): Flag to indicate if the model should be evaluated.
-            forecast (bool, optional): Flag to indicate if forecasting should be performed.
-            artifact_name (str, optional): Specific name of the model artifact to load for evaluation or forecasting.
-        """
-        start_t = time.time()
-        try:
-            with wandb.init(project=self._project, entity=self._entity, config=config):
-                add_wandb_monthly_metrics()
-                self.config = wandb.config
-
-                if self.config["sweep"]:
-                    logger.info(f"Sweeping model {self.config['name']}...")
-                    model = self._train_model_artifact()
-                    logger.info(f"Evaluating model {self.config['name']}...")
-                    self._evaluate_sweep(model)
-
-                if train:
-                    logger.info(f"Training model {self.config['name']}...")
-                    self._train_model_artifact()
-
-                if eval:
-                    logger.info(f"Evaluating model {self.config['name']}...")
-                    self._evaluate_model_artifact(artifact_name)
-
-                if forecast:
-                    logger.info(f"Forecasting model {self.config['name']}...")
-                    self._forecast_model_artifact(artifact_name)
-            wandb.finish()
-        except Exception as e:
-            logger.error(f"Error during model tasks execution: {e}")
-
-        end_t = time.time()
-        minutes = (end_t - start_t) / 60
-        logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
-
-    @abstractmethod
-    def _train_model_artifact(self):
-        """
-        Abstract method to train the model artifact. Must be implemented by subclasses.
-        """
-        pass
-
-    @abstractmethod
-    def _evaluate_model_artifact(self, artifact_name: str):
-        """
-        Abstract method to evaluate the model artifact. Must be implemented by subclasses.
-
-        Args:
-            artifact_name (str): The name of the model artifact to evaluate.
-        """
-        pass
-
-    @abstractmethod
-    def _forecast_model_artifact(self, artifact_name: str):
-        """
-        Abstract method to forecast using the model artifact. Must be implemented by subclasses.
-
-        Args:
-            artifact_name (str): The name of the model artifact to use for forecasting.
-        """
-        pass
-
-    @abstractmethod
-    def _evaluate_sweep(self, model):
-        """
-        Abstract method to evaluate the model during a sweep. Must be implemented by subclasses.
-
-        Args:
-            model: The model to evaluate.
-        """
-        pass
-
+    
     def _get_artifact_files(self, path_artifact: Path, run_type: str) -> List[Path]:
         """
         Retrieve artifact files from a directory that match the given run type and common extensions.
@@ -335,6 +252,7 @@ class ModelManager:
         df_evaluation: pd.DataFrame,
         df_output: pd.DataFrame,
         path_generated: Union[str, Path],
+        sequence_number: int,
     ) -> None:
         """
         Save the model outputs and evaluation metrics to the specified path.
@@ -343,28 +261,31 @@ class ModelManager:
             df_evaluation (pd.DataFrame): DataFrame containing evaluation metrics.
             df_output (pd.DataFrame): DataFrame containing model outputs.
             path_generated (str or Path): The path where the outputs should be saved.
+            sequence_number (int): The sequence number.
         """
         try:
-            Path(path_generated).mkdir(parents=True, exist_ok=True)
+            path_generated = Path(path_generated)
+            path_generated.mkdir(parents=True, exist_ok=True)
 
-            outputs_path = ModelManager._generate_output_file_name(path_generated,
-                                                                   "output",
-                                                                   self.config["steps"][-1],
+            outputs_path = ModelManager._generate_output_file_name("output",
                                                                    self.config["run_type"],
-                                                                   self.config["timestamp"])
-            evaluation_path = ModelManager._generate_output_file_name(path_generated,
-                                                                      "evaluation",
-                                                                      self.config["steps"][-1],
+                                                                   self.config["timestamp"],
+                                                                   sequence_number)
+            evaluation_path = ModelManager._generate_output_file_name("evaluation",
                                                                       self.config["run_type"],
-                                                                      self.config["timestamp"])
+                                                                      self.config["timestamp"],
+                                                                      sequence_number)
 
-            df_output.to_pickle(outputs_path)
-            df_evaluation.to_pickle(evaluation_path)
+            df_output.to_pickle(path_generated/outputs_path)
+            df_evaluation.to_pickle(path_generated/evaluation_path)
         except Exception as e:
             logger.error(f"Error saving model outputs: {e}")
 
     def _save_predictions(
-        self, df_predictions: pd.DataFrame, path_generated: Union[str, Path]
+        self, 
+        df_predictions: pd.DataFrame, 
+        path_generated: Union[str, Path],
+        sequence_number: int = None
     ) -> None:
         """
         Save the model predictions to the specified path.
@@ -372,53 +293,167 @@ class ModelManager:
         Args:
             df_predictions (pd.DataFrame): DataFrame containing model predictions.
             path_generated (str or Path): The path where the predictions should be saved.
+            sequence_number (int): The sequence number.
         """
         try:
-            Path(path_generated).mkdir(parents=True, exist_ok=True)
+            path_generated = Path(path_generated)
+            path_generated.mkdir(parents=True, exist_ok=True)
 
-            predictions_path = ModelManager._generate_output_file_name(path_generated,
-                                                                       "predictions",
-                                                                       self.config["steps"][-1],
+            predictions_name = ModelManager._generate_output_file_name("predictions",
                                                                        self.config["run_type"],
-                                                                       self.config["timestamp"])
-            df_predictions.to_pickle(predictions_path)
+                                                                       self.config["timestamp"],
+                                                                       sequence_number)
+            # logger.info(f"{sequence_number}, Saving predictions to {path_generated/predictions_name}")
+            df_predictions.to_pickle(path_generated/predictions_name)
         except Exception as e:
             logger.error(f"Error saving predictions: {e}")
 
-    @staticmethod
-    def _generate_model_file_name(run_type: str, timestamp: str) -> str:
+    def execute_single_run(self, args) -> None:
         """
-        Generates a model file name based on the run type, and timestamp.
+        Executes a single run of the model, including data fetching, training, evaluation, and forecasting.
 
         Args:
-            run_type (str): The type of run (e.g., calibration, testing).
-            timestamp (str): The timestamp of the model file.
-
-        Returns:
-            str: The generated model file name.
+            args: Command line arguments.
         """
+        self.config = self._update_single_config(args)
+        self._project = f"{self.config['name']}_{args.run_type}"
+        self._eval_type = args.eval_type
 
-        return f"{run_type}_model_{timestamp}.pkl"
+        try:
+            with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
+                self._data_loader.get_data(
+                    use_saved=args.saved,
+                    validate=True,
+                    self_test=args.drift_self_test,
+                    partition=args.run_type,
+                )
+            wandb.finish()
 
-    @staticmethod
-    def _generate_output_file_name(
-            path_generated: Union[str, Path], generated_file_type, steps: int, run_type: str, timestamp: str) -> str:
+            self._execute_model_tasks(
+                config=self.config,
+                train=args.train,
+                eval=args.evaluate,
+                forecast=args.forecast,
+                artifact_name=args.artifact_name
+            )
+        except Exception as e:
+            logger.error(f"Error during single run execution: {e}")
+
+    def execute_sweep_run(self, args) -> None:
         """
-        Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
+        Executes a sweep run of the model, including data fetching and hyperparameter optimization.
 
         Args:
-            path_generated (str or Path): The path where the predictions should be saved.
-            generated_file_type (str): The type of generated file (e.g., predictions, output, evaluation).
-            steps (int): The number of steps ahead for the forecast.
-            run_type (str): The type of run (e.g., calibration, testing).
-
-        Returns:
-            str: The generated prediction file name.
+            args: Command line arguments.
         """
+        self.config = self._update_sweep_config(args)
+        self._project = f"{self.config['name']}_sweep"
+        self._eval_type = args.eval_type
 
-        path_generated = Path(path_generated)
+        try:
+            with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
+                self._data_loader.get_data(
+                    use_saved=args.saved,
+                    validate=True,
+                    self_test=args.drift_self_test,
+                    partition=args.run_type,
+                )
+            wandb.finish()
 
-        return f'{path_generated}/{generated_file_type}_{steps}_{run_type}_{timestamp}.pkl'
+            sweep_id = wandb.sweep(
+                self.config, project=self._project, entity=self._entity
+            )
+            wandb.agent(sweep_id, self._execute_model_tasks, entity=self._entity)
+        except Exception as e:
+            logger.error(f"Error during sweep run execution: {e}")
+
+    def _execute_model_tasks(
+        self,
+        config: Optional[Dict] = None,
+        train: Optional[bool] = None,
+        eval: Optional[bool] = None,
+        forecast: Optional[bool] = None,
+        artifact_name: Optional[str] = None,
+    ) -> None:
+        """
+        Executes various model-related tasks including training, evaluation, and forecasting.
+
+        Args:
+            config (dict, optional): Configuration object containing parameters and settings.
+            train (bool, optional): Flag to indicate if the model should be trained.
+            eval (bool, optional): Flag to indicate if the model should be evaluated.
+            forecast (bool, optional): Flag to indicate if forecasting should be performed.
+            artifact_name (str, optional): Specific name of the model artifact to load for evaluation or forecasting.
+        """
+        start_t = time.time()
+        try:
+            with wandb.init(project=self._project, entity=self._entity, config=config):
+                add_wandb_monthly_metrics()
+                self.config = wandb.config
+
+                if self.config["sweep"]:
+                    logger.info(f"Sweeping model {self.config['name']}...")
+                    model = self._train_model_artifact()
+                    logger.info(f"Evaluating model {self.config['name']}...")
+                    self._evaluate_sweep(model, self._eval_type)
+
+                if train:
+                    logger.info(f"Training model {self.config['name']}...")
+                    self._train_model_artifact()
+
+                if eval:
+                    logger.info(f"Evaluating model {self.config['name']}...")
+                    self._evaluate_model_artifact(self._eval_type, artifact_name)
+
+                if forecast:
+                    logger.info(f"Forecasting model {self.config['name']}...")
+                    self._forecast_model_artifact(artifact_name)
+            wandb.finish()
+        except Exception as e:
+            logger.error(f"Error during model tasks execution: {e}")
+
+        end_t = time.time()
+        minutes = (end_t - start_t) / 60
+        logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
+
+    @abstractmethod
+    def _train_model_artifact(self):
+        """
+        Abstract method to train the model artifact. Must be implemented by subclasses.
+        """
+        pass
+
+    @abstractmethod
+    def _evaluate_model_artifact(self, eval_type: str, artifact_name: str):
+        """
+        Abstract method to evaluate the model artifact. Must be implemented by subclasses.
+
+        Args:
+            eval_type (str): The type of evaluation to perform (e.g., standard, long, complete, live).
+            artifact_name (str): The name of the model artifact to evaluate.
+        """
+        pass
+
+    @abstractmethod
+    def _forecast_model_artifact(self, artifact_name: str):
+        """
+        Abstract method to forecast using the model artifact. Must be implemented by subclasses.
+
+        Args:
+            artifact_name (str): The name of the model artifact to use for forecasting.
+        """
+        pass
+
+    @abstractmethod
+    def _evaluate_sweep(self, model, eval_type: str):
+        """
+        Abstract method to evaluate the model during a sweep. Must be implemented by subclasses.
+
+        Args:
+            model: The model to evaluate.
+            eval_type (str): The type of evaluation to perform (e.g., standard, long, complete, live).
+        """
+        pass
 
     @property
     def configs(self) -> Dict:
