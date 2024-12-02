@@ -1,8 +1,9 @@
 from views_pipeline_core.templates.utils import save_script
 from pathlib import Path
+import logging
+logger = logging.getLogger(__name__)
 
-
-def generate(script_dir: Path) -> bool:
+def generate(script_path: Path) -> bool:
     """
     Generates a Python script that sets up and executes model runs with Weights & Biases (WandB) integration.
 
@@ -11,8 +12,8 @@ def generate(script_dir: Path) -> bool:
     generated script includes command-line argument parsing, validation, and runtime logging.
 
     Parameters:
-        script_dir (Path):
-            The directory where the generated Python script will be saved. This should be a valid writable
+        script_path (Path):
+            The path where the generated Python script will be saved. This should be a valid writable
             path that exists within the project structure.
 
     Returns:
@@ -62,4 +63,4 @@ if __name__ == "__main__":
     else:
         # YourModelManager(model_path=model_path).execute_single_run(args)
 '''
-    return save_script(script_dir, code)
+    return save_script(script_path, code)
