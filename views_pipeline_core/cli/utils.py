@@ -86,6 +86,11 @@ def parse_args():
         help="Enable drift-detection self_test at data-fetch"
     )
 
+    parser.add_argument(
+        "-et", "--eval_type", type=str, default="standard",
+        help="Type of evaluation to be performed"
+    )
+
     return parser.parse_args()
 
 
@@ -140,4 +145,11 @@ def validate_arguments(args):
             "Error: if --train is not set, you should only use --saved flag. Exiting."
         )
         print("To fix: Add --train or --saved flag.")
+        sys.exit(1)
+
+    if args.eval_type not in ["standard", "long", "complete", "live"]:
+        print(
+            "Error: --eval_type should be one of 'standard', 'long', 'complete', or 'live'. Exiting."
+        )
+        print("To fix: Set --eval_type to one of the above options.")
         sys.exit(1)

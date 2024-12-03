@@ -13,9 +13,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-
-
-
 # ============================================================ Model Manager ============================================================
 
 
@@ -58,6 +55,66 @@ class ModelManager:
             )
         self._data_loader = ViewsDataLoader(model_path=self._model_path)
 
+    @staticmethod
+    def _resolve_evaluation_sequence_number(eval_type: str) -> int:
+        """
+        Resolve the evaluation length based on the evaluation type.
+
+        Args:
+            eval_type (str): The type of evaluation to perform (e.g., standard, long, complete, live).
+
+        Returns:
+            int: The evaluation length.
+        """
+        if eval_type == "standard":
+            return 12
+        elif eval_type == "long":
+            return 36
+        elif eval_type == "complete":
+            return None # currently set as None because sophisticated calculation is needed
+        elif eval_type == "live":
+            return 12
+        else:
+            raise ValueError(f"Invalid evaluation type: {eval_type}")
+
+    @staticmethod
+    def _generate_model_file_name(run_type: str, timestamp: str) -> str:
+        """
+        Generates a model file name based on the run type, and timestamp.
+
+        Args:
+            run_type (str): The type of run (e.g., calibration, testing).
+            timestamp (str): The timestamp of the model file.
+
+        Returns:
+            str: The generated model file name.
+        """
+
+        return f"{run_type}_model_{timestamp}.pkl"
+
+    @staticmethod
+    def _generate_output_file_name( 
+            generated_file_type: str, 
+            run_type: str, 
+            timestamp: str,
+            sequence_number: int) -> str:
+        """
+        Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
+
+        Args:
+            generated_file_type (str): The type of generated file (e.g., predictions, output, evaluation).
+            sequence_number (int): The sequence number.
+            run_type (str): The type of run (e.g., calibration, testing).
+
+        Returns:
+            str: The generated prediction file name.
+        """
+        # logger.info(f"sequence_number: {sequence_number}")
+        if sequence_number is not None:
+            return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}.pkl"
+        else:
+            return f"{generated_file_type}_{run_type}_{timestamp}.pkl"
+
     def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
         """
         Loads and executes a configuration method from a specified script.
@@ -84,6 +141,7 @@ class ModelManager:
                     return getattr(config_module, config_method)()
             except (AttributeError, ImportError) as e:
                 logger.error(f"Error loading config from {script_name}: {e}")
+
         return None
 
     def _update_single_config(self, args) -> Dict:
@@ -103,6 +161,7 @@ class ModelManager:
         }
         config["run_type"] = args.run_type
         config["sweep"] = False
+
         return config
 
     def _update_sweep_config(self, args) -> Dict:
@@ -121,7 +180,133 @@ class ModelManager:
         config["parameters"]["name"] = {"value": self._config_meta["name"]}
         config["parameters"]["depvar"] = {"value": self._config_meta["depvar"]}
         config["parameters"]["algorithm"] = {"value": self._config_meta["algorithm"]}
+
         return config
+    
+    def _get_artifact_files(self, path_artifact: Path, run_type: str) -> List[Path]:
+        """
+        Retrieve artifact files from a directory that match the given run type and common extensions.
+
+        Args:
+            path_artifact (Path): The directory path where model files are stored.
+            run_type (str): The type of run (e.g., calibration, testing).
+
+        Returns:
+            List[Path]: List of matching model file paths.
+        """
+        common_extensions = [
+            ".pt",
+            ".pth",
+            ".h5",
+            ".hdf5",
+            ".pkl",
+            ".json",
+            ".bst",
+            ".txt",
+            ".bin",
+            ".cbm",
+            ".onnx",
+        ]
+        artifact_files = [
+            f
+            for f in path_artifact.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"{run_type}_model_")
+            and f.suffix in common_extensions
+        ]
+        return artifact_files
+
+    def _get_latest_model_artifact(self, path_artifact: Path, run_type: str) -> Path:
+        """
+        Retrieve the path (pathlib path object) latest model artifact for a given run type based on the modification time.
+
+        Args:
+            path_artifact (Path): The model specifc directory path where artifacts are stored.
+            run_type (str): The type of run (e.g., calibration, testing, forecasting).
+
+        Returns:
+            The path (pathlib path objsect) to the latest model artifact given the run type.
+
+        Raises:
+            FileNotFoundError: If no model artifacts are found for the given run type.
+        """
+
+        # List all model files for the given specific run_type with the expected filename pattern
+        model_files = self._get_artifact_files(path_artifact, run_type)
+
+        if not model_files:
+            raise FileNotFoundError(
+                f"No model artifacts found for run type '{run_type}' in path '{path_artifact}'"
+            )
+
+        # Sort the files based on the timestamp embedded in the filename. With format %Y%m%d_%H%M%S For example, '20210831_123456.pt'
+        model_files.sort(reverse=True)
+
+        # print statements for debugging
+        logger.info(f"artifact used: {model_files[0]}")
+
+        return path_artifact / model_files[0]
+
+    def _save_model_outputs(
+        self,
+        df_evaluation: pd.DataFrame,
+        df_output: pd.DataFrame,
+        path_generated: Union[str, Path],
+        sequence_number: int,
+    ) -> None:
+        """
+        Save the model outputs and evaluation metrics to the specified path.
+
+        Args:
+            df_evaluation (pd.DataFrame): DataFrame containing evaluation metrics.
+            df_output (pd.DataFrame): DataFrame containing model outputs.
+            path_generated (str or Path): The path where the outputs should be saved.
+            sequence_number (int): The sequence number.
+        """
+        try:
+            path_generated = Path(path_generated)
+            path_generated.mkdir(parents=True, exist_ok=True)
+
+            outputs_path = ModelManager._generate_output_file_name("output",
+                                                                   self.config["run_type"],
+                                                                   self.config["timestamp"],
+                                                                   sequence_number)
+            evaluation_path = ModelManager._generate_output_file_name("evaluation",
+                                                                      self.config["run_type"],
+                                                                      self.config["timestamp"],
+                                                                      sequence_number)
+
+            df_output.to_pickle(path_generated/outputs_path)
+            df_evaluation.to_pickle(path_generated/evaluation_path)
+        except Exception as e:
+            logger.error(f"Error saving model outputs: {e}")
+
+    def _save_predictions(
+        self, 
+        df_predictions: pd.DataFrame, 
+        path_generated: Union[str, Path],
+        sequence_number: int = None
+    ) -> None:
+        """
+        Save the model predictions to the specified path.
+
+        Args:
+            df_predictions (pd.DataFrame): DataFrame containing model predictions.
+            path_generated (str or Path): The path where the predictions should be saved.
+            sequence_number (int): The sequence number.
+        """
+        try:
+            path_generated = Path(path_generated)
+            path_generated.mkdir(parents=True, exist_ok=True)
+
+            predictions_name = ModelManager._generate_output_file_name("predictions",
+                                                                       self.config["run_type"],
+                                                                       self.config["timestamp"],
+                                                                       sequence_number)
+            # logger.info(f"{sequence_number}, Saving predictions to {path_generated/predictions_name}")
+            df_predictions.to_pickle(path_generated/predictions_name)
+        except Exception as e:
+            logger.error(f"Error saving predictions: {e}")
 
     def execute_single_run(self, args) -> None:
         """
@@ -132,6 +317,7 @@ class ModelManager:
         """
         self.config = self._update_single_config(args)
         self._project = f"{self.config['name']}_{args.run_type}"
+        self._eval_type = args.eval_type
 
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
@@ -148,7 +334,7 @@ class ModelManager:
                 train=args.train,
                 eval=args.evaluate,
                 forecast=args.forecast,
-                artifact_name=args.artifact_name,
+                artifact_name=args.artifact_name
             )
         except Exception as e:
             logger.error(f"Error during single run execution: {e}")
@@ -162,6 +348,7 @@ class ModelManager:
         """
         self.config = self._update_sweep_config(args)
         self._project = f"{self.config['name']}_sweep"
+        self._eval_type = args.eval_type
 
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
@@ -208,7 +395,7 @@ class ModelManager:
                     logger.info(f"Sweeping model {self.config['name']}...")
                     model = self._train_model_artifact()
                     logger.info(f"Evaluating model {self.config['name']}...")
-                    self._evaluate_sweep(model)
+                    self._evaluate_sweep(model, self._eval_type)
 
                 if train:
                     logger.info(f"Training model {self.config['name']}...")
@@ -216,7 +403,7 @@ class ModelManager:
 
                 if eval:
                     logger.info(f"Evaluating model {self.config['name']}...")
-                    self._evaluate_model_artifact(artifact_name)
+                    self._evaluate_model_artifact(self._eval_type, artifact_name)
 
                 if forecast:
                     logger.info(f"Forecasting model {self.config['name']}...")
@@ -237,11 +424,12 @@ class ModelManager:
         pass
 
     @abstractmethod
-    def _evaluate_model_artifact(self, artifact_name: str):
+    def _evaluate_model_artifact(self, eval_type: str, artifact_name: str):
         """
         Abstract method to evaluate the model artifact. Must be implemented by subclasses.
 
         Args:
+            eval_type (str): The type of evaluation to perform (e.g., standard, long, complete, live).
             artifact_name (str): The name of the model artifact to evaluate.
         """
         pass
@@ -257,169 +445,31 @@ class ModelManager:
         pass
 
     @abstractmethod
-    def _evaluate_sweep(self, model):
+    def _evaluate_sweep(self, model, eval_type: str):
         """
         Abstract method to evaluate the model during a sweep. Must be implemented by subclasses.
 
         Args:
             model: The model to evaluate.
+            eval_type (str): The type of evaluation to perform (e.g., standard, long, complete, live).
         """
         pass
 
-    def _get_artifact_files(self, path_artifact: Path, run_type: str) -> List[Path]:
+    @property
+    def configs(self) -> Dict:
         """
-        Retrieve artifact files from a directory that match the given run type and common extensions.
-
-        Args:
-            path_artifact (Path): The directory path where model files are stored.
-            run_type (str): The type of run (e.g., calibration, testing).
+        Get the combined meta, deployment and hyperparameters configuration.
 
         Returns:
-            List[Path]: List of matching model file paths.
+            dict: The configuration object.
         """
-        common_extensions = [
-            ".pt",
-            ".pth",
-            ".h5",
-            ".hdf5",
-            ".pkl",
-            ".json",
-            ".bst",
-            ".txt",
-            ".bin",
-            ".cbm",
-            ".onnx",
-        ]
-        artifact_files = [
-            f
-            for f in path_artifact.iterdir()
-            if f.is_file()
-            and f.stem.startswith(f"{run_type}_model_")
-            and f.suffix in common_extensions
-        ]
-        return artifact_files
-
-    def _get_latest_model_artifact(self, path_artifact, run_type):
-        """
-        Retrieve the path (pathlib path object) latest model artifact for a given run type based on the modification time.
-
-        Args:
-            path_artifact (Path): The model specifc directory path where artifacts are stored.
-            run_type (str): The type of run (e.g., calibration, testing, forecasting).
-
-        Returns:
-            The path (pathlib path objsect) to the latest model artifact given the run type.
-
-        Raises:
-            FileNotFoundError: If no model artifacts are found for the given run type.
-        """
-
-        # List all model files for the given specific run_type with the expected filename pattern
-        model_files = self._get_artifact_files(path_artifact, run_type)
-
-        if not model_files:
-            raise FileNotFoundError(
-                f"No model artifacts found for run type '{run_type}' in path '{path_artifact}'"
-            )
-
-        # Sort the files based on the timestamp embedded in the filename. With format %Y%m%d_%H%M%S For example, '20210831_123456.pt'
-        model_files.sort(reverse=True)
-
-        # print statements for debugging
-        logger.info(f"artifact used: {model_files[0]}")
-
-        return path_artifact / model_files[0]
-
-    def _save_model_outputs(
-        self,
-        df_evaluation: pd.DataFrame,
-        df_output: pd.DataFrame,
-        path_generated: Union[str, Path],
-    ) -> None:
-        """
-        Save the model outputs and evaluation metrics to the specified path.
-
-        Args:
-            df_evaluation (pd.DataFrame): DataFrame containing evaluation metrics.
-            df_output (pd.DataFrame): DataFrame containing model outputs.
-            path_generated (str or Path): The path where the outputs should be saved.
-        """
-        try:
-            Path(path_generated).mkdir(parents=True, exist_ok=True)
-
-            outputs_path = ModelManager._generate_output_file_name(path_generated,
-                                                                   "output",
-                                                                   self.config["steps"][-1],
-                                                                   self.config["run_type"],
-                                                                   self.config["timestamp"])
-            evaluation_path = ModelManager._generate_output_file_name(path_generated,
-                                                                      "evaluation",
-                                                                      self.config["steps"][-1],
-                                                                      self.config["run_type"],
-                                                                      self.config["timestamp"])
-
-            df_output.to_pickle(outputs_path)
-            df_evaluation.to_pickle(evaluation_path)
-        except Exception as e:
-            logger.error(f"Error saving model outputs: {e}")
-
-    def _save_predictions(
-        self, df_predictions: pd.DataFrame, path_generated: Union[str, Path]
-    ) -> None:
-        """
-        Save the model predictions to the specified path.
-
-        Args:
-            df_predictions (pd.DataFrame): DataFrame containing model predictions.
-            path_generated (str or Path): The path where the predictions should be saved.
-        """
-        try:
-            Path(path_generated).mkdir(parents=True, exist_ok=True)
-
-            predictions_path = ModelManager._generate_output_file_name(path_generated,
-                                                                       "predictions",
-                                                                       self.config["steps"][-1],
-                                                                       self.config["run_type"],
-                                                                       self.config["timestamp"])
-            df_predictions.to_pickle(predictions_path)
-        except Exception as e:
-            logger.error(f"Error saving predictions: {e}")
-
-    @staticmethod
-    def _generate_model_file_name(run_type: str, timestamp: str) -> str:
-        """
-        Generates a model file name based on the run type, and timestamp.
-
-        Args:
-            run_type (str): The type of run (e.g., calibration, testing).
-            timestamp (str): The timestamp of the model file.
-
-        Returns:
-            str: The generated model file name.
-        """
-
-        return f"{run_type}_model_{timestamp}.pkl"
-
-    @staticmethod
-    def _generate_output_file_name(
-            path_generated: Union[str, Path], generated_file_type, steps: int, run_type: str, timestamp: str) -> str:
-        """
-        Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
-
-        Args:
-            path_generated (str or Path): The path where the predictions should be saved.
-            generated_file_type (str): The type of generated file (e.g., predictions, output, evaluation).
-            steps (int): The number of steps ahead for the forecast.
-            run_type (str): The type of run (e.g., calibration, testing).
-
-        Returns:
-            str: The generated prediction file name.
-        """
-
-        path_generated = Path(path_generated)
-
-        return f'{path_generated}/{generated_file_type}_{steps}_{run_type}_{timestamp}.pkl'
-
+        
+        config = {
+            **self._config_hyperparameters,
+            **self._config_meta,
+            **self._config_deployment,
+        }
+        return config
 
 
 if __name__ == "__main__":
