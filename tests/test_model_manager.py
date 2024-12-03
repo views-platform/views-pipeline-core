@@ -230,7 +230,7 @@ def test_save_model_outputs(mock_model_path):
     df_output = pd.DataFrame({"col1": [5, 6], "col2": [7, 8]})
     path_generated = Path("/path/to/generated")
     with patch("builtins.open", new_callable=mock_open), patch("pathlib.Path.mkdir"):
-        manager._save_model_outputs(df_evaluation, df_output, path_generated)
+        manager._save_model_outputs(df_evaluation, df_output, path_generated, sequence_number=1)
         with patch("pathlib.Path.exists", return_value=True):
             assert Path(f"{path_generated}/output_1_test_run_20220101.pkl").exists()
             assert Path(f"{path_generated}/evaluation_1_test_run_20220101.pkl").exists()
