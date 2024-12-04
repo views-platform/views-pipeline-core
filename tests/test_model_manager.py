@@ -10,12 +10,20 @@ from pathlib import Path
 @pytest.fixture
 def mock_model_path():
     """
-    Fixture to mock the ModelPath class.
+    Fixture to mock the ModelPath class with validate flag set to False.
     
     Yields:
         MagicMock: The mock object for ModelPath.
     """
     with patch("views_pipeline_core.managers.path_manager.ModelPath") as mock:
+        mock_instance = mock.return_value
+        mock_instance.get_scripts.return_value = {
+            "config_deployment.py": "path/to/config_deployment.py",
+            "config_hyperparameters.py": "path/to/config_hyperparameters.py",
+            "config_meta.py": "path/to/config_meta.py",
+            "config_sweep.py": "path/to/config_sweep.py"
+        }
+        mock_instance._validate = False
         yield mock
 
 @pytest.fixture
@@ -70,15 +78,32 @@ def test_model_manager_init(mock_model_path):
         "config_meta.py": "path/to/config_meta.py",
         "config_sweep.py": "path/to/config_sweep.py"
     }
-    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module:
+    mock_config_deployment_content = """
+def get_deployment_config():
+    deployment_config = {'deployment_status': 'shadow'}
+    return deployment_config
+"""
+    mock_config_hyperparameters_content = """
+def get_hp_config():
+    hp_config = {'hp_key': 'hp_value'}
+    return hp_config
+"""
+    mock_config_meta_content = """
+def get_meta_config():
+    meta_config = {'meta_key': 'meta_value'}
+    return meta_config
+"""
+    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
         mock_spec.return_value.loader = MagicMock()
-        mock_module.return_value.get_deployment_config.return_value = {"key": "value"}
-        mock_module.return_value.get_hp_config.return_value = {"key": "value"}
-        mock_module.return_value.get_meta_config.return_value = {"key": "value"}
-        mock_module.return_value.get_sweep_config.return_value = {"key": "value"}
+        mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
+        mock_module.return_value.get_hp_config.return_value = {"hp_key": "hp_value"}
+        mock_module.return_value.get_meta_config.return_value = {"meta_key": "meta_value"}
         manager = ModelManager(mock_model_instance)
         assert manager._entity == "views_pipeline"
         assert manager._model_path == mock_model_instance
+        assert manager._config_deployment == {"deployment_status": "shadow"}
+        assert manager._config_hyperparameters == {"hp_key": "hp_value"}
+        assert manager._config_meta == {"meta_key": "meta_value"}
 
 def test_load_config(mock_model_path):
     """
@@ -94,12 +119,17 @@ def test_load_config(mock_model_path):
     mock_model_instance.get_scripts.return_value = {
         "config_deployment.py": "path/to/config_deployment.py"
     }
-    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module:
+    mock_config_deployment_content = """
+def get_deployment_config():
+    deployment_config = {'deployment_status': 'shadow'}
+    return deployment_config
+"""
+    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
         mock_spec.return_value.loader = MagicMock()
-        mock_module.return_value.get_deployment_config.return_value = {"key": "value"}
+        mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
         manager = ModelManager(mock_model_instance)
         config = manager._ModelManager__load_config("config_deployment.py", "get_deployment_config")
-        assert config == {"key": "value"}
+        assert config == {"deployment_status": "shadow"}
 
 def test_update_single_config(mock_model_path):
     """
@@ -112,17 +142,30 @@ def test_update_single_config(mock_model_path):
         - The single run configuration is updated correctly.
     """
     mock_model_instance = mock_model_path.return_value
-    manager = ModelManager(mock_model_instance)
-    manager._config_hyperparameters = {"hp_key": "hp_value"}
-    manager._config_meta = {"meta_key": "meta_value"}
-    manager._config_deployment = {"deploy_key": "deploy_value"}
-    args = MagicMock(run_type="test_run")
-    config = manager._update_single_config(args)
-    assert config["hp_key"] == "hp_value"
-    assert config["meta_key"] == "meta_value"
-    assert config["deploy_key"] == "deploy_value"
-    assert config["run_type"] == "test_run"
-    assert config["sweep"] is False
+    mock_model_instance.get_scripts.return_value = {
+        "config_deployment.py": "path/to/config_deployment.py",
+        "config_hyperparameters.py": "path/to/config_hyperparameters.py",
+        "config_meta.py": "path/to/config_meta.py"
+    }
+    mock_config_deployment_content = """
+def get_deployment_config():
+    deployment_config = {'deployment_status': 'shadow'}
+    return deployment_config
+"""
+    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
+        mock_spec.return_value.loader = MagicMock()
+        mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
+        manager = ModelManager(mock_model_instance)
+        manager._config_hyperparameters = {"hp_key": "hp_value"}
+        manager._config_meta = {"meta_key": "meta_value"}
+        manager._config_deployment = {"deploy_key": "deploy_value"}
+        args = MagicMock(run_type="test_run")
+        config = manager._update_single_config(args)
+        assert config["hp_key"] == "hp_value"
+        assert config["meta_key"] == "meta_value"
+        assert config["deploy_key"] == "deploy_value"
+        assert config["run_type"] == "test_run"
+        assert config["sweep"] is False
 
 def test_update_sweep_config(mock_model_path):
     """
@@ -135,16 +178,74 @@ def test_update_sweep_config(mock_model_path):
         - The sweep run configuration is updated correctly.
     """
     mock_model_instance = mock_model_path.return_value
-    manager = ModelManager(mock_model_instance)
-    manager._config_sweep = {"parameters": {}}
-    manager._config_meta = {"name": "test_name", "depvar": "test_depvar", "algorithm": "test_algorithm"}
-    args = MagicMock(run_type="test_run")
-    config = manager._update_sweep_config(args)
-    assert config["parameters"]["run_type"]["value"] == "test_run"
-    assert config["parameters"]["sweep"]["value"] is True
-    assert config["parameters"]["name"]["value"] == "test_name"
-    assert config["parameters"]["depvar"]["value"] == "test_depvar"
-    assert config["parameters"]["algorithm"]["value"] == "test_algorithm"
+    mock_model_instance.get_scripts.return_value = {
+        "config_sweep.py": "path/to/config_sweep.py",
+        "config_meta.py": "path/to/config_meta.py"
+    }
+    mock_config_sweep_content = """
+def get_sweep_config():
+    sweep_config = {
+        'method': 'grid',
+        'name': 'bad_blood'
+    }
+
+    # Example metric setup:
+    metric = {
+        'name': 'MSE',
+        'goal': 'minimize'
+    }
+    sweep_config['metric'] = metric
+
+    # Example parameters setup:
+    parameters_dict = {
+        'steps': {'values': [[*range(1, 36 + 1, 1)]]},
+        'n_estimators': {'values': [100, 150, 200]},
+    }
+    sweep_config['parameters'] = parameters_dict
+
+    return sweep_config
+"""
+    mock_config_meta_content = """
+def get_meta_config():
+    meta_config = {'name': 'test_name', 'depvar': 'test_depvar', 'algorithm': 'test_algorithm'}
+    return meta_config
+"""
+    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_sweep_content)):
+        mock_spec.return_value.loader = MagicMock()
+        mock_module.return_value.get_sweep_config.return_value = {
+            'method': 'grid',
+            'name': 'bad_blood',
+            'metric': {
+                'name': 'MSE',
+                'goal': 'minimize'
+            },
+            'parameters': {
+                'steps': {'values': [[*range(1, 36 + 1, 1)]]},
+                'n_estimators': {'values': [100, 150, 200]},
+            }
+        }
+        mock_module.return_value.get_meta_config.return_value = {"name": "test_name", "depvar": "test_depvar", "algorithm": "test_algorithm"}
+        manager = ModelManager(mock_model_instance)
+        manager._config_sweep = {
+            'method': 'grid',
+            'name': 'bad_blood',
+            'metric': {
+                'name': 'MSE',
+                'goal': 'minimize'
+            },
+            'parameters': {
+                'steps': {'values': [[*range(1, 36 + 1, 1)]]},
+                'n_estimators': {'values': [100, 150, 200]},
+            }
+        }
+        manager._config_meta = {"name": "test_name", "depvar": "test_depvar", "algorithm": "test_algorithm"}
+        args = MagicMock(run_type="test_run")
+        config = manager._update_sweep_config(args)
+        assert config["parameters"]["run_type"]["value"] == "test_run"
+        assert config["parameters"]["sweep"]["value"] is True
+        assert config["parameters"]["name"]["value"] == "test_name"
+        assert config["parameters"]["depvar"]["value"] == "test_depvar"
+        assert config["parameters"]["algorithm"]["value"] == "test_algorithm"
 
 # def test_execute_single_run(mock_model_path, mock_dataloader, mock_wandb):
 #     """
@@ -159,59 +260,26 @@ def test_update_sweep_config(mock_model_path):
 #         - The single run is executed correctly.
 #     """
 #     mock_model_instance = mock_model_path.return_value
-#     manager = ModelManager(mock_model_instance)
-#     manager._update_single_config = MagicMock(return_value={"name": "test_name"})
-#     manager._execute_model_tasks = MagicMock()
-#     args = MagicMock(run_type="calibration", saved=False, drift_self_test=False, train=True, evaluate=True, forecast=True, artifact_name="test_artifact")
-#     manager.execute_single_run(args)
-#     manager._update_single_config.assert_called_once_with(args)
-#     manager._execute_model_tasks.assert_called_once_with(config={"name": "test_name"}, train=True, eval=True, forecast=True, artifact_name="test_artifact")
-
-# def test_execute_sweep_run(mock_model_path, mock_dataloader, mock_wandb):
-#     """
-#     Test the execute_sweep_run method of the ModelManager class.
-    
-#     Args:
-#         mock_model_path (MagicMock): The mock object for ModelPath.
-#         mock_dataloader (MagicMock): The mock object for ViewsDataLoader.
-#         mock_wandb (None): The mock object for wandb functions.
-    
-#     Asserts:
-#         - The sweep run is executed correctly.
-#     """
-#     mock_model_instance = mock_model_path.return_value
-#     manager = ModelManager(mock_model_instance)
-#     manager._update_sweep_config = MagicMock(return_value={"name": "test_name"})
-#     manager._execute_model_tasks = MagicMock()
-#     args = MagicMock(run_type="calibration", saved=False, drift_self_test=False)
-#     manager.execute_sweep_run(args)
-#     manager._update_sweep_config.assert_called_once_with(args)
-#     manager._execute_model_tasks.assert_called_once()
-
-# def test_get_artifact_files(mock_model_path):
-#     """
-#     Test the _get_artifact_files method of the ModelManager class.
-    
-#     Args:
-#         mock_model_path (MagicMock): The mock object for ModelPath.
-    
-#     Asserts:
-#         - The artifact files are retrieved correctly.
-#     """
-#     mock_model_instance = mock_model_path.return_value
-#     manager = ModelManager(mock_model_instance)
-#     path_artifact = Path("/path/to/artifacts")
-#     run_type = "test_run"
-#     with patch("pathlib.Path.iterdir") as mock_iterdir:
-#         mock_iterdir.return_value = [
-#             Path("/path/to/artifacts/test_run_model_1.pt"),
-#             Path("/path/to/artifacts/test_run_model_2.h5"),
-#             Path("/path/to/artifacts/other_model.txt")
-#         ]
-#         files = manager._get_artifact_files(path_artifact, run_type)
-#         assert len(files) == 2
-#         assert files[0].name == "test_run_model_1.pt"
-#         assert files[1].name == "test_run_model_2.h5"
+#     mock_model_instance.get_scripts.return_value = {
+#         "config_deployment.py": "path/to/config_deployment.py",
+#         "config_hyperparameters.py": "path/to/config_hyperparameters.py",
+#         "config_meta.py": "path/to/config_meta.py"
+#     }
+#     mock_config_deployment_content = """
+# def get_deployment_config():
+#     deployment_config = {'deployment_status': 'shadow'}
+#     return deployment_config
+# """
+#     with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
+#         mock_spec.return_value.loader = MagicMock()
+#         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
+#         manager = ModelManager(mock_model_instance)
+#         manager._update_single_config = MagicMock(return_value={"name": "test_name"})
+#         manager._execute_model_tasks = MagicMock()
+#         args = MagicMock(run_type="calibration", saved=False, drift_self_test=False, train=True, evaluate=True, forecast=True, artifact_name="test_artifact")
+#         manager.execute_single_run(args)
+#         manager._update_single_config.assert_called_once_with(args)
+#         manager._execute_model_tasks.assert_called_once_with(config={"name": "test_name"}, train=True, eval=True, forecast=True, artifact_name="test_artifact")
 
 def test_save_model_outputs(mock_model_path):
     """
@@ -224,16 +292,30 @@ def test_save_model_outputs(mock_model_path):
         - The model outputs are saved correctly.
     """
     mock_model_instance = mock_model_path.return_value
-    manager = ModelManager(mock_model_instance)
-    manager.config = {"steps": [1], "run_type": "test_run", "timestamp": "20220101"}
-    df_evaluation = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]})
-    df_output = pd.DataFrame({"col1": [5, 6], "col2": [7, 8]})
-    path_generated = Path("/path/to/generated")
-    with patch("builtins.open", new_callable=mock_open), patch("pathlib.Path.mkdir"):
-        manager._save_model_outputs(df_evaluation, df_output, path_generated, sequence_number=1)
-        with patch("pathlib.Path.exists", return_value=True):
-            assert Path(f"{path_generated}/output_1_test_run_20220101.pkl").exists()
-            assert Path(f"{path_generated}/evaluation_1_test_run_20220101.pkl").exists()
+    mock_model_instance.get_scripts.return_value = {
+        "config_deployment.py": "path/to/config_deployment.py",
+        "config_hyperparameters.py": "path/to/config_hyperparameters.py",
+        "config_meta.py": "path/to/config_meta.py"
+    }
+    mock_config_deployment_content = """
+def get_deployment_config():
+    deployment_config = {'deployment_status': 'shadow'}
+    return deployment_config
+"""
+    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
+        mock_spec.return_value.loader = MagicMock()
+        mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
+        manager = ModelManager(mock_model_instance)
+        manager.config = {"run_type": "calibration", "timestamp": "20210831_123456"}
+        df_evaluation = pd.DataFrame({"metric": [1, 2, 3]})
+        df_output = pd.DataFrame({"output": [4, 5, 6]})
+        path_generated = "/path/to/generated"
+        sequence_number = 1
+        with patch("pathlib.Path.mkdir") as mock_mkdir, patch("pandas.DataFrame.to_pickle") as mock_to_pickle:
+            manager._save_model_outputs(df_evaluation, df_output, path_generated, sequence_number)
+            mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+            mock_to_pickle.assert_any_call(Path(path_generated) / "output_calibration_20210831_123456_01.pkl")
+            mock_to_pickle.assert_any_call(Path(path_generated) / "evaluation_calibration_20210831_123456_01.pkl")
 
 def test_save_predictions(mock_model_path):
     """
@@ -246,11 +328,25 @@ def test_save_predictions(mock_model_path):
         - The model predictions are saved correctly.
     """
     mock_model_instance = mock_model_path.return_value
-    manager = ModelManager(mock_model_instance)
-    manager.config = {"steps": [1], "run_type": "test_run", "timestamp": "20220101"}
-    df_predictions = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]})
-    path_generated = Path("/path/to/generated")
-    with patch("builtins.open", new_callable=mock_open), patch("pathlib.Path.mkdir"):
-        manager._save_predictions(df_predictions, path_generated)
-        with patch("pathlib.Path.exists", return_value=True):
-            assert Path(f"{path_generated}/predictions_1_test_run_20220101.pkl").exists()
+    mock_model_instance.get_scripts.return_value = {
+        "config_deployment.py": "path/to/config_deployment.py",
+        "config_hyperparameters.py": "path/to/config_hyperparameters.py",
+        "config_meta.py": "path/to/config_meta.py"
+    }
+    mock_config_deployment_content = """
+def get_deployment_config():
+    deployment_config = {'deployment_status': 'shadow'}
+    return deployment_config
+"""
+    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
+        mock_spec.return_value.loader = MagicMock()
+        mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
+        manager = ModelManager(mock_model_instance)
+        manager.config = {"run_type": "calibration", "timestamp": "20210831_123456"}
+        df_predictions = pd.DataFrame({"prediction": [7, 8, 9]})
+        path_generated = "/path/to/generated"
+        sequence_number = 1
+        with patch("pathlib.Path.mkdir") as mock_mkdir, patch("pandas.DataFrame.to_pickle") as mock_to_pickle:
+            manager._save_predictions(df_predictions, path_generated, sequence_number)
+            mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+            mock_to_pickle.assert_called_once_with(Path(path_generated) / "predictions_calibration_20210831_123456_01.pkl")
