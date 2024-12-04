@@ -40,8 +40,8 @@ class ViewsDataLoader:
         """
         self._model_path = model_path
         self._model_name = model_path.model_name
-        if self._model_path.target == "model":
-            self._path_raw = model_path.data_raw
+        # if self._model_path.target == "model":
+        self._path_raw = model_path.data_raw
         self._path_processed = model_path.data_processed
         self.partition = None
         self.partition_dict = None

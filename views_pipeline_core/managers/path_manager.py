@@ -7,6 +7,7 @@ from typing import Union, Optional, List, Dict
 import re
 import os
 import pyprojroot
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -24,30 +25,14 @@ class ModelPath:
         _force_cache_overwrite (bool): A flag to indicate whether to force overwrite the cache.
         root (Path): The root directory of the project.
         models (Path): The directory for models.
-        common_utils (Path): The directory for common utilities.
-        common_configs (Path): The directory for common configurations.
         model_dir (Path): The directory for the specific model.
-        architectures (Path): The directory for model architectures.
         artifacts (Path): The directory for model artifacts.
         configs (Path): The directory for model configurations.
         data (Path): The directory for model data.
         data_generated (Path): The directory for generated data.
         data_processed (Path): The directory for processed data.
         data_raw (Path): The directory for raw data.
-        dataloaders (Path): The directory for data loaders.
-        forecasting (Path): The directory for forecasting scripts.
-        management (Path): The directory for management scripts.
-        notebooks (Path): The directory for notebooks.
-        offline_evaluation (Path): The directory for offline evaluation scripts.
-        online_evaluation (Path): The directory for online evaluation scripts.
         reports (Path): The directory for reports.
-        src (Path): The source directory.
-        _templates (Path): The directory for templates.
-        training (Path): The directory for training scripts.
-        utils (Path): The directory for utility scripts.
-        visualization (Path): The directory for visualization scripts.
-        _sys_paths (list): A list of system paths.
-        common_querysets (Path): The directory for common querysets.
         queryset_path (Path): The path to the queryset script.
         _queryset (module): The imported queryset module.
         scripts (list): A list of script paths.
@@ -57,23 +42,12 @@ class ModelPath:
     _target = "model"
     _use_global_cache = False
     __instances__ = 0
-    # Class variables for paths
     _root = None
-    # _common_utils = None
-    # _common_configs = None
-    # _common_querysets = None
-    # _meta_tools = None
 
     @classmethod
     def _initialize_class_paths(cls, current_path: Path = None) -> None:
         """Initialize class-level paths."""
         cls._root = cls.find_project_root(current_path=current_path)
-        # cls._models = cls._root / Path(cls._target + "s")
-        # cls._common_utils = cls._root / "common_utils"
-        # cls._common_configs = cls._root / "common_configs"
-        # cls._common_querysets = cls._root / "common_querysets"
-        # cls._meta_tools = cls._root / "meta_tools"
-        # cls._common_logs = cls._root / "common_logs"
 
     @classmethod
     def get_root(cls, current_path: Path = None) -> Path:
@@ -191,12 +165,8 @@ class ModelPath:
             current_path = Path(pyprojroot.here())
             if (current_path / marker).exists():
                     return current_path
-            # print("HERE ", current_path)
         # Start from the current directory and move up the hierarchy
         try:
-            # if os.environ["VIEWS_MODEL_PATH"]:
-            #     current_path = Path(os.environ["VIEWS_MODEL_PATH"])
-            # else:
             current_path = Path(current_path).resolve().parent
             while current_path != current_path.parent:  # Loop until we reach the root directory
                 if (current_path / marker).exists():
@@ -234,10 +204,6 @@ class ModelPath:
         # Common paths
         self.root = self.__class__.get_root()
         self.models = self.__class__.get_models()
-        # self.common_utils = self.__class__.get_common_utils()
-        # self.common_configs = self.__class__.get_common_configs()
-        # self.common_querysets = self.__class__.get_common_querysets()
-        # self.meta_tools = self.__class__.get_meta_tools()
         # Ignore attributes while processing
         self._ignore_attributes = [
             "model_name",
@@ -412,14 +378,6 @@ class ModelPath:
             None
         """
         self.scripts += [
-            # self._build_absolute_directory(Path("configs/config_sweep.py")),
-            # self._build_absolute_directory(Path("src/dataloaders/get_data.py")),
-            # self._build_absolute_directory(
-            #     Path("src/offline_evaluation/evaluate_model.py")
-            # ),
-            # self._build_absolute_directory(
-            #     Path(f"src/training/train_{self.target}.py")
-            # ),
             self.queryset_path
         ]
 
@@ -666,7 +624,6 @@ class EnsemblePath(ModelPath):
         """
         super().__init__(ensemble_name_or_path, validate)
         # Additional ensemble-specific initialization...
-        # print(self._validate)
 
     def _initialize_directories(self) -> None:
         """
@@ -711,12 +668,4 @@ class EnsemblePath(ModelPath):
     #         None
     #     """
     #     self.scripts += [
-    #         self._build_absolute_directory(Path("artifacts/model_metadata_dict.py")),
-    #         self._build_absolute_directory(
-    #             Path("src/offline_evaluation/evaluate_ensemble.py")
-    #         ),
-    #         self._build_absolute_directory(Path("src/training/train_ensemble.py")),
-    #         self._build_absolute_directory(Path("src/utils/utils_check.py")),
-    #         self._build_absolute_directory(Path("src/utils/utils_run.py")),
-    #         self._build_absolute_directory(Path("src/visualization/visual.py")),
     #     ]

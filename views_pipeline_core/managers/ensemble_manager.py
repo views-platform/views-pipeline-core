@@ -82,7 +82,7 @@ class EnsembleManager(ModelManager):
         elif aggregation == "median":
             return pd.concat(df_to_aggregate).groupby(level=[0, 1]).median()
         else:
-            logger.error(f"Invalid aggregation: {aggregation}")
+            raise ValueError(f"Invalid aggregation method: {aggregation}")
     
     def execute_single_run(self, args) -> None:
         """
