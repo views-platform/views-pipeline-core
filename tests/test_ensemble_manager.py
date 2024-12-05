@@ -1,8 +1,10 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from views_pipeline_core.managers.ensemble_manager import EnsembleManager
+from views_pipeline_core.models.check import ensemble_model_check
 from views_pipeline_core.managers.path_manager import EnsemblePath, ModelPath
 from views_pipeline_core.managers.model_manager import ModelManager
+import logging
 import pandas as pd
 import os
 
@@ -11,6 +13,13 @@ def mock_model_path():
     mock_path = MagicMock()
     mock_path.model_dir = "/path/to/models/test_model"
     return mock_path
+
+@pytest.fixture
+def mock_get_scripts():
+    mock_scripts = MagicMock()
+    mock_scripts.get_scripts.return_value = {"config_deployment.py": "mock_script_path"}
+    return mock_scripts
+
 
 # Parameterized test cases for different scenarios
 @pytest.mark.parametrize(
@@ -46,6 +55,7 @@ def mock_model_path():
         )
     ]
 )
+
 def test_get_shell_command(mock_model_path, run_type, train, evaluate, forecast, use_saved, eval_type, expected_command):
     """
     Test the _get_shell_command method with various input combinations to ensure it generates the correct shell command.
@@ -88,18 +98,15 @@ def test_get_aggregated_df_median(sample_data):
     
     pd.testing.assert_frame_equal(result, expected, check_like=True)
 
-def test_get_aggregated_df_invalid_aggregation(sample_data, caplog):
+def test_get_aggregated_df_invalid_aggregation(sample_data):
     """
     Test the _get_aggregated_df method for invalid aggregation method.
     """
-    # result = EnsembleManager._get_aggregated_df(sample_data, "invalid_aggregation")
-
-    # Ensure the result is None (or whatever behavior you expect for invalid input)
-    # assert result is None
-    # assert "Invalid aggregation: invalid_aggregation" in caplog.text
+   
     with pytest.raises(ValueError, match="Invalid aggregation method: invalid_aggregation"):
         EnsembleManager._get_aggregated_df(sample_data, "invalid_aggregation")
 
+        
 # # @patch.object(EnsembleManager, '_execute_model_tasks')
 # # @patch.object(ModelManager, '_update_single_config')
 # # def test_execute_single_run(mock_update_single_config, mock_execute_model_tasks, ensemble_manager):
@@ -115,6 +122,73 @@ def test_get_aggregated_df_invalid_aggregation(sample_data, caplog):
 
 # #     mock_update_single_config.assert_called_once_with(args)
 # #     mock_execute_model_tasks.assert_called_once()
+
+
+
+
+@pytest.fixture
+def mock_args():
+    """Fixture to provide mock arguments for testing."""
+    class Args:
+        def __init__(self, train=False, evaluate=False, forecast=False, run_type="test", eval_type="default", saved=False):
+            self.train = train
+            self.evaluate = evaluate
+            self.forecast = forecast
+            self.run_type = run_type
+            self.eval_type = eval_type
+            self.saved = saved
+
+    return Args(train=True, evaluate=False, forecast=False, run_type="test_run", eval_type="test_eval", saved=False)
+
+@patch('views_pipeline_core.managers.ensemble_manager.EnsembleManager._execute_model_tasks')
+@patch('views_pipeline_core.managers.model_manager.ModelManager._update_single_config')
+@patch('views_pipeline_core.models.check.ensemble_model_check')
+@patch('views_pipeline_core.managers.ensemble_manager.logger')
+def test_execute_single_run(mock_logger, mock_ensemble_model_check, mock_update_single_config, mock_execute_model_tasks, mock_model_path, mock_args):
+    """Test the execute_single_run method."""
+    
+    # Setup mocks
+    mock_model_path.get_scripts.return_value = {"config_deployment.py": "mock_script_path"}
+    mock_update_single_config.return_value = {"name": "test_model"}
+    mock_load_config = MagicMock(return_value={"name": "test_model"})
+
+    # Instantiate EnsembleManager and execute the method
+    manager = EnsembleManager(ensemble_path=mock_model_path)
+    manager._script_paths = {"config_deployment.py": "mock_script_path"}  # Ensure it behaves like a dict
+    manager._load_config = mock_load_config  # Mock _load_config to avoid real config loading
+
+
+    manager.execute_single_run(mock_args)
+
+    # Assertions for expected behavior
+    mock_update_single_config.assert_called_once_with(mock_args)
+    assert manager._project == "test_model_test_run"
+    assert manager._eval_type == "test_eval"
+    mock_ensemble_model_check.assert_not_called()
+    mock_execute_model_tasks.assert_called_once_with(
+        config={"name": "test_model"}, 
+        train=True, 
+        eval=False, 
+        forecast=False, 
+        use_saved=False
+    )
+    mock_logger.error.assert_not_called()
+
+    # Test exception handling
+    mock_execute_model_tasks.side_effect = Exception("Test error")
+
+    # Run the method and check for exception logging (not for raising directly)
+    manager.execute_single_run(mock_args)
+
+    # Check that the error was logged
+    mock_logger.error.assert_called_once_with("Error during single run execution: Test error")
+
+
+
+
+
+
+
 
 # @patch.object(EnsembleManager, '_execute_model_tasks')
 # @patch.object(ModelManager, '_update_single_config')
