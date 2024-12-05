@@ -92,11 +92,13 @@ def test_get_aggregated_df_invalid_aggregation(sample_data, caplog):
     """
     Test the _get_aggregated_df method for invalid aggregation method.
     """
-    result = EnsembleManager._get_aggregated_df(sample_data, "invalid_aggregation")
+    # result = EnsembleManager._get_aggregated_df(sample_data, "invalid_aggregation")
 
     # Ensure the result is None (or whatever behavior you expect for invalid input)
-    assert result is None
-    assert "Invalid aggregation: invalid_aggregation" in caplog.text
+    # assert result is None
+    # assert "Invalid aggregation: invalid_aggregation" in caplog.text
+    with pytest.raises(ValueError, match="Invalid aggregation method: invalid_aggregation"):
+        EnsembleManager._get_aggregated_df(sample_data, "invalid_aggregation")
 
 # # @patch.object(EnsembleManager, '_execute_model_tasks')
 # # @patch.object(ModelManager, '_update_single_config')
