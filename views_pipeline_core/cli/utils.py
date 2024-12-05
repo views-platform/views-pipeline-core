@@ -139,12 +139,12 @@ def validate_arguments(args):
         )
         sys.exit(1)
 
-    if not args.train and not args.saved:
-        # if not training, then we need to use saved data
+    if (not args.train and not args.sweep) and not args.saved:
+        # if not training or sweeping, then we need to use saved data
         print(
-            "Error: if --train is not set, you should only use --saved flag. Exiting."
+            "Error: if --train or --sweep is not set, you should only use --saved flag. Exiting."
         )
-        print("To fix: Add --train or --saved flag.")
+        print("To fix: Add --train or --sweep or --saved flag.")
         sys.exit(1)
 
     if args.eval_type not in ["standard", "long", "complete", "live"]:

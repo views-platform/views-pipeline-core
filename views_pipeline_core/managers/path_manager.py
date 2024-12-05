@@ -338,11 +338,8 @@ class ModelPath:
         self.data_generated = self._build_absolute_directory(Path("data/generated"))
         self.data_processed = self._build_absolute_directory(Path("data/processed"))
         self.reports = self._build_absolute_directory(Path("reports"))
-        self._sys_paths = None
-        if self.__class__._target == "model":
-            self.queryset_path = self._build_absolute_directory(Path("configs/config_queryset.py"))
+        self._sys_paths = None    
         self._queryset = None
-        # print(self.queryset_path)
         # Initialize model-specific directories only if the class is ModelPath
         if self.__class__.__name__ == "ModelPath":
             self._initialize_model_specific_directories()
@@ -363,7 +360,6 @@ class ModelPath:
             self._build_absolute_directory(Path("configs/config_meta.py")),
             self._build_absolute_directory(Path("main.py")),
             self._build_absolute_directory(Path("README.md")),
-            self._build_absolute_directory(Path("configs/config_queryset.py"))
         ]
         # Initialize model-specific directories only if the class is ModelPath
         if self.__class__.__name__ == "ModelPath":
@@ -377,8 +373,11 @@ class ModelPath:
         Returns:
             None
         """
+
+        self.queryset_path = self._build_absolute_directory(Path("configs/config_queryset.py"))
         self.scripts += [
-            self.queryset_path
+            self.queryset_path,
+            self._build_absolute_directory(Path("configs/config_sweep.py"))
         ]
 
     def _is_path(self, path_input: Union[str, Path]) -> bool:
