@@ -10,7 +10,8 @@ from views_pipeline_core.managers.path_manager import ModelPath
 from typing import Dict
 from ingester3.ViewsMonth import ViewsMonth
 from views_pipeline_core.data.utils import ensure_float64
-
+from views_pipeline_core.files.utils import read_dataframe, save_dataframe
+import views_pipeline_core.configs.pipeline_config as pipeline_config
 logger = logging.getLogger(__name__)
 
 
@@ -261,7 +262,7 @@ class ViewsDataLoader:
             self.month_first, self.month_last = self._get_month_range()
 
         path_viewser_df = Path(
-            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df.pkl")
+            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{pipeline_config.get_dataframe_format()}")
         )  # maby change to df...
         alerts = None
 
@@ -269,7 +270,8 @@ class ViewsDataLoader:
             # Check if the VIEWSER data file exists
             try:
                 if path_viewser_df.exists():
-                    df = pd.read_pickle(path_viewser_df)
+                    df = read_dataframe(path_viewser_df)
+                    # df = pd.read_pickle(path_viewser_df)
                     logger.info(f"Reading saved data from {path_viewser_df}")
             except Exception as e:
                 raise RuntimeError(
@@ -285,7 +287,8 @@ class ViewsDataLoader:
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
             logger.info(f"Saving data to {path_viewser_df}")
-            df.to_pickle(path_viewser_df)
+            # df.to_pickle(path_viewser_df)
+            save_dataframe(df, path_viewser_df)
         if validate:
             if self._validate_df_partition(df=df):
                 return df, alerts
