@@ -277,7 +277,10 @@ class ModelManager:
                                                                       sequence_number)
 
             df_output.to_pickle(path_generated/outputs_path)
+            # df_output.to_csv(path_generated/(outputs_path.replace(".pkl", ".csv")))
+
             df_evaluation.to_pickle(path_generated/evaluation_path)
+            # df_evaluation.to_csv(path_generated/(evaluation_path.replace(".pkl", ".csv")))
         except Exception as e:
             logger.error(f"Error saving model outputs: {e}")
 
@@ -305,6 +308,9 @@ class ModelManager:
                                                                        sequence_number)
             # logger.info(f"{sequence_number}, Saving predictions to {path_generated/predictions_name}")
             df_predictions.to_pickle(path_generated/predictions_name)
+
+            # For testing 
+            # df_predictions.to_csv(path_generated/(predictions_name.replace(".pkl", ".csv"))) 
         except Exception as e:
             logger.error(f"Error saving predictions: {e}")
 
