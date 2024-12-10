@@ -339,6 +339,7 @@ class ModelPath:
         self.data_processed = self._build_absolute_directory(Path("data/processed"))
         self.reports = self._build_absolute_directory(Path("reports"))
         self._sys_paths = None    
+        self._sys_paths = None    
         self._queryset = None
         # Initialize model-specific directories only if the class is ModelPath
         if self.__class__.__name__ == "ModelPath":
