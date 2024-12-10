@@ -14,10 +14,10 @@ def parse_args():
     parser.add_argument(
         "-r",
         "--run_type",
-        choices=["calibration", "testing", "forecasting"],
+        choices=["calibration", "validation", "forecasting"],
         type=str,
         default="calibration",
-        help="Choose the run type for the model: calibration, testing, or forecasting. Default is calibration. "
+        help="Choose the run type for the model: calibration, validation, or forecasting. Default is calibration. "
         "Note: If --sweep is flagged, --run_type must be calibration.",
     )
 
@@ -62,7 +62,7 @@ def parse_args():
         help="Specify the name of the model artifact to be used for evaluation. "
         "The file extension will be added in the main and fit with the specific model algorithm."
         "The artifact name should be in the format: <run_type>_model_<timestamp>.pt."
-        "where <run_type> is calibration, testing, or forecasting, and <timestamp> is in the format YMD_HMS."
+        "where <run_type> is calibration, validation, or forecasting, and <timestamp> is in the format YMD_HMS."
         "If not provided, the latest artifact will be used by default.",
     )
 
@@ -106,7 +106,7 @@ def validate_arguments(args):
         sys.exit(1)
 
     if (
-        args.run_type in ["calibration", "testing", "forecasting"]
+        args.run_type in ["calibration", "validation", "forecasting"]
         and not args.train
         and not args.evaluate
         and not args.forecast

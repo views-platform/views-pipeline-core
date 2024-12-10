@@ -10,6 +10,8 @@ import wandb
 import time
 import pandas as pd
 from pathlib import Path
+from views_pipeline_core.files.utils import save_dataframe
+from views_pipeline_core.configs.pipeline import PipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,18 @@ class ModelManager:
             self._config_sweep = self.__load_config(
                 "config_sweep.py", "get_sweep_config"
             )
+        self.set_dataframe_format(format=".parquet")
         self._data_loader = ViewsDataLoader(model_path=self._model_path)
+        
+
+    def set_dataframe_format(self, format: str) -> None:
+        """
+        Set the dataframe format for the model manager.
+
+        Args:
+            format (str): The dataframe format.
+        """
+        PipelineConfig.dataframe_format = format
 
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
@@ -78,42 +91,46 @@ class ModelManager:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
     @staticmethod
-    def _generate_model_file_name(run_type: str, timestamp: str) -> str:
+    def _generate_model_file_name(run_type: str, timestamp: str, file_extension: str) -> str:
         """
         Generates a model file name based on the run type, and timestamp.
 
         Args:
-            run_type (str): The type of run (e.g., calibration, testing).
+            run_type (str): The type of run (e.g., calibration, validation).
             timestamp (str): The timestamp of the model file.
+            file_extension (str): The file extension. Default is set in PipelineConfig.dataframe_format. E.g. .pt, .pkl, .h5
 
         Returns:
             str: The generated model file name.
         """
 
-        return f"{run_type}_model_{timestamp}.pkl"
+        return f"{run_type}_model_{timestamp}{file_extension}"
 
     @staticmethod
     def _generate_output_file_name( 
             generated_file_type: str, 
             run_type: str, 
             timestamp: str,
-            sequence_number: int) -> str:
+            sequence_number: int,
+            file_extension: str) -> str:
         """
         Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
 
         Args:
             generated_file_type (str): The type of generated file (e.g., predictions, output, evaluation).
             sequence_number (int): The sequence number.
-            run_type (str): The type of run (e.g., calibration, testing).
+            run_type (str): The type of run (e.g., calibration, validation).
+            timestamp (str): The timestamp of the generated file.
+            file_extension (str): The file extension. Default is set in PipelineConfig.dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
 
         Returns:
             str: The generated prediction file name.
         """
         # logger.info(f"sequence_number: {sequence_number}")
         if sequence_number is not None:
-            return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}.pkl"
+            return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}{file_extension}"
         else:
-            return f"{generated_file_type}_{run_type}_{timestamp}.pkl"
+            return f"{generated_file_type}_{run_type}_{timestamp}{file_extension}"
 
     def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
         """
@@ -189,7 +206,7 @@ class ModelManager:
 
         Args:
             path_artifact (Path): The directory path where model files are stored.
-            run_type (str): The type of run (e.g., calibration, testing).
+            run_type (str): The type of run (e.g., calibration, validation).
 
         Returns:
             List[Path]: List of matching model file paths.
@@ -222,7 +239,7 @@ class ModelManager:
 
         Args:
             path_artifact (Path): The model specifc directory path where artifacts are stored.
-            run_type (str): The type of run (e.g., calibration, testing, forecasting).
+            run_type (str): The type of run (e.g., calibration, validation, forecasting).
 
         Returns:
             The path (pathlib path objsect) to the latest model artifact given the run type.
@@ -270,14 +287,21 @@ class ModelManager:
             outputs_path = ModelManager._generate_output_file_name("output",
                                                                    self.config["run_type"],
                                                                    self.config["timestamp"],
-                                                                   sequence_number)
+                                                                   sequence_number,
+                                                                   file_extension=PipelineConfig.dataframe_format)
             evaluation_path = ModelManager._generate_output_file_name("evaluation",
                                                                       self.config["run_type"],
                                                                       self.config["timestamp"],
-                                                                      sequence_number)
+                                                                      sequence_number,
+                                                                      file_extension=PipelineConfig.dataframe_format)
 
-            df_output.to_pickle(path_generated/outputs_path)
-            df_evaluation.to_pickle(path_generated/evaluation_path)
+            # df_output.to_pickle(path_generated/outputs_path)
+            save_dataframe(df_output, path_generated/outputs_path)
+            # df_output.to_csv(path_generated/(outputs_path.replace(".pkl", ".csv")))
+
+            # df_evaluation.to_pickle(path_generated/evaluation_path)
+            save_dataframe(df_evaluation, path_generated/evaluation_path)
+            # df_evaluation.to_csv(path_generated/(evaluation_path.replace(".pkl", ".csv")))
         except Exception as e:
             logger.error(f"Error saving model outputs: {e}")
 
@@ -302,9 +326,13 @@ class ModelManager:
             predictions_name = ModelManager._generate_output_file_name("predictions",
                                                                        self.config["run_type"],
                                                                        self.config["timestamp"],
-                                                                       sequence_number)
+                                                                       sequence_number,
+                                                                       file_extension=PipelineConfig.dataframe_format)
             # logger.info(f"{sequence_number}, Saving predictions to {path_generated/predictions_name}")
-            df_predictions.to_pickle(path_generated/predictions_name)
+            # df_predictions.to_pickle(path_generated/predictions_name)
+            save_dataframe(df_predictions, path_generated/predictions_name)
+            # For testing 
+            # df_predictions.to_csv(path_generated/(predictions_name.replace(".pkl", ".csv"))) 
         except Exception as e:
             logger.error(f"Error saving predictions: {e}")
 
@@ -322,10 +350,10 @@ class ModelManager:
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
                 self._data_loader.get_data(
-                    use_saved=args.saved,
-                    validate=True,
                     self_test=args.drift_self_test,
                     partition=args.run_type,
+                    use_saved=args.saved,
+                    validate=True,
                 )
             wandb.finish()
 
@@ -470,19 +498,3 @@ class ModelManager:
             **self._config_deployment,
         }
         return config
-
-
-if __name__ == "__main__":
-    model_path = ModelPath("lavender_haze")
-    model_manager = ModelManager(model_path)
-    print(model_manager._config_deployment)
-    print(model_manager._config_hyperparameters)
-    print(model_manager._config_meta)
-    print(model_manager._config_sweep)
-    # model_manager.execute_single_run("args")
-    # ensemble_path = EnsemblePath("white_mustang")
-    # ensemble_manager = ModelManager(ensemble_path)
-    # print(ensemble_manager._config_deployment)
-    # print(ensemble_manager._config_hyperparameters)
-    # print(ensemble_manager._config_meta)
-    # print(ensemble_manager._config_sweep)

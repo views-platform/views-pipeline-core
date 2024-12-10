@@ -36,7 +36,7 @@ class EnsembleManager(ModelManager):
 
         Args:
             model_path (ModelPath): model path object for the model
-            run_type (str): the type of run (calibration, testing, forecasting)
+            run_type (str): the type of run (calibration, validation, forecasting)
             train (bool): if the model should be trained
             evaluate (bool): if the model should be evaluated
             forecast (bool): if the model should be used for forecasting
@@ -82,7 +82,7 @@ class EnsembleManager(ModelManager):
         elif aggregation == "median":
             return pd.concat(df_to_aggregate).groupby(level=[0, 1]).median()
         else:
-            logger.error(f"Invalid aggregation: {aggregation}")
+            raise ValueError(f"Invalid aggregation method: {aggregation}")
     
     def execute_single_run(self, args) -> None:
         """

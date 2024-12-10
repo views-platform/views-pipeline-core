@@ -1,4 +1,5 @@
 import os
+from typing import Dict
 import numpy as np
 import pandas as pd
 import logging
@@ -7,9 +8,10 @@ from datetime import datetime
 from views_pipeline_core.configs import drift_detection
 from views_pipeline_core.files.utils import create_data_fetch_log_file
 from views_pipeline_core.managers.path_manager import ModelPath
-from typing import Dict
-from ingester3.ViewsMonth import ViewsMonth
 from views_pipeline_core.data.utils import ensure_float64
+from views_pipeline_core.files.utils import read_dataframe, save_dataframe
+from views_pipeline_core.configs.pipeline import PipelineConfig
+from ingester3.ViewsMonth import ViewsMonth
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +42,8 @@ class ViewsDataLoader:
         """
         self._model_path = model_path
         self._model_name = model_path.model_name
-        if self._model_path.target == "model":
-            self._path_raw = model_path.data_raw
+        # if self._model_path.target == "model":
+        self._path_raw = model_path.data_raw
         self._path_processed = model_path.data_processed
         self.partition = None
         self.partition_dict = None
@@ -63,11 +65,11 @@ class ViewsDataLoader:
             dict: A dictionary containing the train and predict ranges for the specified partition.
 
         Raises:
-            ValueError: If the partition attribute is not one of "calibration", "testing", or "forecasting".
+            ValueError: If the partition attribute is not one of "calibration", "validation", or "forecast".
 
         Notes:
-            - For the "calibration" partition, the train range is (121, 396) and the predict range is (397, 444).
-            - For the "testing" partition, the train range is (121, 444) and the predict range is (445, 492).
+            - For the "calibration" partition, the train range is (121, 396) and the test range is (397, 444).
+            - For the "validation" partition, the train range is (121, 444) and the test range is (445, 492).
             - For the "forecasting" partition, the train range starts at 121 and ends at the current month minus 2.
               The predict range starts at the current month minus 1 and extends by the step size.
         """
@@ -75,21 +77,24 @@ class ViewsDataLoader:
             case "calibration":
                 return {
                     "train": (121, 396),
-                    "predict": (397, 444),
-                }  # calib_partitioner_dict - (01/01/1990 - 12/31/2012) : (01/01/2013 - 31/12/2015)
-            case "testing":
-                return {"train": (121, 444), "predict": (445, 492)}
+                    "test": (397, 444),
+                    }  # calib_partitioner_dict - (01/01/1990 - 12/31/2012) : (01/01/2013 - 31/12/2015)
+            case "validation":
+                return {
+                    "train": (121, 444), 
+                    "test": (445, 492)
+                    }
             case "forecasting":
                 month_last = (
                     ViewsMonth.now().id - 2
                 )  # minus 2 because the current month is not yet available. Verified but can be tested by changing this and running the check_data notebook.
                 return {
                     "train": (121, month_last),
-                    "predict": (month_last + 1, month_last + 1 + step),
-                }  # is it even meaningful to have a predict partition for forecasting? if not you can remove steps
+                    "test": (month_last + 1, month_last + 1 + step),
+                }  
             case _:
                 raise ValueError(
-                    'partition should be either "calibration", "testing" or "forecasting"'
+                    'partition should be either "calibration", "validation" or "forecasting"'
                 )
 
     def _fetch_data_from_viewser(self, self_test: bool) -> tuple[pd.DataFrame, list]:
@@ -97,9 +102,8 @@ class ViewsDataLoader:
         Fetches and prepares the initial DataFrame from viewser.
 
         Args:
-            month_first (int): The first month ID to fetch.
-            month_last (int): The last month ID to fetch.
             self_test (bool): Flag indicating whether to perform self-testing.
+            target (str): The target variable.
 
         Returns:
             pd.DataFrame: The prepared DataFrame with initial processing done.
@@ -137,11 +141,6 @@ class ViewsDataLoader:
                     {f"{self._model_path.model_name} data alert {ialert}": str(alert)}
                 )
 
-        # Not required for stepshift model
-        # df.reset_index(inplace=True)
-        # df.rename(columns={'priogrid_gid': 'pg_id'}, inplace=True) # arguably HydraNet or at lest vol specific
-        # df['in_viewser'] = True  # arguably HydraNet or at lest vol specific
-
         return df, alerts
 
     def _get_month_range(self) -> tuple[int, int]:
@@ -152,17 +151,17 @@ class ViewsDataLoader:
             tuple: The start and end month IDs for the partition.
 
         Raises:
-            ValueError: If partition is not 'calibration', 'testing', or 'forecasting'.
+            ValueError: If partition is not 'calibration', 'validation', or 'forecasting'.
         """
         month_first = self.partition_dict["train"][0]
 
         if self.partition == "forecasting":
             month_last = self.partition_dict["train"][1] + 1
-        elif self.partition in ["calibration", "testing"]:
-            month_last = self.partition_dict["predict"][1] + 1
+        elif self.partition in ["calibration", "validation"]:
+            month_last = self.partition_dict["test"][1] + 1
         else:
             raise ValueError(
-                'partition should be either "calibration", "testing" or "forecasting"'
+                'partition should be either "calibration", "validation" or "forecasting"'
             )
         if self.partition == "forecasting" and self.override_month is not None:
             month_last = self.override_month
@@ -194,9 +193,9 @@ class ViewsDataLoader:
         else:
             df_time_units = df.index.get_level_values("month_id").values
         # partitioner_dict = get_partitioner_dict(partition)
-        if self.partition in ["calibration", "testing"]:
+        if self.partition in ["calibration", "validation"]:
             first_month = self.partition_dict["train"][0]
-            last_month = self.partition_dict["predict"][1]
+            last_month = self.partition_dict["test"][1]
         else:
             first_month = self.partition_dict["train"][0]
             last_month = self.partition_dict["train"][1]
@@ -241,7 +240,9 @@ class ViewsDataLoader:
 
         Args:
             self_test (bool): Flag indicating whether to perform self-testing.
+            partition (str): The partition type.
             use_saved (bool, optional): Flag indicating whether to use saved data if available.
+            validate (bool, optional): Flag indicating whether to validate the fetched data. Defaults to True.
             override_month (int, optional): If provided, overrides the end month for the forecasting partition.
 
         Returns:
@@ -261,7 +262,7 @@ class ViewsDataLoader:
             self.month_first, self.month_last = self._get_month_range()
 
         path_viewser_df = Path(
-            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df.pkl")
+            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{PipelineConfig.dataframe_format}")
         )  # maby change to df...
         alerts = None
 
@@ -269,7 +270,8 @@ class ViewsDataLoader:
             # Check if the VIEWSER data file exists
             try:
                 if path_viewser_df.exists():
-                    df = pd.read_pickle(path_viewser_df)
+                    df = read_dataframe(path_viewser_df)
+                    # df = pd.read_pickle(path_viewser_df)
                     logger.info(f"Reading saved data from {path_viewser_df}")
             except Exception as e:
                 raise RuntimeError(
@@ -278,14 +280,15 @@ class ViewsDataLoader:
         else:
             logger.info(f"Fetching data from viewser...")
             df, alerts = self._fetch_data_from_viewser(
-                self_test
+                self_test,
             )  # which is then used here
             data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             create_data_fetch_log_file(
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
             logger.info(f"Saving data to {path_viewser_df}")
-            df.to_pickle(path_viewser_df)
+            # df.to_pickle(path_viewser_df)
+            save_dataframe(df, path_viewser_df)
         if validate:
             if self._validate_df_partition(df=df):
                 return df, alerts

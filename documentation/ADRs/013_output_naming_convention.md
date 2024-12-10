@@ -20,7 +20,7 @@ The evaluation/output naming convention for using a single model will follow thi
 <evaluation/output>_<max_forecast_step>_<run_type>_<timestamp>.pkl
 ```
 - max_forecast_step: The maximum forecast step for the prediction.
-- run_type: The type of run (e.g., calibration, testing).
+- run_type: The type of run (e.g., calibration, validation).
 - timestamp: The timestamp when the model was trained. The format is`YYYYMMDD_HHMMSS`.
 
 The evaluation naming convention for using an ensemble model will follow this structure:
@@ -28,7 +28,7 @@ The evaluation naming convention for using an ensemble model will follow this st
 <evaluation/output>_<max_forecast_step>_<run_type>_<model_name_1><timestamp_1>_<model_name2><timestamp_2>.pkl
 ```
 - max_forecast_step: The maximum forecast step for the prediction.
-- run_type: The type of run (e.g., calibration, testing).
+- run_type: The type of run (e.g., calibration, validation).
 - model_name: The name of the model used for the ensemble prediction.
 - timestamp: The timestamp when the model was trained. The format is`YYYYMMDD_HHMMSS`.
 
