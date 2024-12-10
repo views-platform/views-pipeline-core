@@ -97,7 +97,7 @@ class ViewsDataLoader:
                     'partition should be either "calibration", "validation" or "forecasting"'
                 )
 
-    def _fetch_data_from_viewser(self, self_test: bool, target: str) -> tuple[pd.DataFrame, list]:
+    def _fetch_data_from_viewser(self, self_test: bool) -> tuple[pd.DataFrame, list]:
         """
         Fetches and prepares the initial DataFrame from viewser.
 
