@@ -1,4 +1,5 @@
 import logging
+import re
 logger = logging.getLogger(__name__)
 
 class PipelineConfig:
@@ -13,6 +14,8 @@ class PipelineConfig:
 
     @dataframe_format.setter
     def dataframe_format(self, format: str):
+        if not validate_dataframe_format(format):
+            raise ValueError("Dataframe format must start with a period '.'")
         logger.debug(f"Setting dataframe format: {format}")
         self._dataframe_format = format
 
@@ -25,3 +28,7 @@ class PipelineConfig:
     # def model_format(self, format: str):
     #     logger.debug(f"Setting model format: {format}")
     #     self._model_format = format
+
+# regex validation function to follow ".type" pattern
+def validate_dataframe_format(value: str) -> bool:
+    return bool(re.match(r'^\..*', value))
