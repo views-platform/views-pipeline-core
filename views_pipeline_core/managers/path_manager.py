@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 # ============================================================ ModelPath ============================================================
 
+
 class ModelPath:
     """
     A class to manage model paths and directories within the ViEWS Pipeline.
@@ -128,7 +129,7 @@ class ModelPath:
                 logger.debug(f"No valid ensemble name found in path {path}")
                 return None
         return None
-    
+
     @staticmethod
     def validate_model_name(name: str) -> bool:
         """
@@ -164,11 +165,13 @@ class ModelPath:
         if current_path is None:
             current_path = Path(pyprojroot.here())
             if (current_path / marker).exists():
-                    return current_path
+                return current_path
         # Start from the current directory and move up the hierarchy
         try:
             current_path = Path(current_path).resolve().parent
-            while current_path != current_path.parent:  # Loop until we reach the root directory
+            while (
+                current_path != current_path.parent
+            ):  # Loop until we reach the root directory
                 if (current_path / marker).exists():
                     return current_path
                 current_path = current_path.parent
@@ -179,9 +182,7 @@ class ModelPath:
                 f"{marker} not found in the directory hierarchy. Unable to find project root. {current_path}"
             )
 
-    def __init__(
-        self, model_path: Union[str, Path], validate: bool = True
-    ) -> None:
+    def __init__(self, model_path: Union[str, Path], validate: bool = True) -> None:
         """
         Initializes a ModelPath instance.
 
@@ -338,8 +339,6 @@ class ModelPath:
         self.data_generated = self._build_absolute_directory(Path("data/generated"))
         self.data_processed = self._build_absolute_directory(Path("data/processed"))
         self.reports = self._build_absolute_directory(Path("reports"))
-        self._sys_paths = None    
-        self._sys_paths = None    
         self._queryset = None
         # Initialize model-specific directories only if the class is ModelPath
         if self.__class__.__name__ == "ModelPath":
@@ -375,10 +374,12 @@ class ModelPath:
             None
         """
 
-        self.queryset_path = self._build_absolute_directory(Path("configs/config_queryset.py"))
+        self.queryset_path = self._build_absolute_directory(
+            Path("configs/config_queryset.py")
+        )
         self.scripts += [
             self.queryset_path,
-            self._build_absolute_directory(Path("configs/config_sweep.py"))
+            self._build_absolute_directory(Path("configs/config_sweep.py")),
         ]
 
     def _is_path(self, path_input: Union[str, Path]) -> bool:
@@ -413,10 +414,6 @@ class ModelPath:
         Raises:
             FileNotFoundError: If the common queryset directory does not exist and validation is enabled.
         """
-        # if self._validate and not self._check_if_dir_exists(self.queryset_path):
-        #     error = f"Common queryset directory {self.common_querysets} does not exist. Please create it first using `make_new_scripts.py` or set validate to `False`."
-        #     logger.error(error)
-        #     raise FileNotFoundError(error)
 
         if self._validate and self._check_if_dir_exists(self.queryset_path):
             try:
@@ -593,9 +590,10 @@ class ModelPath:
             else:
                 scripts[str(path)] = None
         return scripts
-    
+
 
 # ============================================================ EnsemblePath ============================================================
+
 
 class EnsemblePath(ModelPath):
     """
@@ -654,6 +652,7 @@ class EnsemblePath(ModelPath):
         """
         super()._initialize_scripts()
         # Initialize ensemble-specific scripts only if the class is EnsemblePath
+
     #     if self.__class__.__name__ == "EnsemblePath":
     #         self._initialize_ensemble_specific_scripts()
 
