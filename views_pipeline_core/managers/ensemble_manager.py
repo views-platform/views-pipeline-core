@@ -36,7 +36,7 @@ class EnsembleManager(ModelManager):
 
         Args:
             model_path (ModelPath): model path object for the model
-            run_type (str): the type of run (calibration, testing, forecasting)
+            run_type (str): the type of run (calibration, validation, forecasting)
             train (bool): if the model should be trained
             evaluate (bool): if the model should be evaluated
             forecast (bool): if the model should be used for forecasting

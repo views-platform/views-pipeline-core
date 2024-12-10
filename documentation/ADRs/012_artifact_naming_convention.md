@@ -18,7 +18,7 @@ The naming convention for a single model artifact will follow this structure:
 ```
 <run_type>_model_<timestamp>.pkl
 ```
-- run_type: The type of run (e.g., calibration, testing, forecasting).
+- run_type: The type of run (e.g., calibration, validation, forecasting).
 - timestamp: The timestamp when the model was trained. The format is`YYYYMMDD_HHMMSS`.
 
 Training is not an option for ensemble models right now as they are made by aggregating single models. So no decision has been made on the naming convention for ensemble models yet.

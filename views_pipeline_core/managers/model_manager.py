@@ -85,7 +85,7 @@ class ModelManager:
         Generates a model file name based on the run type, and timestamp.
 
         Args:
-            run_type (str): The type of run (e.g., calibration, testing).
+            run_type (str): The type of run (e.g., calibration, validation).
             timestamp (str): The timestamp of the model file.
             file_extension (str): The file extension. Default is "pipeline_config.MODEL_FORMAT" E.g. .pt, .pkl, .h5
 
@@ -108,7 +108,7 @@ class ModelManager:
         Args:
             generated_file_type (str): The type of generated file (e.g., predictions, output, evaluation).
             sequence_number (int): The sequence number.
-            run_type (str): The type of run (e.g., calibration, testing).
+            run_type (str): The type of run (e.g., calibration, validation).
             timestamp (str): The timestamp of the generated file.
             file_extension (str): The file extension. Default is "pipeline_config.DATAFRAME_FORMAT". E.g. .pkl, .csv, .xlsx, .parquet
 
@@ -195,7 +195,7 @@ class ModelManager:
 
         Args:
             path_artifact (Path): The directory path where model files are stored.
-            run_type (str): The type of run (e.g., calibration, testing).
+            run_type (str): The type of run (e.g., calibration, validation).
 
         Returns:
             List[Path]: List of matching model file paths.
@@ -228,7 +228,7 @@ class ModelManager:
 
         Args:
             path_artifact (Path): The model specifc directory path where artifacts are stored.
-            run_type (str): The type of run (e.g., calibration, testing, forecasting).
+            run_type (str): The type of run (e.g., calibration, validation, forecasting).
 
         Returns:
             The path (pathlib path objsect) to the latest model artifact given the run type.
@@ -339,10 +339,10 @@ class ModelManager:
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
                 self._data_loader.get_data(
-                    use_saved=args.saved,
-                    validate=True,
                     self_test=args.drift_self_test,
                     partition=args.run_type,
+                    use_saved=args.saved,
+                    validate=True,
                 )
             wandb.finish()
 

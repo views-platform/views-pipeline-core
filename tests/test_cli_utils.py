@@ -25,14 +25,14 @@ def test_parse_args_run_type_calibration():
     
     assert args.run_type == "calibration"
 
-def test_parse_args_run_type_testing():
+def test_parse_args_run_type_validation():
     """
-    Test the run_type argument with value 'testing'.
+    Test the run_type argument with value 'validation'.
     """
-    sys.argv = ["main.py", "--run_type", "testing"]
+    sys.argv = ["main.py", "--run_type", "validation"]
     args = parse_args()
     
-    assert args.run_type == "testing"
+    assert args.run_type == "validation"
 
 def test_parse_args_run_type_forecasting():
     """
@@ -87,7 +87,7 @@ def test_parse_args_invalid_run_type_with_sweep():
     """
     Test invalid combination of --run_type and --sweep flags.
     """
-    sys.argv = ["main.py", "--run_type", "testing", "--sweep"]
+    sys.argv = ["main.py", "--run_type", "validation", "--sweep"]
     with pytest.raises(SystemExit):
         args = parse_args()
         validate_arguments(args)
@@ -104,7 +104,7 @@ def test_validate_arguments_sweep_with_non_calibration():
     """
     Test validate_arguments with --sweep and non-calibration run_type.
     """
-    sys.argv = ["main.py", "--run_type", "testing", "--sweep"]
+    sys.argv = ["main.py", "--run_type", "validation", "--sweep"]
     args = parse_args()
     with pytest.raises(SystemExit):
         validate_arguments(args)

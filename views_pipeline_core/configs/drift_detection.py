@@ -11,7 +11,7 @@ drift_detection_partition_dict={
             'test_partition_length': 1
 
              },
-    'testing':{
+    'validation':{
         'global_missingness': {'threshold': 0.01},
         'time_missingness': {'threshold': 0.05},
         'space_missingness': {'threshold': 0.05},
