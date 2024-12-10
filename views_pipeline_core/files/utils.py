@@ -140,8 +140,8 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
         raise ValueError("The DataFrame must be provided")
     if not isinstance(dataframe, pd.DataFrame):
         raise ValueError("The DataFrame must be a pandas DataFrame")
-    if file_extension is None:
-        raise ValueError(FILE_EXTENSION_ERROR_MESSAGE)
+    if file_extension is None or file_extension == "":
+        raise ValueError(f"Invalid file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
     
     try:
         logger.info(f"Saving the DataFrame to {save_path} in {file_extension} format")
@@ -159,7 +159,7 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
         logger.exception(f"Error saving the DataFrame to {save_path}: {e}")
         raise
 
-def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
+def read_dataframe(file_path: Union[str, Path], *args, **kwargs) -> pd.DataFrame:
     """
     Reads a pandas DataFrame from a specified file path in various formats.
     
@@ -178,19 +178,19 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     if not isinstance(file_path, Path):
         file_path = Path(file_path)
     file_extension = file_path.suffix.lower()
-    if file_extension is None:
-        raise ValueError(FILE_EXTENSION_ERROR_MESSAGE)
+    if file_extension is None or file_extension == "":
+         raise ValueError(f"Invalid file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
     
     try:
         logger.info(f"Reading the DataFrame from {file_path} in {file_extension} format")
         if file_extension == ".csv":
-            return pd.read_csv(file_path)
+            return pd.read_csv(file_path, *args, **kwargs)
         elif file_extension == ".xlsx":
-            return pd.read_excel(file_path)
+            return pd.read_excel(file_path, *args, **kwargs)
         elif file_extension == ".parquet":
-            return pd.read_parquet(file_path)
+            return pd.read_parquet(file_path, *args, **kwargs)
         elif file_extension == ".pkl":
-            return pd.read_pickle(file_path)
+            return pd.read_pickle(file_path, *args, **kwargs)
         else:
             raise ValueError(FILE_EXTENSION_ERROR_MESSAGE)
     except Exception as e:

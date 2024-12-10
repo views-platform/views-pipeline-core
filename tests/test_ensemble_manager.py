@@ -8,6 +8,7 @@ import logging
 import pandas as pd
 import os
 from types import SimpleNamespace
+import wandb
 
 
 class MockArgs:
@@ -27,8 +28,17 @@ def mock_model_path():
 
 
 
+
+
+
+
+
+
+
+
+
 @pytest.mark.parametrize(
-    "args, expected_command",
+    "args, expected_command, expected_methods_called",
     [
         (
             MockArgs(
@@ -45,7 +55,8 @@ def mock_model_path():
                 "--train",
                 "--saved",
                 "--eval_type", "standard"
-            ]
+            ],
+            {"train": 1, "evaluate": 0, "forecast": 0}
         ),
         (
             MockArgs(
@@ -62,7 +73,8 @@ def mock_model_path():
                 "--evaluate",
                 "--forecast",
                 "--eval_type", "detailed"
-            ]
+            ],
+            {"train": 0, "evaluate": 1, "forecast": 1}
         ),
         (
             MockArgs(
@@ -77,13 +89,45 @@ def mock_model_path():
                 "/path/to/models/test_model/run.sh",
                 "--run_type", "calibration",
                 "--eval_type", "minimal"
-            ]
+            ],
+            {"train": 0, "evaluate": 0, "forecast": 0}
         )
     ]
 )
 class TestParametrized():
 
-    def test_get_shell_command(self, mock_model_path, args, expected_command):
+
+    @pytest.fixture
+    def mock_config(self, args):
+        with patch("views_pipeline_core.managers.model_manager.ModelManager._update_single_config") as mock_update_single_config:
+            print(mock_update_single_config(args))
+            return {
+            "name": "test_model",
+            "parameter1": "value1"
+        }
+
+    
+    @pytest.fixture
+    def mock_ensemble_manager(self, mock_model_path, args):
+        manager = EnsembleManager(ensemble_path=mock_model_path)
+        manager._project = "test_project"
+        manager._entity = "test_entity"
+        manager._config_hyperparameters = {}
+        manager._config_meta = {}
+        manager._train_ensemble = MagicMock()
+        manager._evaluate_ensemble = MagicMock()
+        manager._forecast_ensemble = MagicMock()
+        manager._eval_type = args.eval_type
+        with patch("views_pipeline_core.managers.model_manager.ModelManager._update_single_config") as mock_update_single_config:
+            manager.config = mock_update_single_config(args)
+        manager.config = {"name": "test_model"}
+        return manager
+
+
+
+
+
+    def test_get_shell_command(self, mock_model_path, args, expected_command, expected_methods_called): # all arguments are necessary
         """
         Test the _get_shell_command method with various input combinations to ensure it generates the correct shell command.
         """
@@ -138,7 +182,8 @@ class TestParametrized():
         mock_execute_model_tasks,
         mock_model_path,
         args,
-        expected_command
+        expected_command, # it is necessary to be here
+        expected_methods_called # it is necessary to be here
     ):
         
         manager = EnsembleManager(ensemble_path=mock_model_path)
@@ -173,71 +218,136 @@ class TestParametrized():
             use_saved=args.use_saved
         )
         
-        #mock_execute_model_tasks.reset_mock()
-        #mock_execute_model_tasks.side_effect = Exception("Test exception")
+        mock_execute_model_tasks.reset_mock()
+        mock_execute_model_tasks.side_effect = Exception("Test exception")
 
-        #manager.execute_single_run(args)
+      
+
+
+
+
+
+
+
+    def test_execute_model_tasks(
+        self,
+        mock_ensemble_manager,
+        mock_config,
+        args,
+        expected_command,
+        expected_methods_called
+    ):
         
+        with patch("wandb.init") as mock_init, \
+             patch('wandb.define_metric') as mock_define_metric, \
+             patch("wandb.config") as mock_config:
+            
+            mock_config.name = "test_model"
+            mock_ensemble_manager._execute_model_tasks(
+                config=mock_config,
+                train=args.train,
+                eval=args.evaluate,
+                forecast=args.forecast,
+                use_saved=args.use_saved
+            )
+        
+            print(expected_methods_called["evaluate"])
+            print(mock_ensemble_manager._evaluate_ensemble.call_count)
 
 
+            assert mock_ensemble_manager._train_ensemble.call_count == expected_methods_called["train"]
+            assert mock_ensemble_manager._evaluate_ensemble.call_count == expected_methods_called["evaluate"]
+            assert mock_ensemble_manager._forecast_ensemble.call_count == expected_methods_called["forecast"]
 
-        # # Mock script module loading
-        # mock_spec = MagicMock()
-        # mock_module = MagicMock()
-        # mock_module.get_deployment_config.return_value = {'deployment_status': 'shadow'}
-        # mock_spec.loader.exec_module = lambda module: setattr(module, 'get_deployment_config', mock_module.get_deployment_config)
-        # mock_spec_from_file_location.return_value = mock_spec
 
-        # # Mock _update_single_config return value
-        # mock_update_single_config.return_value = {
-        #     "name": "test_model",
-        #     "loader": MagicMock(),
-        #     "deployment_status": "shadow",
-        #     "run_type": args.run_type,
-        #     "sweep": False
-        # }
-
-        # # Set up additional mocks
-        # manager._config_hyperparameters = {"param1": "value1"}
-        # manager._config_meta = {"meta_key": "meta_value"}
-        # manager._config_deployment = {"deployment_status": "shadow"}
-
-        # # Call the method
-        # print(f"Args for execution: {args.train}, {args.evaluate}, {args.forecast}")  # Debugging print
-        # manager.execute_single_run(args)
-
-        # # Assertions
-        # assert manager._project == f"test_model_{args.run_type}"
-        # assert manager._eval_type == args.eval_type
-
-        # print(f"_execute_model_tasks called: {mock_execute_model_tasks.call_count}")  # Debugging print
-        # mock_update_single_config.assert_called_once_with(args)
-
-        # # Corrected assertion: check that _execute_model_tasks is called with the right arguments
-        # if args.train or args.evaluate or args.forecast:
-        #     mock_execute_model_tasks.assert_called_once_with(
-        #         config=manager.config,
-        #         train=args.train,
-        #         eval=args.evaluate,
-        #         forecast=args.forecast,
-        #         use_saved=args.use_saved
-        #     )
-        # else:
-        #     mock_execute_model_tasks.assert_not_called()
-
-        # mock_logger.error.assert_not_called()
-
-        # # Test exception handling
-        # mock_execute_model_tasks.reset_mock()
-        # mock_logger.reset_mock()
-        # mock_execute_model_tasks.side_effect = Exception("Test error")
-
-        # manager.execute_single_run(args)
-        # mock_logger.error.assert_called_once_with("Error during single run execution: Test error")
+            mock_init.assert_called_once()
+            mock_define_metric.assert_called()
 
 
 
 
+
+
+    # def test_train_model_artifact(
+    #         self, 
+    #         args,
+    #         expected_command,
+    #         expected_methods_called,
+    #         model_name, 
+    #         run_type, 
+    #         use_saved, 
+    #         expected_shell_command
+    #     ):
+    #         # Mocking necessary components
+    #         with patch("views_pipeline_core.managers.ensemble_manager.ModelPath") as mock_model_path, \
+    #             patch("views_pipeline_core.managers.ensemble_manager.ModelManager") as mock_model_manager, \
+    #             patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._get_shell_command") as mock_get_shell_command, \
+    #             patch("subprocess.run") as mock_subprocess_run:
+
+    #             # Mocking the return value of ModelPath
+    #             mock_model_path_instance = MagicMock()
+    #             mock_model_path.return_value = mock_model_path_instance
+
+    #             # Mocking the ModelManager and its configs
+    #             mock_model_manager_instance = MagicMock()
+    #             mock_model_manager_instance.configs = {"name": "test_model"}
+    #             mock_model_manager.return_value = mock_model_manager_instance
+
+    #             # Mocking the shell command returned by _get_shell_command
+    #             mock_get_shell_command.return_value = expected_shell_command
+
+    #             # Call the method
+    #             manager = MagicMock()  # You can also replace this with your actual manager if needed
+    #             manager._train_model_artifact(model_name, run_type, use_saved)
+
+    #             # Check that _get_shell_command was called with the correct parameters
+    #             mock_get_shell_command.assert_called_once_with(
+    #                 mock_model_path_instance, 
+    #                 run_type, 
+    #                 train=True, 
+    #                 evaluate=False, 
+    #                 forecast=False, 
+    #                 use_saved=use_saved
+    #             )
+
+    #             # Check that subprocess.run was called with the expected shell command
+    #             mock_subprocess_run.assert_called_once_with(expected_shell_command, check=True)
+
+
+    def test_train_ensemble(self, mock_model_path, args, 
+        expected_command,
+        expected_methods_called):
+        # Create a mock for the ensemble manager
+        with patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._train_model_artifact") as mock_train_model_artifact:
+            print("Mocking works:", mock_train_model_artifact)
+            manager = EnsembleManager(ensemble_path=mock_model_path)
+            manager.config = {
+                "run_type": "test_run",
+                "models": ["/path/to/models/test_model1", "/path/to/models/test_model2"]
+            }
+            print(manager.config)
+            print("args.use_saved in test:", args.use_saved)
+
+            # Call the method
+            manager._train_ensemble(args.use_saved)
+
+            print("Call count:", mock_train_model_artifact.call_count)
+            # Check that _train_model_artifact was called the expected number of times
+            assert mock_train_model_artifact.call_count == len(manager.config["models"])
+
+            # If there were models, assert that it was called with the expected parameters
+            
+            for model_name in manager.config["models"]:
+                    mock_train_model_artifact.assert_any_call(model_name, "test_run", args.use_saved)
+
+
+
+
+
+
+
+
+        
 
 
 

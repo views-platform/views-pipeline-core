@@ -10,7 +10,7 @@ from views_pipeline_core.files.utils import create_data_fetch_log_file
 from views_pipeline_core.managers.path_manager import ModelPath
 from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
-import views_pipeline_core.configs.pipeline_config as pipeline_config
+from views_pipeline_core.configs.pipeline import PipelineConfig
 from ingester3.ViewsMonth import ViewsMonth
 
 logger = logging.getLogger(__name__)
@@ -262,7 +262,7 @@ class ViewsDataLoader:
             self.month_first, self.month_last = self._get_month_range()
 
         path_viewser_df = Path(
-            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{pipeline_config.get_dataframe_format()}")
+            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{PipelineConfig.dataframe_format}")
         )  # maby change to df...
         alerts = None
 
