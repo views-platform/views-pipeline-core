@@ -11,7 +11,7 @@ import time
 import pandas as pd
 from pathlib import Path
 from views_pipeline_core.files.utils import save_dataframe
-import views_pipeline_core.configs.pipeline_config as pipeline_config
+from views_pipeline_core.configs.pipeline import PipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,18 @@ class ModelManager:
             self._config_sweep = self.__load_config(
                 "config_sweep.py", "get_sweep_config"
             )
+        self.set_dataframe_format(format=".parquet")
         self._data_loader = ViewsDataLoader(model_path=self._model_path)
+        
+
+    def set_dataframe_format(self, format: str) -> None:
+        """
+        Set the dataframe format for the model manager.
+
+        Args:
+            format (str): The dataframe format.
+        """
+        PipelineConfig.dataframe_format = format
 
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
@@ -80,14 +91,14 @@ class ModelManager:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
     @staticmethod
-    def _generate_model_file_name(run_type: str, timestamp: str, file_extension: str = pipeline_config.MODEL_FORMAT) -> str:
+    def _generate_model_file_name(run_type: str, timestamp: str, file_extension: str) -> str:
         """
         Generates a model file name based on the run type, and timestamp.
 
         Args:
             run_type (str): The type of run (e.g., calibration, testing).
             timestamp (str): The timestamp of the model file.
-            file_extension (str): The file extension. Default is "pipeline_config.MODEL_FORMAT" E.g. .pt, .pkl, .h5
+            file_extension (str): The file extension. Default is set in PipelineConfig.dataframe_format. E.g. .pt, .pkl, .h5
 
         Returns:
             str: The generated model file name.
@@ -101,7 +112,7 @@ class ModelManager:
             run_type: str, 
             timestamp: str,
             sequence_number: int,
-            file_extension: str = pipeline_config.DATAFRAME_FORMAT) -> str:
+            file_extension: str) -> str:
         """
         Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
 
@@ -110,7 +121,7 @@ class ModelManager:
             sequence_number (int): The sequence number.
             run_type (str): The type of run (e.g., calibration, testing).
             timestamp (str): The timestamp of the generated file.
-            file_extension (str): The file extension. Default is "pipeline_config.DATAFRAME_FORMAT". E.g. .pkl, .csv, .xlsx, .parquet
+            file_extension (str): The file extension. Default is set in PipelineConfig.dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
 
         Returns:
             str: The generated prediction file name.
@@ -277,12 +288,12 @@ class ModelManager:
                                                                    self.config["run_type"],
                                                                    self.config["timestamp"],
                                                                    sequence_number,
-                                                                   file_extension=pipeline_config.get_dataframe_format())
+                                                                   file_extension=PipelineConfig.dataframe_format)
             evaluation_path = ModelManager._generate_output_file_name("evaluation",
                                                                       self.config["run_type"],
                                                                       self.config["timestamp"],
                                                                       sequence_number,
-                                                                      file_extension=pipeline_config.get_dataframe_format())
+                                                                      file_extension=PipelineConfig.dataframe_format)
 
             # df_output.to_pickle(path_generated/outputs_path)
             save_dataframe(df_output, path_generated/outputs_path)
@@ -316,7 +327,7 @@ class ModelManager:
                                                                        self.config["run_type"],
                                                                        self.config["timestamp"],
                                                                        sequence_number,
-                                                                       file_extension=pipeline_config.get_dataframe_format())
+                                                                       file_extension=PipelineConfig.dataframe_format)
             # logger.info(f"{sequence_number}, Saving predictions to {path_generated/predictions_name}")
             # df_predictions.to_pickle(path_generated/predictions_name)
             save_dataframe(df_predictions, path_generated/predictions_name)
@@ -487,19 +498,3 @@ class ModelManager:
             **self._config_deployment,
         }
         return config
-
-
-if __name__ == "__main__":
-    model_path = ModelPath("lavender_haze")
-    model_manager = ModelManager(model_path)
-    print(model_manager._config_deployment)
-    print(model_manager._config_hyperparameters)
-    print(model_manager._config_meta)
-    print(model_manager._config_sweep)
-    # model_manager.execute_single_run("args")
-    # ensemble_path = EnsemblePath("white_mustang")
-    # ensemble_manager = ModelManager(ensemble_path)
-    # print(ensemble_manager._config_deployment)
-    # print(ensemble_manager._config_hyperparameters)
-    # print(ensemble_manager._config_meta)
-    # print(ensemble_manager._config_sweep)
