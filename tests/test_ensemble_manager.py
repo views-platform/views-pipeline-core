@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from views_pipeline_core.managers.ensemble_manager import EnsembleManager
+from views_pipeline_core.managers.ensemble import EnsemblePathManager, EnsembleManager
 from views_pipeline_core.models.check import ensemble_model_check
-from views_pipeline_core.managers.path_manager import EnsemblePath, ModelPath
-from views_pipeline_core.managers.model_manager import ModelManager
+from views_pipeline_core.managers.model import ModelPathManager, ModelManager
+
 import logging
 import pandas as pd
 import os
@@ -99,7 +99,7 @@ class TestParametrized():
 
     @pytest.fixture
     def mock_config(self, args):
-        with patch("views_pipeline_core.managers.model_manager.ModelManager._update_single_config") as mock_update_single_config:
+        with patch("views_pipeline_core.managers.model.ModelManager._update_single_config") as mock_update_single_config:
             print(mock_update_single_config(args))
             return {
             "name": "test_model",
@@ -118,7 +118,7 @@ class TestParametrized():
         manager._evaluate_ensemble = MagicMock()
         manager._forecast_ensemble = MagicMock()
         manager._eval_type = args.eval_type
-        with patch("views_pipeline_core.managers.model_manager.ModelManager._update_single_config") as mock_update_single_config:
+        with patch("views_pipeline_core.managers.model.ModelManager._update_single_config") as mock_update_single_config:
             manager.config = mock_update_single_config(args)
         manager.config = {"name": "test_model"}
         return manager
@@ -172,8 +172,8 @@ class TestParametrized():
     #     assert mock_train_model_artifact.call_count == 2
 
 
-    @patch('views_pipeline_core.managers.ensemble_manager.EnsembleManager._execute_model_tasks')
-    @patch('views_pipeline_core.managers.model_manager.ModelManager._update_single_config')
+    @patch('views_pipeline_core.managers.ensemble.EnsembleManager._execute_model_tasks')
+    @patch('views_pipeline_core.managers.model.ModelManager._update_single_config')
     @patch('views_pipeline_core.models.check.ensemble_model_check')
     def test_execute_single_run(
         self,
@@ -279,12 +279,12 @@ class TestParametrized():
     #         expected_shell_command
     #     ):
     #         # Mocking necessary components
-    #         with patch("views_pipeline_core.managers.ensemble_manager.ModelPath") as mock_model_path, \
+    #         with patch("views_pipeline_core.managers.ensemble_manager.ModelPathManager") as mock_model_path, \
     #             patch("views_pipeline_core.managers.ensemble_manager.ModelManager") as mock_model_manager, \
     #             patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._get_shell_command") as mock_get_shell_command, \
     #             patch("subprocess.run") as mock_subprocess_run:
 
-    #             # Mocking the return value of ModelPath
+    #             # Mocking the return value of ModelPathManager
     #             mock_model_path_instance = MagicMock()
     #             mock_model_path.return_value = mock_model_path_instance
 
@@ -318,7 +318,7 @@ class TestParametrized():
         expected_command,
         expected_methods_called):
         # Create a mock for the ensemble manager
-        with patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._train_model_artifact") as mock_train_model_artifact:
+        with patch("views_pipeline_core.managers.ensemble.EnsembleManager._train_model_artifact") as mock_train_model_artifact:
             print("Mocking works:", mock_train_model_artifact)
             manager = EnsembleManager(ensemble_path=mock_model_path)
             manager.config = {

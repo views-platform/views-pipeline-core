@@ -1,11 +1,10 @@
 import logging
 import logging.config
 import yaml
-import os
-from views_pipeline_core.managers.path_manager import ModelPath
 # from views_pipeline_core.cache.global_cache import GlobalCache
 import importlib.resources
 from pathlib import Path
+import os
 
 _logs_in_model_dir = True
 

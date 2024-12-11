@@ -1,5 +1,4 @@
 import logging
-from views_pipeline_core.managers.path_manager import ModelPath
 import pandas as pd
 from pathlib import Path
 from typing import Union
@@ -110,8 +109,9 @@ def create_log_file(path_generated,
     create_specific_log_file(path_generated, run_type, model_name, deployment_status,
                     model_timestamp, data_generation_timestamp, data_fetch_timestamp, model_type)
     if models:
+        from views_pipeline_core.managers.model import ModelPathManager
         for m_name in models:
-            model_path = ModelPath(m_name)
+            model_path = ModelPathManager(m_name)
             model_path_generated = model_path.data_generated
             log_data = read_log_file(model_path_generated / f"{run_type}_log.txt")
             create_specific_log_file(path_generated, run_type, m_name, log_data["Deployment Status"], 

@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
-from views_pipeline_core.managers.path_manager import ModelPath, EnsemblePath
+from views_pipeline_core.managers.model import ModelManager
 from views_pipeline_core.data.dataloaders import ViewsDataLoader
-from views_pipeline_core.managers.model_manager import ModelManager
+from views_pipeline_core.managers.model import ModelManager
 import wandb
 import pandas as pd
 from pathlib import Path
@@ -15,7 +15,7 @@ def mock_model_path():
     Yields:
         MagicMock: The mock object for ModelPath.
     """
-    with patch("views_pipeline_core.managers.path_manager.ModelPath") as mock:
+    with patch("views_pipeline_core.managers.model.ModelPathManager") as mock:
         mock_instance = mock.return_value
         mock_instance.get_scripts.return_value = {
             "config_deployment.py": "path/to/config_deployment.py",
@@ -34,7 +34,7 @@ def mock_ensemble_path():
     Yields:
         MagicMock: The mock object for EnsemblePath.
     """
-    with patch("views_pipeline_core.managers.path_manager.EnsemblePath") as mock:
+    with patch("views_pipeline_core.managers.ensemble.EnsemblePathManager") as mock:
         yield mock
 
 @pytest.fixture

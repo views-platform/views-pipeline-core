@@ -7,7 +7,6 @@ from pathlib import Path
 from datetime import datetime
 from views_pipeline_core.configs import drift_detection
 from views_pipeline_core.files.utils import create_data_fetch_log_file
-from views_pipeline_core.managers.path_manager import ModelPath
 from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
@@ -17,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class ViewsDataLoader:
+    from views_pipeline_core.managers.model import ModelPathManager
     """
     A class to handle data loading, fetching, and processing for different partitions.
 
@@ -24,12 +24,12 @@ class ViewsDataLoader:
     create or load volumes, and handle drift detection configurations.
     """
 
-    def __init__(self, model_path: ModelPath, **kwargs):
+    def __init__(self, model_path: ModelPathManager, **kwargs):
         """
-        Initializes the DataLoaders class with a ModelPath object and optional keyword arguments.
+        Initializes the DataLoaders class with a ModelPathManager object and optional keyword arguments.
 
         Args:
-            model_path (ModelPath): An instance of the ModelPath class.
+            model_path (ModelPathManager): An instance of the ModelPathManager class.
             **kwargs: Additional keyword arguments to set instance attributes.
 
         Attributes:
