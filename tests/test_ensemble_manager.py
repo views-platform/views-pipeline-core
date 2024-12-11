@@ -342,28 +342,22 @@ class TestParametrized():
     def test_evaluate_ensemble(self, mock_model_path, args, 
         expected_command,
         expected_methods_called):
-        # Create a mock for the ensemble manager
         with patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._evaluate_model_artifact") as mock_evaluate_model_artifact, \
          patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._get_aggregated_df") as mock_get_aggregated_df, \
          patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._save_predictions") as mock_save_predictions, \
          patch("views_pipeline_core.files.utils.create_log_file") as mock_create_log_file, \
          patch("views_pipeline_core.files.utils.create_specific_log_file") as mock_create_specific_log_file, \
          patch("views_pipeline_core.files.utils.read_log_file") as mock_read_log_file, \
+         patch("views_pipeline_core.files.utils.logger") as mock_logger, \
          patch("views_pipeline_core.managers.model_manager.ModelPath") as mock_model_path_class, \
          patch("views_pipeline_core.managers.path_manager.ModelPath._get_model_dir") as mock_get_model_dir, \
          patch("views_pipeline_core.managers.path_manager.ModelPath._build_absolute_directory") as mock_build_absolute_directory:
         
+             
+            mock_model_path_instance = mock_model_path_class.return_value
             
-                 # Mock model directory
-            #mock_get_model_dir.return_value = Path("/mock/path/to/model_dir")
-
-            # Mock ModelPath instance
-            # mock_model_path_instance = mock_model_path_class.return_value
-            # mock_model_path_instance.data_generated.return_value = Path("/mock/path/generated")
-            # mock_model_path_instance.data_raw = Path("/mock/path/raw")
-            # mock_model_path_instance.artifacts = Path("/mock/path/artifacts")
-            # mock_model_path_instance.stem = "test_model"
-            # mock_model_path_instance._check_if_dir_exists.return_value = True
+            mock_model_path_instance._initialize_directories()
+         
 
             mock_evaluate_model_artifact.side_effect = [
                 [{"prediction": 1}, {"prediction": 2}],
@@ -373,17 +367,15 @@ class TestParametrized():
                 {"ensemble_prediction": 1.5},
                 {"ensemble_prediction": 3.0}
             ]
-            # Mock read_log_file to return expected data
+            
             mock_read_log_file.return_value = {
                 "Deployment Status": "test_status",
                 "Single Model Timestamp": "20241209_123456",
                 "Data Generation Timestamp": "20241209_123000",
                 "Data Fetch Timestamp": "20241209_120000",
             }
-
-        
-            print("Mocking works:", mock_evaluate_model_artifact)
-            manager = EnsembleManager(ensemble_path=mock_model_path)
+            
+            manager = EnsembleManager(ensemble_path=mock_model_path_instance)
             manager.config = {
                 "run_type": "test_run",
                 "models": ["test_model", "test_model"],
@@ -391,17 +383,18 @@ class TestParametrized():
                 "deployment_status": "test_status",
                 "aggregation": "mean",
             }
-            print("Models in config:", manager.config["models"])
 
-            # Call the method
             manager._evaluate_ensemble(args.eval_type)
-            print("Call count for create_log_file:", mock_create_log_file.call_count)
-
 
             assert mock_evaluate_model_artifact.call_count == len(manager.config["models"])
             mock_get_aggregated_df.assert_called()
             mock_save_predictions.assert_called()
-            # mock_create_log_file.assert_called_once_with(
+            mock_read_log_file.assert_called()
+            mock_create_specific_log_file.assert_called()
+            
+
+            # This is just not working:
+            # mock_create_log_file.assert_called_once_with(  
             #     Path("/mock/path/generated"), 
             #     manager.config, 
             #     ANY,  # Timestamp
