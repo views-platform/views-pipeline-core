@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock, ANY
+from unittest.mock import patch, MagicMock, ANY, PropertyMock
 from views_pipeline_core.managers.ensemble_manager import EnsembleManager
 from views_pipeline_core.models.check import ensemble_model_check
 from views_pipeline_core.managers.path_manager import EnsemblePath, ModelPath
@@ -10,6 +10,7 @@ import os
 from types import SimpleNamespace
 import wandb
 from pathlib import Path
+import subprocess
 
 class MockArgs:
     def __init__(self, train, evaluate, forecast, saved, run_type, eval_type):
@@ -314,18 +315,18 @@ class TestParametrized():
     #             mock_subprocess_run.assert_called_once_with(expected_shell_command, check=True)
 
 
-    def test_train_ensemble(self, mock_model_path, args, 
+    def test_train_ensemble(self, mock_model_path, mock_ensemble_manager, args, 
         expected_command,
         expected_methods_called):
         # Create a mock for the ensemble manager
         with patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._train_model_artifact") as mock_train_model_artifact:
             manager = EnsembleManager(ensemble_path=mock_model_path)
+            
             manager.config = {
                 "run_type": "test_run",
                 "models": ["/path/to/models/test_model1", "/path/to/models/test_model2"]
             }
-
-            # Call the method
+            
             manager._train_ensemble(args.use_saved)
 
             print("Call count:", mock_train_model_artifact.call_count)
@@ -348,7 +349,6 @@ class TestParametrized():
          patch("views_pipeline_core.files.utils.create_log_file") as mock_create_log_file, \
          patch("views_pipeline_core.files.utils.create_specific_log_file") as mock_create_specific_log_file, \
          patch("views_pipeline_core.files.utils.read_log_file") as mock_read_log_file, \
-         patch("views_pipeline_core.files.utils.logger") as mock_logger, \
          patch("views_pipeline_core.managers.model_manager.ModelPath") as mock_model_path_class, \
          patch("views_pipeline_core.managers.path_manager.ModelPath._get_model_dir") as mock_get_model_dir, \
          patch("views_pipeline_core.managers.path_manager.ModelPath._build_absolute_directory") as mock_build_absolute_directory:
@@ -403,6 +403,164 @@ class TestParametrized():
             #     model_type="ensemble", 
             #     models=manager.config["models"]
             # )
+
+
+
+
+    def test_forecast_ensemble(self, mock_model_path, args, 
+        expected_command,
+        expected_methods_called):
+        # Mock all required methods and classes
+        with patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._forecast_model_artifact") as mock_forecast_model_artifact, \
+            patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._get_aggregated_df") as mock_get_aggregated_df, \
+            patch("views_pipeline_core.managers.ensemble_manager.EnsembleManager._save_predictions") as mock_save_predictions, \
+            patch("views_pipeline_core.files.utils.create_log_file") as mock_create_log_file, \
+            patch("views_pipeline_core.files.utils.create_specific_log_file") as mock_create_specific_log_file, \
+            patch("views_pipeline_core.files.utils.read_log_file") as mock_read_log_file, \
+            patch("views_pipeline_core.managers.model_manager.ModelPath") as mock_model_path_class, \
+            patch("views_pipeline_core.managers.path_manager.ModelPath._get_model_dir") as mock_get_model_dir, \
+            patch("views_pipeline_core.managers.path_manager.ModelPath._build_absolute_directory") as mock_build_absolute_directory:
+
+            mock_model_path_instance = mock_model_path.return_value
+            mock_model_path_instance._initialize_directories()
+
+            mock_forecast_model_artifact.side_effect = [
+                {"model_name": "test_model", "prediction": 1},
+                {"model_name": "test_model", "prediction": 2}
+            ]
+            
+            mock_get_aggregated_df.return_value = {"ensemble_prediction": 1.5}
+
+            mock_read_log_file.return_value = {
+                "Deployment Status": "test_status",
+                "Single Model Timestamp": "20241209_123456",
+                "Data Generation Timestamp": "20241209_123000",
+                "Data Fetch Timestamp": "20241209_120000",
+            }
+            
+            mock_create_specific_log_file.return_value = {
+                "Model Type": "Single",
+                "Model Name": "test_model",
+                "Model Timestamp": "20241209_123456",
+                "Data Generation Timestamp": "20241209_123000",
+                "Data Fetch Timestamp": "20241209_120000",
+                "Deployment Status": "test_status"
+            }
+            
+            manager = EnsembleManager(ensemble_path=mock_model_path_instance)
+            manager.config = {
+                "run_type": "test_run",
+                "models": ["test_model", "test_model"],
+                "name": "test_ensemble",
+                "deployment_status": "test_status",
+                "aggregation": "mean",
+            }
+
+            manager._forecast_ensemble()
+
+            assert mock_forecast_model_artifact.call_count == len(manager.config["models"])
+            assert mock_get_aggregated_df.call_count == 1
+            assert mock_save_predictions.call_count == 1
+
+            # This is not working for the same reason
+            # mock_create_log_file.assert_called_once_with(
+            #     Path("/mock/path/generated"),
+            #     manager.config,
+            #     ANY,  # model_timestamp
+            #     ANY,  # data_generation_timestamp
+            #     data_fetch_timestamp=None,
+            #     model_type="ensemble",
+            #     models=manager.config["models"]
+            # )
+
+
+
+
+
+    def test_train_model_artifact(self, mock_model_path, args, 
+        expected_command,
+        expected_methods_called):
+        # Mocking required methods and classes
+        with patch("views_pipeline_core.managers.ensemble_manager.ModelPath") as mock_model_path_class, \
+            patch("views_pipeline_core.managers.ensemble_manager.ModelManager") as mock_model_manager_class, \
+            patch("views_pipeline_core.managers.ensemble_manager.subprocess.run") as mock_subprocess_run, \
+            patch("views_pipeline_core.managers.ensemble_manager.logger") as mock_logger:
+
+            mock_model_path_instance = mock_model_path_class.return_value
+        
+            # Use PropertyMock to mock model_dir property
+            type(mock_model_path_instance).model_dir = PropertyMock(return_value="/mock/path/to/model")
+
+
+            
+            # Mock the ModelManager instance and its configs
+            mock_model_manager_instance = MagicMock()
+            mock_model_manager_class.return_value = mock_model_manager_instance
+            mock_model_manager_instance.configs = {"model_name": "test_model", "run_type": "test_run"}
+
+            # Mock subprocess.run to simulate successful shell command execution
+            mock_subprocess_run.return_value = None  # Simulate success (no exception thrown)
+
+            # Instantiate the manager and set up the config
+            manager = EnsembleManager(ensemble_path=mock_model_path)
+            manager.config = {
+                "run_type": "test_run",
+                "models": ["test_model"],
+                "name": "test_ensemble",
+                "deployment_status": "test_status",
+                "aggregation": "mean",
+            }
+
+            # Call the method under test
+            manager._train_model_artifact("test_model", "test_run", use_saved=args.use_saved)
+
+            # Assert that subprocess.run is called once
+            mock_subprocess_run.assert_called_once_with(
+                ANY,  # Command should be flexible, so we use ANY
+                check=True
+            )
+
+            # Assert that the logger's info method was called
+            mock_logger.info.assert_called_with("Training single model test_model...")
+
+            # Assert that the correct shell command was generated
+            shell_command = EnsembleManager._get_shell_command(
+                mock_model_path_instance, 
+                "test_run", 
+                train=True, 
+                evaluate=False, 
+                forecast=False,  
+                use_saved=args.use_saved
+            )
+        
+            mock_subprocess_run.assert_called_once_with(shell_command, check=True)
+            
+            mock_logger.info.assert_called_with("Training single model test_model...")
+
+            # If an exception is thrown during subprocess.run, assert logger error
+            mock_subprocess_run.side_effect = subprocess.CalledProcessError(1, 'command')
+            mock_exception = subprocess.CalledProcessError(1, 'command')
+            manager._train_model_artifact("test_model", "test_run", use_saved=False)
+            expected_error_message = "Error during shell command execution for model test_model: " + str(mock_exception)
+            mock_logger.error.assert_called_with(expected_error_message)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
