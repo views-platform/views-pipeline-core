@@ -130,7 +130,7 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     - ValueError: If the file extension is not provided or is not supported.
     - Exception: If there is an error saving the DataFrame.
     """
-    FILE_EXTENSION_ERROR_MESSAGE = "The file extension must be provided. E.g. .csv, .xlsx, .parquet"
+    FILE_EXTENSION_ERROR_MESSAGE = "The file extension must be provided. E.g. .parquet"
     
     # Checks
     if not isinstance(save_path, Path):
@@ -144,17 +144,17 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
         raise ValueError(f"Invalid file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
     
     try:
-        logger.info(f"Saving the DataFrame to {save_path} in {file_extension} format")
-        if file_extension == ".csv":
-            dataframe.to_csv(save_path)
-        elif file_extension == ".xlsx":
-            dataframe.to_excel(save_path)
-        elif file_extension == ".parquet":
+        logger.debug(f"Saving the DataFrame to {save_path} in {file_extension} format")
+        # if file_extension == ".csv":
+        #     dataframe.to_csv(save_path)
+        # elif file_extension == ".xlsx":
+        #     dataframe.to_excel(save_path)
+        if file_extension == ".parquet":
             dataframe.to_parquet(save_path)
         elif file_extension == ".pkl":
             dataframe.to_pickle(save_path)
         else:
-            raise ValueError("The file extension must be provided. E.g. .csv, .xlsx, .parquet")
+            raise ValueError("The file extension must be provided. E.g. .parquet")
     except Exception as e:
         logger.exception(f"Error saving the DataFrame to {save_path}: {e}")
         raise
@@ -172,7 +172,7 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     - ValueError: If the file extension is not provided or is not supported.
     - Exception: If there is an error reading the DataFrame.
     """
-    FILE_EXTENSION_ERROR_MESSAGE = "The file extension must be provided. E.g. .csv, .xlsx, .parquet"
+    FILE_EXTENSION_ERROR_MESSAGE = "The file extension must be provided. E.g. .parquet"
     
     # Checks
     if not isinstance(file_path, Path):
@@ -182,12 +182,12 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
          raise ValueError(f"Invalid file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
     
     try:
-        logger.info(f"Reading the DataFrame from {file_path} in {file_extension} format")
-        if file_extension == ".csv":
-            return pd.read_csv(file_path)
-        elif file_extension == ".xlsx":
-            return pd.read_excel(file_path)
-        elif file_extension == ".parquet":
+        logger.debug(f"Reading the DataFrame from {file_path} in {file_extension} format")
+        # if file_extension == ".csv":
+        #     return pd.read_csv(file_path)
+        # elif file_extension == ".xlsx":
+        #     return pd.read_excel(file_path)
+        if file_extension == ".parquet":
             return pd.read_parquet(file_path)
         elif file_extension == ".pkl":
             return pd.read_pickle(file_path)
