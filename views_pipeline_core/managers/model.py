@@ -581,8 +581,9 @@ class ModelManager:
                 "config_sweep.py", "get_sweep_config"
             )
         self.set_dataframe_format(format=".parquet")
-        from views_pipeline_core.data.dataloaders import ViewsDataLoader
-        self._data_loader = ViewsDataLoader(model_path=self._model_path)
+        if self._model_path.target == "model":
+            from views_pipeline_core.data.dataloaders import ViewsDataLoader
+            self._data_loader = ViewsDataLoader(model_path=self._model_path)
         
 
     def set_dataframe_format(self, format: str) -> None:
