@@ -289,8 +289,9 @@ class EnsembleManager(ModelManager):
                 except Exception as e:
                     logger.error(f"Error during shell command execution for model {model_name}: {e}")
 
-                with open(pkl_path, "rb") as file:
-                    pred = pickle.load(file)
+                # with open(pkl_path, "rb") as file:
+                #     pred = pickle.load(file)
+                pred = read_dataframe(pkl_path)
 
                 data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 date_fetch_timestamp = read_log_file(path_raw / f"{run_type}_data_fetch_log.txt").get("Data Fetch Timestamp", None)
@@ -334,8 +335,9 @@ class EnsembleManager(ModelManager):
             except Exception as e:
                 logger.error(f"Error during shell command execution for model {model_name}: {e}")
 
-            with open(pkl_path, "rb") as file:
-                df = pickle.load(file)
+            # with open(pkl_path, "rb") as file:
+            #     df = pickle.load(file)
+            df = read_dataframe(pkl_path)
 
             data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             date_fetch_timestamp = read_log_file(path_raw / f"{run_type}_data_fetch_log.txt").get("Data Fetch Timestamp", None)

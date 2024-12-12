@@ -1,5 +1,9 @@
-from utils import utils_script_gen
+from typing import Dict
+from views_pipeline_core.templates.utils import save_script
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def generate(script_dir: Path, model_name: str) -> bool:
@@ -36,4 +40,4 @@ def generate(script_dir: Path, model_name: str) -> bool:
     }}
     return meta_config
 """
-    return utils_script_gen.save_script(script_dir, code)
+    return save_script(script_dir, code)
