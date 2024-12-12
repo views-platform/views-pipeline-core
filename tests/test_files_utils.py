@@ -128,7 +128,7 @@ def test_save_dataframe_pickle(tmp_path, sample_dataframe):
 
 def test_save_dataframe_invalid_extension(tmp_path, sample_dataframe):
     save_path = tmp_path / "test.txt"
-    with pytest.raises(ValueError, match="The file extension must be provided. E.g. .csv, .xlsx, .parquet"):
+    with pytest.raises(ValueError, match="The file extension must be provided. E.g. .parquet"):
         save_dataframe(sample_dataframe, save_path)
 
 # def test_read_dataframe_csv(tmp_path, sample_dataframe):
