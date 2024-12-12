@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import sys
-from views_pipeline_core.managers.path_manager import ModelPath
+from views_pipeline_core.managers.model import ModelPathManager
 
 @pytest.fixture
 def temp_dir(tmp_path):
@@ -41,11 +41,11 @@ def test_initialization_with_valid_name(temp_dir):
     """
     project_root, model_dir = temp_dir
     # Patch the class-level attributes and methods to use the temporary directory structure
-    with patch.object(ModelPath, '_root', project_root):
-        with patch.object(ModelPath, 'get_models', return_value=project_root / "models"):
-            with patch('views_pipeline_core.managers.path_manager.ModelPath._get_model_dir', return_value=model_dir):
+    with patch.object(ModelPathManager, '_root', project_root):
+        with patch.object(ModelPathManager, 'get_models', return_value=project_root / "models"):
+            with patch('views_pipeline_core.managers.model.ModelPathManager._get_model_dir', return_value=model_dir):
                 # Initialize the ModelPath instance with a valid model name
-                model_path_instance = ModelPath(model_path=model_dir, validate=True)
+                model_path_instance = ModelPathManager(model_path=model_dir, validate=True)
                 # Assert that the model name and directories are correctly set
                 assert model_path_instance.model_name == "test_model"
                 assert model_path_instance.root == project_root
@@ -60,12 +60,12 @@ def test_initialization_with_invalid_name(temp_dir):
     """
     project_root, _ = temp_dir
     # Patch the class-level attributes and methods to use the temporary directory structure
-    with patch.object(ModelPath, '_root', project_root):
-        with patch.object(ModelPath, 'get_models', return_value=project_root / "models"):
-            with patch('views_pipeline_core.managers.path_manager.ModelPath._get_model_dir', return_value=None):
+    with patch.object(ModelPathManager, '_root', project_root):
+        with patch.object(ModelPathManager, 'get_models', return_value=project_root / "models"):
+            with patch('views_pipeline_core.managers.model.ModelPathManager._get_model_dir', return_value=None):
                 # Assert that initializing with an invalid model name raises a ValueError
                 with pytest.raises(ValueError):
-                    ModelPath(model_path="invalidmodel", validate=True)
+                    ModelPathManager(model_path="invalidmodel", validate=True)
 
 def test_is_path(temp_dir):
     """
@@ -76,8 +76,8 @@ def test_is_path(temp_dir):
     """
     project_root, _ = temp_dir
     # Initialize the ModelPath instance without validation
-    with patch.object(ModelPath, '_root', project_root):
-        model_path_instance = ModelPath(model_path="test_model", validate=False)
+    with patch.object(ModelPathManager, '_root', project_root):
+        model_path_instance = ModelPathManager(model_path="test_model", validate=False)
         # Assert that the project root is a valid path
         assert model_path_instance._is_path(project_root) == True
         # Assert that a non-existent path is not valid
@@ -92,11 +92,11 @@ def test_get_model_dir(temp_dir):
     """
     project_root, model_dir = temp_dir
     # Patch the class-level attributes and methods to use the temporary directory structure
-    with patch.object(ModelPath, '_root', project_root):
-        with patch.object(ModelPath, 'get_models', return_value=project_root / "models"):
-            with patch('views_pipeline_core.managers.path_manager.ModelPath._get_model_dir', return_value=model_dir):
+    with patch.object(ModelPathManager, '_root', project_root):
+        with patch.object(ModelPathManager, 'get_models', return_value=project_root / "models"):
+            with patch('views_pipeline_core.managers.model.ModelPathManager._get_model_dir', return_value=model_dir):
                 # Initialize the ModelPath instance with a valid model name
-                model_path_instance = ModelPath(model_path="test_model", validate=True)
+                model_path_instance = ModelPathManager(model_path="test_model", validate=True)
                 # Assert that the _get_model_dir method returns the correct model directory
                 assert model_path_instance._get_model_dir() == model_dir
 
@@ -109,52 +109,12 @@ def test_build_absolute_directory(temp_dir):
     """
     project_root, model_dir = temp_dir
     # Patch the class-level attributes and methods to use the temporary directory structure
-    with patch.object(ModelPath, '_root', project_root):
-        with patch.object(ModelPath, 'get_models', return_value=project_root / "models"):
-            with patch('views_pipeline_core.managers.path_manager.ModelPath._get_model_dir', return_value=model_dir):
+    with patch.object(ModelPathManager, '_root', project_root):
+        with patch.object(ModelPathManager, 'get_models', return_value=project_root / "models"):
+            with patch('views_pipeline_core.managers.model.ModelPathManager._get_model_dir', return_value=model_dir):
                 # Initialize the ModelPath instance with a valid model name
-                model_path_instance = ModelPath(model_path="test_model", validate=True)
+                model_path_instance = ModelPathManager(model_path="test_model", validate=True)
                 # Build an absolute directory path for "artifacts"
                 abs_dir = model_path_instance._build_absolute_directory(Path("artifacts"))
                 # Assert that the absolute directory path is correct
                 assert abs_dir == model_dir / "artifacts"
-
-# def test_add_paths_to_sys(temp_dir):
-#     """
-#     Test the add_paths_to_sys method to add model paths to the system path.
-
-#     Args:
-#         temp_dir (tuple): A tuple containing the project root directory and the model directory.
-#     """
-#     project_root, model_dir = temp_dir
-#     # Patch the class-level attributes and methods to use the temporary directory structure
-#     with patch.object(ModelPath, '_root', project_root):
-#         with patch.object(ModelPath, 'get_models', return_value=project_root / "models"):
-#             with patch('views_pipeline_core.managers.path_manager.ModelPath._get_model_dir', return_value=model_dir):
-#                 # Initialize the ModelPath instance with a valid model name
-#                 model_path_instance = ModelPath(model_path="test_model", validate=True)
-#                 # Add model paths to the system path
-#                 model_path_instance.add_paths_to_sys()
-#                 # Assert that the "src" directory is added to the system path
-#                 assert str(model_path_instance.model_dir / "src") in sys.path
-
-# def test_remove_paths_from_sys(temp_dir):
-#     """
-#     Test the remove_paths_from_sys method to remove model paths from the system path.
-
-#     Args:
-#         temp_dir (tuple): A tuple containing the project root directory and the model directory.
-#     """
-#     project_root, model_dir = temp_dir
-#     # Patch the class-level attributes and methods to use the temporary directory structure
-#     with patch.object(ModelPath, '_root', project_root):
-#         with patch.object(ModelPath, 'get_models', return_value=project_root / "models"):
-#             with patch('views_pipeline_core.managers.path_manager.ModelPath._get_model_dir', return_value=model_dir):
-#                 # Initialize the ModelPath instance with a valid model name
-#                 model_path_instance = ModelPath(model_path="test_model", validate=True)
-#                 # Add model paths to the system path
-#                 model_path_instance.add_paths_to_sys()
-#                 # Remove model paths from the system path
-#                 model_path_instance.remove_paths_from_sys()
-#                 # Assert that the model directory is removed from the system path
-#                 assert str(model_path_instance.model_dir) not in sys.path

@@ -1,5 +1,4 @@
-from views_pipeline_core.managers.path_manager import ModelPath, EnsemblePath
-from views_pipeline_core.managers.model_manager import ModelManager
+from views_pipeline_core.managers.model import ModelPathManager, ModelManager
 from views_pipeline_core.wandb.utils import add_wandb_monthly_metrics, log_wandb_log_dict
 from views_pipeline_core.models.check import ensemble_model_check
 from views_pipeline_core.files.utils import read_log_file, create_log_file
@@ -14,17 +13,96 @@ from pathlib import Path
 import subprocess
 from datetime import datetime
 import pandas as pd
+from views_pipeline_core.files.utils import save_dataframe, read_dataframe
+from views_pipeline_core.configs.pipeline import PipelineConfig
 
 logger = logging.getLogger(__name__)
+
+# ============================================================ Ensemble Path Manager ============================================================
+
+
+class EnsemblePathManager(ModelPathManager):
+    """
+    A class to manage ensemble paths and directories within the ViEWS Pipeline.
+    Inherits from ModelPathManager and sets the target to 'ensemble'.
+    """
+
+    _target = "ensemble"
+
+    @classmethod
+    def _initialize_class_paths(cls, current_path: Path = None) -> None:
+        """Initialize class-level paths for ensemble."""
+        super()._initialize_class_paths(current_path=current_path)
+        cls._models = cls._root / Path(cls._target + "s")
+        # Additional ensemble-specific initialization...
+
+    def __init__(
+        self, ensemble_name_or_path: Union[str, Path], validate: bool = True
+    ) -> None:
+        """
+        Initializes an EnsemblePathManager instance.
+
+        Args:c
+            ensemble_name_or_path (str or Path): The ensemble name or path.
+            validate (bool, optional): Whether to validate paths and names. Defaults to True.
+        """
+        super().__init__(ensemble_name_or_path, validate)
+        # Additional ensemble-specific initialization...
+
+    def _initialize_directories(self) -> None:
+        """
+        Initializes the necessary directories for the ensemble.
+
+        Creates and sets up various directories required for the ensemble, such as architectures, artifacts, configs, data, etc.
+        """
+        # Call the parent class's _initialize_directories method
+        super()._initialize_directories()
+        # Initialize ensemble-specific directories only if the class is EnsemblePathManager
+        # if self.__class__.__name__ == "EnsemblePathManager":
+        #     self._initialize_ensemble_specific_directories()
+
+    # def _initialize_ensemble_specific_directories(self):
+    #     self.reports_figures = self._build_absolute_directory(Path("reports/figures"))
+    #     self.reports_papers = self._build_absolute_directory(Path("reports/papers"))
+    #     self.reports_plots = self._build_absolute_directory(Path("reports/plots"))
+    #     self.reports_slides = self._build_absolute_directory(Path("reports/slides"))
+    #     self.reports_timelapse = self._build_absolute_directory(
+    #         Path("reports/timelapse")
+    #     )
+
+    def _initialize_scripts(self) -> None:
+        """
+        Initializes the necessary scripts for the ensemble.
+
+        Creates and sets up various scripts required for the ensemble, such as configuration scripts, main script, and other utility scripts.
+        """
+        super()._initialize_scripts()
+        # Initialize ensemble-specific scripts only if the class is EnsemblePathManager
+
+    #     if self.__class__.__name__ == "EnsemblePathManager":
+    #         self._initialize_ensemble_specific_scripts()
+
+    # def _initialize_ensemble_specific_scripts(self):
+    #     """
+    #     Initializes the ensemble-specific scripts by appending their absolute paths
+    #     to the `self.scripts` list.
+
+    #     The paths are built using the `_build_absolute_directory` method.
+
+    #     Returns:
+    #         None
+    #     """
+    #     self.scripts += [
+    #     ]
 
 
 class EnsembleManager(ModelManager):
 
-    def __init__(self, ensemble_path: EnsemblePath) -> None:
+    def __init__(self, ensemble_path: EnsemblePathManager) -> None:
         super().__init__(ensemble_path)
     
     @staticmethod
-    def _get_shell_command(model_path: ModelPath, 
+    def _get_shell_command(model_path: ModelPathManager, 
                            run_type: str, 
                            train: bool, 
                            evaluate: bool, 
@@ -35,7 +113,7 @@ class EnsembleManager(ModelManager):
         """
 
         Args:
-            model_path (ModelPath): model path object for the model
+            model_path (ModelPathManager): model path object for the model
             run_type (str): the type of run (calibration, validation, forecasting)
             train (bool): if the model should be trained
             evaluate (bool): if the model should be evaluated
@@ -156,7 +234,7 @@ class EnsembleManager(ModelManager):
     def _train_model_artifact(self, model_name:str, run_type: str, use_saved: bool) -> None:
         logger.info(f"Training single model {model_name}...")
             
-        model_path = ModelPath(model_name)
+        model_path = ModelPathManager(model_name)
         model_config = ModelManager(model_path).configs
         model_config["run_type"] = run_type
 
@@ -176,7 +254,7 @@ class EnsembleManager(ModelManager):
     def _evaluate_model_artifact(self, model_name:str, run_type: str, eval_type: str) -> None:
         logger.info(f"Evaluating single model {model_name}...")
 
-        model_path = ModelPath(model_name)    
+        model_path = ModelPathManager(model_name)    
         path_raw = model_path.data_raw
         path_generated = model_path.data_generated
         path_artifacts = model_path.artifacts
@@ -188,11 +266,12 @@ class EnsembleManager(ModelManager):
 
         for sequence_number in range(ModelManager._resolve_evaluation_sequence_number(eval_type)):
         
-            pkl_path = f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}.pkl"
+            pkl_path = f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}{PipelineConfig.dataframe_format}"
             if Path(pkl_path).exists():
                 logger.info(f"Loading existing {run_type} predictions from {pkl_path}")
-                with open(pkl_path, "rb") as file:
-                    pred = pickle.load(file)
+                # with open(pkl_path, "rb") as file:
+                #     pred = pickle.load(file)
+                pred = read_dataframe(pkl_path)
             else:
                 logger.info(f"No existing {run_type} predictions found. Generating new {run_type} predictions...")
                 model_config = ModelManager(model_path).configs
@@ -210,8 +289,9 @@ class EnsembleManager(ModelManager):
                 except Exception as e:
                     logger.error(f"Error during shell command execution for model {model_name}: {e}")
 
-                with open(pkl_path, "rb") as file:
-                    pred = pickle.load(file)
+                # with open(pkl_path, "rb") as file:
+                #     pred = pickle.load(file)
+                pred = read_dataframe(pkl_path)
 
                 data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 date_fetch_timestamp = read_log_file(path_raw / f"{run_type}_data_fetch_log.txt").get("Data Fetch Timestamp", None)
@@ -225,7 +305,7 @@ class EnsembleManager(ModelManager):
     def _forecast_model_artifact(self, model_name:str, run_type: str) -> None:
         logger.info(f"Forecasting single model {model_name}...")
 
-        model_path = ModelPath(model_name)    
+        model_path = ModelPathManager(model_name)    
         path_raw = model_path.data_raw
         path_generated = model_path.data_generated
         path_artifacts = model_path.artifacts
@@ -233,11 +313,12 @@ class EnsembleManager(ModelManager):
 
         ts = path_artifact.stem[-15:]
 
-        pkl_path = f"{path_generated}/predictions_{run_type}_{ts}.pkl"
+        pkl_path = f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig.dataframe_format}"
         if Path(pkl_path).exists():
             logger.info(f"Loading existing {run_type} predictions from {pkl_path}")
-            with open(pkl_path, "rb") as file:
-                df = pickle.load(file)
+            # with open(pkl_path, "rb") as file:
+            #     df = pickle.load(file)
+            df = read_dataframe(pkl_path)
         else:
             logger.info(f"No existing {run_type} predictions found. Generating new {run_type} predictions...")
             model_config = ModelManager(model_path).configs
@@ -254,8 +335,9 @@ class EnsembleManager(ModelManager):
             except Exception as e:
                 logger.error(f"Error during shell command execution for model {model_name}: {e}")
 
-            with open(pkl_path, "rb") as file:
-                df = pickle.load(file)
+            # with open(pkl_path, "rb") as file:
+            #     df = pickle.load(file)
+            df = read_dataframe(pkl_path)
 
             data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             date_fetch_timestamp = read_log_file(path_raw / f"{run_type}_data_fetch_log.txt").get("Data Fetch Timestamp", None)

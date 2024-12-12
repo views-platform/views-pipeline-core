@@ -1,7 +1,9 @@
 from views_pipeline_core.templates.utils import save_script
 from pathlib import Path
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 def generate(script_path: Path) -> bool:
     """
@@ -34,12 +36,12 @@ def generate(script_path: Path) -> bool:
           specified script directory.
         - The generated script is designed to be executed as a standalone Python script.
     """
-    code = f'''import wandb
+    code = f"""import wandb
 import warnings
 from pathlib import Path
 from views_pipeline_core.cli.utils import parse_args, validate_arguments
 from views_pipeline_core.logging.utils import setup_logging
-from views_pipeline_core.managers.path_manager import ModelPath
+from views_pipeline_core.managers.model import ModelPathManager
 
 # Import your model manager class here
 # E.g. from views_stepshifter.manager.stepshifter_manager import StepshifterManager
@@ -47,7 +49,7 @@ from views_pipeline_core.managers.path_manager import ModelPath
 warnings.filterwarnings("ignore")
 
 try:
-    model_path = ModelPath(Path(__file__))
+    model_path = ModelPathManager(Path(__file__))
 except Exception as e:
     raise RuntimeError(f"An unexpected error occurred: {{e}}.")
 
@@ -62,5 +64,5 @@ if __name__ == "__main__":
         # YourModelManager(model_path=model_path).execute_sweep_run(args)
     else:
         # YourModelManager(model_path=model_path).execute_single_run(args)
-'''
+"""
     return save_script(script_path, code)
