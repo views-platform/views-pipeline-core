@@ -266,11 +266,12 @@ class EnsembleManager(ModelManager):
 
         for sequence_number in range(ModelManager._resolve_evaluation_sequence_number(eval_type)):
         
-            pkl_path = f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}.pkl"
+            pkl_path = f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}{PipelineConfig.dataframe_format}"
             if Path(pkl_path).exists():
                 logger.info(f"Loading existing {run_type} predictions from {pkl_path}")
-                with open(pkl_path, "rb") as file:
-                    pred = pickle.load(file)
+                # with open(pkl_path, "rb") as file:
+                #     pred = pickle.load(file)
+                pred = read_dataframe(pkl_path)
             else:
                 logger.info(f"No existing {run_type} predictions found. Generating new {run_type} predictions...")
                 model_config = ModelManager(model_path).configs
@@ -311,11 +312,12 @@ class EnsembleManager(ModelManager):
 
         ts = path_artifact.stem[-15:]
 
-        pkl_path = f"{path_generated}/predictions_{run_type}_{ts}.pkl"
+        pkl_path = f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig.dataframe_format}"
         if Path(pkl_path).exists():
             logger.info(f"Loading existing {run_type} predictions from {pkl_path}")
-            with open(pkl_path, "rb") as file:
-                df = pickle.load(file)
+            # with open(pkl_path, "rb") as file:
+            #     df = pickle.load(file)
+            df = read_dataframe(pkl_path)
         else:
             logger.info(f"No existing {run_type} predictions found. Generating new {run_type} predictions...")
             model_config = ModelManager(model_path).configs
