@@ -1,15 +1,9 @@
 import pytest
+import unittest
+import pickle
 from unittest.mock import patch, MagicMock, ANY, PropertyMock
 from views_pipeline_core.managers.ensemble_manager import EnsembleManager
-from views_pipeline_core.models.check import ensemble_model_check
-from views_pipeline_core.managers.path_manager import EnsemblePath, ModelPath
-from views_pipeline_core.managers.model_manager import ModelManager
-import logging
 import pandas as pd
-import os
-from types import SimpleNamespace
-import wandb
-from pathlib import Path
 import subprocess
 
 class MockArgs:
@@ -46,7 +40,7 @@ def mock_model_path():
                 train=True,  # Simulate training
                 evaluate=False,  # Simulate no evaluation
                 forecast=False,  # Simulate no forecasting
-                saved=True,  # Simulate using used_saved data
+                saved=False,  # Simulate using used_saved data
                 run_type="test",  # Example run type
                 eval_type="standard"  # Example eval type
             ),
@@ -54,7 +48,6 @@ def mock_model_path():
                 "/path/to/models/test_model/run.sh",
                 "--run_type", "test",
                 "--train",
-                "--saved",
                 "--eval_type", "standard"
             ],
             {"train": 1, "evaluate": 0, "forecast": 0}
@@ -548,7 +541,194 @@ class TestParametrized():
 
 
 
+    def test_evaluate_model_artifact(self, mock_model_path, args, expected_command, expected_methods_called):
+        # Mocking required methods and classes
+        with patch("views_pipeline_core.managers.model_manager.ModelManager._get_latest_model_artifact") as mock_get_latest_model_artifact, \
+            patch("views_pipeline_core.managers.ensemble_manager.ModelPath") as mock_model_path_class, \
+            patch("views_pipeline_core.managers.ensemble_manager.ModelManager") as mock_model_manager_class, \
+            patch("views_pipeline_core.managers.ensemble_manager.subprocess.run") as mock_subprocess_run, \
+            patch("views_pipeline_core.managers.ensemble_manager.logger") as mock_logger, \
+            patch("views_pipeline_core.managers.ensemble_manager.read_log_file") as mock_read_log_file, \
+            patch("views_pipeline_core.managers.ensemble_manager.create_log_file") as mock_create_log_file, \
+            patch("views_pipeline_core.managers.path_manager.ModelPath._build_absolute_directory") as mock_build_absolute_directory, \
+            patch("pathlib.Path.exists") as mock_path_exists, \
+            patch("builtins.open", unittest.mock.mock_open(read_data=pickle.dumps("mocked_prediction"))) as mock_file_open:
 
+
+            # Mock the ModelPath instance and its attributes
+            mock_model_path_instance = mock_model_path_class.return_value
+            #mock_model_path_instance.data_raw = "/mock/path/raw"
+            mock_model_path_instance.data_generated = "/mock/path/generated"
+            
+            # Mock the ModelManager instance and its configs
+            mock_model_manager_instance = mock_model_manager_class.return_value
+
+            mock_model_manager_instance.configs = {"model_name": "test_model", "run_type": "test_run"}
+
+            # Mock the read_log_file function to return a specific log data
+            mock_read_log_file.return_value = {"Data Fetch Timestamp": "2024-12-11T12:00:00"}
+
+            
+            mock_get_latest_model_artifact.return_value = MagicMock(stem="predictions_test_run_202401011200000")
+            
+            # Instantiate the manager and set up the config
+            manager = EnsembleManager(ensemble_path=mock_model_path_instance)
+            manager.config = {
+                "run_type": "test_run",
+                "models": ["test_model"],
+                "name": "test_ensemble",
+                "deployment_status": "test_status",
+                "aggregation": "mean",
+            }
+            #mock_path_exists.side_effect = lambda p: str(p) == f"<MagicMock name='ModelPath().data_generated' id='6344983952'>/predictions_test_run_<MagicMock name='_get_latest_model_artifact().stem.__getitem__()' id='6344929168'>_00.pkl"
+            # Call the method under test
+            result = manager._evaluate_model_artifact("test_model", "test_run", eval_type="standard")
+            mock_logger.info.assert_any_call("Evaluating single model test_model...")
+            mock_logger.info.assert_any_call("Loading existing test_run predictions from /mock/path/generated/predictions_test_run_202401011200000_00.pkl")
+            mock_file_open.assert_called_with(
+                "/mock/path/generated/predictions_test_run_202401011200000_00.pkl", "rb"
+            )
+            #self.assertEqual(result, ["mocked_prediction"])
+
+
+
+            mock_path_exists.return_value= False
+
+            # Generate the expected shell command
+            shell_command = EnsembleManager._get_shell_command(
+                mock_model_path_instance, 
+                "test_run", 
+                train=False, 
+                evaluate=True, 
+                forecast=False, 
+                use_saved=True,
+                eval_type="standard"
+            )
+            #mock_path_exists.side_effect = False  # Simulate missing file
+            result = manager._evaluate_model_artifact("test_model", "test_run", eval_type="standard")
+            mock_logger.info.assert_any_call("No existing test_run predictions found. Generating new test_run predictions...")
+
+            # Assert that subprocess.run is called once with the correct command
+            mock_subprocess_run.assert_called_once_with(
+                shell_command,  # This should now match the generated shell command
+                check=True
+            )
+
+            
+            
+            mock_subprocess_run.side_effect = subprocess.CalledProcessError(1, 'command')
+            mock_exception = subprocess.CalledProcessError(1, 'command')
+            manager._evaluate_model_artifact("test_model", "test_run", eval_type="standard")
+            expected_error_message = "Error during shell command execution for model test_model: " + str(mock_exception)
+            mock_logger.error.assert_called_with(expected_error_message)    
+
+            mock_file_open.assert_called_with(
+                "/mock/path/generated/predictions_test_run_202401011200000_00.pkl", "rb"
+            )
+
+            assert mock_file_open.call_count == 3
+            assert mock_create_log_file.call_count==2
+            assert mock_logger.error.call_count ==1
+            assert mock_read_log_file.call_count==2
+
+
+
+
+
+
+
+
+
+    def test_forecast_model_artifact(self, mock_model_path, args, expected_command, expected_methods_called):
+        # Mocking required methods and classes
+        with patch("views_pipeline_core.managers.model_manager.ModelManager._get_latest_model_artifact") as mock_get_latest_model_artifact, \
+            patch("views_pipeline_core.managers.ensemble_manager.ModelPath") as mock_model_path_class, \
+            patch("views_pipeline_core.managers.ensemble_manager.ModelManager") as mock_model_manager_class, \
+            patch("views_pipeline_core.managers.ensemble_manager.subprocess.run") as mock_subprocess_run, \
+            patch("views_pipeline_core.managers.ensemble_manager.logger") as mock_logger, \
+            patch("views_pipeline_core.managers.ensemble_manager.read_log_file") as mock_read_log_file, \
+            patch("views_pipeline_core.managers.ensemble_manager.create_log_file") as mock_create_log_file, \
+            patch("views_pipeline_core.managers.path_manager.ModelPath._build_absolute_directory") as mock_build_absolute_directory, \
+            patch("pathlib.Path.exists") as mock_path_exists, \
+            patch("builtins.open", unittest.mock.mock_open(read_data=pickle.dumps("mocked_prediction"))) as mock_file_open:
+
+
+            # Mock the ModelPath instance and its attributes
+            mock_model_path_instance = mock_model_path_class.return_value
+            #mock_model_path_instance.data_raw = "/mock/path/raw"
+            mock_model_path_instance.data_generated = "/mock/path/generated"
+            
+            # Mock the ModelManager instance and its configs
+            mock_model_manager_instance = mock_model_manager_class.return_value
+
+            mock_model_manager_instance.configs = {"model_name": "test_model", "run_type": "test_run"}
+
+            # Mock the read_log_file function to return a specific log data
+            mock_read_log_file.return_value = {"Data Fetch Timestamp": "2024-12-11T12:00:00"}
+
+            
+            mock_get_latest_model_artifact.return_value = MagicMock(stem="predictions_test_run_202401011200000")
+            
+            # Instantiate the manager and set up the config
+            manager = EnsembleManager(ensemble_path=mock_model_path_instance)
+            manager.config = {
+                "run_type": "test_run",
+                "models": ["test_model"],
+                "name": "test_ensemble",
+                "deployment_status": "test_status",
+                "aggregation": "mean",
+            }
+            #mock_path_exists.side_effect = lambda p: str(p) == f"<MagicMock name='ModelPath().data_generated' id='6344983952'>/predictions_test_run_<MagicMock name='_get_latest_model_artifact().stem.__getitem__()' id='6344929168'>_00.pkl"
+            # Call the method under test
+            result = manager._forecast_model_artifact("test_model", "test_run")
+            print(mock_logger.info.call_count)
+            mock_logger.info.assert_any_call("Forecasting single model test_model...")
+            mock_logger.info.assert_any_call("Loading existing test_run predictions from /mock/path/generated/predictions_test_run_202401011200000.pkl")
+            mock_file_open.assert_called_with(
+                "/mock/path/generated/predictions_test_run_202401011200000.pkl", "rb"
+            )
+            #self.assertEqual(result, ["mocked_prediction"])
+
+
+
+            mock_path_exists.return_value= False
+
+            # Generate the expected shell command
+            shell_command = EnsembleManager._get_shell_command(
+                mock_model_path_instance, 
+                "test_run", 
+                train=False, 
+                evaluate=False, 
+                forecast=True, 
+                use_saved=True,
+                eval_type="standard"
+            )
+            #mock_path_exists.side_effect = False  # Simulate missing file
+            result = manager._forecast_model_artifact("test_model", "test_run")
+            mock_logger.info.assert_any_call("No existing test_run predictions found. Generating new test_run predictions...")
+
+            # Assert that subprocess.run is called once with the correct command
+            mock_subprocess_run.assert_called_once_with(
+                shell_command,  # This should now match the generated shell command
+                check=True
+            )
+
+            
+            
+            mock_subprocess_run.side_effect = subprocess.CalledProcessError(1, 'command')
+            mock_exception = subprocess.CalledProcessError(1, 'command')
+            manager._evaluate_model_artifact("test_model", "test_run", eval_type="standard")
+            expected_error_message = "Error during shell command execution for model test_model: " + str(mock_exception)
+            mock_logger.error.assert_called_with(expected_error_message)    
+
+            mock_file_open.assert_called_with(
+                "/mock/path/generated/predictions_test_run_202401011200000_00.pkl", "rb"
+            )
+
+            assert mock_file_open.call_count == 3
+            assert mock_create_log_file.call_count==2
+            assert mock_logger.error.call_count ==1
+            assert mock_read_log_file.call_count==2
 
 
 
