@@ -33,6 +33,8 @@ class LoggingManager:
         self._logging_path = model_path.logging
         if not isinstance(self._logging_path, Path) and self._logging_is_active:
             raise ValueError("Logging path must be a valid Path object.")
+        else:
+            self._logging_path.mkdir(parents=True, exist_ok=True)
         self._logger = None
 
     def _setup_logging(self) -> logging.Logger:
@@ -83,9 +85,9 @@ class LoggingManager:
             dict: The logging configuration.
         """
         try:
-            with importlib.resources.open_text(
-                "views_pipeline_core.configs", "logging.yaml"
-            ) as file:
+            with importlib.resources.files("views_pipeline_core.configs").joinpath(
+                "logging.yaml"
+            ).open("r") as file:
                 config = yaml.safe_load(file)
             return config
         except FileNotFoundError:

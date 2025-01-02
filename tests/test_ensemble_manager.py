@@ -228,7 +228,6 @@ class TestParametrized():
 
 
 
-
     def test_execute_model_tasks(
         self,
         mock_ensemble_manager,
