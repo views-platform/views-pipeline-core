@@ -1,5 +1,8 @@
 from views_pipeline_core.managers.model import ModelPathManager, ModelManager
-from views_pipeline_core.wandb.utils import add_wandb_monthly_metrics, log_wandb_log_dict
+from views_pipeline_core.wandb.utils import (
+    add_wandb_monthly_metrics,
+    log_wandb_log_dict,
+)
 from views_pipeline_core.models.check import ensemble_model_check
 from views_pipeline_core.files.utils import read_log_file, create_log_file
 from views_pipeline_core.models.outputs import generate_output_dict
@@ -100,16 +103,17 @@ class EnsembleManager(ModelManager):
 
     def __init__(self, ensemble_path: EnsemblePathManager) -> None:
         super().__init__(ensemble_path)
-    
+
     @staticmethod
-    def _get_shell_command(model_path: ModelPathManager, 
-                           run_type: str, 
-                           train: bool, 
-                           evaluate: bool, 
-                           forecast: bool,
-                           use_saved: bool = False, 
-                           eval_type: str = "standard"
-                           ) -> list:
+    def _get_shell_command(
+        model_path: ModelPathManager,
+        run_type: str,
+        train: bool,
+        evaluate: bool,
+        forecast: bool,
+        use_saved: bool = False,
+        eval_type: str = "standard",
+    ) -> list:
         """
 
         Args:
@@ -121,7 +125,7 @@ class EnsembleManager(ModelManager):
             use_saved (bool): if the model should use locally stored data
 
         Returns:
-            
+
         """
 
         shell_command = [f"{str(model_path.model_dir)}/run.sh"]
@@ -141,7 +145,7 @@ class EnsembleManager(ModelManager):
         shell_command.append(eval_type)
 
         return shell_command
-    
+
     @staticmethod
     def _get_aggregated_df(df_to_aggregate, aggregation):
         """
@@ -161,7 +165,7 @@ class EnsembleManager(ModelManager):
             return pd.concat(df_to_aggregate).groupby(level=[0, 1]).median()
         else:
             raise ValueError(f"Invalid aggregation method: {aggregation}")
-    
+
     def execute_single_run(self, args) -> None:
         """
         Executes a single run of the model, including data fetching, training, evaluation, and forecasting.
@@ -178,13 +182,13 @@ class EnsembleManager(ModelManager):
                 ensemble_model_check(self.config)
 
             self._execute_model_tasks(
-                config=self.config, 
-                train=args.train, 
-                eval=args.evaluate, 
+                config=self.config,
+                train=args.train,
+                eval=args.evaluate,
                 forecast=args.forecast,
-                use_saved=args.saved
-                )
-                
+                use_saved=args.saved,
+            )
+
         except Exception as e:
             logger.error(f"Error during single run execution: {e}")
 
@@ -194,7 +198,7 @@ class EnsembleManager(ModelManager):
         train: Optional[bool] = None,
         eval: Optional[bool] = None,
         forecast: Optional[bool] = None,
-        use_saved: Optional[bool] = None
+        use_saved: Optional[bool] = None,
     ) -> None:
         """
         Executes various model-related tasks including training, evaluation, and forecasting.
@@ -210,7 +214,11 @@ class EnsembleManager(ModelManager):
             with wandb.init(project=self._project, entity=self._entity, config=config):
                 add_wandb_monthly_metrics()
                 self.config = wandb.config
-
+                self._wandb_alert(
+                    title="Running Ensemble",
+                    text=f"Ensemble Name: {str(self._config_meta['name'])}\nConstituent Models: {str(self._config_meta['models'])}",
+                    level=wandb.AlertLevel.INFO,
+                )
                 if train:
                     logger.info(f"Training model {self.config['name']}...")
                     self._train_ensemble(use_saved)
@@ -231,41 +239,51 @@ class EnsembleManager(ModelManager):
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
 
-    def _train_model_artifact(self, model_name:str, run_type: str, use_saved: bool) -> None:
+    def _train_model_artifact(
+        self, model_name: str, run_type: str, use_saved: bool
+    ) -> None:
         logger.info(f"Training single model {model_name}...")
-            
+
         model_path = ModelPathManager(model_name)
         model_config = ModelManager(model_path).configs
         model_config["run_type"] = run_type
 
-        shell_command = EnsembleManager._get_shell_command(model_path, 
-                                                           run_type, 
-                                                           train=True, 
-                                                           evaluate=False, 
-                                                           forecast=False, 
-                                                           use_saved=use_saved)
+        shell_command = EnsembleManager._get_shell_command(
+            model_path,
+            run_type,
+            train=True,
+            evaluate=False,
+            forecast=False,
+            use_saved=use_saved,
+        )
 
         # print(shell_command)
         try:
             subprocess.run(shell_command, check=True)
         except Exception as e:
-            logger.error(f"Error during shell command execution for model {model_name}: {e}")
-        
-    def _evaluate_model_artifact(self, model_name:str, run_type: str, eval_type: str) -> None:
+            logger.error(
+                f"Error during shell command execution for model {model_name}: {e}"
+            )
+
+    def _evaluate_model_artifact(
+        self, model_name: str, run_type: str, eval_type: str
+    ) -> None:
         logger.info(f"Evaluating single model {model_name}...")
 
-        model_path = ModelPathManager(model_name)    
+        model_path = ModelPathManager(model_name)
         path_raw = model_path.data_raw
         path_generated = model_path.data_generated
-        path_artifacts = model_path.artifacts
-        path_artifact = self._get_latest_model_artifact(path_artifacts, run_type)
+        # path_artifacts = model_path.artifacts
+        path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
 
         ts = path_artifact.stem[-15:]
 
         preds = []
 
-        for sequence_number in range(ModelManager._resolve_evaluation_sequence_number(eval_type)):
-        
+        for sequence_number in range(
+            ModelManager._resolve_evaluation_sequence_number(eval_type)
+        ):
+
             pkl_path = f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}{PipelineConfig.dataframe_format}"
             if Path(pkl_path).exists():
                 logger.info(f"Loading existing {run_type} predictions from {pkl_path}")
@@ -273,43 +291,57 @@ class EnsembleManager(ModelManager):
                 #     pred = pickle.load(file)
                 pred = read_dataframe(pkl_path)
             else:
-                logger.info(f"No existing {run_type} predictions found. Generating new {run_type} predictions...")
+                logger.info(
+                    f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
+                )
                 model_config = ModelManager(model_path).configs
                 model_config["run_type"] = run_type
-                shell_command = EnsembleManager._get_shell_command(model_path, 
-                                                                   run_type, 
-                                                                   train=False, 
-                                                                   evaluate=True, 
-                                                                   forecast=False,
-                                                                   use_saved=True,
-                                                                   eval_type=eval_type)
+                shell_command = EnsembleManager._get_shell_command(
+                    model_path,
+                    run_type,
+                    train=False,
+                    evaluate=True,
+                    forecast=False,
+                    use_saved=True,
+                    eval_type=eval_type,
+                )
 
                 try:
                     subprocess.run(shell_command, check=True)
                 except Exception as e:
-                    logger.error(f"Error during shell command execution for model {model_name}: {e}")
+                    logger.error(
+                        f"Error during shell command execution for model {model_name}: {e}"
+                    )
 
                 # with open(pkl_path, "rb") as file:
                 #     pred = pickle.load(file)
                 pred = read_dataframe(pkl_path)
 
                 data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                date_fetch_timestamp = read_log_file(path_raw / f"{run_type}_data_fetch_log.txt").get("Data Fetch Timestamp", None)
+                date_fetch_timestamp = read_log_file(
+                    path_raw / f"{run_type}_data_fetch_log.txt"
+                ).get("Data Fetch Timestamp", None)
 
-                create_log_file(path_generated, model_config, ts, data_generation_timestamp, date_fetch_timestamp)
+                create_log_file(
+                    path_generated,
+                    model_config,
+                    ts,
+                    data_generation_timestamp,
+                    date_fetch_timestamp,
+                )
 
             preds.append(pred)
 
         return preds
-    
-    def _forecast_model_artifact(self, model_name:str, run_type: str) -> None:
+
+    def _forecast_model_artifact(self, model_name: str, run_type: str) -> None:
         logger.info(f"Forecasting single model {model_name}...")
 
-        model_path = ModelPathManager(model_name)    
+        model_path = ModelPathManager(model_name)
         path_raw = model_path.data_raw
         path_generated = model_path.data_generated
-        path_artifacts = model_path.artifacts
-        path_artifact = self._get_latest_model_artifact(path_artifacts, run_type)
+        # path_artifacts = model_path.artifacts
+        path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
 
         ts = path_artifact.stem[-15:]
 
@@ -320,32 +352,46 @@ class EnsembleManager(ModelManager):
             #     df = pickle.load(file)
             df = read_dataframe(pkl_path)
         else:
-            logger.info(f"No existing {run_type} predictions found. Generating new {run_type} predictions...")
+            logger.info(
+                f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
+            )
             model_config = ModelManager(model_path).configs
             model_config["run_type"] = run_type
-            shell_command = EnsembleManager._get_shell_command(model_path, 
-                                                               run_type, 
-                                                               train=False, 
-                                                               evaluate=False, 
-                                                               forecast=True, 
-                                                               use_saved=True)
+            shell_command = EnsembleManager._get_shell_command(
+                model_path,
+                run_type,
+                train=False,
+                evaluate=False,
+                forecast=True,
+                use_saved=True,
+            )
             # print(shell_command)
             try:
                 subprocess.run(shell_command, check=True)
             except Exception as e:
-                logger.error(f"Error during shell command execution for model {model_name}: {e}")
+                logger.error(
+                    f"Error during shell command execution for model {model_name}: {e}"
+                )
 
             # with open(pkl_path, "rb") as file:
             #     df = pickle.load(file)
             df = read_dataframe(pkl_path)
 
             data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            date_fetch_timestamp = read_log_file(path_raw / f"{run_type}_data_fetch_log.txt").get("Data Fetch Timestamp", None)
-            
-            create_log_file(path_generated, model_config, ts, data_generation_timestamp, date_fetch_timestamp)
+            date_fetch_timestamp = read_log_file(
+                path_raw / f"{run_type}_data_fetch_log.txt"
+            ).get("Data Fetch Timestamp", None)
+
+            create_log_file(
+                path_generated,
+                model_config,
+                ts,
+                data_generation_timestamp,
+                date_fetch_timestamp,
+            )
 
         return df
-    
+
     def _train_ensemble(self, use_saved: bool) -> None:
         run_type = self.config["run_type"]
 
@@ -363,7 +409,9 @@ class EnsembleManager(ModelManager):
 
         for i in range(len(dfs[0])):
             df_to_aggregate = [df[i] for df in dfs]
-            df_agg = EnsembleManager._get_aggregated_df(df_to_aggregate, self.config["aggregation"])
+            df_agg = EnsembleManager._get_aggregated_df(
+                df_to_aggregate, self.config["aggregation"]
+            )
             dfs_agg.append(df_agg)
 
         data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -371,6 +419,11 @@ class EnsembleManager(ModelManager):
         # _, df_output = generate_output_dict(df_agg, self.config)
         # evaluation, df_evaluation = generate_metric_dict(df_agg, self.config)
         # log_wandb_log_dict(self.config, evaluation)
+        # self._wandb_alert(
+        #             title="Ensemble Evaluation Complete",
+        #             text=f"Ensemble Name: {str(self._config_meta['name'])}\nMetrics: {str(evaluation)}",
+        #             level=wandb.AlertLevel.INFO,
+        #         )
 
         # Timestamp of single models is more important than ensemble model timestamp
         self.config["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -379,9 +432,16 @@ class EnsembleManager(ModelManager):
             self._save_predictions(df_agg, path_generated_e, i)
 
         # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
-        create_log_file(path_generated_e, self.config, data_generation_timestamp, data_generation_timestamp, data_fetch_timestamp=None,
-                        model_type="ensemble", models=self.config["models"])
-           
+        create_log_file(
+            path_generated_e,
+            self.config,
+            data_generation_timestamp,
+            data_generation_timestamp,
+            data_fetch_timestamp=None,
+            model_type="ensemble",
+            models=self.config["models"],
+        )
+
     def _forecast_ensemble(self) -> None:
         path_generated_e = self._model_path.data_generated
         run_type = self.config["run_type"]
@@ -390,15 +450,22 @@ class EnsembleManager(ModelManager):
         for model_name in self.config["models"]:
 
             dfs.append(self._forecast_model_artifact(model_name, run_type))
-            
-        df_prediction = EnsembleManager._get_aggregated_df(dfs, self.config["aggregation"])
+
+        df_prediction = EnsembleManager._get_aggregated_df(
+            dfs, self.config["aggregation"]
+        )
         data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         self.config["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._save_predictions(df_prediction, path_generated_e)
 
         # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
-        create_log_file(path_generated_e, self.config, data_generation_timestamp, data_generation_timestamp, data_fetch_timestamp=None,
-                        model_type="ensemble", models=self.config["models"])
-
-    
+        create_log_file(
+            path_generated_e,
+            self.config,
+            data_generation_timestamp,
+            data_generation_timestamp,
+            data_fetch_timestamp=None,
+            model_type="ensemble",
+            models=self.config["models"],
+        )

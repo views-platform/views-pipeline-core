@@ -103,7 +103,7 @@ class TestParametrized():
             print(mock_update_single_config(args))
             return {
             "name": "test_model",
-            "parameter1": "value1"
+            "parameter1": "value1",
         }
 
     

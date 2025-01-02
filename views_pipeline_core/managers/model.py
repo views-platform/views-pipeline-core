@@ -1,24 +1,36 @@
 import sys
 from abc import abstractmethod
 import hashlib
-from views_pipeline_core.wandb.utils import add_wandb_monthly_metrics, generate_wandb_log_dict, log_wandb_log_dict
+from views_pipeline_core.wandb.utils import (
+    add_wandb_monthly_metrics,
+    generate_wandb_log_dict,
+    log_wandb_log_dict,
+)
 from typing import Union, Optional, List, Dict
 import logging
 import importlib
 import wandb
+
+# from wandb import AlertLevel
 import time
 import pandas as pd
 import numpy as np
 import re
 import pyprojroot
 from pathlib import Path
-from views_pipeline_core.files.utils import save_dataframe
+from views_pipeline_core.files.utils import (
+    save_dataframe,
+    create_log_file,
+    read_log_file,
+)
 from views_pipeline_core.configs.pipeline import PipelineConfig
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
 # ============================================================ Model Path Manager ============================================================
+
 
 class ModelPathManager:
     """
@@ -349,6 +361,69 @@ class ModelPathManager:
             logger.error(f"Error checking if input is a path: {e}")
             return False
 
+    def _get_artifact_files(self, run_type: str) -> List[Path]:
+        """
+        Retrieve artifact files from a directory that match the given run type and common extensions.
+
+        Args:
+            path_artifact (Path): The directory path where model files are stored.
+            run_type (str): The type of run (e.g., calibration, validation).
+
+        Returns:
+            List[Path]: List of matching model file paths.
+        """
+        common_extensions = [
+            ".pt",
+            ".pth",
+            ".h5",
+            ".hdf5",
+            ".pkl",
+            ".json",
+            ".bst",
+            ".txt",
+            ".bin",
+            ".cbm",
+            ".onnx",
+        ]
+        artifact_files = [
+            f
+            for f in self.artifacts.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"{run_type}_model_")
+            and f.suffix in common_extensions
+        ]
+        return artifact_files
+
+    def get_latest_model_artifact_path(self, run_type: str) -> Path:
+        """
+        Retrieve the path (pathlib path object) latest model artifact for a given run type based on the modification time.
+
+        Args:
+            path_artifact (Path): The model specific directory path where artifacts are stored.
+            run_type (str): The type of run (e.g., calibration, validation, forecasting).
+
+        Returns:
+            The path (pathlib path object) to the latest model artifact given the run type.
+
+        Raises:
+            FileNotFoundError: If no model artifacts are found for the given run type.
+        """
+        # List all model files for the given specific run_type with the expected filename pattern
+        model_files = self._get_artifact_files(run_type=run_type)
+
+        if not model_files:
+            raise FileNotFoundError(
+                f"No model artifacts found for run type '{run_type}' in path '{self.artifacts}'"
+            )
+
+        # Sort the files based on the timestamp embedded in the filename. With format %Y%m%d_%H%M%S For example, '20210831_123456.pt'
+        model_files.sort(reverse=True)
+
+        # Log the artifact used for debugging purposes
+        logger.info(f"Artifact used: {model_files[0]}")
+
+        return self.artifacts / model_files[0]
+
     def get_queryset(self) -> Optional[Dict[str, str]]:
         """
         Returns the queryset for the model if it exists.
@@ -559,7 +634,9 @@ class ModelManager:
         _data_loader (ViewsDataLoader): Data loader for fetching and preprocessing data.
     """
 
-    def __init__(self, model_path: ModelPathManager) -> None:
+    def __init__(
+        self, model_path: ModelPathManager, wandb_notifications: bool = True
+    ) -> None:
         """
         Initializes the ModelManager with the given model path.
 
@@ -583,8 +660,10 @@ class ModelManager:
         self.set_dataframe_format(format=".parquet")
         if self._model_path.target == "model":
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
+
             self._data_loader = ViewsDataLoader(model_path=self._model_path)
-        
+        self._wandb_notifications = wandb_notifications
+        # self._args = None
 
     def set_dataframe_format(self, format: str) -> None:
         """
@@ -611,14 +690,14 @@ class ModelManager:
         elif eval_type == "long":
             return 36
         elif eval_type == "complete":
-            return None # currently set as None because sophisticated calculation is needed
+            return None  # currently set as None because sophisticated calculation is needed
         elif eval_type == "live":
             return 12
         else:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
     @staticmethod
-    def _generate_model_file_name(run_type: str, timestamp: str, file_extension: str) -> str:
+    def _generate_model_file_name(run_type: str, file_extension: str) -> str:
         """
         Generates a model file name based on the run type, and timestamp.
 
@@ -630,16 +709,17 @@ class ModelManager:
         Returns:
             str: The generated model file name.
         """
-
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{run_type}_model_{timestamp}{file_extension}"
 
     @staticmethod
-    def _generate_output_file_name( 
-            generated_file_type: str, 
-            run_type: str, 
-            timestamp: str,
-            sequence_number: int,
-            file_extension: str) -> str:
+    def _generate_output_file_name(
+        generated_file_type: str,
+        run_type: str,
+        timestamp: str,
+        sequence_number: int,
+        file_extension: str,
+    ) -> str:
         """
         Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
 
@@ -726,70 +806,57 @@ class ModelManager:
         config["parameters"]["algorithm"] = {"value": self._config_meta["algorithm"]}
 
         return config
-    
-    def _get_artifact_files(self, path_artifact: Path, run_type: str) -> List[Path]:
+
+    def _wandb_alert(self, title: str, text: str, level: wandb.AlertLevel):
+        if self._wandb_notifications:
+            try:
+                wandb.alert(
+                    title=title,
+                    text=text,
+                    level=level,
+                )
+            except Exception as e:
+                logger.error(f"Error sending WandB alert: {e}")
+
+    def _save_model_artifact(self, run_type):
         """
-        Retrieve artifact files from a directory that match the given run type and common extensions.
+        Save the model artifact to Weights and Biases (WandB).
 
         Args:
-            path_artifact (Path): The directory path where model files are stored.
-            run_type (str): The type of run (e.g., calibration, validation).
-
-        Returns:
-            List[Path]: List of matching model file paths.
-        """
-        common_extensions = [
-            ".pt",
-            ".pth",
-            ".h5",
-            ".hdf5",
-            ".pkl",
-            ".json",
-            ".bst",
-            ".txt",
-            ".bin",
-            ".cbm",
-            ".onnx",
-        ]
-        artifact_files = [
-            f
-            for f in path_artifact.iterdir()
-            if f.is_file()
-            and f.stem.startswith(f"{run_type}_model_")
-            and f.suffix in common_extensions
-        ]
-        return artifact_files
-
-    def _get_latest_model_artifact(self, path_artifact: Path, run_type: str) -> Path:
-        """
-        Retrieve the path (pathlib path object) latest model artifact for a given run type based on the modification time.
-
-        Args:
-            path_artifact (Path): The model specifc directory path where artifacts are stored.
-            run_type (str): The type of run (e.g., calibration, validation, forecasting).
-
-        Returns:
-            The path (pathlib path objsect) to the latest model artifact given the run type.
+            run_type (str): The type of run for which the model artifact is being saved.
 
         Raises:
-            FileNotFoundError: If no model artifacts are found for the given run type.
+            Exception: If there is an error while saving the artifact to WandB.
+
+        Logs:
+            Info: When the artifact is successfully saved to WandB.
+            Error: When there is an error saving the artifact to WandB.
+
+        Alerts:
+            WandB Alert: Sends an alert to WandB if there is an error while saving the artifact.
         """
-
-        # List all model files for the given specific run_type with the expected filename pattern
-        model_files = self._get_artifact_files(path_artifact, run_type)
-
-        if not model_files:
-            raise FileNotFoundError(
-                f"No model artifacts found for run type '{run_type}' in path '{path_artifact}'"
+        # Save the artifact to WandB
+        try:
+            artifact = wandb.Artifact(
+                name=f"{run_type}_model_artifact",
+                type="model",
+                description=f"Latest {run_type} {self._model_path.target} artifact",
             )
-
-        # Sort the files based on the timestamp embedded in the filename. With format %Y%m%d_%H%M%S For example, '20210831_123456.pt'
-        model_files.sort(reverse=True)
-
-        # print statements for debugging
-        logger.info(f"artifact used: {model_files[0]}")
-
-        return path_artifact / model_files[0]
+            _latest_model_artifact_path = (
+                self._model_path.get_latest_model_artifact_path(run_type=run_type)
+            )
+            artifact.add_file()
+            wandb.run.log_artifact(artifact)
+            logger.info(
+                f"Artifact for run type: {run_type}, {_latest_model_artifact_path} saved to WandB successfully."
+            )
+        except Exception as e:
+            logger.error(f"Error saving artifact to WandB: {e}")
+            self._wandb_alert(
+                title="Artifact Saving Error",
+                text=f"An error occurred while saving the artifact {_latest_model_artifact_path} to WandB: {e}",
+                level=wandb.AlertLevel.ERROR,
+            )
 
     def _save_model_outputs(
         self,
@@ -799,7 +866,7 @@ class ModelManager:
         sequence_number: int,
     ) -> None:
         """
-        Save the model outputs and evaluation metrics to the specified path.
+        Save the model outputs and evaluation metrics to the specified path and log them to WandB.
 
         Args:
             df_evaluation (pd.DataFrame): DataFrame containing evaluation metrics.
@@ -811,35 +878,56 @@ class ModelManager:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
-            outputs_path = ModelManager._generate_output_file_name("output",
-                                                                   self.config["run_type"],
-                                                                   self.config["timestamp"],
-                                                                   sequence_number,
-                                                                   file_extension=PipelineConfig.dataframe_format)
-            evaluation_path = ModelManager._generate_output_file_name("evaluation",
-                                                                      self.config["run_type"],
-                                                                      self.config["timestamp"],
-                                                                      sequence_number,
-                                                                      file_extension=PipelineConfig.dataframe_format)
+            outputs_path = ModelManager._generate_output_file_name(
+                "output",
+                self.config["run_type"],
+                self.config["timestamp"],
+                sequence_number,
+                file_extension=PipelineConfig.dataframe_format,
+            )
+            evaluation_path = ModelManager._generate_output_file_name(
+                "evaluation",
+                self.config["run_type"],
+                self.config["timestamp"],
+                sequence_number,
+                file_extension=PipelineConfig.dataframe_format,
+            )
 
-            # df_output.to_pickle(path_generated/outputs_path)
-            save_dataframe(df_output, path_generated/outputs_path)
-            # df_output.to_csv(path_generated/(outputs_path.replace(".pkl", ".csv")))
+            save_dataframe(df_output, path_generated / outputs_path)
+            save_dataframe(df_evaluation, path_generated / evaluation_path)
 
-            # df_evaluation.to_pickle(path_generated/evaluation_path)
-            save_dataframe(df_evaluation, path_generated/evaluation_path)
-            # df_evaluation.to_csv(path_generated/(evaluation_path.replace(".pkl", ".csv")))
+            # Log outputs and evaluation metrics to WandB
+            wandb.save(str(path_generated / outputs_path))
+            wandb.save(str(path_generated / evaluation_path))
+
+            wandb.log(
+                {
+                    "evaluation_metrics": wandb.Table(dataframe=df_evaluation),
+                    "model_outputs": wandb.Table(dataframe=df_output),
+                }
+            )
+
+            self._wandb_alert(
+                title=f"{self._model_path.target.title} Outputs Saved",
+                text=f"{self._model_path.target.title} outputs and evaluation metrics for {self.config['name']} have been successfully saved and logged to WandB at {path_generated}.",
+                level=wandb.AlertLevel.INFO,
+            )
         except Exception as e:
             logger.error(f"Error saving model outputs: {e}")
+            self._wandb_alert(
+                title=f"{self._model_path.target.title} Outputs Saving Error",
+                text=f"An error occurred while saving and logging {self._model_path.target} outputs for {self.config['name']} at {path_generated}: {e}",
+                level=wandb.AlertLevel.ERROR,
+            )
 
     def _save_predictions(
-        self, 
-        df_predictions: pd.DataFrame, 
+        self,
+        df_predictions: pd.DataFrame,
         path_generated: Union[str, Path],
-        sequence_number: int = None
+        sequence_number: int = None,
     ) -> None:
         """
-        Save the model predictions to the specified path.
+        Save the model predictions to the specified path and log them to WandB.
 
         Args:
             df_predictions (pd.DataFrame): DataFrame containing model predictions.
@@ -850,18 +938,31 @@ class ModelManager:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
-            predictions_name = ModelManager._generate_output_file_name("predictions",
-                                                                       self.config["run_type"],
-                                                                       self.config["timestamp"],
-                                                                       sequence_number,
-                                                                       file_extension=PipelineConfig.dataframe_format)
-            # logger.info(f"{sequence_number}, Saving predictions to {path_generated/predictions_name}")
-            # df_predictions.to_pickle(path_generated/predictions_name)
-            save_dataframe(df_predictions, path_generated/predictions_name)
-            # For testing 
-            # df_predictions.to_csv(path_generated/(predictions_name.replace(".pkl", ".csv"))) 
+            predictions_name = ModelManager._generate_output_file_name(
+                "predictions",
+                self.config["run_type"],
+                self.config["timestamp"],
+                sequence_number,
+                file_extension=PipelineConfig.dataframe_format,
+            )
+            save_dataframe(df_predictions, path_generated / predictions_name)
+
+            # Log predictions to WandB
+            wandb.save(str(path_generated / predictions_name))
+            wandb.log({"predictions": wandb.Table(dataframe=df_predictions)})
+
+            self._wandb_alert(
+                title="Predictions Saved",
+                text=f"Predictions for {self.config['name']} have been successfully saved and logged to WandB at {path_generated.relative_to(self._model_path.root)}.",
+                level=wandb.AlertLevel.INFO,
+            )
         except Exception as e:
             logger.error(f"Error saving predictions: {e}")
+            self._wandb_alert(
+                title="Prediction Saving Error",
+                text=f"An error occurred while saving predictions for {self.config['name']} at {path_generated.relative_to(self._model_path.root)}: {e}",
+                level=wandb.AlertLevel.ERROR,
+            )
 
     def execute_single_run(self, args) -> None:
         """
@@ -873,6 +974,7 @@ class ModelManager:
         self.config = self._update_single_config(args)
         self._project = f"{self.config['name']}_{args.run_type}"
         self._eval_type = args.eval_type
+        # self._args = args
 
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
@@ -882,6 +984,11 @@ class ModelManager:
                     use_saved=args.saved,
                     validate=True,
                 )
+                self._wandb_alert(
+                    title="Queryset Fetch Complete",
+                    text=f"Queryset for {self._model_path.target} {self.config['name']} with depvar {self.config['depvar']} and LoA of {self.config['level']} downloaded successfully.",
+                    level=wandb.AlertLevel.INFO,
+                )
             wandb.finish()
 
             self._execute_model_tasks(
@@ -889,10 +996,17 @@ class ModelManager:
                 train=args.train,
                 eval=args.evaluate,
                 forecast=args.forecast,
-                artifact_name=args.artifact_name
+                artifact_name=args.artifact_name,
             )
         except Exception as e:
             logger.error(f"Error during single run execution: {e}")
+            self._wandb_alert(
+                title="Single Run Execution Error",
+                text=f"An error occurred during the execution of single run for {self.config['name']}: {e}",
+                level=wandb.AlertLevel.ERROR,
+            )
+        finally:
+            wandb.finish()
 
     def execute_sweep_run(self, args) -> None:
         """
@@ -904,6 +1018,7 @@ class ModelManager:
         self.config = self._update_sweep_config(args)
         self._project = f"{self.config['name']}_sweep"
         self._eval_type = args.eval_type
+        # self._args = args
 
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
@@ -921,6 +1036,11 @@ class ModelManager:
             wandb.agent(sweep_id, self._execute_model_tasks, entity=self._entity)
         except Exception as e:
             logger.error(f"Error during sweep run execution: {e}")
+            self._wandb_alert(
+                title="Sweep Run Execution Error",
+                text=f"An error occurred during the execution of sweep run for {self.config['name']}: {e}",
+                level=wandb.AlertLevel.ERROR,
+            )
 
     def _execute_model_tasks(
         self,
@@ -955,26 +1075,87 @@ class ModelManager:
                 if train:
                     logger.info(f"Training model {self.config['name']}...")
                     self._train_model_artifact()
+                    if not self.config["sweep"]:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        data_fetch_timestamp = read_log_file(
+                            self._model_path.data_raw
+                            / f"{self.config['run_type']}_data_fetch_log.txt"
+                        ).get("Data Fetch Timestamp", None)
+                        create_log_file(
+                            self._model_path.data_generated,
+                            self.config,
+                            timestamp,
+                            None,
+                            data_fetch_timestamp,
+                        )
+
+                    self._wandb_alert(
+                        title="Training Complete",
+                        text=f"Training for model {self.config['name']} completed successfully.",
+                        level=wandb.AlertLevel.INFO,
+                    )
 
                 if eval:
                     logger.info(f"Evaluating model {self.config['name']}...")
                     self._evaluate_model_artifact(self._eval_type, artifact_name)
+                    data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    data_fetch_timestamp = read_log_file(
+                        self._model_path.data_raw
+                        / f"{self.config['run_type']}_data_fetch_log.txt"
+                    ).get("Data Fetch Timestamp", None)
+                    create_log_file(
+                        self._model_path.data_generated,
+                        self.config,
+                        self.config["timestamp"],
+                        data_generation_timestamp,
+                        data_fetch_timestamp,
+                    )
+                    self._wandb_alert(
+                        title="Evaluation Complete",
+                        text=f"Evaluation for model {self.config['name']} completed successfully.",
+                        level=wandb.AlertLevel.INFO,
+                    )
 
                 if forecast:
                     logger.info(f"Forecasting model {self.config['name']}...")
                     self._forecast_model_artifact(artifact_name)
+                    data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    data_fetch_timestamp = read_log_file(
+                        self._model_path.data_raw
+                        / f"{self.config['run_type']}_data_fetch_log.txt"
+                    ).get("Data Fetch Timestamp", None)
+                    create_log_file(
+                        self._model_path.data_generated,
+                        self.config,
+                        self.config["timestamp"],
+                        data_generation_timestamp,
+                        data_fetch_timestamp,
+                    )
+                    self._wandb_alert(
+                        title="Forecasting Complete",
+                        text=f"Forecasting for model {self.config['name']} completed successfully.",
+                        level=wandb.AlertLevel.INFO,
+                    )
             wandb.finish()
         except Exception as e:
             logger.error(f"Error during model tasks execution: {e}")
+            self._wandb_alert(
+                title="Model Task Execution Error",
+                text=f"An error occurred during the execution of model tasks for {self.config['name']}: {e}",
+                level=wandb.AlertLevel.ERROR,
+            )
 
         end_t = time.time()
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
 
     @abstractmethod
-    def _train_model_artifact(self):
+    def _train_model_artifact(self) -> any:
         """
         Abstract method to train the model artifact. Must be implemented by subclasses.
+
+        Returns:
+            any: The trained machine learning model.
         """
         pass
 
@@ -1018,7 +1199,7 @@ class ModelManager:
         Returns:
             dict: The configuration object.
         """
-        
+
         config = {
             **self._config_hyperparameters,
             **self._config_meta,

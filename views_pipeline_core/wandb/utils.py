@@ -86,3 +86,13 @@ def log_wandb_log_dict(config, evaluation):
         step = f"step{str(t).zfill(2)}"
         log_dict = generate_wandb_log_dict(log_dict, evaluation, step)
         wandb.log(log_dict)
+        
+        # Send a Slack alert with the model evaluation metrics
+        # alert_message = f"Model evaluation metrics for step {step}:\n"
+        # for key, value in log_dict.items():
+        #     alert_message += f"{key}: {value}\n"
+        # wandb.alert(
+        #     title=f"Model Evaluation Metrics for {step}",
+        #     text=alert_message,
+        #     level=wandb.AlertLevel.INFO
+        # )

@@ -101,6 +101,23 @@ def create_log_file(path_generated,
                     data_fetch_timestamp,
                     model_type="single",
                     models=None):
+    """
+    Creates a log file for the given model configuration and timestamps.
+    Parameters:
+    path_generated (str): The path where the log file will be generated.
+    model_config (dict): Configuration dictionary for the model containing keys:
+        - "run_type" (str): The type of run (e.g., "calibration", "evaluation").
+        - "name" (str): The name of the model.
+        - "deployment_status" (str): The deployment status of the model.
+    model_timestamp (str): Timestamp for the model.
+    data_generation_timestamp (str): Timestamp for data generation.
+    data_fetch_timestamp (str): Timestamp for data fetching.
+    model_type (str, optional): The type of model, default is "single".
+    models (list, optional): List of model names for which logs should be created, default is None.
+    
+    Returns:
+    None
+    """
     
     run_type = model_config["run_type"]
     model_name = model_config["name"]
@@ -154,7 +171,7 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
         elif file_extension == ".pkl":
             dataframe.to_pickle(save_path)
         else:
-            raise ValueError("The file extension must be provided. E.g. .parquet")
+            raise ValueError(f"{FILE_EXTENSION_ERROR_MESSAGE}")
     except Exception as e:
         logger.exception(f"Error saving the DataFrame to {save_path}: {e}")
         raise
