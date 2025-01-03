@@ -1,7 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
 from views_pipeline_core.managers.model import ModelManager
-from views_pipeline_core.data.dataloaders import ViewsDataLoader
 from views_pipeline_core.managers.model import ModelManager
 import wandb
 import pandas as pd
@@ -61,6 +60,34 @@ def mock_wandb():
     """
     with patch("wandb.init"), patch("wandb.finish"), patch("wandb.sweep"), patch("wandb.agent"):
         yield
+
+def test_wandb_alert(mock_model_path):
+    """
+    Test the _wandb_alert method of the ModelManager class.
+    
+    Args:
+        mock_model_path (MagicMock): The mock object for ModelPath.
+    
+    Asserts:
+        - The wandb alert is called with the correct parameters.
+    """
+    mock_model_instance = mock_model_path.return_value
+    mock_config_deployment_content = """
+def get_deployment_config():
+    deployment_config = {'deployment_status': 'shadow'}
+    return deployment_config
+"""
+    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
+        mock_spec.return_value.loader = MagicMock()
+        mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
+        mock_module.return_value.get_hp_config.return_value = {"hp_key": "hp_value"}
+        mock_module.return_value.get_meta_config.return_value = {"meta_key": "meta_value"}
+        mock_model_instance = mock_model_path.return_value
+        manager = ModelManager(mock_model_instance, wandb_notifications=True)
+        with patch("wandb.alert") as mock_alert:
+            with patch("wandb.run"):
+                manager._wandb_alert(title="Test Alert", text="This is a test alert", level="info")
+                mock_alert.assert_called_once_with(title="Test Alert", text="This is a test alert", level="info")
 
 def test_model_manager_init(mock_model_path):
     """
