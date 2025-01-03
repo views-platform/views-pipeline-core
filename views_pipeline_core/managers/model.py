@@ -1,30 +1,32 @@
 import sys
+import requests
+import time
+import re
+import pyprojroot
+from typing import Union, Optional, List, Dict
+import logging
+import importlib
 from abc import abstractmethod
 import hashlib
+from datetime import datetime
+import wandb
+import pandas as pd
+import numpy as np
+from pathlib import Path
 from views_pipeline_core.wandb.utils import (
     add_wandb_monthly_metrics,
     generate_wandb_log_dict,
     log_wandb_log_dict,
 )
-from typing import Union, Optional, List, Dict
-import logging
-import importlib
-import wandb
-
-# from wandb import AlertLevel
-import time
-import pandas as pd
-import numpy as np
-import re
-import pyprojroot
-from pathlib import Path
 from views_pipeline_core.files.utils import (
     save_dataframe,
     create_log_file,
     read_log_file,
 )
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from datetime import datetime
+from views_forecasts.extensions import *
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -635,7 +637,7 @@ class ModelManager:
     """
 
     def __init__(
-        self, model_path: ModelPathManager, wandb_notifications: bool = True
+        self, model_path: ModelPathManager, wandb_notifications: bool = False
     ) -> None:
         """
         Initializes the ModelManager with the given model path.
@@ -644,6 +646,8 @@ class ModelManager:
             model_path (ModelPathManager): The path manager for the model.
         """
         self._entity = "views_pipeline"
+        self._owner = "views-platform"
+        self._model_repo = "views-models"
         self._model_path = model_path
         self._script_paths = self._model_path.get_scripts()
         self._config_deployment = self.__load_config(
@@ -658,10 +662,11 @@ class ModelManager:
                 "config_sweep.py", "get_sweep_config"
             )
         self.set_dataframe_format(format=".parquet")
+        self._pred_store_name = self.__get_pred_store_name()
         if self._model_path.target == "model":
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
-            self._data_loader = ViewsDataLoader(model_path=self._model_path)
+            self._data_loader = ViewsDataLoader(model_path=self._model_path, pred_store_name=self._pred_store_name)
         self._wandb_notifications = wandb_notifications
         # self._args = None
 
@@ -697,7 +702,7 @@ class ModelManager:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
     @staticmethod
-    def _generate_model_file_name(run_type: str, file_extension: str) -> str:
+    def _generate_model_file_name(run_type: str, timestamp:str, file_extension: str) -> str:
         """
         Generates a model file name based on the run type, and timestamp.
 
@@ -709,7 +714,6 @@ class ModelManager:
         Returns:
             str: The generated model file name.
         """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{run_type}_model_{timestamp}{file_extension}"
 
     @staticmethod
@@ -738,6 +742,56 @@ class ModelManager:
             return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}{file_extension}"
         else:
             return f"{generated_file_type}_{run_type}_{timestamp}{file_extension}"
+    
+    @staticmethod
+    def _get_latest_release_version(owner: str, repo: str) -> str:
+        """
+        Get the latest release version from the GitHub repository.
+
+        Args:
+            owner (str): The owner of the GitHub repository.
+            repo (str): The name of the GitHub repository
+
+        Returns:
+            str: The latest release version.
+        """
+        try:
+            response = requests.get(
+                f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+            )
+            response.raise_for_status()  # Raise an error for bad HTTP status codes
+            logger.debug(f"Latest release version: {response.json()['name']}")
+            return response.json()["name"]
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error getting the latest release version: {e}")
+            raise RuntimeError(f"Error getting the latest release version: {e}")
+    
+    def __get_pred_store_name(self) -> str:
+        """
+        Get the prediction store name based on the release version and date.
+        The agreed format is 'v{major}{minor}{patch}_{year}_{month}'.
+
+        Returns:
+            str: The prediction store name.
+        """
+        version = ModelManager._get_latest_release_version(self._owner, self._model_repo)
+        current_date = datetime.now()
+        year = current_date.year
+        month = str(current_date.month).zfill(2)
+
+        pred_store_name = ("v" + 
+                           "".join(part.zfill(2) for part in version.split(".")) +
+                           f"_{year}_{month}")
+        
+        if pred_store_name not in ViewsMetadata().get_runs().name.tolist():
+            logger.warning(f"Run {pred_store_name} not found in the database. Creating a new run.")
+            ViewsMetadata().new_run(name=pred_store_name,
+                                    description=f"Development runs for views-models with version {version} in {year}_{month}",
+                                    max_month=999,
+                                    min_month=1)
+        
+        return pred_store_name
+
 
     def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
         """
@@ -946,6 +1000,10 @@ class ModelManager:
                 file_extension=PipelineConfig.dataframe_format,
             )
             save_dataframe(df_predictions, path_generated / predictions_name)
+
+            # Save to prediction store
+            df_predictions.forecasts.set_run(self._pred_store_name)
+            df_predictions.forecasts.to_store(name=predictions_name.split(".")[0]) # remove extension
 
             # Log predictions to WandB
             wandb.save(str(path_generated / predictions_name))
