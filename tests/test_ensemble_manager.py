@@ -20,21 +20,12 @@ class MockArgs:
         self.run_type = run_type
         self.eval_type = eval_type
 
+
 @pytest.fixture
 def mock_model_path():
     mock_path = MagicMock()
     mock_path.model_dir = "/path/to/models/test_model"
     return mock_path
-
-
-
-
-
-
-
-
-
-
 
 
 @pytest.mark.parametrize(
@@ -47,16 +38,18 @@ def mock_model_path():
                 forecast=False,  # Simulate no forecasting
                 saved=True,  # Simulate using used_saved data
                 run_type="test",  # Example run type
-                eval_type="standard"  # Example eval type
+                eval_type="standard",  # Example eval type
             ),
             [
                 "/path/to/models/test_model/run.sh",
-                "--run_type", "test",
+                "--run_type",
+                "test",
                 "--train",
                 "--saved",
-                "--eval_type", "standard"
+                "--eval_type",
+                "standard",
             ],
-            {"train": 1, "evaluate": 0, "forecast": 0}
+            {"train": 1, "evaluate": 0, "forecast": 0},
         ),
         (
             MockArgs(
@@ -65,16 +58,18 @@ def mock_model_path():
                 forecast=True,  # Simulate forecasting
                 saved=False,  # Simulate not using used_saved data
                 run_type="forecast",  # Example run type
-                eval_type="detailed"  # Example eval type
+                eval_type="detailed",  # Example eval type
             ),
             [
                 "/path/to/models/test_model/run.sh",
-                "--run_type", "forecast",
+                "--run_type",
+                "forecast",
                 "--evaluate",
                 "--forecast",
-                "--eval_type", "detailed"
+                "--eval_type",
+                "detailed",
             ],
-            {"train": 0, "evaluate": 1, "forecast": 1}
+            {"train": 0, "evaluate": 1, "forecast": 1},
         ),
         (
             MockArgs(
@@ -83,30 +78,32 @@ def mock_model_path():
                 forecast=False,  # Simulate no forecasting
                 saved=False,  # Simulate not using saved data
                 run_type="calibration",  # Example run type
-                eval_type="minimal"  # Example eval type
+                eval_type="minimal",  # Example eval type
             ),
             [
                 "/path/to/models/test_model/run.sh",
-                "--run_type", "calibration",
-                "--eval_type", "minimal"
+                "--run_type",
+                "calibration",
+                "--eval_type",
+                "minimal",
             ],
-            {"train": 0, "evaluate": 0, "forecast": 0}
-        )
-    ]
+            {"train": 0, "evaluate": 0, "forecast": 0},
+        ),
+    ],
 )
-class TestParametrized():
-
+class TestParametrized:
 
     @pytest.fixture
     def mock_config(self, args):
-        with patch("views_pipeline_core.managers.model.ModelManager._update_single_config") as mock_update_single_config:
+        with patch(
+            "views_pipeline_core.managers.model.ModelManager._update_single_config"
+        ) as mock_update_single_config:
             print(mock_update_single_config(args))
             return {
-            "name": "test_model",
-            "parameter1": "value1",
-        }
+                "name": "test_model",
+                "parameter1": "value1",
+            }
 
-    
     @pytest.fixture
     def mock_ensemble_manager(self, mock_model_path, args):
         manager = EnsembleManager(ensemble_path=mock_model_path)
@@ -118,38 +115,30 @@ class TestParametrized():
         manager._evaluate_ensemble = MagicMock()
         manager._forecast_ensemble = MagicMock()
         manager._eval_type = args.eval_type
-        with patch("views_pipeline_core.managers.model.ModelManager._update_single_config") as mock_update_single_config:
+        with patch(
+            "views_pipeline_core.managers.model.ModelManager._update_single_config"
+        ) as mock_update_single_config:
             manager.config = mock_update_single_config(args)
         manager.config = {"name": "test_model"}
         return manager
 
-
-
-
-
-    def test_get_shell_command(self, mock_model_path, args, expected_command, expected_methods_called): # all arguments are necessary
+    def test_get_shell_command(
+        self, mock_model_path, args, expected_command, expected_methods_called
+    ):  # all arguments are necessary
         """
         Test the _get_shell_command method with various input combinations to ensure it generates the correct shell command.
         """
         # Directly use mock_args since it's already a SimpleNamespace object
         command = EnsembleManager._get_shell_command(
-            mock_model_path, 
-            args.run_type, 
-            args.train, 
-            args.evaluate, 
-            args.forecast, 
-            args.use_saved, 
-            args.eval_type
+            mock_model_path,
+            args.run_type,
+            args.train,
+            args.evaluate,
+            args.forecast,
+            args.use_saved,
+            args.eval_type,
         )
         assert command == expected_command
-
-
-
-
-
-
-
-
 
     # @patch.object(EnsembleManager, '_train_model_artifact')
     # def test_train_ensemble(self, mock_train_model_artifact, args, expected_command):
@@ -171,10 +160,9 @@ class TestParametrized():
     #     mock_train_model_artifact.assert_any_call("model2", "test_run_type", use_saved)
     #     assert mock_train_model_artifact.call_count == 2
 
-
-    @patch('views_pipeline_core.managers.ensemble.EnsembleManager._execute_model_tasks')
-    @patch('views_pipeline_core.managers.model.ModelManager._update_single_config')
-    @patch('views_pipeline_core.models.check.ensemble_model_check')
+    @patch("views_pipeline_core.managers.ensemble.EnsembleManager._execute_model_tasks")
+    @patch("views_pipeline_core.managers.model.ModelManager._update_single_config")
+    @patch("views_pipeline_core.models.check.ensemble_model_check")
     def test_execute_single_run(
         self,
         mock_ensemble_model_check,
@@ -182,18 +170,19 @@ class TestParametrized():
         mock_execute_model_tasks,
         mock_model_path,
         args,
-        expected_command, # it is necessary to be here
-        expected_methods_called # it is necessary to be here
+        expected_command,  # it is necessary to be here
+        expected_methods_called,  # it is necessary to be here
     ):
-        
+
         manager = EnsembleManager(ensemble_path=mock_model_path)
         manager.config = mock_update_single_config(args)
-        mock_update_single_config.return_value = {"name": "test_model", "run_type": args.run_type}
-
+        mock_update_single_config.return_value = {
+            "name": "test_model",
+            "run_type": args.run_type,
+        }
 
         manager.execute_single_run(args)
-         
-                 
+
         assert manager._project == f"{manager.config['name']}_{args.run_type}"
         assert manager._eval_type == args.eval_type
 
@@ -204,29 +193,22 @@ class TestParametrized():
             mock_ensemble_model_check.assert_not_called()
 
         mock_execute_model_tasks(
-            config=manager.config, 
-            train=args.train, 
-            eval=args.evaluate, 
-            forecast=args.forecast, 
-            use_saved=args.use_saved
+            config=manager.config,
+            train=args.train,
+            eval=args.evaluate,
+            forecast=args.forecast,
+            use_saved=args.use_saved,
         )
         mock_execute_model_tasks.assert_called_once_with(
-            config=manager.config, 
-            train=args.train, 
-            eval=args.evaluate, 
-            forecast=args.forecast, 
-            use_saved=args.use_saved
+            config=manager.config,
+            train=args.train,
+            eval=args.evaluate,
+            forecast=args.forecast,
+            use_saved=args.use_saved,
         )
-        
+
         mock_execute_model_tasks.reset_mock()
         mock_execute_model_tasks.side_effect = Exception("Test exception")
-
-      
-
-
-
-
-
 
     def test_execute_model_tasks(
         self,
@@ -234,47 +216,49 @@ class TestParametrized():
         mock_config,
         args,
         expected_command,
-        expected_methods_called
+        expected_methods_called,
     ):
-        
-        with patch("wandb.init") as mock_init, \
-             patch('wandb.define_metric') as mock_define_metric, \
-             patch("wandb.config") as mock_config:
-            
+
+        with patch("wandb.init") as mock_init, patch(
+            "wandb.define_metric"
+        ) as mock_define_metric, patch("wandb.config") as mock_config:
+
             mock_config.name = "test_model"
             mock_ensemble_manager._execute_model_tasks(
                 config=mock_config,
                 train=args.train,
                 eval=args.evaluate,
                 forecast=args.forecast,
-                use_saved=args.use_saved
+                use_saved=args.use_saved,
             )
-        
+
             print(expected_methods_called["evaluate"])
             print(mock_ensemble_manager._evaluate_ensemble.call_count)
 
-
-            assert mock_ensemble_manager._train_ensemble.call_count == expected_methods_called["train"]
-            assert mock_ensemble_manager._evaluate_ensemble.call_count == expected_methods_called["evaluate"]
-            assert mock_ensemble_manager._forecast_ensemble.call_count == expected_methods_called["forecast"]
-
+            assert (
+                mock_ensemble_manager._train_ensemble.call_count
+                == expected_methods_called["train"]
+            )
+            assert (
+                mock_ensemble_manager._evaluate_ensemble.call_count
+                == expected_methods_called["evaluate"]
+            )
+            assert (
+                mock_ensemble_manager._forecast_ensemble.call_count
+                == expected_methods_called["forecast"]
+            )
 
             mock_init.assert_called_once()
             mock_define_metric.assert_called()
 
-
-
-
-
-
     # def test_train_model_artifact(
-    #         self, 
+    #         self,
     #         args,
     #         expected_command,
     #         expected_methods_called,
-    #         model_name, 
-    #         run_type, 
-    #         use_saved, 
+    #         model_name,
+    #         run_type,
+    #         use_saved,
     #         expected_shell_command
     #     ):
     #         # Mocking necessary components
@@ -301,28 +285,32 @@ class TestParametrized():
 
     #             # Check that _get_shell_command was called with the correct parameters
     #             mock_get_shell_command.assert_called_once_with(
-    #                 mock_model_path_instance, 
-    #                 run_type, 
-    #                 train=True, 
-    #                 evaluate=False, 
-    #                 forecast=False, 
+    #                 mock_model_path_instance,
+    #                 run_type,
+    #                 train=True,
+    #                 evaluate=False,
+    #                 forecast=False,
     #                 use_saved=use_saved
     #             )
 
     #             # Check that subprocess.run was called with the expected shell command
     #             mock_subprocess_run.assert_called_once_with(expected_shell_command, check=True)
 
-
-    def test_train_ensemble(self, mock_model_path, args, 
-        expected_command,
-        expected_methods_called):
+    def test_train_ensemble(
+        self, mock_model_path, args, expected_command, expected_methods_called
+    ):
         # Create a mock for the ensemble manager
-        with patch("views_pipeline_core.managers.ensemble.EnsembleManager._train_model_artifact") as mock_train_model_artifact:
+        with patch(
+            "views_pipeline_core.managers.ensemble.EnsembleManager._train_model_artifact"
+        ) as mock_train_model_artifact:
             print("Mocking works:", mock_train_model_artifact)
             manager = EnsembleManager(ensemble_path=mock_model_path)
             manager.config = {
                 "run_type": "test_run",
-                "models": ["/path/to/models/test_model1", "/path/to/models/test_model2"]
+                "models": [
+                    "/path/to/models/test_model1",
+                    "/path/to/models/test_model2",
+                ],
             }
             print(manager.config)
             print("args.use_saved in test:", args.use_saved)
@@ -335,21 +323,11 @@ class TestParametrized():
             assert mock_train_model_artifact.call_count == len(manager.config["models"])
 
             # If there were models, assert that it was called with the expected parameters
-            
+
             for model_name in manager.config["models"]:
-                    mock_train_model_artifact.assert_any_call(model_name, "test_run", args.use_saved)
-
-
-
-
-
-
-
-
-        
-
-
-
+                mock_train_model_artifact.assert_any_call(
+                    model_name, "test_run", args.use_saved
+                )
 
 
 @pytest.fixture
@@ -357,9 +335,14 @@ def sample_data():
     """
     Fixture to provide common sample data for the aggregation tests.
     """
-    df1 = pd.DataFrame({"A": [1, 2], "B": [3, 4]}, index=pd.MultiIndex.from_tuples([(0, 0), (0, 1)]))
-    df2 = pd.DataFrame({"A": [5, 6], "B": [7, 8]}, index=pd.MultiIndex.from_tuples([(0, 0), (0, 1)]))
+    df1 = pd.DataFrame(
+        {"A": [1, 2], "B": [3, 4]}, index=pd.MultiIndex.from_tuples([(0, 0), (0, 1)])
+    )
+    df2 = pd.DataFrame(
+        {"A": [5, 6], "B": [7, 8]}, index=pd.MultiIndex.from_tuples([(0, 0), (0, 1)])
+    )
     return [df1, df2]
+
 
 def test_get_aggregated_df_mean(sample_data):
     """
@@ -368,9 +351,13 @@ def test_get_aggregated_df_mean(sample_data):
     df_to_aggregate = sample_data
 
     result = EnsembleManager._get_aggregated_df(df_to_aggregate, "mean")
-    expected = pd.DataFrame({"A": [3.0, 4.0], "B": [5.0, 6.0]}, index=pd.MultiIndex.from_tuples([(0, 0), (0, 1)]))
-    
+    expected = pd.DataFrame(
+        {"A": [3.0, 4.0], "B": [5.0, 6.0]},
+        index=pd.MultiIndex.from_tuples([(0, 0), (0, 1)]),
+    )
+
     pd.testing.assert_frame_equal(result, expected, check_like=True)
+
 
 def test_get_aggregated_df_median(sample_data):
     """
@@ -379,19 +366,25 @@ def test_get_aggregated_df_median(sample_data):
     df_to_aggregate = sample_data
 
     result = EnsembleManager._get_aggregated_df(df_to_aggregate, "median")
-    expected = pd.DataFrame({"A": [3.0, 4.0], "B": [5.0, 6.0]}, index=pd.MultiIndex.from_tuples([(0, 0), (0, 1)]))
-    
+    expected = pd.DataFrame(
+        {"A": [3.0, 4.0], "B": [5.0, 6.0]},
+        index=pd.MultiIndex.from_tuples([(0, 0), (0, 1)]),
+    )
+
     pd.testing.assert_frame_equal(result, expected, check_like=True)
+
 
 def test_get_aggregated_df_invalid_aggregation(sample_data):
     """
     Test the _get_aggregated_df method for invalid aggregation method.
     """
-   
-    with pytest.raises(ValueError, match="Invalid aggregation method: invalid_aggregation"):
+
+    with pytest.raises(
+        ValueError, match="Invalid aggregation method: invalid_aggregation"
+    ):
         EnsembleManager._get_aggregated_df(sample_data, "invalid_aggregation")
 
-        
+
 # # @patch.object(EnsembleManager, '_execute_model_tasks')
 # # @patch.object(ModelManager, '_update_single_config')
 # # def test_execute_single_run(mock_update_single_config, mock_execute_model_tasks, ensemble_manager):
@@ -407,14 +400,6 @@ def test_get_aggregated_df_invalid_aggregation(sample_data):
 
 # #     mock_update_single_config.assert_called_once_with(args)
 # #     mock_execute_model_tasks.assert_called_once()
-
-
-
-
-
-
-
-
 
 
 # @patch('views_pipeline_core.managers.ensemble_manager.EnsembleManager._execute_model_tasks')
@@ -474,12 +459,6 @@ def test_get_aggregated_df_invalid_aggregation(sample_data):
 
 #     # Verify error logging
 #     mock_logger.error.assert_called_once_with("Error during single run execution: Test error")
-
-
-
-
-
-
 
 
 # @patch.object(EnsembleManager, '_execute_model_tasks')

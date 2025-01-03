@@ -808,15 +808,19 @@ class ModelManager:
         return config
 
     def _wandb_alert(self, title: str, text: str, level: wandb.AlertLevel):
-        if self._wandb_notifications:
+        if self._wandb_notifications and wandb.run:
             try:
                 wandb.alert(
                     title=title,
                     text=text,
                     level=level,
                 )
+            except wandb.errors.CommError as e:
+                logger.error(f"Communication error sending WandB alert: {e}")
+            except wandb.errors.UsageError as e:
+                logger.error(f"Usage error sending WandB alert: {e}")
             except Exception as e:
-                logger.error(f"Error sending WandB alert: {e}")
+                logger.error(f"Unexpected error sending WandB alert: {e}")
 
     def _save_model_artifact(self, run_type):
         """
