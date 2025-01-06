@@ -18,15 +18,34 @@ class PackageManager:
 
     def __init__(self, package_path: Union[str, Path], validate: bool = True):
         """
-        TODO
+        Initialize the PackageManager.
+
+        Args:
+            package_path (Union[str, Path]): The path to the package or the package name.
+            validate (bool, optional): Whether to validate the package path or name. Defaults to True.
+
+        Raises:
+            FileNotFoundError: If the package path is not found and validation is enabled.
+            ValueError: If the package name is invalid.
+
+        Attributes:
+            _validate (bool): Whether to validate the package path or name.
+            package_name (str): The name of the package.
+            package_path (Path): The path to the package.
+            manager (Path or None): The path to the package manager directory, or None if not found.
+            _init_with_path (bool): Whether the initialization was done with a package path.
+            latest_version (str): The latest release version of the package from GitHub (if initialized with package name).
         """
         self._validate = validate
         if ModelPathManager._is_path(path_input=package_path, validate=self._validate):
             if self._validate:
                 if not Path(package_path).is_dir():
                     raise FileNotFoundError(f"Package path not found: {package_path}")
-            self.package_name = PackageManager._find_package_name(package_path)
+            self.package_name = PackageManager.get_package_name_from_path(package_path)
             self.package_path = Path(package_path)
+            self.manager = self.package_path / self.package_name / "manager"
+            if not self.manager.exists() and self._validate:
+                self.manager = None
             print("Initialized package manager with package path.")
             self._init_with_path = True
         else:
@@ -38,18 +57,21 @@ class PackageManager:
             )
             print("Initialized package manager with package name.")
             self._init_with_path = False
-        # self.package_version = package_version
-        # self.description = description
-        # self.author = author
 
     def _ensure_init_with_package_path(self):
+        """
+        Ensures that the PackageManager is initialized with a valid package path.
+
+        Raises:
+            RuntimeError: If the PackageManager is not initialized with a valid package path.
+        """
         if not self._init_with_path:
             raise RuntimeError(
                 "Cannot execute this method without a valid package path. Initialize PackageManager with a valid path instead of a package name."
             )
 
     @staticmethod
-    def _find_package_name(path: Union[str, Path]) -> str:
+    def get_package_name_from_path(path: Union[str, Path]) -> str:
         """
         Find the package name from the given path.
 
@@ -68,6 +90,19 @@ class PackageManager:
     def get_latest_release_version_from_github(
         repository_name: str, organization_name: str = "views-platform"
     ) -> str:
+        """
+    Fetches the latest release version of a given repository from GitHub.
+
+    Args:
+        repository_name (str): The name of the repository.
+        organization_name (str, optional): The name of the organization. Defaults to "views-platform".
+
+    Returns:
+        str: The tag name of the latest release if found, otherwise None.
+
+    Raises:
+        requests.exceptions.RequestException: If an error occurs while making the request to GitHub.
+    """
         # Define the GitHub URL for the package
         github_url = f"""https://api.github.com/repos/{organization_name}/{repository_name}/releases/latest"""
         # Get the latest release information from GitHub
@@ -109,12 +144,11 @@ class PackageManager:
             return True
         return False
 
-    def create_views_package(self, description: str, author_name: str):
+    def create_views_package(self):
         """
         Create a new Poetry package with the specified details.
         """
         self._ensure_init_with_package_path()
-        _package_version = "0.1.0"
         try:
             # Create the package directory
             os.makedirs(self.package_path.parent, exist_ok=True)
@@ -130,24 +164,6 @@ class PackageManager:
                 subprocess.run(["pip", "install", "poetry"], check=True)
                 subprocess.run(["poetry", "--version"], capture_output=True, check=True)
 
-            # Initialize the Poetry package
-            # result = subprocess.run(
-            #     [
-            #         "poetry",
-            #         "init",
-            #         "--name",
-            #         self.package_name,
-            #         "--version",
-            #         _package_version,
-            #         "--description",
-            #         description,
-            #         "--author",
-            #         author_name,
-            #         "--no-interaction",
-            #     ],
-            #     capture_output=True,
-            #     text=True,
-            # )
             result = subprocess.run(
                 [
                     "poetry",
@@ -159,10 +175,17 @@ class PackageManager:
                 capture_output=True,
                 text=True,
             )
-            self.add_dependency(package_name="views-pipeline-core", version=">=0.2.0,<1.0.0")
+            self.add_dependency(
+                package_name="views-pipeline-core", version=">=0.2.0,<1.0.0"
+            )
             if result.returncode != 0:
-                logging.error(f"Poetry init failed with error: {result.stderr}")
-                raise subprocess.CalledProcessError(result.returncode, result.args, output=result.stdout, stderr=result.stderr)
+                logging.error(f"Poetry run failed with error: {result.stderr}")
+                raise subprocess.CalledProcessError(
+                    result.returncode,
+                    result.args,
+                    output=result.stdout,
+                    stderr=result.stderr,
+                )
             else:
                 logging.info(f"Poetry init output: {result.stdout}")
         except subprocess.CalledProcessError as e:
@@ -190,7 +213,9 @@ class PackageManager:
         try:
             os.chdir(self.package_path)
             # Construct the dependency string
-            dependency = package_name if version is None else f"{package_name}=={version}"
+            dependency = (
+                package_name if version is None else f"{package_name}=={version}"
+            )
             # Add the dependency to the package
             result = subprocess.run(
                 ["poetry", "add", dependency],
@@ -199,7 +224,12 @@ class PackageManager:
             )
             if result.returncode != 0:
                 logging.error(f"Poetry add failed with error: {result.stderr}")
-                raise subprocess.CalledProcessError(result.returncode, result.args, output=result.stdout, stderr=result.stderr)
+                raise subprocess.CalledProcessError(
+                    result.returncode,
+                    result.args,
+                    output=result.stdout,
+                    stderr=result.stderr,
+                )
             else:
                 logging.info(f"Poetry add output: {result.stdout}")
         except subprocess.CalledProcessError as e:
@@ -240,16 +270,11 @@ class PackageManager:
 
 # Example usage
 if __name__ == "__main__":
-    # manager = PackageManager(
-    #     "example_package", "0.1.0", "An example package", "Author Name"
-    # )
 
     manager = PackageManager(
         "/Users/dylanpinheiro/Documents/test/views-example", validate=False
     )
-    manager.create_views_package(
-        description="An example package", author_name="Author Name"
-    )
+    manager.create_views_package()
     manager.validate_views_package()
 
-    # print(PackageManager.get_latest_release_version_from_github("views-pipeline-core"))
+    print(PackageManager.get_latest_release_version_from_github("views-pipeline-core"))
