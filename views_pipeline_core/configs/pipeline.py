@@ -6,11 +6,16 @@ class PipelineConfig:
     def __init__(self):
         self._dataframe_format = '.pkl'
         self._model_format = '.pkl'
+        self._organization_name = 'views'
 
     @property
     def dataframe_format(self) -> str:
         logger.debug(f"Dataframe format: {self._dataframe_format}")
         return self._dataframe_format
+    
+    @property
+    def organization_name(self) -> str:
+        return self._organization_name
 
     @dataframe_format.setter
     def dataframe_format(self, format: str):

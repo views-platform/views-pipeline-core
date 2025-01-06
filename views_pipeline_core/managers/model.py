@@ -264,7 +264,7 @@ class ModelPathManager:
             'my_model'
         """
         # Should fail as violently as possible if the model name is invalid.
-        if self._is_path(model_path):
+        if ModelPathManager._is_path(model_path, validate=self._validate):
             logger.debug(f"Path input detected: {model_path}")
             try:
                 result = ModelPathManager.get_model_name_from_path(model_path)
@@ -342,7 +342,8 @@ class ModelPathManager:
             self._build_absolute_directory(Path("configs/config_sweep.py")),
         ]
 
-    def _is_path(self, path_input: Union[str, Path]) -> bool:
+    @staticmethod
+    def _is_path(path_input: Union[str, Path], validate: bool = True) -> bool:
         """
         Determines if the given input is a valid path.
 
@@ -350,13 +351,18 @@ class ModelPathManager:
 
         Args:
             path_input (Union[str, Path]): The input to check.
+            validate (bool, optional): Whether to check if the path exists. Defaults to True.
 
         Returns:
             bool: True if the input is a valid path, False otherwise.
         """
         try:
             path_input = Path(path_input) if isinstance(path_input, str) else path_input
-            return path_input.exists() and len(path_input.parts) > 1
+            if validate:
+                return path_input.exists() and len(path_input.parts) > 1
+            else:
+                return len(path_input.parts) > 1
+            # return path_input.exists() and len(path_input.parts) > 1
         except Exception as e:
             logger.error(f"Error checking if input is a path: {e}")
             return False
