@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def generate(script_dir: Path) -> bool:
+def generate(script_path: Path) -> bool:
     """
     Generates a script that sets up the project paths, parses command-line arguments,
     sets up logging, and executes a single model run.
@@ -51,4 +51,4 @@ def generate(script_dir: Path) -> bool:
 
     EnsembleManager(ensemble_path=ensemble_path).execute_single_run(args)
     """
-    return save_script(script_dir, code)
+    return save_script(script_path, code)
