@@ -637,7 +637,7 @@ class ModelManager:
     """
 
     def __init__(
-        self, model_path: ModelPathManager, wandb_notifications: bool = False
+        self, model_path: ModelPathManager, wandb_notifications: bool = True
     ) -> None:
         """
         Initializes the ModelManager with the given model path.
@@ -702,18 +702,18 @@ class ModelManager:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
     @staticmethod
-    def _generate_model_file_name(run_type: str, timestamp:str, file_extension: str) -> str:
+    def _generate_model_file_name(run_type: str, file_extension: str) -> str:
         """
         Generates a model file name based on the run type, and timestamp.
 
         Args:
             run_type (str): The type of run (e.g., calibration, validation).
-            timestamp (str): The timestamp of the model file.
             file_extension (str): The file extension. Default is set in PipelineConfig.dataframe_format. E.g. .pt, .pkl, .h5
 
         Returns:
             str: The generated model file name.
         """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{run_type}_model_{timestamp}{file_extension}"
 
     @staticmethod
