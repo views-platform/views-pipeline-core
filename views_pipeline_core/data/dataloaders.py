@@ -265,7 +265,7 @@ class ViewsDataLoader:
         # path_viewser_df = Path(
         #     os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{PipelineConfig.dataframe_format}")
         # )  # maby change to df...
-        viewser_df_name = f"{self.partition}_viewser_df"
+        viewser_df_name = f"{self._model_name}_{self.partition}_viewser_df"
         alerts = None
 
         if use_saved:
