@@ -1,5 +1,5 @@
 from pathlib import Path
-
+from views_pipeline_core.templates.utils import save_shell_script
 def generate(script_path: Path, package_name: str) -> bool:
     """
     Generates a shell script to set up the environment and run a Python script.
@@ -78,10 +78,11 @@ echo "Running $script_path/main.py "
 python $script_path/main.py "$@"
 """
     
-    try:
-      with open(script_path, "w", encoding="utf-8") as script_file:
-          script_file.write(code)
-          return True
-    except IOError as e:
-        print(f"An error occurred while writing to {script_path}: {e}")
-        return False
+    # try:
+    #   with open(script_path, "w", encoding="utf-8") as script_file:
+    #       script_file.write(code)
+    #       return True
+    # except IOError as e:
+    #     print(f"An error occurred while writing to {script_path}: {e}")
+    #     return False
+    return save_shell_script(script_path, code)

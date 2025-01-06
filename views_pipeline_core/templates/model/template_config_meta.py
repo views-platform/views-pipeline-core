@@ -1,4 +1,4 @@
-from views_pipeline_core.templates.utils import save_script
+from views_pipeline_core.templates.utils import save_python_script
 from pathlib import Path
 import logging
 logger = logging.getLogger(__name__)
@@ -42,4 +42,4 @@ def generate(script_path: Path, model_name: str, model_algorithm: str) -> bool:
     }}
     return meta_config
 """
-    return save_script(script_path, code)
+    return save_python_script(script_path, code)

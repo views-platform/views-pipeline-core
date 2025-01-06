@@ -1,4 +1,4 @@
-from views_pipeline_core.templates.utils import save_script
+from views_pipeline_core.templates.utils import save_python_script
 from pathlib import Path
 import logging
 
@@ -71,4 +71,4 @@ if __name__ == "__main__":
     else:
         # YourModelManager(model_path=model_path).execute_single_run(args)
 """
-    return save_script(script_path, code)
+    return save_python_script(script_path, code)

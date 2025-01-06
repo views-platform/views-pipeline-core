@@ -1,5 +1,5 @@
 from typing import Dict
-from views_pipeline_core.templates.utils import save_script
+from views_pipeline_core.templates.utils import save_python_script
 from pathlib import Path
 import logging
 
@@ -40,4 +40,4 @@ def generate(script_path: Path, model_name: str) -> bool:
     }}
     return meta_config
 """
-    return save_script(script_path, code)
+    return save_python_script(script_path, code)
