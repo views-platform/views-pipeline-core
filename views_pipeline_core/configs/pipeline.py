@@ -1,5 +1,6 @@
 import logging
 import re
+
 logger = logging.getLogger(__name__)
 
 class PipelineConfig:
@@ -7,11 +8,17 @@ class PipelineConfig:
         self._dataframe_format = '.pkl'
         self._model_format = '.pkl'
         self._organization_name = 'views'
+        # self._version_range = ">=0.2.0,<1.0.0"
 
     @property
     def dataframe_format(self) -> str:
         logger.debug(f"Dataframe format: {self._dataframe_format}")
         return self._dataframe_format
+    
+    @property
+    def views_pipeline_core_version_range(self) -> str:
+        from views_pipeline_core.managers.package import PackageManager
+        return f">={PackageManager.get_latest_release_version_from_github('views-pipeline-core')}, <1.0.0"
     
     @property
     def organization_name(self) -> str:

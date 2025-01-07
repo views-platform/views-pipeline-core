@@ -29,7 +29,7 @@ class PackageManager:
             ValueError: If the package name is invalid.
 
         Attributes:
-            _validate (bool): Whether to validate the package path or name.
+            _validate (bool): Whether to validate the package path.
             package_name (str): The name of the package.
             package_path (Path): The path to the package.
             manager (Path or None): The path to the package manager directory, or None if not found.
@@ -43,9 +43,15 @@ class PackageManager:
                     raise FileNotFoundError(f"Package path not found: {package_path}")
             self.package_name = PackageManager.get_package_name_from_path(package_path)
             self.package_path = Path(package_path)
-            self.manager = self.package_path / self.package_name / "manager"
+            self.test = self.package_path / "test"
+            self.package_core = self.package_path / self._replace_special_characters(
+                str(self.package_name)
+            )
+            self.manager = self.package_core / "manager"
             if not self.manager.exists() and self._validate:
                 self.manager = None
+
+            # Get the main directory of the package inside the package
             print("Initialized package manager with package path.")
             self._init_with_path = True
         else:
@@ -57,6 +63,19 @@ class PackageManager:
             )
             print("Initialized package manager with package name.")
             self._init_with_path = False
+
+    # write a method to replace all special characters in a string with underscores
+    def _replace_special_characters(self, string: str) -> str:
+        """
+        Replace all special characters in a string with underscores.
+
+        Parameters:
+            string (str): The string to process.
+
+        Returns:
+            str: The processed string with special characters replaced by underscores.
+        """
+        return re.sub(r"[^a-zA-Z0-9_]", "_", string)
 
     def _ensure_init_with_package_path(self):
         """
@@ -91,18 +110,18 @@ class PackageManager:
         repository_name: str, organization_name: str = "views-platform"
     ) -> str:
         """
-    Fetches the latest release version of a given repository from GitHub.
+        Fetches the latest release version of a given repository from GitHub.
 
-    Args:
-        repository_name (str): The name of the repository.
-        organization_name (str, optional): The name of the organization. Defaults to "views-platform".
+        Args:
+            repository_name (str): The name of the repository.
+            organization_name (str, optional): The name of the organization. Defaults to "views-platform".
 
-    Returns:
-        str: The tag name of the latest release if found, otherwise None.
+        Returns:
+            str: The tag name of the latest release if found, otherwise None.
 
-    Raises:
-        requests.exceptions.RequestException: If an error occurs while making the request to GitHub.
-    """
+        Raises:
+            requests.exceptions.RequestException: If an error occurs while making the request to GitHub.
+        """
         # Define the GitHub URL for the package
         github_url = f"""https://api.github.com/repos/{organization_name}/{repository_name}/releases/latest"""
         # Get the latest release information from GitHub
@@ -111,7 +130,7 @@ class PackageManager:
             if response.status_code == 200:
                 data = response.json()
                 if "tag_name" in data:
-                    return data["tag_name"]
+                    return data["tag_name"].lstrip("v")
                 else:
                     logging.error("No releases found for this repository.")
                     return None
@@ -176,7 +195,8 @@ class PackageManager:
                 text=True,
             )
             self.add_dependency(
-                package_name="views-pipeline-core", version=">=0.2.0,<1.0.0"
+                package_name="views-pipeline-core",
+                version=PipelineConfig().views_pipeline_core_version_range,
             )
             if result.returncode != 0:
                 logging.error(f"Poetry run failed with error: {result.stderr}")
@@ -266,15 +286,3 @@ class PackageManager:
             logging.info(f"Package {self.package_name} is valid.")
         except Exception as e:
             logging.error(f"An error occurred while validating the package: {e}")
-
-
-# Example usage
-if __name__ == "__main__":
-
-    manager = PackageManager(
-        "/Users/dylanpinheiro/Documents/test/views-example", validate=False
-    )
-    manager.create_views_package()
-    manager.validate_views_package()
-
-    print(PackageManager.get_latest_release_version_from_github("views-pipeline-core"))
