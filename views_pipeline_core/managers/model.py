@@ -13,11 +13,7 @@ import wandb
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from views_pipeline_core.wandb.utils import (
-    add_wandb_monthly_metrics,
-    generate_wandb_log_dict,
-    log_wandb_log_dict,
-)
+from views_pipeline_core.wandb.utils import add_wandb_metrics
 from views_pipeline_core.files.utils import (
     save_dataframe,
     create_log_file,
@@ -25,7 +21,6 @@ from views_pipeline_core.files.utils import (
 )
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_forecasts.extensions import *
-
 
 
 logger = logging.getLogger(__name__)
@@ -1007,7 +1002,7 @@ class ModelManager:
 
             # Save to prediction store
             df_predictions.forecasts.set_run(self._pred_store_name)
-            df_predictions.forecasts.to_store(name=predictions_name.split(".")[0]) # remove extension
+            df_predictions.forecasts.to_store(name=predictions_name.split(".")[0], overwrite=True) # remove extension
 
             # Log predictions to WandB
             wandb.save(str(path_generated / predictions_name))
@@ -1125,7 +1120,7 @@ class ModelManager:
         start_t = time.time()
         try:
             with wandb.init(project=self._project, entity=self._entity, config=config):
-                add_wandb_monthly_metrics()
+                add_wandb_metrics()
                 self.config = wandb.config
 
                 if self.config["sweep"]:
