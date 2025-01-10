@@ -723,7 +723,7 @@ class ModelManager:
         Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
 
         Args:
-            generated_file_type (str): The type of generated file (e.g., predictions, output, evaluation).
+            generated_file_type (str): The type of generated file (e.g., predictions, output).
             sequence_number (int): The sequence number.
             run_type (str): The type of run (e.g., calibration, validation).
             timestamp (str): The timestamp of the generated file.
@@ -737,6 +737,28 @@ class ModelManager:
             return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}{file_extension}"
         else:
             return f"{generated_file_type}_{run_type}_{timestamp}{file_extension}"
+
+    @staticmethod
+    def _generate_evaluation_file_name(
+        evaluation_type: str,
+        run_type: str,
+        timestamp: str,
+        file_extension: str,
+    ) -> str:
+        """
+        Generates an evaluation file name based on the run type, evaluation type, and timestamp.
+
+        Args:
+            evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
+            run_type (str): The type of run (e.g., calibration, validation).
+            timestamp (str): The timestamp of the generated file.
+            file_extension (str): The file extension. Default is set in PipelineConfig.dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
+
+        Returns:
+            str: The generated prediction file name.
+        """
+        # logger.info(f"sequence_number: {sequence_number}")
+        return f"eval_{evaluation_type}_{run_type}_{timestamp}{file_extension}"
     
     @staticmethod
     def _get_latest_release_version(owner: str, repo: str) -> str:
@@ -911,58 +933,68 @@ class ModelManager:
                 level=wandb.AlertLevel.ERROR,
             )
 
-    def _save_model_outputs(
+    def _save_evaluations(
         self,
-        df_evaluation: pd.DataFrame,
-        df_output: pd.DataFrame,
+        df_step_wise_evaluation: pd.DataFrame,
+        df_time_series_wise_evaluation: pd.DataFrame,
+        df_month_wise_evaluation: pd.DataFrame,
         path_generated: Union[str, Path],
-        sequence_number: int,
     ) -> None:
         """
-        Save the model outputs and evaluation metrics to the specified path and log them to WandB.
+        Save the model evaluation metrics to the specified path and log them to WandB.
 
         Args:
-            df_evaluation (pd.DataFrame): DataFrame containing evaluation metrics.
-            df_output (pd.DataFrame): DataFrame containing model outputs.
+            df_step_wise_evaluation (pd.DataFrame): DataFrame containing step-wise evaluation metrics.
+            df_time_series_wise_evaluation (pd.DataFrame): DataFrame containing time series-wise evaluation metrics.
+            df_month_wise_evaluation (pd.DataFrame): DataFrame containing month-wise evaluation metrics.
             path_generated (str or Path): The path where the outputs should be saved.
-            sequence_number (int): The sequence number.
         """
         try:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
-            outputs_path = ModelManager._generate_output_file_name(
-                "output",
+            eval_step_path = ModelManager._generate_evaluation_file_name(
+                "step",
                 self.config["run_type"],
                 self.config["timestamp"],
-                sequence_number,
-                file_extension=PipelineConfig.dataframe_format,
-            )
-            evaluation_path = ModelManager._generate_output_file_name(
-                "evaluation",
-                self.config["run_type"],
-                self.config["timestamp"],
-                sequence_number,
                 file_extension=PipelineConfig.dataframe_format,
             )
 
-            save_dataframe(df_output, path_generated / outputs_path)
-            save_dataframe(df_evaluation, path_generated / evaluation_path)
+            eval_ts_path = ModelManager._generate_evaluation_file_name(
+                "ts",
+                self.config["run_type"],
+                self.config["timestamp"],
+                file_extension=PipelineConfig.dataframe_format,
+            )
+
+            eval_month_path = ModelManager._generate_evaluation_file_name(
+                "month",
+                self.config["run_type"],
+                self.config["timestamp"],
+                file_extension=PipelineConfig.dataframe_format,
+            )
+
+            save_dataframe(df_month_wise_evaluation, path_generated / eval_month_path)
+            save_dataframe(df_time_series_wise_evaluation, path_generated / eval_ts_path)
+            save_dataframe(df_step_wise_evaluation, path_generated / eval_step_path)
+            
 
             # Log outputs and evaluation metrics to WandB
-            wandb.save(str(path_generated / outputs_path))
-            wandb.save(str(path_generated / evaluation_path))
+            wandb.save(str(path_generated / eval_month_path))
+            wandb.save(str(path_generated / eval_ts_path))
+            wandb.save(str(path_generated / eval_step_path))
 
             wandb.log(
                 {
-                    "evaluation_metrics": wandb.Table(dataframe=df_evaluation),
-                    "model_outputs": wandb.Table(dataframe=df_output),
+                    "evaluation_metrics_month": wandb.Table(dataframe=df_month_wise_evaluation),
+                    "evaluation_metrics_ts": wandb.Table(dataframe=df_time_series_wise_evaluation),
+                    "evaluation_metrics_step": wandb.Table(dataframe=df_step_wise_evaluation),
                 }
             )
 
             self._wandb_alert(
                 title=f"{self._model_path.target.title} Outputs Saved",
-                text=f"{self._model_path.target.title} outputs and evaluation metrics for {self.config['name']} have been successfully saved and logged to WandB at {path_generated}.",
+                text=f"{self._model_path.target.title} evaluation metrics for {self.config['name']} have been successfully saved and logged to WandB at {path_generated}.",
                 level=wandb.AlertLevel.INFO,
             )
         except Exception as e:
