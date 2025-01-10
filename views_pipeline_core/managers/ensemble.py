@@ -1,12 +1,11 @@
 from views_pipeline_core.managers.model import ModelPathManager, ModelManager
-from views_pipeline_core.wandb.utils import (
-    add_wandb_monthly_metrics,
-    log_wandb_log_dict,
-)
+from views_pipeline_core.wandb.utils import add_wandb_metrics, log_wandb_log_dict
 from views_pipeline_core.models.check import ensemble_model_check
 from views_pipeline_core.files.utils import read_log_file, create_log_file
-from views_pipeline_core.models.outputs import generate_output_dict
-from views_pipeline_core.evaluation.metrics import generate_metric_dict
+from views_pipeline_core.files.utils import save_dataframe, read_dataframe
+from views_pipeline_core.configs.pipeline import PipelineConfig
+from views_evaluation.evaluation.metrics import MetricsManager
+from views_forecasts.extensions import *
 from typing import Union, Optional, List, Dict
 import wandb
 import logging
@@ -16,8 +15,7 @@ from pathlib import Path
 import subprocess
 from datetime import datetime
 import pandas as pd
-from views_pipeline_core.files.utils import save_dataframe, read_dataframe
-from views_pipeline_core.configs.pipeline import PipelineConfig
+
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +99,8 @@ class EnsemblePathManager(ModelPathManager):
 
 class EnsembleManager(ModelManager):
 
-    def __init__(self, ensemble_path: EnsemblePathManager) -> None:
-        super().__init__(ensemble_path)
+    def __init__(self, ensemble_path: EnsemblePathManager, wandb_notifications: bool = False) -> None:
+        super().__init__(ensemble_path, wandb_notifications)
 
     @staticmethod
     def _get_shell_command(
@@ -212,7 +210,7 @@ class EnsembleManager(ModelManager):
         start_t = time.time()
         try:
             with wandb.init(project=self._project, entity=self._entity, config=config):
-                add_wandb_monthly_metrics()
+                add_wandb_metrics()
                 self.config = wandb.config
                 self._wandb_alert(
                     title="Running Ensemble",
@@ -225,11 +223,69 @@ class EnsembleManager(ModelManager):
 
                 if eval:
                     logger.info(f"Evaluating model {self.config['name']}...")
-                    self._evaluate_ensemble(self._eval_type)
+                    df_predictions = self._evaluate_ensemble(self._eval_type)
+
+                    path_generated_e = self._model_path.data_generated
+                    data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    self.config["timestamp"] = data_generation_timestamp
+
+                    metrics_manager = MetricsManager(self.config["metrics"])
+                    df_viewser = pd.DataFrame.forecasts.read_store(run=self._pred_store_name,
+                                                       name=f"{self._config_meta['models'][0]}_{self.config['run_type']}_viewser_df") # The target value should be the same
+                    df_actual = df_viewser[[self.config["depvar"]]]
+                    step_wise_evaluation, df_step_wise_evaluation = metrics_manager.step_wise_evaluation(
+                        df_actual, df_predictions, self.config["depvar"], self.config["steps"]
+                    )
+                    time_series_wise_evaluation, df_time_series_wise_evaluation = metrics_manager.time_series_wise_evaluation(
+                        df_actual, df_predictions, self.config["depvar"]
+                    )
+                    month_wise_evaluation, df_month_wise_evaluation = metrics_manager.month_wise_evaluation(
+                        df_actual, df_predictions, self.config["depvar"]
+                    )
+
+                    log_wandb_log_dict(step_wise_evaluation, time_series_wise_evaluation, month_wise_evaluation)
+
+                    self._save_evaluations(
+                        df_step_wise_evaluation,
+                        df_time_series_wise_evaluation,
+                        df_month_wise_evaluation,
+                        self._model_path.data_generated,
+                        )
+
+                    for i, df in enumerate(df_predictions):
+                        self._save_predictions(df, path_generated_e, i)
+
+                    # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
+                    create_log_file(
+                        path_generated_e,
+                        self.config,
+                        data_generation_timestamp,
+                        data_generation_timestamp,
+                        data_fetch_timestamp=None,
+                        model_type="ensemble",
+                        models=self.config["models"],
+                    )
 
                 if forecast:
                     logger.info(f"Forecasting model {self.config['name']}...")
-                    self._forecast_ensemble()
+                    df_prediction = self._forecast_ensemble()
+
+                    path_generated_e = self._model_path.data_generated
+                    data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    self.config["timestamp"] = data_generation_timestamp
+
+                    self._save_predictions(df_prediction, path_generated_e)
+
+                    # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
+                    create_log_file(
+                        path_generated_e,
+                        self.config,
+                        data_generation_timestamp,
+                        data_generation_timestamp,
+                        data_fetch_timestamp=None,
+                        model_type="ensemble",
+                        models=self.config["models"],
+                    )
 
             wandb.finish()
         except Exception as e:
@@ -267,7 +323,7 @@ class EnsembleManager(ModelManager):
 
     def _evaluate_model_artifact(
         self, model_name: str, run_type: str, eval_type: str
-    ) -> None:
+    ) -> List[pd.DataFrame]:
         logger.info(f"Evaluating single model {model_name}...")
 
         model_path = ModelPathManager(model_name)
@@ -284,13 +340,11 @@ class EnsembleManager(ModelManager):
             ModelManager._resolve_evaluation_sequence_number(eval_type)
         ):
 
-            pkl_path = f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}{PipelineConfig.dataframe_format}"
-            if Path(pkl_path).exists():
-                logger.info(f"Loading existing {run_type} predictions from {pkl_path}")
-                # with open(pkl_path, "rb") as file:
-                #     pred = pickle.load(file)
-                pred = read_dataframe(pkl_path)
-            else:
+            name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
+            try:
+                pred = pd.DataFrame.forecasts.read_store(run=self._pred_store_name, name=name)
+                logger.info(f"Loading existing prediction {name} from prediction store")
+            except Exception as e:
                 logger.info(
                     f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
                 )
@@ -315,7 +369,7 @@ class EnsembleManager(ModelManager):
 
                 # with open(pkl_path, "rb") as file:
                 #     pred = pickle.load(file)
-                pred = read_dataframe(pkl_path)
+                pred = pd.DataFrame.forecasts.read_store(run=self._pred_store_name, name=name)
 
                 data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 date_fetch_timestamp = read_log_file(
@@ -334,7 +388,7 @@ class EnsembleManager(ModelManager):
 
         return preds
 
-    def _forecast_model_artifact(self, model_name: str, run_type: str) -> None:
+    def _forecast_model_artifact(self, model_name: str, run_type: str) -> pd.DataFrame:
         logger.info(f"Forecasting single model {model_name}...")
 
         model_path = ModelPathManager(model_name)
@@ -345,13 +399,11 @@ class EnsembleManager(ModelManager):
 
         ts = path_artifact.stem[-15:]
 
-        pkl_path = f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig.dataframe_format}"
-        if Path(pkl_path).exists():
-            logger.info(f"Loading existing {run_type} predictions from {pkl_path}")
-            # with open(pkl_path, "rb") as file:
-            #     df = pickle.load(file)
-            df = read_dataframe(pkl_path)
-        else:
+        name = f"{model_name}_predictions_{run_type}_{ts}"
+        try:
+            pred = pd.DataFrame.forecasts.read_store(run=self._pred_store_name, name=name)
+            logger.info(f"Loading existing prediction {name} from prediction store")
+        except Exception as e:
             logger.info(
                 f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
             )
@@ -373,9 +425,7 @@ class EnsembleManager(ModelManager):
                     f"Error during shell command execution for model {model_name}: {e}"
                 )
 
-            # with open(pkl_path, "rb") as file:
-            #     df = pickle.load(file)
-            df = read_dataframe(pkl_path)
+            pred = pd.DataFrame.forecasts.read_store(run=self._pred_store_name, name=name)
 
             data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             date_fetch_timestamp = read_log_file(
@@ -390,7 +440,7 @@ class EnsembleManager(ModelManager):
                 date_fetch_timestamp,
             )
 
-        return df
+        return pred
 
     def _train_ensemble(self, use_saved: bool) -> None:
         run_type = self.config["run_type"]
@@ -398,7 +448,7 @@ class EnsembleManager(ModelManager):
         for model_name in self.config["models"]:
             self._train_model_artifact(model_name, run_type, use_saved)
 
-    def _evaluate_ensemble(self, eval_type: str) -> None:
+    def _evaluate_ensemble(self, eval_type: str) -> List[pd.DataFrame]:
         path_generated_e = self._model_path.data_generated
         run_type = self.config["run_type"]
         dfs = []
@@ -414,36 +464,9 @@ class EnsembleManager(ModelManager):
             )
             dfs_agg.append(df_agg)
 
-        data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # _, df_output = generate_output_dict(df_agg, self.config)
-        # evaluation, df_evaluation = generate_metric_dict(df_agg, self.config)
-        # log_wandb_log_dict(self.config, evaluation)
-        # self._wandb_alert(
-        #             title="Ensemble Evaluation Complete",
-        #             text=f"Ensemble Name: {str(self._config_meta['name'])}\nMetrics: {str(evaluation)}",
-        #             level=wandb.AlertLevel.INFO,
-        #         )
-
-        # Timestamp of single models is more important than ensemble model timestamp
-        self.config["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # self._save_model_outputs(df_evaluation, df_output, path_generated_e)
-        for i, df_agg in enumerate(dfs_agg):
-            self._save_predictions(df_agg, path_generated_e, i)
-
-        # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
-        create_log_file(
-            path_generated_e,
-            self.config,
-            data_generation_timestamp,
-            data_generation_timestamp,
-            data_fetch_timestamp=None,
-            model_type="ensemble",
-            models=self.config["models"],
-        )
+        return dfs_agg
 
     def _forecast_ensemble(self) -> None:
-        path_generated_e = self._model_path.data_generated
         run_type = self.config["run_type"]
         dfs = []
 
@@ -454,18 +477,5 @@ class EnsembleManager(ModelManager):
         df_prediction = EnsembleManager._get_aggregated_df(
             dfs, self.config["aggregation"]
         )
-        data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        self.config["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._save_predictions(df_prediction, path_generated_e)
-
-        # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
-        create_log_file(
-            path_generated_e,
-            self.config,
-            data_generation_timestamp,
-            data_generation_timestamp,
-            data_fetch_timestamp=None,
-            model_type="ensemble",
-            models=self.config["models"],
-        )
+        
+        return df_prediction
