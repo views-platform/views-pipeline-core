@@ -13,13 +13,14 @@ import wandb
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from views_pipeline_core.wandb.utils import add_wandb_metrics
+from views_pipeline_core.wandb.utils import add_wandb_metrics, log_wandb_log_dict
 from views_pipeline_core.files.utils import (
     save_dataframe,
     create_log_file,
     read_log_file,
 )
 from views_pipeline_core.configs.pipeline import PipelineConfig
+from views_evaluation.evaluation.metrics import MetricsManager
 from views_forecasts.extensions import *
 
 
@@ -1033,8 +1034,9 @@ class ModelManager:
             save_dataframe(df_predictions, path_generated / predictions_name)
 
             # Save to prediction store
+            name = self._model_path.model_name + "_" + predictions_name.split(".")[0] # remove extension
             df_predictions.forecasts.set_run(self._pred_store_name)
-            df_predictions.forecasts.to_store(name=predictions_name.split(".")[0], overwrite=True) # remove extension
+            df_predictions.forecasts.to_store(name=name, overwrite=True) 
 
             # Log predictions to WandB
             wandb.save(str(path_generated / predictions_name))
@@ -1186,7 +1188,8 @@ class ModelManager:
 
                 if eval:
                     logger.info(f"Evaluating model {self.config['name']}...")
-                    self._evaluate_model_artifact(self._eval_type, artifact_name)
+                    df_predictions = self._evaluate_model_artifact(self._eval_type, artifact_name)
+
                     data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     data_fetch_timestamp = read_log_file(
                         self._model_path.data_raw
@@ -1199,6 +1202,33 @@ class ModelManager:
                         data_generation_timestamp,
                         data_fetch_timestamp,
                     )
+
+                    metrics_manager = MetricsManager(self.config["metrics"])
+                    df_viewser = pd.DataFrame.forecasts.read_store(run=self._pred_store_name,
+                                                       name=f"{self._model_path.model_name}_{self.config['run_type']}_viewser_df")
+                    df_actual = df_viewser[[self.config["depvar"]]]
+                    step_wise_evaluation, df_step_wise_evaluation = metrics_manager.step_wise_evaluation(
+                        df_actual, df_predictions, self.config["depvar"], self.config["steps"]
+                    )
+                    time_series_wise_evaluation, df_time_series_wise_evaluation = metrics_manager.time_series_wise_evaluation(
+                        df_actual, df_predictions, self.config["depvar"]
+                    )
+                    month_wise_evaluation, df_month_wise_evaluation = metrics_manager.month_wise_evaluation(
+                        df_actual, df_predictions, self.config["depvar"]
+                    )
+
+                    log_wandb_log_dict(step_wise_evaluation, time_series_wise_evaluation, month_wise_evaluation)
+
+                    self._save_evaluations(
+                        df_step_wise_evaluation,
+                        df_time_series_wise_evaluation,
+                        df_month_wise_evaluation,
+                        self._model_path.data_generated,
+                        )
+
+                    for i, df in enumerate(df_predictions):
+                        self._save_predictions(df, self._model_path.data_generated, i)
+
                     self._wandb_alert(
                         title="Evaluation Complete",
                         text=f"Evaluation for model {self.config['name']} completed successfully.",
@@ -1207,7 +1237,8 @@ class ModelManager:
 
                 if forecast:
                     logger.info(f"Forecasting model {self.config['name']}...")
-                    self._forecast_model_artifact(artifact_name)
+                    df_prediction = self._forecast_model_artifact(artifact_name)
+
                     data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     data_fetch_timestamp = read_log_file(
                         self._model_path.data_raw
@@ -1220,6 +1251,9 @@ class ModelManager:
                         data_generation_timestamp,
                         data_fetch_timestamp,
                     )
+
+                    self._save_predictions(df_prediction, self._model_path.data_generated)
+
                     self._wandb_alert(
                         title="Forecasting Complete",
                         text=f"Forecasting for model {self.config['name']} completed successfully.",
