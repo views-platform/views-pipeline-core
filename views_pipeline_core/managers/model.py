@@ -1203,6 +1203,7 @@ class ModelManager:
                         data_fetch_timestamp,
                     )
 
+                    # Evaluate the model
                     metrics_manager = MetricsManager(self.config["metrics"])
                     df_viewser = pd.DataFrame.forecasts.read_store(run=self._pred_store_name,
                                                        name=f"{self._model_path.model_name}_{self.config['run_type']}_viewser_df")
@@ -1219,6 +1220,7 @@ class ModelManager:
 
                     log_wandb_log_dict(step_wise_evaluation, time_series_wise_evaluation, month_wise_evaluation)
 
+                    # Save evaluation metrics and predictions
                     self._save_evaluations(
                         df_step_wise_evaluation,
                         df_time_series_wise_evaluation,
