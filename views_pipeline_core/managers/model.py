@@ -698,7 +698,7 @@ class ModelManager:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
     @staticmethod
-    def _generate_model_file_name(run_type: str, file_extension: str) -> str:
+    def generate_model_file_name(run_type: str, file_extension: str) -> str:
         """
         Generates a model file name based on the run type, and timestamp.
 
