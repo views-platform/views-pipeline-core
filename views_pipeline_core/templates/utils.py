@@ -154,8 +154,8 @@ def save_text_file(output_file: Path, code: str, override=False) -> bool:
 
     try:
         # Write the text content to the file
-        if not output_file.suffix.endswith(".txt"):
-            logger.exception(f"{output_file} is not a text file.")
+        if not output_file.suffix.endswith(".txt") and output_file.name != ".gitignore":
+            logger.exception(f"{output_file} is not a text or .gitignore file.")
             return False
         if not output_file.parent.exists():
             logger.info(f"Creating parent directories for {output_file}")
@@ -163,9 +163,9 @@ def save_text_file(output_file: Path, code: str, override=False) -> bool:
         with open(output_file, "w") as file:
             file.write(code)
 
-        logger.info(f"Text file saved successfully: {output_file}")
+        logger.info(f"File saved successfully: {output_file}")
         return True
     except IOError as e:
-        logger.exception(f"Failed to write the text file: {e}")
+        logger.exception(f"Failed to write the file: {e}")
         logger.exception(f"File: {output_file}")
         return False

@@ -216,7 +216,7 @@ class EnsembleManager(ModelManager):
                 self.config = wandb.config
                 self._wandb_alert(
                     title="Running Ensemble",
-                    text=f"Ensemble Name: {str(self._config_meta['name'])}\nConstituent Models: {str(self._config_meta['models'])}",
+                    text=f"Ensemble Name: {str(self.config['name'])}\nConstituent Models: {str(self.config['models'])}",
                     level=wandb.AlertLevel.INFO,
                 )
                 if train:

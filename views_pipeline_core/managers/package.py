@@ -44,6 +44,8 @@ class PackageManager:
             self.package_name = PackageManager.get_package_name_from_path(package_path)
             self.package_path = Path(package_path)
             self.test = self.package_path / "test"
+            if not self.test.exists() and self._validate:
+                self.test = None
             self.package_core = self.package_path / self._replace_special_characters(
                 str(self.package_name)
             )
@@ -64,7 +66,7 @@ class PackageManager:
             print("Initialized package manager with package name.")
             self._init_with_path = False
 
-    # write a method to replace all special characters in a string with underscores
+    # method to replace all special characters in a string with underscores
     def _replace_special_characters(self, string: str) -> str:
         """
         Replace all special characters in a string with underscores.
@@ -176,7 +178,7 @@ class PackageManager:
             # Check if Poetry is installed
             try:
                 subprocess.run(["poetry", "--version"], capture_output=True, check=True)
-            except subprocess.CalledProcessError:
+            except (subprocess.CalledProcessError, FileNotFoundError):
                 logging.info(
                     "Poetry is not installed or not found in the system PATH. Installing Poetry..."
                 )
@@ -210,7 +212,7 @@ class PackageManager:
                 logging.info(f"Poetry init output: {result.stdout}")
         except subprocess.CalledProcessError as e:
             logging.error(
-                f"Subprocess error occurred while creating the package with command '{e.cmd}': {e.stderr}"
+            f"Subprocess error occurred while creating the package with command '{e.cmd}': {e.stderr}"
             )
         except FileNotFoundError as e:
             logging.error(f"File not found error: {e.filename} - {e}")
@@ -218,7 +220,7 @@ class PackageManager:
             logging.error(f"OS error: {e.strerror}")
         except Exception as e:
             logging.error(
-                f"An unexpected error occurred while creating the package: {type(e).__name__} - {e}"
+            f"An unexpected error occurred while creating the package: {type(e).__name__} - {e}"
             )
 
     def add_dependency(self, package_name: str, version: str = None):

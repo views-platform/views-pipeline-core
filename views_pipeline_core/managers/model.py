@@ -813,7 +813,23 @@ class ModelManager:
 
         return config
 
-    def _wandb_alert(self, title: str, text: str, level: wandb.AlertLevel):
+    def _wandb_alert(self, title: str, text: str = "", level: wandb.AlertLevel = wandb.AlertLevel.INFO) -> None:
+        """
+        Sends an alert to Weights and Biases (WandB) if WandB notifications are enabled and a WandB run is active.
+
+        Args:
+            title (str): The title of the alert.
+            text (str, optional): The text content of the alert. Defaults to an empty string.
+            level (wandb.AlertLevel, optional): The level of the alert. Defaults to wandb.AlertLevel.INFO.
+
+        Returns:
+            None
+
+        Raises:
+            wandb.errors.CommError: If there is a communication error while sending the alert.
+            wandb.errors.UsageError: If there is a usage error while sending the alert.
+            Exception: If there is an unexpected error while sending the alert.
+        """
         if self._wandb_notifications and wandb.run:
             try:
                 wandb.alert(
@@ -827,6 +843,22 @@ class ModelManager:
                 logger.error(f"Usage error sending WandB alert: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error sending WandB alert: {e}")
+
+    def _generate_evaluation_table(self, metric_dict: Dict) -> str:
+            """
+            Generates a formatted evaluation table as a string.
+
+            Args:
+                metric_dict (Dict): A dictionary where keys are metric names and values are their corresponding values.
+
+            Returns:
+                str: A formatted string representing the evaluation table.
+            """
+            table_str = "Metric".ljust(20) + "Value\n"
+            table_str += "-" * 40 + "\n"
+            for key, value in metric_dict.items():
+                table_str += f"{key.ljust(20)}{value}\n"
+            return table_str
 
     def _save_model_artifact(self, run_type):
         """
@@ -1107,7 +1139,8 @@ class ModelManager:
 
                 if eval:
                     logger.info(f"Evaluating model {self.config['name']}...")
-                    self._evaluate_model_artifact(self._eval_type, artifact_name)
+                    evaluation_results = self._evaluate_model_artifact(self._eval_type, artifact_name)
+
                     data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     data_fetch_timestamp = read_log_file(
                         self._model_path.data_raw
@@ -1120,11 +1153,19 @@ class ModelManager:
                         data_generation_timestamp,
                         data_fetch_timestamp,
                     )
-                    self._wandb_alert(
-                        title="Evaluation Complete",
-                        text=f"Evaluation for model {self.config['name']} completed successfully.",
-                        level=wandb.AlertLevel.INFO,
-                    )
+
+                    # If we are given a metric dict, add it to the wandb alert
+                    if isinstance(evaluation_results, dict):
+                        evaluation_table = self._generate_evaluation_table(evaluation_results)
+                        logger.info(f"Evaluation Results:\n{evaluation_table}")
+                        self._wandb_alert(
+                            title=f"Evaluation Complete for model {self.config['name']}",
+                            text=f"{evaluation_table}",
+                        )
+                    else:
+                        self._wandb_alert(
+                            title=f"Evaluation Complete for model {self.config['name']}",
+                        )
 
                 if forecast:
                     logger.info(f"Forecasting model {self.config['name']}...")
