@@ -1113,7 +1113,7 @@ class ModelManager:
 
             self._wandb_alert(
                 title="Predictions Saved",
-                text=f"Predictions for {self.config['name']} have been successfully saved and logged to WandB at {path_generated.relative_to(self._model_path.root)}.",
+                text=f"Predictions for {self.config['name']} have been successfully saved and logged to WandB and locally at {path_generated.relative_to(self._model_path.root)}.",
                 level=wandb.AlertLevel.INFO,
             )
         except Exception as e:
@@ -1145,8 +1145,8 @@ class ModelManager:
                     validate=True,
                 )
                 self._wandb_alert(
-                    title="Queryset Fetch Complete",
-                    text=f"Queryset for {self._model_path.target} {self.config['name']} with depvar {self.config['depvar']} and LoA of {self.config['level']} downloaded successfully.",
+                    title=f"Queryset Fetch Complete ({str(args.run_type)})",
+                    text=f"Queryset for {self._model_path.target} {self.config['name']} with depvar {self.config['depvar']} and LoA of {self.config['level']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
                     level=wandb.AlertLevel.INFO,
                 )
             wandb.finish()
@@ -1402,24 +1402,18 @@ class ModelManager:
             self._save_predictions(df, self._model_path.data_generated, i)
 
         # If we are given a metric dict, add it to the wandb alert
-        if isinstance(df_predictions, dict):
-            evaluation_table = self._generate_evaluation_table(df_predictions)
-            logger.info(f"Evaluation Results:\n{evaluation_table}")
-            self._wandb_alert(
-                title=f"Evaluation Complete for model {self.config['name']}",
-                text=f"{evaluation_table}",
-            )
-        elif isinstance(df_predictions, pd.DataFrame):
-            evaluation_table = self._generate_evaluation_table(df_predictions.to_dict())
-            logger.info(f"Evaluation Results:\n{evaluation_table}")
-            self._wandb_alert(
-                title=f"Evaluation Complete for model {self.config['name']}",
-                text=f"{evaluation_table}",
-            )
-        else:
-            self._wandb_alert(
-                title=f"Evaluation Complete for model {self.config['name']}",
-            )
+        # if isinstance(df_predictions, dict):
+        #     evaluation_table = self._generate_evaluation_table(df_predictions)
+        #     logger.info(f"Evaluation Results:\n{evaluation_table}")
+        #     self._wandb_alert(
+        #         title=f"Evaluation Complete for model {self.config['name']}",
+        #         text=f"{evaluation_table}",
+        #     )
+        # else:
+        self._wandb_alert(
+            title=f"Evaluation Complete for model {self.config['name']}",
+            text=f"{str(wandb.run.summary._as_dict())}",
+        )
 
     @abstractmethod
     def _train_model_artifact(self) -> any:
