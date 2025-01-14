@@ -808,11 +808,16 @@ class ModelManager:
         year = current_date.year
         month = str(current_date.month).zfill(2)
 
-        pred_store_name = (
-            "v"
-            + "".join(part.zfill(2) for part in version.split("."))
-            + f"_{year}_{month}"
-        )
+        try:
+            if version is None:
+                version = "0.1.0"
+            pred_store_name = (
+                "v"
+                + "".join(part.zfill(2) for part in version.split("."))
+                + f"_{year}_{month}"
+            )
+        except Exception as e:
+            logger.error(f"Error generating prediction store name: {e}")
 
         if pred_store_name not in ViewsMetadata().get_runs().name.tolist():
             logger.warning(
