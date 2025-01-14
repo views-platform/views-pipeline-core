@@ -951,8 +951,14 @@ class ModelManager:
         table_str = f"{'Metric':<25} | {'Value':<15}\n"
         table_str += "-" * 45 + "\n"
         for key, value in metric_dict.items():
-            table_str += f"{key:<25} | {value:<15}\n"
-        return table_str
+            try:
+                if not str(key).startswith("_"):
+                    value = float(value) # Super hacky way to filter out metrics. 0/10 do not recommend
+                    table_str += f"{key:<25} | {value:<15.6f}\n"
+            except:
+                continue
+        return f"```\n{table_str}```"
+
 
     def _save_model_artifact(self, run_type):
         """
@@ -1321,22 +1327,14 @@ class ModelManager:
             self._model_path.data_raw
             / f"{self.config['run_type']}_data_fetch_log.txt"
         ).get("Data Fetch Timestamp", None)
-        if train:
-            create_log_file(
-                path_generated=self._model_path.data_generated,
-                model_config=self.config,
-                model_timestamp=self.config["timestamp"],
-                data_generation_timestamp=None,
-                data_fetch_timestamp=data_fetch_timestamp,
-            )
-        else:
-            create_log_file(
-                path_generated=self._model_path.data_generated,
-                model_config=self.config,
-                model_timestamp=self.config["timestamp"],
-                data_generation_timestamp=timestamp,
-                data_fetch_timestamp=data_fetch_timestamp,
-            )
+
+        create_log_file(
+            path_generated=self._model_path.data_generated,
+            model_config=self.config,
+            model_timestamp=self.config["timestamp"],
+            data_generation_timestamp= None if train else timestamp,
+            data_fetch_timestamp=data_fetch_timestamp,
+        )
 
 
     def _evaluate_prediction_dataframe(self, df_predictions):
@@ -1412,7 +1410,7 @@ class ModelManager:
         # else:
         self._wandb_alert(
             title=f"Evaluation Complete for model {self.config['name']}",
-            text=f"{str(wandb.run.summary._as_dict())}",
+            text=f"{self._generate_evaluation_table(metric_dict=wandb.run.summary._as_dict())}",
         )
 
     @abstractmethod
