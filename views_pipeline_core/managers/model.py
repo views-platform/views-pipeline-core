@@ -948,16 +948,16 @@ class ModelManager:
         Returns:
             str: A formatted string representing the evaluation table.
         """
-        table_str = f"{'Metric':<25} | {'Value':<15}\n"
-        table_str += "-" * 45 + "\n"
+        table_str = "\n{:<70} {:<30}".format("Metric", "Value")
+        table_str += "-" * 100 + "\n"
         for key, value in metric_dict.items():
             try:
                 if not str(key).startswith("_"):
                     value = float(value) # Super hacky way to filter out metrics. 0/10 do not recommend
-                    table_str += f"{key:<25} | {value:<15.6f}\n"
+                    table_str += "{:<70}\t{:<30}\n".format(str(key), value)
             except:
                 continue
-        return f"```\n{table_str}```"
+        return table_str
 
 
     def _save_model_artifact(self, run_type):

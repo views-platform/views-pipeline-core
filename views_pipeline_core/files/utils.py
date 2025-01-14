@@ -2,7 +2,8 @@ import logging
 import pandas as pd
 from pathlib import Path
 from typing import Union
-
+import requests
+import json
 logger = logging.getLogger(__name__)
 
 
@@ -213,3 +214,18 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     except Exception as e:
         logger.exception(f"Error reading the DataFrame from {file_path}: {e}")
         raise
+
+def download_json(url):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Check if the request was successful
+        return response.content.decode()  # Parse JSON response into a dictionary
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error downloading JSON file: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON file: {e}")
+        return None
+    
+print(download_json("https://raw.githubusercontent.com/prio-data/VIEWS_FAO_index/refs/heads/main/data/processed/MatchingTable_VIEWS_Country_IDs.json"))
+        
