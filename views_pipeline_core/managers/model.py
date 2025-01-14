@@ -21,7 +21,8 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
 from views_forecasts.extensions import *
 import traceback
-
+from views_pipeline_core.data.country import CountryData, Country
+import numpy as np
 
 
 logger = logging.getLogger(__name__)
@@ -663,7 +664,7 @@ class ModelManager:
                 "config_sweep.py", "get_sweep_config"
             )
         self.set_dataframe_format(format=".parquet")
-        print(f"Dataframe format (MM): {PipelineConfig().dataframe_format}")
+        print(f"Dataframe format: {PipelineConfig().dataframe_format}")
         self._pred_store_name = self.__get_pred_store_name()
         if self._model_path.target == "model":
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
@@ -672,6 +673,7 @@ class ModelManager:
                 model_path=self._model_path, pred_store_name=self._pred_store_name
             )
         self._wandb_notifications = wandb_notifications
+        self.__country_data = CountryData()
 
     def set_dataframe_format(self, format: str) -> None:
         """
@@ -790,7 +792,7 @@ class ModelManager:
     #     except requests.exceptions.RequestException as e:
     #         logger.error(f"Error getting the latest release version: {e}")
     #         raise RuntimeError(f"Error getting the latest release version: {e}")
-    
+
     def __get_pred_store_name(self) -> str:
         """
         Get the prediction store name based on the release version and date.
@@ -803,7 +805,10 @@ class ModelManager:
         #     self._owner, self._model_repo
         # )
         from views_pipeline_core.managers.package import PackageManager
-        version = PackageManager.get_latest_release_version_from_github(repository_name=self._model_repo)
+
+        version = PackageManager.get_latest_release_version_from_github(
+            repository_name=self._model_repo
+        )
         current_date = datetime.now()
         year = current_date.year
         month = str(current_date.month).zfill(2)
@@ -925,7 +930,7 @@ class ModelManager:
         if self._wandb_notifications and wandb.run:
             try:
                 # Replace the user's home directory with '[USER_HOME]' in the alert text
-                text = str(text).replace(str(Path.home()), '[USER_HOME]')
+                text = str(text).replace(str(Path.home()), "[USER_HOME]")
                 wandb.alert(
                     title=title,
                     text=text,
@@ -953,12 +958,13 @@ class ModelManager:
         for key, value in metric_dict.items():
             try:
                 if not str(key).startswith("_"):
-                    value = float(value) # Super hacky way to filter out metrics. 0/10 do not recommend
+                    value = float(
+                        value
+                    )  # Super hacky way to filter out metrics. 0/10 do not recommend
                     table_str += "{:<70}\t{:<30}\n".format(str(key), value)
             except:
                 continue
         return table_str
-
 
     def _save_model_artifact(self, run_type):
         """
@@ -1240,9 +1246,13 @@ class ModelManager:
                 if train:
                     try:
                         logger.info(f"Training model {self.config['name']}...")
-                        self._train_model_artifact(train=train, eval=eval, forecast=forecast) # Train the model
+                        self._train_model_artifact(
+                            train=train, eval=eval, forecast=forecast
+                        )  # Train the model
                         if not self.config["sweep"]:
-                            self._handle_log_creation(train=train, eval=eval, forecast=forecast)
+                            self._handle_log_creation(
+                                train=train, eval=eval, forecast=forecast
+                            )
                         self._wandb_alert(
                             title="Training Complete",
                             text=f"Training for model {self.config['name']} completed successfully.",
@@ -1261,10 +1271,14 @@ class ModelManager:
                         logger.info(f"Evaluating model {self.config['name']}...")
                         df_predictions = self._evaluate_model_artifact(
                             self._eval_type, artifact_name
-                        ) # Evaluate the model
-                        self._handle_log_creation(train=train, eval=eval, forecast=forecast)
+                        )  # Evaluate the model
+                        self._handle_log_creation(
+                            train=train, eval=eval, forecast=forecast
+                        )
                         # Evaluate the model
-                        self._evaluate_prediction_dataframe(df_predictions) # Calculate evaluation metrics
+                        self._evaluate_prediction_dataframe(
+                            df_predictions
+                        )  # Calculate evaluation metrics
                     except Exception as e:
                         logger.error(f"Error evaluating model: {e}")
                         self._wandb_alert(
@@ -1276,16 +1290,24 @@ class ModelManager:
                 if forecast:
                     try:
                         logger.info(f"Forecasting model {self.config['name']}...")
-                        df_predictions = self._forecast_model_artifact(artifact_name) # Forecast the model
-                        self._handle_log_creation(train=train, eval=eval, forecast=forecast)
+                        df_predictions = self._forecast_model_artifact(
+                            artifact_name
+                        )  # Forecast the model
+                        
+                        table = postprocess_forecasts(df_predictions)
+                        self._wandb_alert(
+                            title=f"Forecasting for model {self.config['name']} completed successfully.",
+                            text=f"{table}",
+                            level=wandb.AlertLevel.INFO,
+                        )
+
+                        self._handle_log_creation(
+                            train=train, eval=eval, forecast=forecast
+                        )
                         self._save_predictions(
                             df_predictions, self._model_path.data_generated
                         )
-                        self._wandb_alert(
-                            title="Forecasting Complete",
-                            text=f"Forecasting for model {self.config['name']} completed successfully.",
-                            level=wandb.AlertLevel.INFO,
-                        )
+                        logger.info(f"{table}")
                     except Exception as e:
                         logger.error(f"Error forecasting model: {e}")
                         self._wandb_alert(
@@ -1310,8 +1332,8 @@ class ModelManager:
         """
         Handles the creation of log files for different stages of the model pipeline.
 
-        Depending on the flags provided, this method creates log files for training, 
-        evaluation, or forecasting stages of the model pipeline. It reads the data 
+        Depending on the flags provided, this method creates log files for training,
+        evaluation, or forecasting stages of the model pipeline. It reads the data
         fetch timestamp from an existing log file and includes it in the new log files.
 
         Args:
@@ -1324,18 +1346,16 @@ class ModelManager:
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         data_fetch_timestamp = read_log_file(
-            self._model_path.data_raw
-            / f"{self.config['run_type']}_data_fetch_log.txt"
+            self._model_path.data_raw / f"{self.config['run_type']}_data_fetch_log.txt"
         ).get("Data Fetch Timestamp", None)
 
         create_log_file(
             path_generated=self._model_path.data_generated,
             model_config=self.config,
             model_timestamp=self.config["timestamp"],
-            data_generation_timestamp= None if train else timestamp,
+            data_generation_timestamp=None if train else timestamp,
             data_fetch_timestamp=data_fetch_timestamp,
         )
-
 
     def _evaluate_prediction_dataframe(self, df_predictions):
         """
@@ -1408,6 +1428,7 @@ class ModelManager:
         #         text=f"{evaluation_table}",
         #     )
         # else:
+
         self._wandb_alert(
             title=f"Evaluation Complete for model {self.config['name']}",
             text=f"{self._generate_evaluation_table(metric_dict=wandb.run.summary._as_dict())}",
@@ -1474,3 +1495,58 @@ class ModelManager:
             **self._config_deployment,
         }
         return config
+
+def postprocess_forecasts(df):
+    from ingester3.ViewsMonth import ViewsMonth
+
+    df = df.reset_index()
+    # exit if country_id column is not present
+    if "country_id" not in df.columns:
+        return "country_id column not found in the DataFrame. Only cm level models supported."
+    n = 6
+    top_n_countries = (
+        df.groupby("country_id")["step_combined"]
+        .mean()
+        .nlargest(n)
+        .index.tolist()
+    )
+    # print(top_n_countries)
+    table_str = f"Forecasts for top {n} countries: "
+    for country_id in top_n_countries:
+        step_combined_values = df[
+            df["country_id"] == country_id
+        ].set_index("month_id")["step_combined"]
+        # convert logged values to normal values
+        step_combined_values = step_combined_values.apply(
+            np.exp
+        )
+
+        # replace NaN, inf, -inf with 0
+        step_combined_values.replace(
+            [np.inf, -np.inf], np.nan, inplace=True
+        )
+        step_combined_values.fillna(0, inplace=True)
+
+        # convert step_combined_values to int and round upwards
+        step_combined_values = step_combined_values.apply(
+            np.ceil
+        ).astype(int)
+
+        # print step_combined_values as a table with month_id and step_combined
+        step_combined_list = (
+            step_combined_values.reset_index()
+            .sort_values("month_id")
+            .to_dict(orient="records")
+        )
+        table_str += f"\n\nCountry: {CountryData().get_country_by_id(country_id).name}\n"
+        table_str += "{:<20} {:<20} {:<30}\n".format(
+            "Month", "Year", "Forecasted fatalities"
+        )
+        table_str += "-" * 70 + "\n"
+        for month in step_combined_list:
+            month_name = ViewsMonth(month["month_id"]).month
+            year = ViewsMonth(month["month_id"]).year
+            table_str += "{:<20} {:<20} {:<30}\n".format(
+                month_name, year, month["step_combined"]
+            )
+    return table_str
