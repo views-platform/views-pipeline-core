@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 class PipelineConfig:
     def __init__(self):
-        self._dataframe_format = '.pkl'
+        self._dataframe_format = '.parquet'
         self._model_format = '.pkl'
         self._organization_name = 'views'
         # self._version_range = ">=0.2.0,<1.0.0"

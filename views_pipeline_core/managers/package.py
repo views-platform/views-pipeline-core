@@ -131,8 +131,10 @@ class PackageManager:
             response = requests.get(github_url)
             if response.status_code == 200:
                 data = response.json()
-                if "tag_name" in data:
+                if "tag_name" in data and data["tag_name"] is not None:
                     return data["tag_name"].lstrip("v")
+                elif "name" in data and data["name"] is not None:
+                    return data["name"].lstrip("v")
                 else:
                     logging.error("No releases found for this repository.")
                     return None
