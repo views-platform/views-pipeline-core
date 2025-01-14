@@ -1,12 +1,14 @@
+from typing import Dict
+import re
+from dataclasses import asdict
 import wandb
+from views_evaluation.evaluation.metrics import EvaluationMetrics
 
-def add_wandb_monthly_metrics():
+def add_wandb_metrics():
     """
-    Defines the WandB metrics for monthly evaluation.
+    Defines the WandB metrics for step-wise, month-wise, and time-series-wise evaluation.
 
-    This function sets up the metrics for logging monthly evaluation metrics in WandB.
-    It defines a step metric called "monthly/out_sample_month" and specifies that any
-    metric under the "monthly" namespace will use "monthly/out_sample_month" as its step metric.
+    This function sets up the metrics for logging step-wise evaluation metrics in WandB.
 
     Usage:
         This function should be called at the start of a WandB run to configure
@@ -14,85 +16,116 @@ def add_wandb_monthly_metrics():
 
     Example:
         >>> wandb.init(project="example_project")
-        >>> add_wandb_monthly_metrics()
-        >>> wandb.log({"monthly/mean_squared_error": 0.02, "monthly/out_sample_month": 1})
+        >>> add_wandb_metrics()
+        >>> wandb.log({"step-wise/mean_squared_error": 0.02, "step-wise/step": 1})
 
     Notes:
-        - The step metric "monthly/out_sample_month" will be used to log metrics for each time  (i.e. forecasted month).
-        - Any metric prefixed with "monthly/" will follow the "monthly/out_sample_month" step metric.
+        - The step metric "step-wise/step" will be used to log metrics for each time step.
+        - Any metric prefixed with "step-wise/" will follow the "step-wise/step" step metric.
 
     See Also:
-        - `wandb.define_metric`: WandB API for defining metrics and their step relationships.
+        - `wandb.define_metric`: WandB API for defining metrics and their step relationships
+
     """
+    wandb.define_metric("step-wise/step")
+    wandb.define_metric("step-wise/*", step_metric="step-wise/step")
 
-    # Define "new" monthly metrics for WandB logging
-    wandb.define_metric("monthly/out_sample_month")
-    wandb.define_metric("monthly/*", step_metric="monthly/out_sample_month")
+    wandb.define_metric("month-wise/month")
+    wandb.define_metric("month-wise/*", step_metric="month-wise/month")
+
+    wandb.define_metric("time-series-wise/time-series")
+    wandb.define_metric("time-series-wise/*", step_metric="time-series-wise/time-series")
 
 
-def generate_wandb_log_dict(log_dict, dict_of_eval_dicts, step):
+def generate_wandb_step_wise_log_dict(
+    log_dict: dict, 
+    dict_of_eval_dicts: Dict[str, EvaluationMetrics], 
+    step: str
+    ) -> dict:
     """
-    Adds evaluation metrics to a WandB log dictionary for a specific time step (i.e. forcasted month).
-
-    This function updates the provided log dictionary with evaluation metrics from
-    a specified feature and step, formatted for WandB logging. It appends the metrics
-    to the log dictionary using the "monthly/{metric_name}" format.
+    Generate a WandB log dictionary for step-wise evaluation metrics.
 
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
-        dict_of_eval_dicts (Dict[str, Dict[str, EvaluationMetrics]]): A dictionary of evaluation metrics,
-            where the keys are feature identifiers and the values are dictionaries with time steps as keys
-            and `EvaluationMetrics` instances as values.
+        dict_of_eval_dicts (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
+            where the keys are steps and values are `EvaluationMetrics` instances.
         step (str): The specific time step (month forecasted) for which metrics are logged (e.g., 'step01').
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and step.
-
-    Example:
-        >>> log_dict = {}
-        >>> dict_of_eval_dicts = {
-        ...     'step01': EvaluationMetrics(MSE=0.1, AP=0.2, AUC=0.3, Brier=0.4),
-        ...     'step02': EvaluationMetrics(MSE=0.2, AP=0.3, AUC=0.4, Brier=0.5),
-                ...
-        ... }
-        >>> log_dict = generate_wandb_log_dict(log_dict, dict_of_eval_dicts, 'step01')
-        >>> print(log_dict)
-        {
-            'monthly/MSE': 0.1,
-            'monthly/AP': 0.2,
-            'monthly/AUC': 0.3,
-            'monthly/Brier': 0.4
-        }
-
-    Notes:
-        - Only non-None values from the `EvaluationMetrics` instance are added to the log dictionary.
-        - The metrics are formatted with the "monthly/{metric_name}" naming convention for WandB logging.
-
-    See Also:
-        - `wandb.log`: WandB API for logging metrics.
     """
-
-    for key, value in dict_of_eval_dicts[step].items():
+    for key, value in asdict(dict_of_eval_dicts[step]).items():
         if value is not None:
-            log_dict[f"monthly/{key}"] = value
+            log_dict[f"step-wise/{key}"] = value
 
     return log_dict
 
 
-def log_wandb_log_dict(config, evaluation):
-    for t in config["steps"]:
+def generate_wandb_month_wise_log_dict(
+    log_dict: dict,
+    dict_of_eval_dicts: Dict[str, EvaluationMetrics],
+    month: str):
+    """
+    Generate a WandB log dictionary for month-wise evaluation metrics.
+
+    Args:
+        log_dict (dict): The log dictionary to be updated with new metrics.
+        dict_of_eval_dicts (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
+            where the keys are months and values are `EvaluationMetrics` instances.
+        month (str): The specific month for which metrics are logged (e.g., 'month501').
+
+    Returns:
+        dict: The updated log dictionary with the evaluation metrics for the specified feature and month.
+    """
+    for key, value in asdict(dict_of_eval_dicts[month]).items():
+        if value is not None:
+            log_dict[f"month-wise/{key}"] = value
+
+    return log_dict
+
+
+def generate_wandb_time_series_wise_log_dict(
+    log_dict: dict, 
+    dict_of_eval_dicts: Dict[str, EvaluationMetrics],
+    time_series: str
+    ) -> dict:
+    """
+    Generate a WandB log dictionary for time-series-wise evaluation metrics.
+
+    Args:
+        log_dict (dict): The log dictionary to be updated with new metrics.
+        dict_of_eval_dicts (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
+            where the keys are time series and values are `EvaluationMetrics` instances.
+        time_series (str): The specific time series for which metrics are logged (e.g., 'ts01').
+
+    Returns:
+        dict: The updated log dictionary with the evaluation metrics for the specified feature and time series
+    """
+    for key, value in asdict(dict_of_eval_dicts[time_series]).items():
+        if value is not None:
+            log_dict[f"time-series-wise/{key}"] = value
+
+    return log_dict
+
+
+def log_wandb_log_dict(step_wise_evaluation, time_series_wise_evaluation, month_wise_evaluation):
+    for step in step_wise_evaluation.keys():
+        s = int(re.search(r"\d+", step).group())
         log_dict = {}
-        log_dict["monthly/out_sample_month"] = t
-        step = f"step{str(t).zfill(2)}"
-        log_dict = generate_wandb_log_dict(log_dict, evaluation, step)
+        log_dict["step-wise/step"] = s
+        log_dict = generate_wandb_step_wise_log_dict(log_dict, step_wise_evaluation, step)
         wandb.log(log_dict)
-        
-        # Send a Slack alert with the model evaluation metrics
-        # alert_message = f"Model evaluation metrics for step {step}:\n"
-        # for key, value in log_dict.items():
-        #     alert_message += f"{key}: {value}\n"
-        # wandb.alert(
-        #     title=f"Model Evaluation Metrics for {step}",
-        #     text=alert_message,
-        #     level=wandb.AlertLevel.INFO
-        # )
+
+    for month in month_wise_evaluation.keys():
+        m = int(re.search(r"\d+", month).group())
+        log_dict = {}
+        log_dict["month-wise/month"] = m
+        log_dict = generate_wandb_month_wise_log_dict(log_dict, month_wise_evaluation, month)
+        wandb.log(log_dict)
+
+    for time_series in time_series_wise_evaluation.keys():
+        ts = int(re.search(r"\d+", time_series).group())
+        log_dict = {}
+        log_dict["time-series-wise/time-series"] = ts
+        log_dict = generate_wandb_time_series_wise_log_dict(log_dict, time_series_wise_evaluation, time_series)
+        wandb.log(log_dict)
