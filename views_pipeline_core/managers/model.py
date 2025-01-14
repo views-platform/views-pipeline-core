@@ -1236,7 +1236,7 @@ class ModelManager:
                         logger.info(f"Training model {self.config['name']}...")
                         self._train_model_artifact(train=train, eval=eval, forecast=forecast) # Train the model
                         if not self.config["sweep"]:
-                            self._handle_log_creation()
+                            self._handle_log_creation(train=train, eval=eval, forecast=forecast)
                         self._wandb_alert(
                             title="Training Complete",
                             text=f"Training for model {self.config['name']} completed successfully.",
@@ -1256,7 +1256,7 @@ class ModelManager:
                         df_predictions = self._evaluate_model_artifact(
                             self._eval_type, artifact_name
                         ) # Evaluate the model
-                        self._handle_log_creation()
+                        self._handle_log_creation(train=train, eval=eval, forecast=forecast)
                         # Evaluate the model
                         self._evaluate_prediction_dataframe(df_predictions) # Calculate evaluation metrics
                     except Exception as e:
@@ -1271,7 +1271,7 @@ class ModelManager:
                     try:
                         logger.info(f"Forecasting model {self.config['name']}...")
                         df_predictions = self._forecast_model_artifact(artifact_name) # Forecast the model
-                        self._handle_log_creation()
+                        self._handle_log_creation(train=train, eval=eval, forecast=forecast)
                         self._save_predictions(
                             df_predictions, self._model_path.data_generated
                         )
@@ -1340,6 +1340,27 @@ class ModelManager:
 
 
     def _evaluate_prediction_dataframe(self, df_predictions):
+        """
+        Evaluates the prediction DataFrame against actual values and logs the evaluation metrics.
+
+        Args:
+            df_predictions (pd.DataFrame or dict): The DataFrame or dictionary containing the prediction results.
+
+        Returns:
+            None
+
+        This method performs the following steps:
+        1. Initializes the MetricsManager with the specified metrics configuration.
+        2. Reads the actual values from the forecast store.
+        3. Evaluates the predictions using step-wise, time-series-wise, and month-wise evaluations.
+        4. Logs the evaluation metrics using WandB.
+        5. Saves the evaluation metrics and predictions to the specified paths.
+        6. Generates and logs an evaluation table if the predictions are provided as a dictionary or DataFrame.
+        7. Sends a WandB alert with the evaluation results.
+
+        Raises:
+            None
+        """
         metrics_manager = MetricsManager(self.config["metrics"])
         df_viewser = pd.DataFrame.forecasts.read_store(
             run=self._pred_store_name,
