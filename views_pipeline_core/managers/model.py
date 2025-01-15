@@ -1299,7 +1299,7 @@ class ModelManager:
                         table = postprocess_forecasts(df_predictions)
                         self._wandb_alert(
                             title=f"Forecasting for model {self.config['name']} completed successfully.",
-                            text=f"""{table}""",
+                            text=f"""{table}""" if table else "",
                             level=wandb.AlertLevel.INFO,
                         )
 
@@ -1309,7 +1309,6 @@ class ModelManager:
                         self._save_predictions(
                             df_predictions, self._model_path.data_generated
                         )
-                        logger.info(f"{table}")
                     except Exception as e:
                         logger.error(f"Error forecasting model: {e}")
                         self._wandb_alert(
@@ -1354,7 +1353,7 @@ class ModelManager:
         create_log_file(
             path_generated=self._model_path.data_generated,
             model_config=self.config,
-            model_timestamp=self.config["timestamp"],
+            model_timestamp=timestamp if train else self.config["timestamp"],
             data_generation_timestamp=None if train else timestamp,
             data_fetch_timestamp=data_fetch_timestamp,
         )
@@ -1505,7 +1504,8 @@ def postprocess_forecasts(df):
     df = df.reset_index()
     # exit if country_id column is not present
     if "country_id" not in df.columns:
-        return "country_id column not found in the DataFrame. Only cm level models supported."
+        logger.debug("country_id column not found in the DataFrame. Only cm level models supported. Skipping postprocessing.")
+        return None
     n = 1
     top_n_countries = (
         df.groupby("country_id")["step_combined"].mean().nlargest(n).index.tolist()
@@ -1545,4 +1545,5 @@ def postprocess_forecasts(df):
             table_str += "{:<20} {:<20} {:<30}\n".format(
                 month_name, year, month["step_combined"]
             )
+    logger.info(f"{table_str}")
     return str(table_str)

@@ -99,7 +99,9 @@ class EnsemblePathManager(ModelPathManager):
 
 class EnsembleManager(ModelManager):
 
-    def __init__(self, ensemble_path: EnsemblePathManager, wandb_notifications: bool = False) -> None:
+    def __init__(
+        self, ensemble_path: EnsemblePathManager, wandb_notifications: bool = False
+    ) -> None:
         super().__init__(ensemble_path, wandb_notifications)
 
     @staticmethod
@@ -230,27 +232,42 @@ class EnsembleManager(ModelManager):
                     self.config["timestamp"] = data_generation_timestamp
 
                     metrics_manager = MetricsManager(self.config["metrics"])
-                    df_viewser = pd.DataFrame.forecasts.read_store(run=self._pred_store_name,
-                                                       name=f"{self._config_meta['models'][0]}_{self.config['run_type']}_viewser_df") # The target value should be the same
+                    df_viewser = pd.DataFrame.forecasts.read_store(
+                        run=self._pred_store_name,
+                        name=f"{self._config_meta['models'][0]}_{self.config['run_type']}_viewser_df",
+                    )  # The target value should be the same
                     df_actual = df_viewser[[self.config["depvar"]]]
-                    step_wise_evaluation, df_step_wise_evaluation = metrics_manager.step_wise_evaluation(
-                        df_actual, df_predictions, self.config["depvar"], self.config["steps"]
+                    step_wise_evaluation, df_step_wise_evaluation = (
+                        metrics_manager.step_wise_evaluation(
+                            df_actual,
+                            df_predictions,
+                            self.config["depvar"],
+                            self.config["steps"],
+                        )
                     )
-                    time_series_wise_evaluation, df_time_series_wise_evaluation = metrics_manager.time_series_wise_evaluation(
-                        df_actual, df_predictions, self.config["depvar"]
+                    time_series_wise_evaluation, df_time_series_wise_evaluation = (
+                        metrics_manager.time_series_wise_evaluation(
+                            df_actual, df_predictions, self.config["depvar"]
+                        )
                     )
-                    month_wise_evaluation, df_month_wise_evaluation = metrics_manager.month_wise_evaluation(
-                        df_actual, df_predictions, self.config["depvar"]
+                    month_wise_evaluation, df_month_wise_evaluation = (
+                        metrics_manager.month_wise_evaluation(
+                            df_actual, df_predictions, self.config["depvar"]
+                        )
                     )
 
-                    log_wandb_log_dict(step_wise_evaluation, time_series_wise_evaluation, month_wise_evaluation)
+                    log_wandb_log_dict(
+                        step_wise_evaluation,
+                        time_series_wise_evaluation,
+                        month_wise_evaluation,
+                    )
 
                     self._save_evaluations(
                         df_step_wise_evaluation,
                         df_time_series_wise_evaluation,
                         df_month_wise_evaluation,
                         self._model_path.data_generated,
-                        )
+                    )
 
                     for i, df in enumerate(df_predictions):
                         self._save_predictions(df, path_generated_e, i)
@@ -269,6 +286,15 @@ class EnsembleManager(ModelManager):
                 if forecast:
                     logger.info(f"Forecasting model {self.config['name']}...")
                     df_prediction = self._forecast_ensemble()
+
+                    from views_pipeline_core.managers.model import postprocess_forecasts
+
+                    table = postprocess_forecasts(df_prediction)
+                    self._wandb_alert(
+                        title=f"Forecasting for ensemble {self.config['name']} completed successfully.",
+                        text=f"""{table}""" if table else "",
+                        level=wandb.AlertLevel.INFO,
+                    )
 
                     path_generated_e = self._model_path.data_generated
                     data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -342,7 +368,9 @@ class EnsembleManager(ModelManager):
 
             name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
             try:
-                pred = pd.DataFrame.forecasts.read_store(run=self._pred_store_name, name=name)
+                pred = pd.DataFrame.forecasts.read_store(
+                    run=self._pred_store_name, name=name
+                )
                 logger.info(f"Loading existing prediction {name} from prediction store")
             except Exception as e:
                 logger.info(
@@ -369,7 +397,9 @@ class EnsembleManager(ModelManager):
 
                 # with open(pkl_path, "rb") as file:
                 #     pred = pickle.load(file)
-                pred = pd.DataFrame.forecasts.read_store(run=self._pred_store_name, name=name)
+                pred = pd.DataFrame.forecasts.read_store(
+                    run=self._pred_store_name, name=name
+                )
 
                 data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 date_fetch_timestamp = read_log_file(
@@ -401,7 +431,9 @@ class EnsembleManager(ModelManager):
 
         name = f"{model_name}_predictions_{run_type}_{ts}"
         try:
-            pred = pd.DataFrame.forecasts.read_store(run=self._pred_store_name, name=name)
+            pred = pd.DataFrame.forecasts.read_store(
+                run=self._pred_store_name, name=name
+            )
             logger.info(f"Loading existing prediction {name} from prediction store")
         except Exception as e:
             logger.info(
@@ -425,7 +457,9 @@ class EnsembleManager(ModelManager):
                     f"Error during shell command execution for model {model_name}: {e}"
                 )
 
-            pred = pd.DataFrame.forecasts.read_store(run=self._pred_store_name, name=name)
+            pred = pd.DataFrame.forecasts.read_store(
+                run=self._pred_store_name, name=name
+            )
 
             data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             date_fetch_timestamp = read_log_file(
@@ -439,7 +473,6 @@ class EnsembleManager(ModelManager):
                 data_generation_timestamp,
                 date_fetch_timestamp,
             )
-
         return pred
 
     def _train_ensemble(self, use_saved: bool) -> None:
@@ -477,5 +510,5 @@ class EnsembleManager(ModelManager):
         df_prediction = EnsembleManager._get_aggregated_df(
             dfs, self.config["aggregation"]
         )
-        
+
         return df_prediction
