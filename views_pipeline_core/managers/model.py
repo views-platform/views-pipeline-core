@@ -1240,7 +1240,7 @@ class ModelManager:
                 if train:
                     try:
                         logger.info(f"Training model {self.config['name']}...")
-                        self._train_model_artifact(train=train, eval=eval, forecast=forecast) # Train the model
+                        self._train_model_artifact() # Train the model
                         if not self.config["sweep"]:
                             self._handle_log_creation(train=train, eval=eval, forecast=forecast)
                         self._wandb_alert(
