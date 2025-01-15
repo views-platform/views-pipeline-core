@@ -60,4 +60,4 @@ class CountryData:
 if __name__ == "__main__":
     country_data = CountryData()
     print(country_data.get_country_by_id(32))
-    print(country_data.get_country_by_name("Afghanistan"))
+    print(country_data.get_country_by_name("Afghanistan").country_id)

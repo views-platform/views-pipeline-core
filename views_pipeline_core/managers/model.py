@@ -1246,16 +1246,14 @@ class ModelManager:
                 if train:
                     try:
                         logger.info(f"Training model {self.config['name']}...")
-                        self._train_model_artifact(
-                            train=train, eval=eval, forecast=forecast
-                        )  # Train the model
+                        self._train_model_artifact()  # Train the model
                         if not self.config["sweep"]:
                             self._handle_log_creation(
                                 train=train, eval=eval, forecast=forecast
                             )
                         self._wandb_alert(
-                            title="Training Complete",
-                            text=f"Training for model {self.config['name']} completed successfully.",
+                            title="TTraining for model {self.config['name']} completed successfully.",
+                            text=f"",
                             level=wandb.AlertLevel.INFO,
                         )
                     except Exception as e:
@@ -1289,15 +1287,19 @@ class ModelManager:
 
                 if forecast:
                     try:
+                        self._wandb_alert(
+                            title=f"Forcasting for model {self.config['name']} started...",
+                            level=wandb.AlertLevel.INFO,
+                        )
                         logger.info(f"Forecasting model {self.config['name']}...")
                         df_predictions = self._forecast_model_artifact(
                             artifact_name
                         )  # Forecast the model
-                        
+
                         table = postprocess_forecasts(df_predictions)
                         self._wandb_alert(
                             title=f"Forecasting for model {self.config['name']} completed successfully.",
-                            text=f"{table}",
+                            text=f"""{table}""",
                             level=wandb.AlertLevel.INFO,
                         )
 
@@ -1496,6 +1498,7 @@ class ModelManager:
         }
         return config
 
+
 def postprocess_forecasts(df):
     from ingester3.ViewsMonth import ViewsMonth
 
@@ -1503,34 +1506,25 @@ def postprocess_forecasts(df):
     # exit if country_id column is not present
     if "country_id" not in df.columns:
         return "country_id column not found in the DataFrame. Only cm level models supported."
-    n = 6
+    n = 1
     top_n_countries = (
-        df.groupby("country_id")["step_combined"]
-        .mean()
-        .nlargest(n)
-        .index.tolist()
+        df.groupby("country_id")["step_combined"].mean().nlargest(n).index.tolist()
     )
     # print(top_n_countries)
     table_str = f"Forecasts for top {n} countries: "
     for country_id in top_n_countries:
-        step_combined_values = df[
-            df["country_id"] == country_id
-        ].set_index("month_id")["step_combined"]
+        step_combined_values = df[df["country_id"] == country_id].set_index("month_id")[
+            "step_combined"
+        ]
         # convert logged values to normal values
-        step_combined_values = step_combined_values.apply(
-            np.exp
-        )
+        step_combined_values = step_combined_values.apply(np.exp)
 
         # replace NaN, inf, -inf with 0
-        step_combined_values.replace(
-            [np.inf, -np.inf], np.nan, inplace=True
-        )
+        step_combined_values.replace([np.inf, -np.inf], np.nan, inplace=True)
         step_combined_values.fillna(0, inplace=True)
 
         # convert step_combined_values to int and round upwards
-        step_combined_values = step_combined_values.apply(
-            np.ceil
-        ).astype(int)
+        step_combined_values = step_combined_values.apply(np.ceil).astype(int)
 
         # print step_combined_values as a table with month_id and step_combined
         step_combined_list = (
@@ -1538,7 +1532,9 @@ def postprocess_forecasts(df):
             .sort_values("month_id")
             .to_dict(orient="records")
         )
-        table_str += f"\n\nCountry: {CountryData().get_country_by_id(country_id).name}\n"
+        table_str += (
+            f"\nCountry: {CountryData().get_country_by_id(country_id).name}\n"
+        )
         table_str += "{:<20} {:<20} {:<30}\n".format(
             "Month", "Year", "Forecasted fatalities"
         )
@@ -1549,4 +1545,4 @@ def postprocess_forecasts(df):
             table_str += "{:<20} {:<20} {:<30}\n".format(
                 month_name, year, month["step_combined"]
             )
-    return table_str
+    return str(table_str)
