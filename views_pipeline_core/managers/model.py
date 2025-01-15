@@ -1331,8 +1331,8 @@ class ModelManager:
         create_log_file(
             path_generated=self._model_path.data_generated,
             model_config=self.config,
-            model_timestamp=self.config["timestamp"],
-            data_generation_timestamp= None if train else timestamp,
+            model_timestamp=timestamp if train else self.config["timestamp"],
+            data_generation_timestamp=None if train else timestamp,
             data_fetch_timestamp=data_fetch_timestamp,
         )
 
