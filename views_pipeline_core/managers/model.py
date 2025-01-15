@@ -673,7 +673,6 @@ class ModelManager:
                 model_path=self._model_path, pred_store_name=self._pred_store_name
             )
         self._wandb_notifications = wandb_notifications
-        self.__country_data = CountryData()
 
     def set_dataframe_format(self, format: str) -> None:
         """
@@ -986,8 +985,8 @@ class ModelManager:
         # Save the artifact to WandB
         try:
             artifact = wandb.Artifact(
-                name=f"{run_type}_model_artifact",
-                type="model",
+                name=f"{run_type}_{self._model_path.target}_artifact",
+                type=f"{self._model_path.target}",
                 description=f"Latest {run_type} {self._model_path.target} artifact",
             )
             _latest_model_artifact_path = (
@@ -1125,7 +1124,7 @@ class ModelManager:
 
             self._wandb_alert(
                 title="Predictions Saved",
-                text=f"Predictions for {self.config['name']} have been successfully saved and logged to WandB and locally at {path_generated.relative_to(self._model_path.root)}.",
+                text=f"Predictions for {self._model_path.target} {self.config['name']} have been successfully saved and logged to WandB and locally at {path_generated.relative_to(self._model_path.root)}.",
                 level=wandb.AlertLevel.INFO,
             )
         except Exception as e:
@@ -1238,35 +1237,35 @@ class ModelManager:
                 add_wandb_metrics()
                 self.config = wandb.config
                 if self.config["sweep"]:
-                    logger.info(f"Sweeping model {self.config['name']}...")
+                    logger.info(f"Sweeping {self._model_path.target} {self.config['name']}...")
                     model = self._train_model_artifact()
-                    logger.info(f"Evaluating model {self.config['name']}...")
+                    logger.info(f"Evaluating {self._model_path.target} {self.config['name']}...")
                     self._evaluate_sweep(model, self._eval_type)
 
                 if train:
                     try:
-                        logger.info(f"Training model {self.config['name']}...")
+                        logger.info(f"Training {self._model_path.target} {self.config['name']}...")
                         self._train_model_artifact()  # Train the model
                         if not self.config["sweep"]:
                             self._handle_log_creation(
                                 train=train, eval=eval, forecast=forecast
                             )
                         self._wandb_alert(
-                            title="TTraining for model {self.config['name']} completed successfully.",
+                            title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
                             text=f"",
                             level=wandb.AlertLevel.INFO,
                         )
                     except Exception as e:
-                        logger.error(f"Error training model: {e}")
+                        logger.error(f"{self._model_path.target.title()} training model: {e}")
                         self._wandb_alert(
-                            title="Model Training Error",
-                            text=f"An error occurred during training of model {self.config['name']}: {traceback.format_exc()}",
+                            title=f"{self._model_path.target.title()} Training Error",
+                            text=f"An error occurred during training of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
 
                 if eval:
                     try:
-                        logger.info(f"Evaluating model {self.config['name']}...")
+                        logger.info(f"Evaluating {self._model_path.target} {self.config['name']}...")
                         df_predictions = self._evaluate_model_artifact(
                             self._eval_type, artifact_name
                         )  # Evaluate the model
@@ -1280,25 +1279,25 @@ class ModelManager:
                     except Exception as e:
                         logger.error(f"Error evaluating model: {e}")
                         self._wandb_alert(
-                            title="Model Evaluation Error",
-                            text=f"An error occurred during evaluation of model {self.config['name']}: {traceback.format_exc()}",
+                            title=f"{self._model_path.target.title()} Evaluation Error",
+                            text=f"An error occurred during evaluation of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
 
                 if forecast:
                     try:
                         self._wandb_alert(
-                            title=f"Forcasting for model {self.config['name']} started...",
+                            title=f"Forcasting for {self._model_path.target} {self.config['name']} started...",
                             level=wandb.AlertLevel.INFO,
                         )
-                        logger.info(f"Forecasting model {self.config['name']}...")
+                        logger.info(f"Forecasting {self._model_path.target} {self.config['name']}...")
                         df_predictions = self._forecast_model_artifact(
                             artifact_name
                         )  # Forecast the model
 
                         table = postprocess_forecasts(df_predictions)
                         self._wandb_alert(
-                            title=f"Forecasting for model {self.config['name']} completed successfully.",
+                            title=f"Forecasting for {self._model_path.target} {self.config['name']} completed successfully.",
                             text=f"""{table}""" if table else "",
                             level=wandb.AlertLevel.INFO,
                         )
@@ -1310,18 +1309,18 @@ class ModelManager:
                             df_predictions, self._model_path.data_generated
                         )
                     except Exception as e:
-                        logger.error(f"Error forecasting model: {e}")
+                        logger.error(f"Error forecasting {self._model_path.target}: {e}")
                         self._wandb_alert(
                             title="Model Forecasting Error",
-                            text=f"An error occurred during forecasting of model {self.config['name']}: {traceback.format_exc()}",
+                            text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
             wandb.finish()
         except Exception as e:
-            logger.error(f"Error during model tasks execution: {e}")
+            logger.error(f"Error during {self._model_path.target} tasks execution: {e}")
             self._wandb_alert(
-                title="Model Task Execution Error",
-                text=f"An error occurred during the execution of model tasks for {self.config['name']}: {e}",
+                title=f"{self._model_path.target.title()} Task Execution Error",
+                text=f"An error occurred during the execution of {self._model_path.target} tasks for {self.config['name']}: {e}",
                 level=wandb.AlertLevel.ERROR,
             )
 
@@ -1431,7 +1430,7 @@ class ModelManager:
         # else:
 
         self._wandb_alert(
-            title=f"Evaluation Complete for model {self.config['name']}",
+            title=f"Evaluation Complete for {self._model_path.target} {self.config['name']}",
             text=f"{self._generate_evaluation_table(metric_dict=wandb.run.summary._as_dict())}",
         )
 
@@ -1506,7 +1505,7 @@ def postprocess_forecasts(df):
     if "country_id" not in df.columns:
         logger.debug("country_id column not found in the DataFrame. Only cm level models supported. Skipping postprocessing.")
         return None
-    n = 1
+    n = 20
     top_n_countries = (
         df.groupby("country_id")["step_combined"].mean().nlargest(n).index.tolist()
     )

@@ -100,7 +100,7 @@ class EnsemblePathManager(ModelPathManager):
 class EnsembleManager(ModelManager):
 
     def __init__(
-        self, ensemble_path: EnsemblePathManager, wandb_notifications: bool = False
+        self, ensemble_path: EnsemblePathManager, wandb_notifications: bool = True
     ) -> None:
         super().__init__(ensemble_path, wandb_notifications)
 
