@@ -21,7 +21,8 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
 from views_forecasts.extensions import *
 import traceback
-
+from views_pipeline_core.data.country import CountryData, Country
+import numpy as np
 
 
 logger = logging.getLogger(__name__)
@@ -663,7 +664,7 @@ class ModelManager:
                 "config_sweep.py", "get_sweep_config"
             )
         self.set_dataframe_format(format=".parquet")
-        print(f"Dataframe format (MM): {PipelineConfig().dataframe_format}")
+        print(f"Dataframe format: {PipelineConfig().dataframe_format}")
         self._pred_store_name = self.__get_pred_store_name()
         if self._model_path.target == "model":
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
@@ -790,7 +791,7 @@ class ModelManager:
     #     except requests.exceptions.RequestException as e:
     #         logger.error(f"Error getting the latest release version: {e}")
     #         raise RuntimeError(f"Error getting the latest release version: {e}")
-    
+
     def __get_pred_store_name(self) -> str:
         """
         Get the prediction store name based on the release version and date.
@@ -803,7 +804,10 @@ class ModelManager:
         #     self._owner, self._model_repo
         # )
         from views_pipeline_core.managers.package import PackageManager
-        version = PackageManager.get_latest_release_version_from_github(repository_name=self._model_repo)
+
+        version = PackageManager.get_latest_release_version_from_github(
+            repository_name=self._model_repo
+        )
         current_date = datetime.now()
         year = current_date.year
         month = str(current_date.month).zfill(2)
@@ -925,7 +929,7 @@ class ModelManager:
         if self._wandb_notifications and wandb.run:
             try:
                 # Replace the user's home directory with '[USER_HOME]' in the alert text
-                text = str(text).replace(str(Path.home()), '[USER_HOME]')
+                text = str(text).replace(str(Path.home()), "[USER_HOME]")
                 wandb.alert(
                     title=title,
                     text=text,
@@ -953,12 +957,13 @@ class ModelManager:
         for key, value in metric_dict.items():
             try:
                 if not str(key).startswith("_"):
-                    value = float(value) # Super hacky way to filter out metrics. 0/10 do not recommend
+                    value = float(
+                        value
+                    )  # Super hacky way to filter out metrics. 0/10 do not recommend
                     table_str += "{:<70}\t{:<30}\n".format(str(key), value)
             except:
                 continue
         return table_str
-
 
     def _save_model_artifact(self, run_type):
         """
@@ -980,8 +985,8 @@ class ModelManager:
         # Save the artifact to WandB
         try:
             artifact = wandb.Artifact(
-                name=f"{run_type}_model_artifact",
-                type="model",
+                name=f"{run_type}_{self._model_path.target}_artifact",
+                type=f"{self._model_path.target}",
                 description=f"Latest {run_type} {self._model_path.target} artifact",
             )
             _latest_model_artifact_path = (
@@ -1119,7 +1124,7 @@ class ModelManager:
 
             self._wandb_alert(
                 title="Predictions Saved",
-                text=f"Predictions for {self.config['name']} have been successfully saved and logged to WandB and locally at {path_generated.relative_to(self._model_path.root)}.",
+                text=f"Predictions for {self._model_path.target} {self.config['name']} have been successfully saved and logged to WandB and locally at {path_generated.relative_to(self._model_path.root)}.",
                 level=wandb.AlertLevel.INFO,
             )
         except Exception as e:
@@ -1232,73 +1237,88 @@ class ModelManager:
                 add_wandb_metrics()
                 self.config = wandb.config
                 if self.config["sweep"]:
-                    logger.info(f"Sweeping model {self.config['name']}...")
+                    logger.info(f"Sweeping {self._model_path.target} {self.config['name']}...")
                     model = self._train_model_artifact()
-                    logger.info(f"Evaluating model {self.config['name']}...")
+                    logger.info(f"Evaluating {self._model_path.target} {self.config['name']}...")
                     self._evaluate_sweep(model, self._eval_type)
 
                 if train:
                     try:
-                        logger.info(f"Training model {self.config['name']}...")
-                        self._train_model_artifact() # Train the model
+                        logger.info(f"Training {self._model_path.target} {self.config['name']}...")
+                        self._train_model_artifact()  # Train the model
                         if not self.config["sweep"]:
-                            self._handle_log_creation(train=train, eval=eval, forecast=forecast)
+                            self._handle_log_creation(
+                                train=train, eval=eval, forecast=forecast
+                            )
                         self._wandb_alert(
-                            title="Training Complete",
-                            text=f"Training for model {self.config['name']} completed successfully.",
+                            title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
+                            text=f"",
                             level=wandb.AlertLevel.INFO,
                         )
                     except Exception as e:
-                        logger.error(f"Error training model: {e}")
+                        logger.error(f"{self._model_path.target.title()} training model: {e}")
                         self._wandb_alert(
-                            title="Model Training Error",
-                            text=f"An error occurred during training of model {self.config['name']}: {traceback.format_exc()}",
+                            title=f"{self._model_path.target.title()} Training Error",
+                            text=f"An error occurred during training of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
 
                 if eval:
                     try:
-                        logger.info(f"Evaluating model {self.config['name']}...")
+                        logger.info(f"Evaluating {self._model_path.target} {self.config['name']}...")
                         df_predictions = self._evaluate_model_artifact(
                             self._eval_type, artifact_name
-                        ) # Evaluate the model
-                        self._handle_log_creation(train=train, eval=eval, forecast=forecast)
+                        )  # Evaluate the model
+                        self._handle_log_creation(
+                            train=train, eval=eval, forecast=forecast
+                        )
                         # Evaluate the model
-                        self._evaluate_prediction_dataframe(df_predictions) # Calculate evaluation metrics
+                        self._evaluate_prediction_dataframe(
+                            df_predictions
+                        )  # Calculate evaluation metrics
                     except Exception as e:
                         logger.error(f"Error evaluating model: {e}")
                         self._wandb_alert(
-                            title="Model Evaluation Error",
-                            text=f"An error occurred during evaluation of model {self.config['name']}: {traceback.format_exc()}",
+                            title=f"{self._model_path.target.title()} Evaluation Error",
+                            text=f"An error occurred during evaluation of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
 
                 if forecast:
                     try:
-                        logger.info(f"Forecasting model {self.config['name']}...")
-                        df_predictions = self._forecast_model_artifact(artifact_name) # Forecast the model
-                        self._handle_log_creation(train=train, eval=eval, forecast=forecast)
+                        self._wandb_alert(
+                            title=f"Forcasting for {self._model_path.target} {self.config['name']} started...",
+                            level=wandb.AlertLevel.INFO,
+                        )
+                        logger.info(f"Forecasting {self._model_path.target} {self.config['name']}...")
+                        df_predictions = self._forecast_model_artifact(
+                            artifact_name
+                        )  # Forecast the model
+
+                        self._wandb_alert(
+                            title=f"Forecasting for {self._model_path.target} {self.config['name']} completed successfully.",
+                            level=wandb.AlertLevel.INFO,
+                        )
+
+                        self._handle_log_creation(
+                            train=train, eval=eval, forecast=forecast
+                        )
                         self._save_predictions(
                             df_predictions, self._model_path.data_generated
                         )
-                        self._wandb_alert(
-                            title="Forecasting Complete",
-                            text=f"Forecasting for model {self.config['name']} completed successfully.",
-                            level=wandb.AlertLevel.INFO,
-                        )
                     except Exception as e:
-                        logger.error(f"Error forecasting model: {e}")
+                        logger.error(f"Error forecasting {self._model_path.target}: {e}")
                         self._wandb_alert(
                             title="Model Forecasting Error",
-                            text=f"An error occurred during forecasting of model {self.config['name']}: {traceback.format_exc()}",
+                            text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
             wandb.finish()
         except Exception as e:
-            logger.error(f"Error during model tasks execution: {e}")
+            logger.error(f"Error during {self._model_path.target} tasks execution: {e}")
             self._wandb_alert(
-                title="Model Task Execution Error",
-                text=f"An error occurred during the execution of model tasks for {self.config['name']}: {e}",
+                title=f"{self._model_path.target.title()} Task Execution Error",
+                text=f"An error occurred during the execution of {self._model_path.target} tasks for {self.config['name']}: {e}",
                 level=wandb.AlertLevel.ERROR,
             )
 
@@ -1310,8 +1330,8 @@ class ModelManager:
         """
         Handles the creation of log files for different stages of the model pipeline.
 
-        Depending on the flags provided, this method creates log files for training, 
-        evaluation, or forecasting stages of the model pipeline. It reads the data 
+        Depending on the flags provided, this method creates log files for training,
+        evaluation, or forecasting stages of the model pipeline. It reads the data
         fetch timestamp from an existing log file and includes it in the new log files.
 
         Args:
@@ -1324,8 +1344,7 @@ class ModelManager:
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         data_fetch_timestamp = read_log_file(
-            self._model_path.data_raw
-            / f"{self.config['run_type']}_data_fetch_log.txt"
+            self._model_path.data_raw / f"{self.config['run_type']}_data_fetch_log.txt"
         ).get("Data Fetch Timestamp", None)
 
         create_log_file(
@@ -1335,7 +1354,6 @@ class ModelManager:
             data_generation_timestamp=None if train else timestamp,
             data_fetch_timestamp=data_fetch_timestamp,
         )
-
 
     def _evaluate_prediction_dataframe(self, df_predictions):
         """
@@ -1408,8 +1426,9 @@ class ModelManager:
         #         text=f"{evaluation_table}",
         #     )
         # else:
+
         self._wandb_alert(
-            title=f"Evaluation Complete for model {self.config['name']}",
+            title=f"Evaluation Complete for {self._model_path.target} {self.config['name']}",
             text=f"{self._generate_evaluation_table(metric_dict=wandb.run.summary._as_dict())}",
         )
 
