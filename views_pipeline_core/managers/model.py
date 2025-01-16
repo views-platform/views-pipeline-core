@@ -21,7 +21,6 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
 from views_forecasts.extensions import *
 import traceback
-from views_pipeline_core.data.country import CountryData, Country
 import numpy as np
 
 
