@@ -84,7 +84,27 @@ The VIEWS project is a collaborative effort supported by leading research instit
 
 The VIEWS project is funded by several organizations dedicated to advancing peace and conflict research. Our primary funders include:
 
-[<img src="https://upload.wikimedia.org/wikipedia/en/0/03/Uppsala_University_logo.svg" alt="Uppsala University Logo" width="150" height="90">](https://www.uu.se/en/department/peace-and-conflict-research)
-[<img src="https://upload.wikimedia.org/wikipedia/commons/b/b7/Flag_of_Europe.svg" alt="European Union" width="150" height="90">](https://european-union.europa.eu/index_en)
-[<img src="https://upload.wikimedia.org/wikipedia/en/e/e9/European_Research_Council_logo.svg" alt="European Research Council" width="150" height="90">](https://erc.europa.eu/homepage)
-[<img src="https://upload.wikimedia.org/wikipedia/en/7/7a/Logo_of_the_Peace_Research_Institute_Oslo_%28Institutt_for_fredsforskning%2C_PRIO%29.png" alt="Peace Research Institute Oslo" width="150" height="90">](https://www.prio.org/)
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://www.uu.se/en/department/peace-and-conflict-research">
+        <img src="https://upload.wikimedia.org/wikipedia/en/0/03/Uppsala_University_logo.svg" alt="Uppsala University Logo" width="150" height="90">
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://european-union.europa.eu/index_en">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/b/b7/Flag_of_Europe.svg" alt="European Union" width="150" height="90">
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://erc.europa.eu/homepage">
+        <img src="https://upload.wikimedia.org/wikipedia/en/e/e9/European_Research_Council_logo.svg" alt="European Research Council" width="150" height="90">
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://www.prio.org/">
+        <img src="https://upload.wikimedia.org/wikipedia/en/7/7a/Logo_of_the_Peace_Research_Institute_Oslo_%28Institutt_for_fredsforskning%2C_PRIO%29.png" alt="Peace Research Institute Oslo" width="150" height="70">
+      </a>
+    </td>
+  </tr>
+</table>
