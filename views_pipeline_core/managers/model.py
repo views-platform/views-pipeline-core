@@ -1236,14 +1236,20 @@ class ModelManager:
                 add_wandb_metrics()
                 self.config = wandb.config
                 if self.config["sweep"]:
-                    logger.info(f"Sweeping {self._model_path.target} {self.config['name']}...")
+                    logger.info(
+                        f"Sweeping {self._model_path.target} {self.config['name']}..."
+                    )
                     model = self._train_model_artifact()
-                    logger.info(f"Evaluating {self._model_path.target} {self.config['name']}...")
+                    logger.info(
+                        f"Evaluating {self._model_path.target} {self.config['name']}..."
+                    )
                     self._evaluate_sweep(model, self._eval_type)
 
                 if train:
                     try:
-                        logger.info(f"Training {self._model_path.target} {self.config['name']}...")
+                        logger.info(
+                            f"Training {self._model_path.target} {self.config['name']}..."
+                        )
                         self._train_model_artifact()  # Train the model
                         if not self.config["sweep"]:
                             self._handle_log_creation(
@@ -1255,7 +1261,9 @@ class ModelManager:
                             level=wandb.AlertLevel.INFO,
                         )
                     except Exception as e:
-                        logger.error(f"{self._model_path.target.title()} training model: {e}")
+                        logger.error(
+                            f"{self._model_path.target.title()} training model: {e}"
+                        )
                         self._wandb_alert(
                             title=f"{self._model_path.target.title()} Training Error",
                             text=f"An error occurred during training of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
@@ -1264,7 +1272,9 @@ class ModelManager:
 
                 if eval:
                     try:
-                        logger.info(f"Evaluating {self._model_path.target} {self.config['name']}...")
+                        logger.info(
+                            f"Evaluating {self._model_path.target} {self.config['name']}..."
+                        )
                         df_predictions = self._evaluate_model_artifact(
                             self._eval_type, artifact_name
                         )  # Evaluate the model
@@ -1272,9 +1282,14 @@ class ModelManager:
                             train=train, eval=eval, forecast=forecast
                         )
                         # Evaluate the model
-                        self._evaluate_prediction_dataframe(
-                            df_predictions
-                        )  # Calculate evaluation metrics
+                        if self.config["metrics"]:
+                            self._evaluate_prediction_dataframe(
+                                df_predictions
+                            )  # Calculate evaluation metrics with the views-evaluation package
+                        else:
+                            raise ValueError(
+                                'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
+                            )
                     except Exception as e:
                         logger.error(f"Error evaluating model: {e}")
                         self._wandb_alert(
@@ -1289,7 +1304,9 @@ class ModelManager:
                             title=f"Forcasting for {self._model_path.target} {self.config['name']} started...",
                             level=wandb.AlertLevel.INFO,
                         )
-                        logger.info(f"Forecasting {self._model_path.target} {self.config['name']}...")
+                        logger.info(
+                            f"Forecasting {self._model_path.target} {self.config['name']}..."
+                        )
                         df_predictions = self._forecast_model_artifact(
                             artifact_name
                         )  # Forecast the model
@@ -1306,7 +1323,9 @@ class ModelManager:
                             df_predictions, self._model_path.data_generated
                         )
                     except Exception as e:
-                        logger.error(f"Error forecasting {self._model_path.target}: {e}")
+                        logger.error(
+                            f"Error forecasting {self._model_path.target}: {e}"
+                        )
                         self._wandb_alert(
                             title="Model Forecasting Error",
                             text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
