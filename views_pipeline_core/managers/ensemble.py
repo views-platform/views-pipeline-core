@@ -287,12 +287,8 @@ class EnsembleManager(ModelManager):
                     logger.info(f"Forecasting model {self.config['name']}...")
                     df_prediction = self._forecast_ensemble()
 
-                    from views_pipeline_core.managers.model import postprocess_forecasts
-
-                    table = postprocess_forecasts(df_prediction)
                     self._wandb_alert(
                         title=f"Forecasting for ensemble {self.config['name']} completed successfully.",
-                        text=f"""{table}""" if table else "",
                         level=wandb.AlertLevel.INFO,
                     )
 
