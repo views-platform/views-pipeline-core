@@ -79,3 +79,12 @@ The VIEWS project is a collaborative effort supported by leading research instit
 
 - **Department of Peace and Conflict Research at the University of Uppsala:**
   The [Department of Peace and Conflict Research at the University of Uppsala](https://www.uu.se/en/department/peace-and-conflict-research) is a leading academic institution in the study of conflict resolution, peacebuilding, and security. The department is renowned for its research and education programs aimed at fostering a deeper understanding of conflict dynamics and peace processes. This department also hosts the [Uppsala Conflict Data Program (UCDP)](https://ucdp.uu.se/), a central data source for the VIEWS project. About half of the VIEWS core team is currently located at the University of Uppsala.
+
+### Funding Information
+
+The VIEWS project is funded by several organizations dedicated to advancing peace and conflict research. Our primary funders include:
+
+[<img src="https://upload.wikimedia.org/wikipedia/en/0/03/Uppsala_University_logo.svg" alt="Uppsala University Logo" width="150" height="90">](https://www.uu.se/en/department/peace-and-conflict-research)
+[<img src="https://upload.wikimedia.org/wikipedia/commons/b/b7/Flag_of_Europe.svg" alt="European Union" width="150" height="90">](https://european-union.europa.eu/index_en)
+[<img src="https://upload.wikimedia.org/wikipedia/en/e/e9/European_Research_Council_logo.svg" alt="European Research Council" width="150" height="90">](https://erc.europa.eu/homepage)
+[<img src="https://upload.wikimedia.org/wikipedia/en/7/7a/Logo_of_the_Peace_Research_Institute_Oslo_%28Institutt_for_fredsforskning%2C_PRIO%29.png" alt="Peace Research Institute Oslo" width="150" height="90">](https://www.prio.org/)
