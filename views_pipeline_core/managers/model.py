@@ -274,7 +274,8 @@ class ModelPathManager:
                         f"Invalid {self.target} name. Please provide a valid {self.target} name that follows the lowercase 'adjective_noun' format."
                     )
             except Exception as e:
-                logger.error(f"Error extracting model name from path: {e}")
+                logger.error(f"Error extracting model name from path: {e}", exc_info=True)
+                raise 
         else:
             if not self.validate_model_name(model_path):
                 raise ValueError(
@@ -484,7 +485,7 @@ class ModelPathManager:
         model_dir = self.models / self.model_name
         if not self._check_if_dir_exists(model_dir) and self._validate:
             error = f"{self.target.title()} directory {model_dir} does not exist. Please create it first using `make_new_model.py` or set validate to `False`."
-            logger.error(error)
+            logger.error(error, exc_info=True)
             raise FileNotFoundError(error)
         return model_dir
 
@@ -663,7 +664,7 @@ class ModelManager:
                 "config_sweep.py", "get_sweep_config"
             )
         self.set_dataframe_format(format=".parquet")
-        print(f"Dataframe format: {PipelineConfig().dataframe_format}")
+        logger.debug(f"Dataframe format: {PipelineConfig().dataframe_format}")
         self._pred_store_name = self.__get_pred_store_name()
         if self._model_path.target == "model":
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
@@ -820,7 +821,8 @@ class ModelManager:
                 + f"_{year}_{month}"
             )
         except Exception as e:
-            logger.error(f"Error generating prediction store name: {e}")
+            logger.error(f"Error generating prediction store name: {e}", exc_info=True)
+            raise
 
         if pred_store_name not in ViewsMetadata().get_runs().name.tolist():
             logger.warning(
@@ -860,7 +862,8 @@ class ModelManager:
                 if hasattr(config_module, config_method):
                     return getattr(config_module, config_method)()
             except (AttributeError, ImportError) as e:
-                logger.error(f"Error loading config from {script_name}: {e}")
+                logger.error(f"Error loading config from {script_name}: {e}", exc_info=True)
+                raise
 
         return None
 
@@ -997,12 +1000,13 @@ class ModelManager:
                 f"Artifact for run type: {run_type}, {_latest_model_artifact_path.relative_to(self._model_path.root)} saved to WandB successfully."
             )
         except Exception as e:
-            logger.error(f"Error saving artifact to WandB: {e}")
+            logger.error(f"Error saving artifact to WandB: {e}", exc_info=True)
             self._wandb_alert(
                 title="Artifact Saving Error",
                 text=f"An error occurred while saving the artifact {_latest_model_artifact_path.relative_to(self._model_path.root)} to WandB: {traceback.format_exc()}",
                 level=wandb.AlertLevel.ERROR,
             )
+            raise
 
     def _save_evaluations(
         self,
@@ -1076,12 +1080,13 @@ class ModelManager:
                 level=wandb.AlertLevel.INFO,
             )
         except Exception as e:
-            logger.error(f"Error saving model outputs: {e}")
+            logger.error(f"Error saving model outputs: {e}", exc_info=True)
             self._wandb_alert(
                 title=f"{self._model_path.target.title} Outputs Saving Error",
                 text=f"An error occurred while saving and logging {self._model_path.target} outputs for {self.config['name']} at {path_generated.relative_to(self._model_path.root)}: {traceback.format_exc()}",
                 level=wandb.AlertLevel.ERROR,
             )
+            raise
 
     def _save_predictions(
         self,
@@ -1127,12 +1132,13 @@ class ModelManager:
                 level=wandb.AlertLevel.INFO,
             )
         except Exception as e:
-            logger.error(f"Error saving predictions: {e}")
+            logger.error(f"Error saving predictions: {e}", exc_info=True)
             self._wandb_alert(
                 title="Prediction Saving Error",
                 text=f"An error occurred while saving predictions for {self.config['name']} at {path_generated.relative_to(self._model_path.root)}: {traceback.format_exc()}",
                 level=wandb.AlertLevel.ERROR,
             )
+            raise
 
     def execute_single_run(self, args) -> None:
         """
@@ -1169,12 +1175,13 @@ class ModelManager:
                 artifact_name=args.artifact_name,
             )
         except Exception as e:
-            logger.error(f"Error during single run execution: {e}")
+            logger.error(f"Error during single run execution: {e}", exc_info=True)
             self._wandb_alert(
                 title="Single Run Execution Error",
                 text=f"An error occurred during the execution of single run for {self.config['name']}: {e}",
                 level=wandb.AlertLevel.ERROR,
             )
+            raise
         finally:
             wandb.finish()
 
@@ -1205,12 +1212,13 @@ class ModelManager:
             )
             wandb.agent(sweep_id, self._execute_model_tasks, entity=self._entity)
         except Exception as e:
-            logger.error(f"Error during sweep run execution: {e}")
+            logger.error(f"Error during sweep run execution: {e}", exc_info=True)
             self._wandb_alert(
                 title="Sweep Run Execution Error",
                 text=f"An error occurred during the execution of sweep run for {self.config['name']}: {traceback.format_exc()}",
                 level=wandb.AlertLevel.ERROR,
             )
+            raise
 
     def _execute_model_tasks(
         self,
@@ -1262,13 +1270,14 @@ class ModelManager:
                         )
                     except Exception as e:
                         logger.error(
-                            f"{self._model_path.target.title()} training model: {e}"
+                            f"{self._model_path.target.title()} training model: {e}", exc_info=True
                         )
                         self._wandb_alert(
                             title=f"{self._model_path.target.title()} Training Error",
                             text=f"An error occurred during training of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
+                        raise
 
                 if eval:
                     try:
@@ -1277,7 +1286,7 @@ class ModelManager:
                         )
                         df_predictions = self._evaluate_model_artifact(
                             self._eval_type, artifact_name
-                        )  # Evaluate the model
+                        )
                         self._handle_log_creation(
                             train=train, eval=eval, forecast=forecast
                         )
@@ -1291,19 +1300,16 @@ class ModelManager:
                                 'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
                             )
                     except Exception as e:
-                        logger.error(f"Error evaluating model: {e}")
+                        logger.error(f"Error evaluating model: {e}", exc_info=True)
                         self._wandb_alert(
                             title=f"{self._model_path.target.title()} Evaluation Error",
                             text=f"An error occurred during evaluation of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
+                        raise
 
                 if forecast:
                     try:
-                        self._wandb_alert(
-                            title=f"Forcasting for {self._model_path.target} {self.config['name']} started...",
-                            level=wandb.AlertLevel.INFO,
-                        )
                         logger.info(
                             f"Forecasting {self._model_path.target} {self.config['name']}..."
                         )
@@ -1323,22 +1329,22 @@ class ModelManager:
                             df_predictions, self._model_path.data_generated
                         )
                     except Exception as e:
-                        logger.error(
-                            f"Error forecasting {self._model_path.target}: {e}"
-                        )
+                        logger.error(f"Error forecasting {self._model_path.target}: {e}", exc_info=True)
                         self._wandb_alert(
                             title="Model Forecasting Error",
                             text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
+                        raise
             wandb.finish()
         except Exception as e:
-            logger.error(f"Error during {self._model_path.target} tasks execution: {e}")
+            logger.error(f"Error during {self._model_path.target} tasks execution: {e}", exc_info=True)
             self._wandb_alert(
                 title=f"{self._model_path.target.title()} Task Execution Error",
                 text=f"An error occurred during the execution of {self._model_path.target} tasks for {self.config['name']}: {e}",
                 level=wandb.AlertLevel.ERROR,
             )
+            raise
 
         end_t = time.time()
         minutes = (end_t - start_t) / 60
@@ -1373,12 +1379,13 @@ class ModelManager:
             data_fetch_timestamp=data_fetch_timestamp,
         )
 
-    def _evaluate_prediction_dataframe(self, df_predictions):
+    def _evaluate_prediction_dataframe(self, df_predictions, ensemble=False) -> None:
         """
         Evaluates the prediction DataFrame against actual values and logs the evaluation metrics.
 
         Args:
             df_predictions (pd.DataFrame or dict): The DataFrame or dictionary containing the prediction results.
+            ensemble (bool, optional): Flag indicating whether the predictions are from an ensemble model. Defaults to False.
 
         Returns:
             None
@@ -1396,10 +1403,18 @@ class ModelManager:
             None
         """
         metrics_manager = MetricsManager(self.config["metrics"])
-        df_viewser = pd.DataFrame.forecasts.read_store(
-            run=self._pred_store_name,
-            name=f"{self._model_path.model_name}_{self.config['run_type']}_viewser_df",
-        )
+        if not ensemble:
+            df_viewser = pd.DataFrame.forecasts.read_store(
+                run=self._pred_store_name,
+                name=f"{self._model_path.model_name}_{self.config['run_type']}_viewser_df",
+            )
+        else:
+            # If the predictions are from an ensemble model, the actual values are not available in the forecast store
+            # So we use the actual values from one of the single models
+            df_viewser = pd.DataFrame.forecasts.read_store(
+                run=self._pred_store_name,
+                name=f"{self.config['models'][0]}_{self.config['run_type']}_viewser_df",
+            )
         df_actual = df_viewser[[self.config["depvar"]]]
         step_wise_evaluation, df_step_wise_evaluation = (
             metrics_manager.step_wise_evaluation(

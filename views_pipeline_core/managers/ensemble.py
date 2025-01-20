@@ -190,7 +190,8 @@ class EnsembleManager(ModelManager):
             )
 
         except Exception as e:
-            logger.error(f"Error during single run execution: {e}")
+            logger.error(f"Error during single run execution: {e}", exc_info=True)
+            raise
 
     def _execute_model_tasks(
         self,
@@ -220,102 +221,107 @@ class EnsembleManager(ModelManager):
                     level=wandb.AlertLevel.INFO,
                 )
                 if train:
-                    logger.info(f"Training model {self.config['name']}...")
-                    self._train_ensemble(use_saved)
+                    try:
+                        logger.info(f"Training model {self.config['name']}...")
+                        self._train_ensemble(use_saved)
+
+                        self._wandb_alert(
+                            title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
+                            text=f"",
+                            level=wandb.AlertLevel.INFO,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"{self._model_path.target.title()} training model: {e}", exc_info=True
+                        )
+                        self._wandb_alert(
+                            title=f"{self._model_path.target.title()} Training Error",
+                            text=f"An error occurred during training of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
+                            level=wandb.AlertLevel.ERROR,
+                        )
+                        raise
 
                 if eval:
-                    logger.info(f"Evaluating model {self.config['name']}...")
-                    df_predictions = self._evaluate_ensemble(self._eval_type)
-
-                    path_generated_e = self._model_path.data_generated
-                    data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    self.config["timestamp"] = data_generation_timestamp
-
-                    metrics_manager = MetricsManager(self.config["metrics"])
-                    df_viewser = pd.DataFrame.forecasts.read_store(
-                        run=self._pred_store_name,
-                        name=f"{self._config_meta['models'][0]}_{self.config['run_type']}_viewser_df",
-                    )  # The target value should be the same
-                    df_actual = df_viewser[[self.config["depvar"]]]
-                    step_wise_evaluation, df_step_wise_evaluation = (
-                        metrics_manager.step_wise_evaluation(
-                            df_actual,
-                            df_predictions,
-                            self.config["depvar"],
-                            self.config["steps"],
+                    try:
+                        logger.info(f"Evaluating model {self.config['name']}...")
+                        df_predictions = self._evaluate_ensemble(self._eval_type)
+                        self._handle_log_creation()
+                        # Evaluate the model
+                        if self.config["metrics"]:
+                            self._evaluate_prediction_dataframe(
+                                df_predictions, ensemble=True
+                            )  # Calculate evaluation metrics with the views-evaluation package
+                        else:
+                            raise ValueError(
+                                'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
+                            )
+                    except Exception as e:
+                        logger.error(f"Error evaluating model: {e}", exc_info=True)
+                        self._wandb_alert(
+                            title=f"{self._model_path.target.title()} Evaluation Error",
+                            text=f"An error occurred during evaluation of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
+                            level=wandb.AlertLevel.ERROR,
                         )
-                    )
-                    time_series_wise_evaluation, df_time_series_wise_evaluation = (
-                        metrics_manager.time_series_wise_evaluation(
-                            df_actual, df_predictions, self.config["depvar"]
-                        )
-                    )
-                    month_wise_evaluation, df_month_wise_evaluation = (
-                        metrics_manager.month_wise_evaluation(
-                            df_actual, df_predictions, self.config["depvar"]
-                        )
-                    )
-
-                    log_wandb_log_dict(
-                        step_wise_evaluation,
-                        time_series_wise_evaluation,
-                        month_wise_evaluation,
-                    )
-
-                    self._save_evaluations(
-                        df_step_wise_evaluation,
-                        df_time_series_wise_evaluation,
-                        df_month_wise_evaluation,
-                        self._model_path.data_generated,
-                    )
-
-                    for i, df in enumerate(df_predictions):
-                        self._save_predictions(df, path_generated_e, i)
-
-                    # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
-                    create_log_file(
-                        path_generated_e,
-                        self.config,
-                        data_generation_timestamp,
-                        data_generation_timestamp,
-                        data_fetch_timestamp=None,
-                        model_type="ensemble",
-                        models=self.config["models"],
-                    )
+                        raise
 
                 if forecast:
-                    logger.info(f"Forecasting model {self.config['name']}...")
-                    df_prediction = self._forecast_ensemble()
+                    try:
+                        logger.info(f"Forecasting model {self.config['name']}...")
+                        df_prediction = self._forecast_ensemble()
 
-                    self._wandb_alert(
-                        title=f"Forecasting for ensemble {self.config['name']} completed successfully.",
-                        level=wandb.AlertLevel.INFO,
-                    )
-
-                    path_generated_e = self._model_path.data_generated
-                    data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    self.config["timestamp"] = data_generation_timestamp
-
-                    self._save_predictions(df_prediction, path_generated_e)
-
-                    # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
-                    create_log_file(
-                        path_generated_e,
-                        self.config,
-                        data_generation_timestamp,
-                        data_generation_timestamp,
-                        data_fetch_timestamp=None,
-                        model_type="ensemble",
-                        models=self.config["models"],
-                    )
+                        self._wandb_alert(
+                            title=f"Forecasting for ensemble {self.config['name']} completed successfully.",
+                            level=wandb.AlertLevel.INFO,
+                            )
+                        self._handle_log_creation()
+                        self._save_predictions(df_prediction, self._model_path.data_generated)
+                    except Exception as e:
+                        logger.error(
+                            f"Error forecasting {self._model_path.target}: {e}", exc_info=True
+                        )
+                        self._wandb_alert(
+                            title="Model Forecasting Error",
+                            text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
+                            level=wandb.AlertLevel.ERROR,
+                        )
+                        raise
 
             wandb.finish()
+
         except Exception as e:
-            logger.error(f"Error during model tasks execution: {e}")
+            logger.error(f"Error during model tasks execution: {e}", exc_info=True)
+            self._wandb_alert(
+                title=f"{self._model_path.target.title()} Task Execution Error",
+                text=f"An error occurred during the execution of {self._model_path.target} tasks for {self.config['name']}: {e}",
+                level=wandb.AlertLevel.ERROR,
+            )
+            raise
 
         end_t = time.time()
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
+    
+    def _handle_log_creation(self) -> None:
+        """
+        Handles the creation of log files for different stages of the model pipeline.
+
+        Returns:
+            None
+        """
+        path_generated_e = self._model_path.data_generated
+        data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.config["timestamp"] = data_generation_timestamp
+
+        # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
+        create_log_file(
+            path_generated_e,
+            self.config,
+            data_generation_timestamp,
+            data_generation_timestamp,
+            data_fetch_timestamp=None,
+            model_type="ensemble",
+            models=self.config["models"],
+        )
 
     def _train_model_artifact(
         self, model_name: str, run_type: str, use_saved: bool
@@ -340,8 +346,9 @@ class EnsembleManager(ModelManager):
             subprocess.run(shell_command, check=True)
         except Exception as e:
             logger.error(
-                f"Error during shell command execution for model {model_name}: {e}"
+                f"Error during shell command execution for model {model_name}: {e}", exc_info=True
             )
+            raise
 
     def _evaluate_model_artifact(
         self, model_name: str, run_type: str, eval_type: str
@@ -388,8 +395,9 @@ class EnsembleManager(ModelManager):
                     subprocess.run(shell_command, check=True)
                 except Exception as e:
                     logger.error(
-                        f"Error during shell command execution for model {model_name}: {e}"
+                        f"Error during shell command execution for model {model_name}: {e}", exc_info=True
                     )
+                    raise
 
                 # with open(pkl_path, "rb") as file:
                 #     pred = pickle.load(file)
@@ -397,18 +405,18 @@ class EnsembleManager(ModelManager):
                     run=self._pred_store_name, name=name
                 )
 
-                data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                date_fetch_timestamp = read_log_file(
-                    path_raw / f"{run_type}_data_fetch_log.txt"
-                ).get("Data Fetch Timestamp", None)
+                # data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                # date_fetch_timestamp = read_log_file(
+                #     path_raw / f"{run_type}_data_fetch_log.txt"
+                # ).get("Data Fetch Timestamp", None)
 
-                create_log_file(
-                    path_generated,
-                    model_config,
-                    ts,
-                    data_generation_timestamp,
-                    date_fetch_timestamp,
-                )
+                # create_log_file(
+                #     path_generated,
+                #     model_config,
+                #     ts,
+                #     data_generation_timestamp,
+                #     date_fetch_timestamp,
+                # )
 
             preds.append(pred)
 
@@ -450,25 +458,26 @@ class EnsembleManager(ModelManager):
                 subprocess.run(shell_command, check=True)
             except Exception as e:
                 logger.error(
-                    f"Error during shell command execution for model {model_name}: {e}"
+                    f"Error during shell command execution for model {model_name}: {e}", exc_info=True
                 )
+                raise
 
             pred = pd.DataFrame.forecasts.read_store(
                 run=self._pred_store_name, name=name
             )
 
-            data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            date_fetch_timestamp = read_log_file(
-                path_raw / f"{run_type}_data_fetch_log.txt"
-            ).get("Data Fetch Timestamp", None)
+            # data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # date_fetch_timestamp = read_log_file(
+            #     path_raw / f"{run_type}_data_fetch_log.txt"
+            # ).get("Data Fetch Timestamp", None)
 
-            create_log_file(
-                path_generated,
-                model_config,
-                ts,
-                data_generation_timestamp,
-                date_fetch_timestamp,
-            )
+            # create_log_file(
+            #     path_generated,
+            #     model_config,
+            #     ts,
+            #     data_generation_timestamp,
+            #     date_fetch_timestamp,
+            # )
         return pred
 
     def _train_ensemble(self, use_saved: bool) -> None:

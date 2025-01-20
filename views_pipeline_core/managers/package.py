@@ -6,6 +6,7 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.managers.model import ModelPathManager
 import requests
 import logging
+import time
 from typing import Union
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,8 @@ class PackageManager:
         # Get the latest release information from GitHub
         try:
             response = requests.get(github_url)
+            # print(response.json())
+
             if response.status_code == 200:
                 data = response.json()
                 if "tag_name" in data and data["tag_name"] != "":
@@ -138,14 +141,28 @@ class PackageManager:
                 else:
                     logging.error("No releases found for this repository.")
                     return None
+
+            elif response.status_code == 403 and "X-RateLimit-Reset" in response.headers:
+                reset_time = int(response.headers["X-RateLimit-Reset"])
+                logging.error(
+                    f"API rate limit exceeded. Retry after {reset_time - int(time.time())} seconds.", exc_info=False
+                )
+                exit(1)
+
             else:
                 logging.error(
-                    f"Failed to get latest version from GitHub: {response.status_code}"
+                    f"Failed to get latest version from GitHub: {response.status_code}",
+                    f"Response: {response.text}",
+                    exc_info=True,
                 )
+                exit(1)
+                
         except requests.exceptions.RequestException as e:
             logging.error(
-                f"An error occurred while getting the latest version from GitHub: {e}"
+                f"An error occurred while getting the latest version from GitHub: {e}",
+                exc_info=True,
             )
+            raise
         return None
 
     @staticmethod
