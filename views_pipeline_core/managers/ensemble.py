@@ -15,7 +15,7 @@ from pathlib import Path
 import subprocess
 from datetime import datetime
 import pandas as pd
-
+import traceback
 
 logger = logging.getLogger(__name__)
 
