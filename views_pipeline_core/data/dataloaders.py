@@ -12,7 +12,6 @@ from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.managers.model import ModelPathManager
 from ingester3.ViewsMonth import ViewsMonth
-from views_forecasts.extensions import *
 
 logger = logging.getLogger(__name__)
 
@@ -262,40 +261,31 @@ class ViewsDataLoader:
         if self.month_first is None or self.month_last is None:
             self.month_first, self.month_last = self._get_month_range()
 
-        # path_viewser_df = Path(
-        #     os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{PipelineConfig.dataframe_format}")
-        # )  # maby change to df...
-        viewser_df_name = f"{self._model_name}_{self.partition}_viewser_df"
+        path_viewser_df = Path(
+            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{PipelineConfig.dataframe_format}")
+        )  
         alerts = None
 
         if use_saved:
             # Check if the VIEWSER data file exists
             try:
-                # if path_viewser_df.exists():
-                #     df = read_dataframe(path_viewser_df)
-                #     # df = pd.read_pickle(path_viewser_df)
-                #     logger.info(f"Reading saved data from {path_viewser_df}")
-                logger.info(f"Reading saved data from prediction store with run name {self.pred_store_name}")
-                df = pd.DataFrame.forecasts.read_store(run=self.pred_store_name, 
-                                                       name=viewser_df_name)
+                if path_viewser_df.exists():
+                    df = read_dataframe(path_viewser_df)
+                    logger.info(f"Reading saved data from {path_viewser_df}")
             except Exception as e:
                 raise RuntimeError(
-                    f"Use of saved data was specified but getting {viewser_df_name} failed with: {e}"
+                    f"Use of saved data was specified but getting {path_viewser_df} failed with: {e}"
                 )
         else:
             logger.info(f"Fetching data from viewser...")
-            df, alerts = self._fetch_data_from_viewser(
-                self_test,
-            )  # which is then used here
+            df, alerts = self._fetch_data_from_viewser(self_test) 
             data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             create_data_fetch_log_file(
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
-            logger.info(f"Saving data to prediction store with run name {self.pred_store_name}")
-            # df.to_pickle(path_viewser_df)
-            # save_dataframe(df, path_viewser_df)
-            df.forecasts.set_run(self.pred_store_name)
-            df.forecasts.to_store(name=viewser_df_name, overwrite=True) # dangerous to leave overwrite=True, further discussion needed 
+            logger.info(f"Saving data to {path_viewser_df}")
+            save_dataframe(df, path_viewser_df)
+            
         if validate:
             if self._validate_df_partition(df=df):
                 return df, alerts

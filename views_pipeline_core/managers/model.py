@@ -13,6 +13,7 @@ import pandas as pd
 from pathlib import Path
 from views_pipeline_core.wandb.utils import add_wandb_metrics, log_wandb_log_dict
 from views_pipeline_core.files.utils import (
+    read_dataframe,
     save_dataframe,
     create_log_file,
     read_log_file,
@@ -1404,17 +1405,15 @@ class ModelManager:
         """
         metrics_manager = MetricsManager(self.config["metrics"])
         if not ensemble:
-            df_viewser = pd.DataFrame.forecasts.read_store(
-                run=self._pred_store_name,
-                name=f"{self._model_path.model_name}_{self.config['run_type']}_viewser_df",
-            )
+            df_path = self._model_path.data_raw / f"{self.config['run_type']}_viewser_df"
+            df_viewser = read_dataframe(df_path)
         else:
             # If the predictions are from an ensemble model, the actual values are not available in the forecast store
             # So we use the actual values from one of the single models
-            df_viewser = pd.DataFrame.forecasts.read_store(
-                run=self._pred_store_name,
-                name=f"{self.config['models'][0]}_{self.config['run_type']}_viewser_df",
-            )
+            df_path = ModelPathManager(self.config["models"][0]).data_raw / f"{self.config['run_type']}_viewser_df"
+            df_viewser = read_dataframe(df_path)
+            
+        logger.info(f"df_viewser read from {df_path}")
         df_actual = df_viewser[[self.config["depvar"]]]
         step_wise_evaluation, df_step_wise_evaluation = (
             metrics_manager.step_wise_evaluation(
