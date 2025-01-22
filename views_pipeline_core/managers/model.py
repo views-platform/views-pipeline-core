@@ -1405,14 +1405,14 @@ class ModelManager:
         """
         metrics_manager = MetricsManager(self.config["metrics"])
         if not ensemble:
-            df_path = self._model_path.data_raw / f"{self.config['run_type']}_viewser_df"
+            df_path = self._model_path.data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
             df_viewser = read_dataframe(df_path)
         else:
             # If the predictions are from an ensemble model, the actual values are not available in the forecast store
             # So we use the actual values from one of the single models
-            df_path = ModelPathManager(self.config["models"][0]).data_raw / f"{self.config['run_type']}_viewser_df"
+            df_path = ModelPathManager(self.config["models"][0]).data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
             df_viewser = read_dataframe(df_path)
-            
+
         logger.info(f"df_viewser read from {df_path}")
         df_actual = df_viewser[[self.config["depvar"]]]
         step_wise_evaluation, df_step_wise_evaluation = (
