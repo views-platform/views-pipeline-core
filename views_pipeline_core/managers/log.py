@@ -71,6 +71,10 @@ class LoggingManager:
             except Exception as e:
                 logging.basicConfig(level=self._default_level)
                 logging.error(f"Failed to load logging configuration: {e}")
+
+            # Set Azure SDK logging level to WARNING to avoid excessive logging
+            logging.getLogger("azure").setLevel(logging.WARNING)
+            
             return logging.getLogger()
         return None
 
