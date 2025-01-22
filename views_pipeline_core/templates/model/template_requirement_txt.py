@@ -19,6 +19,6 @@ def generate(script_path: Path, package_name:str, package_version_range: str = "
     """
     if package_version_range is None:
         package_version_range = "=0.1.0"
-    code = f"""{package_name}={package_version_range}
+    code = f"""{package_name}=={package_version_range}
 """
     return save_text_file(script_path, code)
