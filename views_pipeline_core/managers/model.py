@@ -22,7 +22,6 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
 from views_forecasts.extensions import *
 import traceback
-import numpy as np
 
 
 logger = logging.getLogger(__name__)
@@ -645,9 +644,9 @@ class ModelManager:
     ) -> None:
         """
         Initializes the ModelManager with the given model path.
-
         Args:
             model_path (ModelPathManager): The path manager for the model.
+            wandb_notifications (bool, optional): Whether to enable WandB notifications. Defaults to True.
         """
         self._entity = "views_pipeline"
         self._model_repo = "views-models"
@@ -805,7 +804,8 @@ class ModelManager:
         #     self._owner, self._model_repo
         # )
         from views_pipeline_core.managers.package import PackageManager
-
+        # from views_forecasts.extensions import ViewsMetadata
+        
         version = PackageManager.get_latest_release_version_from_github(
             repository_name=self._model_repo
         )
@@ -955,18 +955,20 @@ class ModelManager:
         Returns:
             str: A formatted string representing the evaluation table.
         """
-        table_str = "\n{:<70} {:<30}".format("Metric", "Value")
-        table_str += "-" * 100 + "\n"
+        from tabulate import tabulate
+        # create an empty dataframe with columns 'Metric' and 'Value'
+        metric_df = pd.DataFrame(columns=["Metric", "Value"])
         for key, value in metric_dict.items():
             try:
                 if not str(key).startswith("_"):
-                    value = float(
-                        value
-                    )  # Super hacky way to filter out metrics. 0/10 do not recommend
-                    table_str += "{:<70}\t{:<30}\n".format(str(key), value)
+                    value = float(value)
+                    # add metric and value to the dataframe
+                    metric_df = metric_df.append({"Metric": key, "Value": value}, ignore_index=True)
             except:
                 continue
-        return table_str
+        result = tabulate(metric_df, headers='keys', tablefmt='grid')
+        print(result)
+        return f"```\n{result}\n```"
 
     def _save_model_artifact(self, run_type):
         """
@@ -1103,6 +1105,7 @@ class ModelManager:
             path_generated (str or Path): The path where the predictions should be saved.
             sequence_number (int): The sequence number.
         """
+        from views_forecasts.extensions import ForecastAccessor
         try:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)

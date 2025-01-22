@@ -89,7 +89,8 @@ def get_deployment_config():
                 manager._wandb_alert(title="Test Alert", text="This is a test alert", level="info")
                 mock_alert.assert_called_once_with(title="Test Alert", text="This is a test alert", level="info")
 
-def test_model_manager_init(mock_model_path):
+@patch("views_forecasts.extensions.ForecastAccessor.read_store")
+def test_model_manager_init(mock_model_path, mock_read_store):
     """
     Test the initialization of the ModelManager class.
     
@@ -133,7 +134,8 @@ def get_meta_config():
         assert manager._config_hyperparameters == {"hp_key": "hp_value"}
         assert manager._config_meta == {"meta_key": "meta_value"}
 
-def test_load_config(mock_model_path):
+@patch("views_forecasts.extensions.ForecastAccessor.read_store")
+def test_load_config(mock_model_pat, mock_read_store):
     """
     Test the __load_config method of the ModelManager class.
     
