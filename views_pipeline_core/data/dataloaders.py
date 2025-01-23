@@ -291,7 +291,7 @@ class ViewsDataLoader:
                 return df, alerts
             else:
                 raise RuntimeError(
-                    f"file {viewser_df_name} incompatible with partition {self.partition}"
+                    f"file {path_viewser_df.name} incompatible with partition {self.partition}"
                 )
         logger.debug(f"DataFrame shape: {df.shape if df is not None else 'None'}")
         for ialert, alert in enumerate(

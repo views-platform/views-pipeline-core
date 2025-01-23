@@ -1165,7 +1165,7 @@ class ModelManager:
                     validate=True,
                 )
                 self._wandb_alert(
-                    title=f"Queryset Fetch Complete ({str(args.run_type)})",
+                    title=f"Queryset Fetch Complete ({str(self._data_loader.partition)})",
                     text=f"Queryset for {self._model_path.target} {self.config['name']} with depvar {self.config['depvar']} and LoA of {self.config['level']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
                     level=wandb.AlertLevel.INFO,
                 )
