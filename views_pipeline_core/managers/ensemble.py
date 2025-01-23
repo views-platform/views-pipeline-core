@@ -5,7 +5,7 @@ from views_pipeline_core.files.utils import read_log_file, create_log_file
 from views_pipeline_core.files.utils import save_dataframe, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
-from views_forecasts.extensions import *
+from views_forecasts.extensions import * 
 from typing import Union, Optional, List, Dict
 import wandb
 import logging
@@ -353,6 +353,7 @@ class EnsembleManager(ModelManager):
     def _evaluate_model_artifact(
         self, model_name: str, run_type: str, eval_type: str
     ) -> List[pd.DataFrame]:
+        # from views_forecasts.extensions import ForecastAccessor
         logger.info(f"Evaluating single model {model_name}...")
 
         model_path = ModelPathManager(model_name)
@@ -423,6 +424,7 @@ class EnsembleManager(ModelManager):
         return preds
 
     def _forecast_model_artifact(self, model_name: str, run_type: str) -> pd.DataFrame:
+        # from views_forecasts.extensions import ForecastAccessor
         logger.info(f"Forecasting single model {model_name}...")
 
         model_path = ModelPathManager(model_name)

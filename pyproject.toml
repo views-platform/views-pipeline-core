@@ -17,7 +17,7 @@ ingester3 = "^2.1.0"
 properscoring = "^0.1"
 wandb = "^0.18.7"
 pyprojroot="^0.3.0"
-views_evaluation = { git = "https://github.com/views-platform/views-evaluation.git", branch = "main" }
+views-evaluation = { git = "https://github.com/views-platform/views-evaluation.git", branch = "main" }
 views-forecasts = "^0.5.5"
 
 
