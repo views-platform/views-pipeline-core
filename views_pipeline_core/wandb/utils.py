@@ -1,4 +1,5 @@
 from typing import Dict
+from statistics import mean
 import re
 from dataclasses import asdict
 import wandb
@@ -108,24 +109,64 @@ def generate_wandb_time_series_wise_log_dict(
     return log_dict
 
 
+def calculate_mean_evaluation_metrics(evaluation_dict) -> dict:
+    """
+    Calculate the mean evaluation metrics for a dictionary of evaluation metrics.
+
+    Args:
+        evaluation_dict (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
+            where the keys are time steps, months, or time series, and values are `EvaluationMetrics` instances.
+
+    Returns:
+        dict: A dictionary of mean evaluation metrics for the input dictionary.
+    """
+    mean_dict = {}
+    first_item = next(iter(evaluation_dict.values()))
+    metric_names = vars(first_item).keys()
+    
+    # Compute the mean for each metric, skipping metrics with None values
+    for key in metric_names:
+        valid_values = [value for value in (vars(item).get(key) for item in evaluation_dict.values()) if value is not None]
+        if valid_values: 
+            mean_dict[key] = mean(valid_values)
+
+    return mean_dict
+
+
 def log_wandb_log_dict(step_wise_evaluation, time_series_wise_evaluation, month_wise_evaluation):
     for step in step_wise_evaluation.keys():
         s = int(re.search(r"\d+", step).group())
         log_dict = {}
         log_dict["step-wise/step"] = s
-        log_dict = generate_wandb_step_wise_log_dict(log_dict, step_wise_evaluation, step)
-        wandb.log(log_dict)
+        step_wise_log_dict = generate_wandb_step_wise_log_dict(log_dict, step_wise_evaluation, step)
+        wandb.log(step_wise_log_dict)
 
     for month in month_wise_evaluation.keys():
         m = int(re.search(r"\d+", month).group())
         log_dict = {}
         log_dict["month-wise/month"] = m
-        log_dict = generate_wandb_month_wise_log_dict(log_dict, month_wise_evaluation, month)
-        wandb.log(log_dict)
+        month_wise_log_dict = generate_wandb_month_wise_log_dict(log_dict, month_wise_evaluation, month)
+        wandb.log(month_wise_log_dict)
 
     for time_series in time_series_wise_evaluation.keys():
         ts = int(re.search(r"\d+", time_series).group())
         log_dict = {}
         log_dict["time-series-wise/time-series"] = ts
-        log_dict = generate_wandb_time_series_wise_log_dict(log_dict, time_series_wise_evaluation, time_series)
-        wandb.log(log_dict)
+        ts_wise_log_dict = generate_wandb_time_series_wise_log_dict(log_dict, time_series_wise_evaluation, time_series)
+        wandb.log(ts_wise_log_dict)
+
+    # Calculate and log the mean evaluation metrics
+    mean_step_wise = calculate_mean_evaluation_metrics(step_wise_evaluation)
+    mean_month_wise = calculate_mean_evaluation_metrics(month_wise_evaluation)
+    mean_time_series_wise = calculate_mean_evaluation_metrics(time_series_wise_evaluation)
+
+    for key, value in mean_step_wise.items():
+        wandb.log({f"step_wise_{key.lower()}_mean": value})
+    
+    for key, value in mean_month_wise.items():
+        wandb.log({f"month_wise_{key.lower()}_mean": value})
+    
+    for key, value in mean_time_series_wise.items():
+        wandb.log({f"time_series_wise_{key.lower()}_mean": value})
+
+    

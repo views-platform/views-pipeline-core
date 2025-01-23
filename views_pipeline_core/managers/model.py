@@ -11,7 +11,10 @@ from datetime import datetime
 import wandb
 import pandas as pd
 from pathlib import Path
-from views_pipeline_core.wandb.utils import add_wandb_metrics, log_wandb_log_dict
+from views_pipeline_core.wandb.utils import (
+    add_wandb_metrics, 
+    log_wandb_log_dict,
+)
 from views_pipeline_core.files.utils import (
     read_dataframe,
     save_dataframe,
@@ -671,9 +674,10 @@ class ModelManager:
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
             self._data_loader = ViewsDataLoader(
-                model_path=self._model_path, pred_store_name=self._pred_store_name
+                model_path=self._model_path
             )
         self._wandb_notifications = wandb_notifications
+        self._sweep = False
 
     def set_dataframe_format(self, format: str) -> None:
         """
@@ -770,29 +774,6 @@ class ModelManager:
         # logger.info(f"sequence_number: {sequence_number}")
         return f"eval_{evaluation_type}_{run_type}_{timestamp}{file_extension}"
 
-    # @staticmethod
-    # def _get_latest_release_version(owner: str, repo: str) -> str:
-    #     """
-    #     Get the latest release version from the GitHub repository.
-
-    #     Args:
-    #         owner (str): The owner of the GitHub repository.
-    #         repo (str): The name of the GitHub repository
-
-    #     Returns:
-    #         str: The latest release version.
-    #     """
-    #     try:
-    #         response = requests.get(
-    #             f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-    #         )
-    #         response.raise_for_status()  # Raise an error for bad HTTP status codes
-    #         logger.debug(f"Latest release version: {response.json()['name']}")
-    #         return response.json()["name"]
-    #     except requests.exceptions.RequestException as e:
-    #         logger.error(f"Error getting the latest release version: {e}")
-    #         raise RuntimeError(f"Error getting the latest release version: {e}")
-
     def __get_pred_store_name(self) -> str:
         """
         Get the prediction store name based on the release version and date.
@@ -884,11 +865,11 @@ class ModelManager:
             **self._config_deployment,
         }
         config["run_type"] = args.run_type
-        config["sweep"] = False
+        config["sweep"] = args.sweep
 
         return config
 
-    def _update_sweep_config(self, args) -> Dict:
+    def _update_sweep_config(self, wandb_config) -> Dict:
         """
         Updates the configuration object for a sweep run with hyperparameters, metadata, and command line arguments.
 
@@ -898,12 +879,13 @@ class ModelManager:
         Returns:
             dict: The updated configuration object.
         """
-        config = self._config_sweep
-        config["parameters"]["run_type"] = {"value": args.run_type}
-        config["parameters"]["sweep"] = {"value": True}
-        config["parameters"]["name"] = {"value": self._config_meta["name"]}
-        config["parameters"]["depvar"] = {"value": self._config_meta["depvar"]}
-        config["parameters"]["algorithm"] = {"value": self._config_meta["algorithm"]}
+        config = {
+            **wandb_config,
+            **self._config_meta,
+            **self._config_deployment,
+        }
+        config["run_type"] = self._args.run_type
+        config["sweep"] = self._args.sweep
 
         return config
 
@@ -968,7 +950,7 @@ class ModelManager:
                 continue
         return table_str
 
-    def _save_model_artifact(self, run_type):
+    def _save_model_artifact(self, run_type: str) -> None:
         """
         Save the model artifact to Weights and Biases (WandB).
 
@@ -1141,6 +1123,112 @@ class ModelManager:
             )
             raise
 
+    def _handle_log_creation(self, train: bool, eval: bool, forecast: bool) -> None:
+        """
+        Handles the creation of log files for different stages of the model pipeline.
+
+        Depending on the flags provided, this method creates log files for training,
+        evaluation, or forecasting stages of the model pipeline. It reads the data
+        fetch timestamp from an existing log file and includes it in the new log files.
+
+        Args:
+            train (bool): Flag indicating whether the log is for the training stage.
+            eval (bool): Flag indicating whether the log is for the evaluation stage.
+            forecast (bool): Flag indicating whether the log is for the forecasting stage.
+
+        Returns:
+            None
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        data_fetch_timestamp = read_log_file(
+            self._model_path.data_raw / f"{self.config['run_type']}_data_fetch_log.txt"
+        ).get("Data Fetch Timestamp", None)
+
+        create_log_file(
+            path_generated=self._model_path.data_generated,
+            model_config=self.config,
+            model_timestamp=timestamp if train else self.config["timestamp"],
+            data_generation_timestamp=None if train else timestamp,
+            data_fetch_timestamp=data_fetch_timestamp,
+        )
+
+    def _evaluate_prediction_dataframe(self, df_predictions, ensemble=False) -> None:
+        """
+        Evaluates the prediction DataFrame against actual values and logs the evaluation metrics.
+
+        Args:
+            df_predictions (pd.DataFrame or dict): The DataFrame or dictionary containing the prediction results.
+            ensemble (bool, optional): Flag indicating whether the predictions are from an ensemble model. Defaults to False.
+
+        Returns:
+            None
+
+        This method performs the following steps:
+        1. Initializes the MetricsManager with the specified metrics configuration.
+        2. Reads the actual values from the forecast store.
+        3. Evaluates the predictions using step-wise, time-series-wise, and month-wise evaluations.
+        4. Logs the evaluation metrics using WandB.
+        5. Saves the evaluation metrics and predictions to the specified paths.
+        6. Generates and logs an evaluation table if the predictions are provided as a dictionary or DataFrame.
+        7. Sends a WandB alert with the evaluation results.
+
+        Raises:
+            None
+        """
+        metrics_manager = MetricsManager(self.config["metrics"])
+        if not ensemble:
+            df_path = self._model_path.data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+            df_viewser = read_dataframe(df_path)
+        else:
+            # If the predictions are from an ensemble model, the actual values are not available in the forecast store
+            # So we use the actual values from one of the single models
+            df_path = ModelPathManager(self.config["models"][0]).data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+            df_viewser = read_dataframe(df_path)
+
+        logger.info(f"df_viewser read from {df_path}")
+        df_actual = df_viewser[[self.config["depvar"]]]
+        step_wise_evaluation, df_step_wise_evaluation = (
+            metrics_manager.step_wise_evaluation(
+                df_actual,
+                df_predictions,
+                self.config["depvar"],
+                self.config["steps"],
+            )
+        )
+        time_series_wise_evaluation, df_time_series_wise_evaluation = (
+            metrics_manager.time_series_wise_evaluation(
+                df_actual, df_predictions, self.config["depvar"]
+            )
+        )
+        month_wise_evaluation, df_month_wise_evaluation = (
+            metrics_manager.month_wise_evaluation(
+                df_actual, df_predictions, self.config["depvar"]
+            )
+        )
+        
+        log_wandb_log_dict(
+            step_wise_evaluation, 
+            time_series_wise_evaluation, 
+            month_wise_evaluation
+        )
+
+        if not self.config["sweep"]:
+            # Save evaluation metrics and predictions
+            self._save_evaluations(
+                df_step_wise_evaluation,
+                df_time_series_wise_evaluation,
+                df_month_wise_evaluation,
+                self._model_path.data_generated,
+            )
+
+            for i, df in enumerate(df_predictions):
+                self._save_predictions(df, self._model_path.data_generated, i)
+
+        self._wandb_alert(
+            title=f"Evaluation Complete for {self._model_path.target} {self.config['name']}",
+            text=f"{self._generate_evaluation_table(metric_dict=wandb.run.summary._as_dict())}",
+        )
+
     def execute_single_run(self, args) -> None:
         """
         Executes a single run of the model, including data fetching, training, evaluation, and forecasting.
@@ -1151,7 +1239,7 @@ class ModelManager:
         self.config = self._update_single_config(args)
         self._project = f"{self.config['name']}_{args.run_type}"
         self._eval_type = args.eval_type
-        # self._args = args
+        self._args = args
 
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
@@ -1193,10 +1281,12 @@ class ModelManager:
         Args:
             args: Command line arguments.
         """
-        self.config = self._update_sweep_config(args)
-        self._project = f"{self.config['name']}_sweep"
+        # self.config = self._update_sweep_config(args)
+
+        self._project = f"{self._config_sweep['name']}_sweep"
         self._eval_type = args.eval_type
-        # self._args = args
+        self._args = args
+        self._sweep = True
 
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
@@ -1209,7 +1299,7 @@ class ModelManager:
             wandb.finish()
 
             sweep_id = wandb.sweep(
-                self.config, project=self._project, entity=self._entity
+                self._config_sweep, project=self._project, entity=self._entity
             )
             wandb.agent(sweep_id, self._execute_model_tasks, entity=self._entity)
         except Exception as e:
@@ -1243,16 +1333,27 @@ class ModelManager:
         try:
             with wandb.init(project=self._project, entity=self._entity, config=config):
                 add_wandb_metrics()
-                self.config = wandb.config
-                if self.config["sweep"]:
+                # self.config = wandb.config
+                if self._sweep:
+                    self.config = self._update_sweep_config(wandb.config)
+                    
                     logger.info(
                         f"Sweeping {self._model_path.target} {self.config['name']}..."
                     )
                     model = self._train_model_artifact()
+
                     logger.info(
                         f"Evaluating {self._model_path.target} {self.config['name']}..."
                     )
-                    self._evaluate_sweep(model, self._eval_type)
+                    df_predictions = self._evaluate_sweep(self._eval_type, model)
+                    if self.config["metrics"]:
+                        self._evaluate_prediction_dataframe(
+                            df_predictions
+                        )  
+                    else:
+                        raise ValueError(
+                            'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
+                        )
 
                 if train:
                     try:
@@ -1260,7 +1361,7 @@ class ModelManager:
                             f"Training {self._model_path.target} {self.config['name']}..."
                         )
                         self._train_model_artifact()  # Train the model
-                        if not self.config["sweep"]:
+                        if not self._sweep:
                             self._handle_log_creation(
                                 train=train, eval=eval, forecast=forecast
                             )
@@ -1351,119 +1452,7 @@ class ModelManager:
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
 
-    def _handle_log_creation(self, train: bool, eval: bool, forecast: bool) -> None:
-        """
-        Handles the creation of log files for different stages of the model pipeline.
-
-        Depending on the flags provided, this method creates log files for training,
-        evaluation, or forecasting stages of the model pipeline. It reads the data
-        fetch timestamp from an existing log file and includes it in the new log files.
-
-        Args:
-            train (bool): Flag indicating whether the log is for the training stage.
-            eval (bool): Flag indicating whether the log is for the evaluation stage.
-            forecast (bool): Flag indicating whether the log is for the forecasting stage.
-
-        Returns:
-            None
-        """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        data_fetch_timestamp = read_log_file(
-            self._model_path.data_raw / f"{self.config['run_type']}_data_fetch_log.txt"
-        ).get("Data Fetch Timestamp", None)
-
-        create_log_file(
-            path_generated=self._model_path.data_generated,
-            model_config=self.config,
-            model_timestamp=timestamp if train else self.config["timestamp"],
-            data_generation_timestamp=None if train else timestamp,
-            data_fetch_timestamp=data_fetch_timestamp,
-        )
-
-    def _evaluate_prediction_dataframe(self, df_predictions, ensemble=False) -> None:
-        """
-        Evaluates the prediction DataFrame against actual values and logs the evaluation metrics.
-
-        Args:
-            df_predictions (pd.DataFrame or dict): The DataFrame or dictionary containing the prediction results.
-            ensemble (bool, optional): Flag indicating whether the predictions are from an ensemble model. Defaults to False.
-
-        Returns:
-            None
-
-        This method performs the following steps:
-        1. Initializes the MetricsManager with the specified metrics configuration.
-        2. Reads the actual values from the forecast store.
-        3. Evaluates the predictions using step-wise, time-series-wise, and month-wise evaluations.
-        4. Logs the evaluation metrics using WandB.
-        5. Saves the evaluation metrics and predictions to the specified paths.
-        6. Generates and logs an evaluation table if the predictions are provided as a dictionary or DataFrame.
-        7. Sends a WandB alert with the evaluation results.
-
-        Raises:
-            None
-        """
-        metrics_manager = MetricsManager(self.config["metrics"])
-        if not ensemble:
-            df_path = self._model_path.data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
-            df_viewser = read_dataframe(df_path)
-        else:
-            # If the predictions are from an ensemble model, the actual values are not available in the forecast store
-            # So we use the actual values from one of the single models
-            df_path = ModelPathManager(self.config["models"][0]).data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
-            df_viewser = read_dataframe(df_path)
-
-        logger.info(f"df_viewser read from {df_path}")
-        df_actual = df_viewser[[self.config["depvar"]]]
-        step_wise_evaluation, df_step_wise_evaluation = (
-            metrics_manager.step_wise_evaluation(
-                df_actual,
-                df_predictions,
-                self.config["depvar"],
-                self.config["steps"],
-            )
-        )
-        time_series_wise_evaluation, df_time_series_wise_evaluation = (
-            metrics_manager.time_series_wise_evaluation(
-                df_actual, df_predictions, self.config["depvar"]
-            )
-        )
-        month_wise_evaluation, df_month_wise_evaluation = (
-            metrics_manager.month_wise_evaluation(
-                df_actual, df_predictions, self.config["depvar"]
-            )
-        )
-
-        log_wandb_log_dict(
-            step_wise_evaluation, time_series_wise_evaluation, month_wise_evaluation
-        )
-
-        # Save evaluation metrics and predictions
-        self._save_evaluations(
-            df_step_wise_evaluation,
-            df_time_series_wise_evaluation,
-            df_month_wise_evaluation,
-            self._model_path.data_generated,
-        )
-
-        for i, df in enumerate(df_predictions):
-            self._save_predictions(df, self._model_path.data_generated, i)
-
-        # If we are given a metric dict, add it to the wandb alert
-        # if isinstance(df_predictions, dict):
-        #     evaluation_table = self._generate_evaluation_table(df_predictions)
-        #     logger.info(f"Evaluation Results:\n{evaluation_table}")
-        #     self._wandb_alert(
-        #         title=f"Evaluation Complete for model {self.config['name']}",
-        #         text=f"{evaluation_table}",
-        #     )
-        # else:
-
-        self._wandb_alert(
-            title=f"Evaluation Complete for {self._model_path.target} {self.config['name']}",
-            text=f"{self._generate_evaluation_table(metric_dict=wandb.run.summary._as_dict())}",
-        )
-
+    
     @abstractmethod
     def _train_model_artifact(self) -> any:
         """
@@ -1490,7 +1479,7 @@ class ModelManager:
         pass
 
     @abstractmethod
-    def _forecast_model_artifact(self, artifact_name: str):
+    def _forecast_model_artifact(self, artifact_name: str) -> pd.DataFrame:
         """
         Abstract method to forecast using the model artifact. Must be implemented by subclasses.
 
@@ -1500,7 +1489,7 @@ class ModelManager:
         pass
 
     @abstractmethod
-    def _evaluate_sweep(self, model, eval_type: str):
+    def _evaluate_sweep(self, eval_type: str, model: any) -> None:
         """
         Abstract method to evaluate the model during a sweep. Must be implemented by subclasses.
 
