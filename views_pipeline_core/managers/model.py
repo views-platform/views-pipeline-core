@@ -1406,7 +1406,13 @@ class ModelManager:
         Raises:
             None
         """
-        metrics_manager = MetricsManager(self.config["metrics"])
+        if "metrics" in self.config:
+            metrics_manager = MetricsManager(self.config["metrics"])
+        else:
+            logger.error('Missing "metrics" in config_meta.py')
+            raise ValueError(
+                'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
+            )
         if not ensemble:
             df_path = self._model_path.data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
             df_viewser = read_dataframe(df_path)

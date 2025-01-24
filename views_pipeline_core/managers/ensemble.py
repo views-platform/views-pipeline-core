@@ -247,14 +247,10 @@ class EnsembleManager(ModelManager):
                         df_predictions = self._evaluate_ensemble(self._eval_type)
                         self._handle_log_creation()
                         # Evaluate the model
-                        if self.config["metrics"]:
-                            self._evaluate_prediction_dataframe(
+                        self._evaluate_prediction_dataframe(
                                 df_predictions, ensemble=True
-                            )  # Calculate evaluation metrics with the views-evaluation package
-                        else:
-                            raise ValueError(
-                                'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
-                            )
+                        )  # Calculate evaluation metrics with the views-evaluation package
+                        
                     except Exception as e:
                         logger.error(f"Error evaluating model: {e}", exc_info=True)
                         self._wandb_alert(
