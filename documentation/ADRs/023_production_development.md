@@ -1,12 +1,16 @@
 # Production and Development Branches
 
-| ADR Info            | Details           |
-|---------------------|-------------------|
-| Subject             | Production and Development Branches  |
-| ADR Number          | 023   |
-| Status              | Accepted   |
-| Author              | Borbála   |
-| Date                | 29.10.2024.     |
+# (Deprecated)
+
+This ADR has been migrated to [process_004_production_development.md](https://github.com/views-platform/docs/blob/main/ODRs/process_004_production_development.md)
+
+| ADR Info            | Details                             |
+|---------------------|-------------------------------------|
+| Subject             | Production and Development Branches |
+| ADR Number          | 023                                 |
+| Status              | Deprecated                          |
+| Author              | Borbála                             |
+| Date                | 29.10.2024.                         |
 
 ## Context
 Historically, the `main` branch was used for production and development work occurred directly via feature branched pulled from `main`. This required increased testing and restrictions on `main` such as making it protected or creating a GitHub action that prevents merging if branch is behind. These additional restrictions made the development cumbersome and increased the risk of merging unstable features.
