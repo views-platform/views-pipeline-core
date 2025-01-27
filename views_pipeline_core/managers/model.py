@@ -1253,7 +1253,7 @@ class ModelManager:
                     validate=True,
                 )
                 self._wandb_alert(
-                    title=f"Queryset Fetch Complete ({str(args.run_type)})",
+                    title=f"Queryset Fetch Complete ({str(self._data_loader.partition)})",
                     text=f"Queryset for {self._model_path.target} {self.config['name']} with depvar {self.config['depvar']} and LoA of {self.config['level']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
                     level=wandb.AlertLevel.INFO,
                 )
@@ -1455,7 +1455,125 @@ class ModelManager:
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
 
-    
+    def _handle_log_creation(self, train: bool, eval: bool, forecast: bool) -> None:
+        """
+        Handles the creation of log files for different stages of the model pipeline.
+
+        Depending on the flags provided, this method creates log files for training,
+        evaluation, or forecasting stages of the model pipeline. It reads the data
+        fetch timestamp from an existing log file and includes it in the new log files.
+
+        Args:
+            train (bool): Flag indicating whether the log is for the training stage.
+            eval (bool): Flag indicating whether the log is for the evaluation stage.
+            forecast (bool): Flag indicating whether the log is for the forecasting stage.
+
+        Returns:
+            None
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        data_fetch_timestamp = read_log_file(
+            self._model_path.data_raw / f"{self.config['run_type']}_data_fetch_log.txt"
+        ).get("Data Fetch Timestamp", None)
+
+        create_log_file(
+            path_generated=self._model_path.data_generated,
+            model_config=self.config,
+            model_timestamp=timestamp if train else self.config["timestamp"],
+            data_generation_timestamp=None if train else timestamp,
+            data_fetch_timestamp=data_fetch_timestamp,
+        )
+
+    def _evaluate_prediction_dataframe(self, df_predictions, ensemble=False) -> None:
+        """
+        Evaluates the prediction DataFrame against actual values and logs the evaluation metrics.
+
+        Args:
+            df_predictions (pd.DataFrame or dict): The DataFrame or dictionary containing the prediction results.
+            ensemble (bool, optional): Flag indicating whether the predictions are from an ensemble model. Defaults to False.
+
+        Returns:
+            None
+
+        This method performs the following steps:
+        1. Initializes the MetricsManager with the specified metrics configuration.
+        2. Reads the actual values from the forecast store.
+        3. Evaluates the predictions using step-wise, time-series-wise, and month-wise evaluations.
+        4. Logs the evaluation metrics using WandB.
+        5. Saves the evaluation metrics and predictions to the specified paths.
+        6. Generates and logs an evaluation table if the predictions are provided as a dictionary or DataFrame.
+        7. Sends a WandB alert with the evaluation results.
+
+        Raises:
+            None
+        """
+        if "metrics" in self.config:
+            metrics_manager = MetricsManager(self.config["metrics"])
+        else:
+            logger.error('Missing "metrics" in config_meta.py')
+            raise ValueError(
+                'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
+            )
+        if not ensemble:
+            df_path = self._model_path.data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+            df_viewser = read_dataframe(df_path)
+        else:
+            # If the predictions are from an ensemble model, the actual values are not available in the forecast store
+            # So we use the actual values from one of the single models
+            df_path = ModelPathManager(self.config["models"][0]).data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+            df_viewser = read_dataframe(df_path)
+
+        logger.info(f"df_viewser read from {df_path}")
+        df_actual = df_viewser[[self.config["depvar"]]]
+        step_wise_evaluation, df_step_wise_evaluation = (
+            metrics_manager.step_wise_evaluation(
+                df_actual,
+                df_predictions,
+                self.config["depvar"],
+                self.config["steps"],
+            )
+        )
+        time_series_wise_evaluation, df_time_series_wise_evaluation = (
+            metrics_manager.time_series_wise_evaluation(
+                df_actual, df_predictions, self.config["depvar"]
+            )
+        )
+        month_wise_evaluation, df_month_wise_evaluation = (
+            metrics_manager.month_wise_evaluation(
+                df_actual, df_predictions, self.config["depvar"]
+            )
+        )
+
+        log_wandb_log_dict(
+            step_wise_evaluation, time_series_wise_evaluation, month_wise_evaluation
+        )
+
+        # Save evaluation metrics and predictions
+        self._save_evaluations(
+            df_step_wise_evaluation,
+            df_time_series_wise_evaluation,
+            df_month_wise_evaluation,
+            self._model_path.data_generated,
+        )
+
+        for i, df in enumerate(df_predictions):
+            self._save_predictions(df, self._model_path.data_generated, i)
+
+        # If we are given a metric dict, add it to the wandb alert
+        # if isinstance(df_predictions, dict):
+        #     evaluation_table = self._generate_evaluation_table(df_predictions)
+        #     logger.info(f"Evaluation Results:\n{evaluation_table}")
+        #     self._wandb_alert(
+        #         title=f"Evaluation Complete for model {self.config['name']}",
+        #         text=f"{evaluation_table}",
+        #     )
+        # else:
+
+        self._wandb_alert(
+            title=f"Evaluation Complete for {self._model_path.target} {self.config['name']}",
+            text=f"{self._generate_evaluation_table(metric_dict=wandb.run.summary._as_dict())}",
+        )
+
     @abstractmethod
     def _train_model_artifact(self) -> any:
         """

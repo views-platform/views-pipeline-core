@@ -16,7 +16,7 @@ import subprocess
 from datetime import datetime
 import pandas as pd
 import traceback
-
+import tqdm
 logger = logging.getLogger(__name__)
 
 # ============================================================ Ensemble Path Manager ============================================================
@@ -247,14 +247,10 @@ class EnsembleManager(ModelManager):
                         df_predictions = self._evaluate_ensemble(self._eval_type)
                         self._handle_log_creation()
                         # Evaluate the model
-                        if self.config["metrics"]:
-                            self._evaluate_prediction_dataframe(
+                        self._evaluate_prediction_dataframe(
                                 df_predictions, ensemble=True
-                            )  # Calculate evaluation metrics with the views-evaluation package
-                        else:
-                            raise ValueError(
-                                'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
-                            )
+                        )  # Calculate evaluation metrics with the views-evaluation package
+                        
                     except Exception as e:
                         logger.error(f"Error evaluating model: {e}", exc_info=True)
                         self._wandb_alert(
@@ -485,7 +481,8 @@ class EnsembleManager(ModelManager):
     def _train_ensemble(self, use_saved: bool) -> None:
         run_type = self.config["run_type"]
 
-        for model_name in self.config["models"]:
+        for model_name in tqdm.tqdm(self.config["models"], desc="Training ensemble"):
+            tqdm.tqdm.write(f"Current model: {model_name}")
             self._train_model_artifact(model_name, run_type, use_saved)
 
     def _evaluate_ensemble(self, eval_type: str) -> List[pd.DataFrame]:
@@ -493,10 +490,12 @@ class EnsembleManager(ModelManager):
         run_type = self.config["run_type"]
         dfs = []
         dfs_agg = []
-
-        for model_name in self.config["models"]:
+        
+        for model_name in tqdm.tqdm(self.config["models"], desc="Evaluating ensemble"):
+            tqdm.tqdm.write(f"Current model: {model_name}")
             dfs.append(self._evaluate_model_artifact(model_name, run_type, eval_type))
 
+        tqdm.tqdm.write(f"Aggregating metrics...")
         for i in range(len(dfs[0])):
             df_to_aggregate = [df[i] for df in dfs]
             df_agg = EnsembleManager._get_aggregated_df(
@@ -510,8 +509,8 @@ class EnsembleManager(ModelManager):
         run_type = self.config["run_type"]
         dfs = []
 
-        for model_name in self.config["models"]:
-
+        for model_name in tqdm.tqdm(self.config["models"], desc="Forecasting ensemble"):
+            tqdm.tqdm.write(f"Current model: {model_name}")
             dfs.append(self._forecast_model_artifact(model_name, run_type))
 
         df_prediction = EnsembleManager._get_aggregated_df(
