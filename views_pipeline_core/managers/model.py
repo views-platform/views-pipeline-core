@@ -789,39 +789,41 @@ class ModelManager:
         # version = ModelManager._get_latest_release_version(
         #     self._owner, self._model_repo
         # )
-        from views_pipeline_core.managers.package import PackageManager
+        if self._use_prediction_store:
+            from views_pipeline_core.managers.package import PackageManager
 
-        version = PackageManager.get_latest_release_version_from_github(
-            repository_name=self._model_repo
-        )
-        current_date = datetime.now()
-        year = current_date.year
-        month = str(current_date.month).zfill(2)
-
-        try:
-            if version is None:
-                version = "0.1.0"
-            pred_store_name = (
-                "v"
-                + "".join(part.zfill(2) for part in version.split("."))
-                + f"_{year}_{month}"
+            version = PackageManager.get_latest_release_version_from_github(
+                repository_name=self._model_repo
             )
-        except Exception as e:
-            logger.error(f"Error generating prediction store name: {e}", exc_info=True)
-            raise
+            current_date = datetime.now()
+            year = current_date.year
+            month = str(current_date.month).zfill(2)
 
-        if pred_store_name not in ViewsMetadata().get_runs().name.tolist():
-            logger.warning(
-                f"Run {pred_store_name} not found in the database. Creating a new run."
-            )
-            ViewsMetadata().new_run(
-                name=pred_store_name,
-                description=f"Development runs for views-models with version {version} in {year}_{month}",
-                max_month=999,
-                min_month=1,
-            )
+            try:
+                if version is None:
+                    version = "0.1.0"
+                pred_store_name = (
+                    "v"
+                    + "".join(part.zfill(2) for part in version.split("."))
+                    + f"_{year}_{month}"
+                )
+            except Exception as e:
+                logger.error(f"Error generating prediction store name: {e}", exc_info=True)
+                raise
 
-        return pred_store_name
+            if pred_store_name not in ViewsMetadata().get_runs().name.tolist():
+                logger.warning(
+                    f"Run {pred_store_name} not found in the database. Creating a new run."
+                )
+                ViewsMetadata().new_run(
+                    name=pred_store_name,
+                    description=f"Development runs for views-models with version {version} in {year}_{month}",
+                    max_month=999,
+                    min_month=1,
+                )
+
+            return pred_store_name
+        return None
 
     def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
         """
