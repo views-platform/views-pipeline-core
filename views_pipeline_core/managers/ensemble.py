@@ -320,19 +320,17 @@ class EnsembleManager(ModelManager):
         )
 
     def _generate_new_predictions(
-        self, run_type: str, eval_type: str, model_path
+        self, run_type: str, model_path: str|Path, model_name: str,evaluate=False, forecast=False, eval_type="standard"
     ) -> None:
-        logger.info(
-                    f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
-                )
+        logger.info(f"No existing {run_type} predictions found. Generating new {run_type} predictions...")
         model_config = ModelManager(model_path).configs
         model_config["run_type"] = run_type
         shell_command = EnsembleManager._get_shell_command(
             model_path,
             run_type,
             train=False,
-            evaluate=True,
-            forecast=False,
+            evaluate=evaluate,
+            forecast=forecast,
             use_saved=True,
             eval_type=eval_type,
         )
@@ -344,7 +342,6 @@ class EnsembleManager(ModelManager):
                 f"Error during shell command execution for model {model_name}: {e}", exc_info=True
             )
             raise
-
 
     def _train_model_artifact(
         self, model_name: str, run_type: str, use_saved: bool
@@ -381,7 +378,6 @@ class EnsembleManager(ModelManager):
         model_path = ModelPathManager(model_name)
         path_raw = model_path.data_raw
         path_generated = model_path.data_generated
-        # path_artifacts = model_path.artifacts
         path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
 
         ts = path_artifact.stem[-15:]
@@ -390,17 +386,16 @@ class EnsembleManager(ModelManager):
 
         for sequence_number in range(
             ModelManager._resolve_evaluation_sequence_number(eval_type)
-        ):
-
-            name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
+        ):  
             if self._use_prediction_store:
+                name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
                 try:
                     pred = pd.DataFrame.forecasts.read_store(
                         run=self._pred_store_name, name=name
                     )
                     logger.info(f"Loading existing prediction {name} from prediction store")
                 except Exception as e:
-                    self._generate_new_predictions(run_type, eval_type, model_path)
+                    self._generate_new_predictions(run_type, model_path, model_name, evaluate=True, eval_type=eval_type)
                     pred = pd.DataFrame.forecasts.read_store(
                         run=self._pred_store_name, name=name
                     )
@@ -410,7 +405,7 @@ class EnsembleManager(ModelManager):
                     pred = read_dataframe(file_path)
                     logger.info(f"Loading existing prediction {name} from local file")
                 else:
-                    self._generate_new_predictions(run_type, eval_type, model_path)
+                    self._generate_new_predictions(run_type, model_path, model_name, evaluate=True, eval_type=eval_type)
                     pred = read_dataframe(f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}{PipelineConfig().dataframe_format}")
 
             preds.append(pred)
@@ -425,61 +420,34 @@ class EnsembleManager(ModelManager):
         model_path = ModelPathManager(model_name)
         path_raw = model_path.data_raw
         path_generated = model_path.data_generated
-        # path_artifacts = model_path.artifacts
         path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
 
         ts = path_artifact.stem[-15:]
 
         name = f"{model_name}_predictions_{run_type}_{ts}"
-        try:
-            if self._use_prediction_store:
+
+        if self._use_prediction_store:
+            name = f"{model_name}_predictions_{run_type}_{ts}"
+            try:
                 pred = pd.DataFrame.forecasts.read_store(
                     run=self._pred_store_name, name=name
                 )
                 logger.info(f"Loading existing prediction {name} from prediction store")
-            else:
-                pass
-        except Exception as e:
-            logger.info(
-                f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
-            )
-            model_config = ModelManager(model_path).configs
-            model_config["run_type"] = run_type
-            shell_command = EnsembleManager._get_shell_command(
-                model_path,
-                run_type,
-                train=False,
-                evaluate=False,
-                forecast=True,
-                use_saved=True,
-            )
-            # print(shell_command)
-            try:
-                subprocess.run(shell_command, check=True)
             except Exception as e:
-                logger.error(
-                    f"Error during shell command execution for model {model_name}: {e}", exc_info=True
-                )
-                raise
-            if self._use_prediction_store:
+                self._generate_new_predictions(run_type, model_path, model_name, forecast=True)
                 pred = pd.DataFrame.forecasts.read_store(
                     run=self._pred_store_name, name=name
                 )
+        else:
+            file_path = path_generated / f"predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}"
+            if file_path.exists():
+                pred = read_dataframe(file_path)
+                logger.info(f"Loading existing prediction {name} from local file")
             else:
-                pass
+                self._generate_new_predictions(run_type, model_path, model_name, forecast=True)
+                pred = read_dataframe(f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}")
 
-            # data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # date_fetch_timestamp = read_log_file(
-            #     path_raw / f"{run_type}_data_fetch_log.txt"
-            # ).get("Data Fetch Timestamp", None)
-
-            # create_log_file(
-            #     path_generated,
-            #     model_config,
-            #     ts,
-            #     data_generation_timestamp,
-            #     date_fetch_timestamp,
-            # )
+    
         return pred
 
     def _train_ensemble(self, use_saved: bool) -> None:
