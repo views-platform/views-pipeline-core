@@ -1,14 +1,17 @@
 
 # Production and Development Sync
+# (Deprecated)
+
+This ADR has been migrated to [process_005_development_and_production_sync.md](https://github.com/views-platform/docs/blob/main/ODRs/process_005_development_and_production_sync.md)
 
 
-| ADR Info            | Details           |
-|---------------------|-------------------|
-| Subject             | Production and Development Branch Synchronization  |
-| ADR Number          | 024   |
-| Status              | Accepted   |
-| Author              | Simon  |
-| Date                | 31.10.2024.    |
+| ADR Info            | Details                                           |
+|---------------------|---------------------------------------------------|
+| Subject             | Production and Development Branch Synchronization |
+| ADR Number          | 024                                               |
+| Status              | Deprecated                                        |
+| Author              | Simon                                             |
+| Date                | 31.10.2024.                                       |
 
 ## Context
 
