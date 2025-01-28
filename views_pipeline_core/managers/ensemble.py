@@ -5,7 +5,7 @@ from views_pipeline_core.files.utils import read_log_file, create_log_file
 from views_pipeline_core.files.utils import save_dataframe, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
-from views_forecasts.extensions import * 
+# from views_forecasts.extensions import * 
 from typing import Union, Optional, List, Dict
 import wandb
 import logging
@@ -100,9 +100,9 @@ class EnsemblePathManager(ModelPathManager):
 class EnsembleManager(ModelManager):
 
     def __init__(
-        self, ensemble_path: EnsemblePathManager, wandb_notifications: bool = True
+        self, ensemble_path: EnsemblePathManager, wandb_notifications: bool = True, use_prediction_store: bool = False
     ) -> None:
-        super().__init__(ensemble_path, wandb_notifications)
+        super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
 
     @staticmethod
     def _get_shell_command(
@@ -368,10 +368,13 @@ class EnsembleManager(ModelManager):
 
             name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
             try:
-                pred = pd.DataFrame.forecasts.read_store(
-                    run=self._pred_store_name, name=name
-                )
-                logger.info(f"Loading existing prediction {name} from prediction store")
+                if self._use_prediction_store:
+                    pred = pd.DataFrame.forecasts.read_store(
+                        run=self._pred_store_name, name=name
+                    )
+                    logger.info(f"Loading existing prediction {name} from prediction store")
+                else:
+                    pass
             except Exception as e:
                 logger.info(
                     f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
@@ -398,9 +401,12 @@ class EnsembleManager(ModelManager):
 
                 # with open(pkl_path, "rb") as file:
                 #     pred = pickle.load(file)
-                pred = pd.DataFrame.forecasts.read_store(
-                    run=self._pred_store_name, name=name
-                )
+                if self._use_prediction_store:
+                    pred = pd.DataFrame.forecasts.read_store(
+                        run=self._pred_store_name, name=name
+                    )
+                else:
+                    pass
 
                 # data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 # date_fetch_timestamp = read_log_file(
@@ -433,10 +439,13 @@ class EnsembleManager(ModelManager):
 
         name = f"{model_name}_predictions_{run_type}_{ts}"
         try:
-            pred = pd.DataFrame.forecasts.read_store(
-                run=self._pred_store_name, name=name
-            )
-            logger.info(f"Loading existing prediction {name} from prediction store")
+            if self._use_prediction_store:
+                pred = pd.DataFrame.forecasts.read_store(
+                    run=self._pred_store_name, name=name
+                )
+                logger.info(f"Loading existing prediction {name} from prediction store")
+            else:
+                pass
         except Exception as e:
             logger.info(
                 f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
@@ -459,10 +468,12 @@ class EnsembleManager(ModelManager):
                     f"Error during shell command execution for model {model_name}: {e}", exc_info=True
                 )
                 raise
-
-            pred = pd.DataFrame.forecasts.read_store(
-                run=self._pred_store_name, name=name
-            )
+            if self._use_prediction_store:
+                pred = pd.DataFrame.forecasts.read_store(
+                    run=self._pred_store_name, name=name
+                )
+            else:
+                pass
 
             # data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             # date_fetch_timestamp = read_log_file(

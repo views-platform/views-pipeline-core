@@ -23,7 +23,7 @@ from views_pipeline_core.files.utils import (
 )
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
-from views_forecasts.extensions import *
+# from views_forecasts.extensions import *
 import traceback
 import numpy as np
 
@@ -644,7 +644,7 @@ class ModelManager:
     """
 
     def __init__(
-        self, model_path: ModelPathManager, wandb_notifications: bool = True
+        self, model_path: ModelPathManager, wandb_notifications: bool = True, use_prediction_store: bool = False
     ) -> None:
         """
         Initializes the ModelManager with the given model path.
@@ -652,6 +652,10 @@ class ModelManager:
         Args:
             model_path (ModelPathManager): The path manager for the model.
         """
+        self._use_prediction_store = use_prediction_store
+        if self._use_prediction_store:
+            from views_forecasts.extensions import ForecastsStore, ViewsMetadata
+            self._pred_store_name = self.__get_pred_store_name()
         self._entity = "views_pipeline"
         self._model_repo = "views-models"
         self._model_path = model_path
@@ -669,7 +673,7 @@ class ModelManager:
             )
         self.set_dataframe_format(format=".parquet")
         logger.debug(f"Dataframe format: {PipelineConfig().dataframe_format}")
-        self._pred_store_name = self.__get_pred_store_name()
+        
         if self._model_path.target == "model":
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
@@ -1101,11 +1105,12 @@ class ModelManager:
             save_dataframe(df_predictions, path_generated / predictions_name)
 
             # Save to prediction store
-            name = (
-                self._model_path.model_name + "_" + predictions_name.split(".")[0]
-            )  # remove extension
-            df_predictions.forecasts.set_run(self._pred_store_name)
-            df_predictions.forecasts.to_store(name=name, overwrite=True)
+            if self._use_prediction_store:
+                name = (
+                    self._model_path.model_name + "_" + predictions_name.split(".")[0]
+                )  # remove extension
+                df_predictions.forecasts.set_run(self._pred_store_name)
+                df_predictions.forecasts.to_store(name=name, overwrite=True)
 
             # Log predictions to WandB
             wandb.save(str(path_generated / predictions_name))
