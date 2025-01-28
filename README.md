@@ -1,9 +1,13 @@
 ![GitHub License](https://img.shields.io/github/license/views-platform/views-pipeline-core)
 ![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/views-platform/views-pipeline-core)
 
+<div style="width: 100%; max-width: 1500px; height: 400px; overflow: hidden; position: relative;">
+  <img src="https://pbs.twimg.com/profile_banners/1237000633896652800/1717069203/1500x500" alt="VIEWS Twitter Header" style="position: absolute; top: -50px; width: 100%; height: auto;">
+</div>
+
 # Welcome to view-pipeline-core repository! 
 
-The views-pipeline-core contains all the necesary components for execution of the VIEWS pipeline. It is a modular and scalable pipeline that handles data ingestion, preprocessing, model and ensemble training, evaluation, and experiment tracking. In this README reference document you will find of the information about the views-pipeline-core – from the design rationale to all of the individual components in the structure.
+The **views-pipeline-core** contains all the necesary components for execution of the VIEWS pipeline. It is a modular and scalable pipeline that handles data ingestion, preprocessing, model and ensemble training, evaluation, and experiment tracking. In this README reference document you will find of the information about the views-pipeline-core – from the design rationale to all of the individual components in the structure.
 
 ## Table of Contents
 
@@ -29,6 +33,8 @@ The views-pipeline-core contains all the necesary components for execution of th
 
 
 ## Design Objectives
+
+The development of the VIEWS pipeline is driven by several core objectives. 
 
 - **Modularity** – Distinct modules ensure maintainability and extensibility.  
 - **Reusability** – Separated concerns allow reuse across projects.  
