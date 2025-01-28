@@ -267,13 +267,16 @@ def get_meta_config():
             }
         }
         manager._config_meta = {"name": "test_model", "depvar": "test_depvar", "algorithm": "test_algorithm"}
-        args = MagicMock(run_type="test_run")
-        config = manager._update_sweep_config(args)
-        assert config["parameters"]["run_type"]["value"] == "test_run"
-        # assert config["parameters"]["sweep"]["value"] is True
-        assert config["parameters"]["name"]["value"] == "test_model"
-        assert config["parameters"]["depvar"]["value"] == "test_depvar"
-        assert config["parameters"]["algorithm"]["value"] == "test_algorithm"
+        manager._config_deployment = {"deployment_status": "test_shadow"}
+        manager._args = MagicMock(run_type="test_run", sweep=True)
+        wandb_config = MagicMock()
+        config = manager._update_sweep_config(wandb_config=wandb_config)
+        assert config["run_type"] == "test_run"
+        assert config["sweep"] is True
+        assert config["name"] == "test_model"
+        assert config["depvar"] == "test_depvar"
+        assert config["algorithm"] == "test_algorithm"
+        assert config["deployment_status"] == "test_shadow"
 
 def test_execute_single_run(mock_model_path, mock_dataloader, mock_wandb):
     """
