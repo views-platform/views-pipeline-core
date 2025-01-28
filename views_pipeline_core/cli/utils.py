@@ -102,7 +102,7 @@ def validate_arguments(args):
 
     if args.sweep and (args.train or args.evaluate):
         print(
-            "Error: Sweep runs cannot have --train, or --evaluate flags set. Sweep does training and evaluation by default. Exiting."
+            "Error: Sweep runs cannot have --train or --evaluate flags set. Sweep does training and evaluation by default. Exiting."
         )
         print("To fix: Remove --train, or --evaluate flags when --sweep is flagged.")
         sys.exit(1)
