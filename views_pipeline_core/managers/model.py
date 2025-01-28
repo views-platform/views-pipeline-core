@@ -937,18 +937,20 @@ class ModelManager:
         Returns:
             str: A formatted string representing the evaluation table.
         """
-        table_str = "\n{:<70} {:<30}".format("Metric", "Value")
-        table_str += "-" * 100 + "\n"
+        from tabulate import tabulate
+        # create an empty dataframe with columns 'Metric' and 'Value'
+        metric_df = pd.DataFrame(columns=["Metric", "Value"])
         for key, value in metric_dict.items():
             try:
                 if not str(key).startswith("_"):
-                    value = float(
-                        value
-                    )  # Super hacky way to filter out metrics. 0/10 do not recommend
-                    table_str += "{:<70}\t{:<30}\n".format(str(key), value)
+                    value = float(value)
+                    # add metric and value to the dataframe
+                    metric_df = metric_df.append({"Metric": key, "Value": value}, ignore_index=True)
             except:
                 continue
-        return table_str
+        result = tabulate(metric_df, headers='keys', tablefmt='grid')
+        print(result)
+        return f"```\n{result}\n```"
 
     def _save_model_artifact(self, run_type: str) -> None:
         """
@@ -1287,7 +1289,7 @@ class ModelManager:
         self._eval_type = args.eval_type
         self._args = args
         self._sweep = True
-
+        
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
                 self._data_loader.get_data(
@@ -1295,6 +1297,11 @@ class ModelManager:
                     validate=True,
                     self_test=args.drift_self_test,
                     partition=args.run_type,
+                )
+                self._wandb_alert(
+                    title=f"Queryset Fetch Complete ({str(args.run_type)})",
+                    text=f"Queryset for {self._model_path.target} {self._model_path.model_name} with depvar {self._config_meta['depvar']} and LoA of {self._config_meta['level']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
+                    level=wandb.AlertLevel.INFO,
                 )
             wandb.finish()
 
@@ -1336,12 +1343,17 @@ class ModelManager:
                 # self.config = wandb.config
                 if self._sweep:
                     self.config = self._update_sweep_config(wandb.config)
-                    
+                    # print(f"Config: {self.config}")
+                    # print(f"Wandb Config: {wandb.config}")
                     logger.info(
                         f"Sweeping {self._model_path.target} {self.config['name']}..."
                     )
                     model = self._train_model_artifact()
-
+                    self._wandb_alert(
+                            title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
+                            text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```" if self._sweep else "",
+                            level=wandb.AlertLevel.INFO,
+                        )
                     logger.info(
                         f"Evaluating {self._model_path.target} {self.config['name']}..."
                     )
@@ -1367,7 +1379,7 @@ class ModelManager:
                             )
                         self._wandb_alert(
                             title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
-                            text=f"",
+                            text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{self._config_hyperparameters}\n```" if not self._sweep else "",
                             level=wandb.AlertLevel.INFO,
                         )
                     except Exception as e:
