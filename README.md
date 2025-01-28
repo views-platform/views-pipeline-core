@@ -70,7 +70,7 @@ As a logging system plays a central role in monitoring and efficiency in the exe
 
 ### Pipeline
 
-The overall setting and properties of the pipeline are centralized in the PipelineConfig class, which can be found in the `pipeline.py` file.  This class contains methods for accessing and modifying global settings, which ensures consistency and ease of maintenance.
+The overall setting and properties of the pipeline are centralized in the `PipelineConfig` class, which can be found in the `pipeline.py` file.  This class contains methods for accessing and modifying global settings, which ensures consistency and ease of maintenance.
 
 ---
 
@@ -80,10 +80,10 @@ To be able to handle and manage all the input data, the VIEWS pipeline relies on
 
 ### How DataLoader Fits Into The Pipeline
 
-1. **Data Ingestion and Preprocessing** – The ViewsDataLoader class collects and loads data from [viewser](https://github.com/prio-data/viewser) as a [pandas dataframe](https://pandas.pydata.org/docs/index.html). By providing methods for validating data partitions and handling drift detection configurations, the ViewsDataLoader class ensures data consistency and quality.
-2. **Integration** – The ViewsDataLoader class works with other pipeline components, including [`ModelPathManager`](#modelpathmanager) in order to manage model paths, as well as drift detection through configurations for monitoring data drift. This integration ensures that data operations are connected to other pipeline components, such as model training and evaluation, allowing for smooth execution.  
+1. **Data Ingestion and Preprocessing** – The `ViewsDataLoader` class collects and loads data from [viewser](https://github.com/prio-data/viewser) as a [pandas dataframe](https://pandas.pydata.org/docs/index.html). By providing methods for validating data partitions and handling drift detection configurations, the `ViewsDataLoader` class ensures data consistency and quality.
+2. **Integration** – The `ViewsDataLoader` class works with other pipeline components, including [`ModelPathManager`](#modelpathmanager) in order to manage model paths, as well as drift detection through configurations for monitoring data drift. This integration ensures that data operations are connected to other pipeline components, such as model training and evaluation, allowing for smooth execution.  
 3. **Logging and Debugging** – The class additionally utilizes logging to track data operations and gain insight into the loading process. This is useful for debugging and tracking the pipeline's performance.
-4. **Maintaining Consistency and Quality** – The ViewsDataLoader class ensures accurate data loading, validation, and processing. As such, it is crucial for ensuring and increasing the model reliability and validity.
+4. **Maintaining Consistency and Quality** – The `ViewsDataLoader` class ensures accurate data loading, validation, and processing. As such, it is crucial for ensuring and increasing the model reliability and validity.
 
 ---
 
@@ -95,7 +95,7 @@ The VIEWS pipeline includes several management classs in order for the pipeline 
 
 The `ModelPathManager` class manages the paths and the directories associated with the VIEWS models.
 
-1. **Initialization and Directory Management** – The ModelPathManager class manages the paths and directories associated with a model. It creates various directories for the model, including configurations, data, artifacts, and scripts.  
+1. **Initialization and Directory Management** – The `ModelPathManager` class manages the paths and directories associated with a model. It creates various directories for the model, including configurations, data, artifacts, and scripts.  
 2. **Script Management** – The class also defines methods for initializing and managing script paths required by the model. This includes configuration scripts, main scripts, querysets and various utility scripts. 
 3. **Artifact Management** – The class provides methods for managing model artifacts, including retrieving the latest path and handling artifact files.  
 
@@ -143,7 +143,7 @@ forecasting progress, while providing insights for potential debugging and allow
 
 ### PackageManager
 
-In addition to `ModelManager` and `EnsambleManager`, views-pipeline-core also includes a `PackageManager`. The `PackageManager` is located in the `package.py` file, and includes methods and functionalities for handling the Python [Poetry](https://python-poetry.org/) packages. This includes everything from creating new packages, validating existing ones, adding dependencies, to getting the most recent release versions from GitHub.
+In addition to `ModelManager` and `EnsambleManager`, views-pipeline-core also includes a `PackageManager`. The `PackageManager` is located in the `package.py` file, and includes methods and functionalities for handling the [Python Poetry](https://python-poetry.org/) packages. This includes everything from creating new packages, validating existing ones, adding dependencies, to getting the most recent release versions from GitHub.
 
 ### How PackageManager Fits Into The Pipeline
 
