@@ -109,7 +109,7 @@ class TestParametrized():
         with patch.object(ModelManager, '_ModelManager__load_config'), \
             patch("views_pipeline_core.managers.package.PackageManager"):
 
-            manager = EnsembleManager(ensemble_path=mock_model_path)
+            manager = EnsembleManager(ensemble_path=mock_model_path, use_prediction_store=False)
             #manager.config = mock_update_single_config(args)
             manager._project = "test_project"
             manager._eval_type = args.eval_type

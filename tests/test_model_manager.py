@@ -1,7 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
 from views_pipeline_core.managers.model import ModelManager
-from views_pipeline_core.managers.model import ModelManager
 import wandb
 import pandas as pd
 from pathlib import Path
@@ -83,7 +82,7 @@ def get_deployment_config():
         mock_module.return_value.get_hp_config.return_value = {"hp_key": "hp_value"}
         mock_module.return_value.get_meta_config.return_value = {"meta_key": "meta_value"}
         mock_model_instance = mock_model_path.return_value
-        manager = ModelManager(mock_model_instance, wandb_notifications=True)
+        manager = ModelManager(mock_model_instance, wandb_notifications=True, use_prediction_store=False)
         with patch("wandb.alert") as mock_alert:
             with patch("wandb.run"):
                 manager._wandb_alert(title="Test Alert", text="This is a test alert", level="info")
@@ -126,7 +125,7 @@ def get_meta_config():
         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
         mock_module.return_value.get_hp_config.return_value = {"hp_key": "hp_value"}
         mock_module.return_value.get_meta_config.return_value = {"meta_key": "meta_value"}
-        manager = ModelManager(mock_model_instance)
+        manager = ModelManager(mock_model_instance, use_prediction_store=False)
         assert manager._entity == "views_pipeline"
         assert manager._model_path == mock_model_instance
         assert manager._config_deployment == {"deployment_status": "shadow"}
@@ -155,7 +154,7 @@ def get_deployment_config():
     with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
         mock_spec.return_value.loader = MagicMock()
         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
-        manager = ModelManager(mock_model_instance)
+        manager = ModelManager(mock_model_instance, use_prediction_store=False)
         config = manager._ModelManager__load_config("config_deployment.py", "get_deployment_config")
         assert config == {"deployment_status": "shadow"}
 
@@ -183,7 +182,7 @@ def get_deployment_config():
     with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
         mock_spec.return_value.loader = MagicMock()
         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
-        manager = ModelManager(mock_model_instance)
+        manager = ModelManager(mock_model_instance, use_prediction_store=False)
         manager._config_hyperparameters = {"hp_key": "hp_value"}
         manager._config_meta = {"meta_key": "meta_value"}
         manager._config_deployment = {"deploy_key": "deploy_value"}
@@ -253,7 +252,7 @@ def get_meta_config():
             }
         }
         mock_module.return_value.get_meta_config.return_value = {"name": "test_model", "depvar": "test_depvar", "algorithm": "test_algorithm"}
-        manager = ModelManager(mock_model_instance)
+        manager = ModelManager(mock_model_instance, use_prediction_store=False)
         manager._config_sweep = {
             'method': 'grid',
             'name': 'test_model',
@@ -304,7 +303,7 @@ def get_deployment_config():
     with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
         mock_spec.return_value.loader = MagicMock()
         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
-        manager = ModelManager(mock_model_instance)
+        manager = ModelManager(mock_model_instance, use_prediction_store=False)
         manager._update_single_config = MagicMock(return_value={"name": "test_model"})
         manager._execute_model_tasks = MagicMock()
         args = MagicMock(run_type="calibration", saved=False, drift_self_test=False, train=True, evaluate=True, forecast=True, artifact_name="test_artifact")

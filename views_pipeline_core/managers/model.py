@@ -644,7 +644,7 @@ class ModelManager:
     """
 
     def __init__(
-        self, model_path: ModelPathManager, wandb_notifications: bool = True, use_prediction_store: bool = False
+        self, model_path: ModelPathManager, wandb_notifications: bool = True, use_prediction_store: bool = True
     ) -> None:
         """
         Initializes the ModelManager with the given model path.
@@ -653,11 +653,8 @@ class ModelManager:
             model_path (ModelPathManager): The path manager for the model.
         """
         self._use_prediction_store = use_prediction_store
-        if self._use_prediction_store:
-            from views_forecasts.extensions import ForecastsStore, ViewsMetadata
-            self._pred_store_name = self.__get_pred_store_name()
-        self._entity = "views_pipeline"
         self._model_repo = "views-models"
+        self._entity = "views_pipeline"
         self._model_path = model_path
         self._script_paths = self._model_path.get_scripts()
         self._config_deployment = self.__load_config(
@@ -682,6 +679,9 @@ class ModelManager:
             )
         self._wandb_notifications = wandb_notifications
         self._sweep = False
+        if self._use_prediction_store:
+            from views_forecasts.extensions import ForecastsStore, ViewsMetadata
+            self._pred_store_name = self.__get_pred_store_name()
 
     def set_dataframe_format(self, format: str) -> None:
         """
@@ -791,7 +791,7 @@ class ModelManager:
         # )
         if self._use_prediction_store:
             from views_pipeline_core.managers.package import PackageManager
-
+            from views_forecasts.extensions import ViewsMetadata
             version = PackageManager.get_latest_release_version_from_github(
                 repository_name=self._model_repo
             )
