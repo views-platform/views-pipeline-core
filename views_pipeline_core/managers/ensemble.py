@@ -422,29 +422,12 @@ class EnsembleManager(ModelManager):
 
         model_path = ModelPathManager(model_name)
         self._execute_shell_script(
-            run_type, model_path, model_name, train=True, use_saved=use_saved
+            run_type, 
+            model_path, 
+            model_name, 
+            train=True, 
+            use_saved=use_saved
         )
-        # model_config = ModelManager(model_path).configs
-        # model_config["run_type"] = run_type
-
-        # shell_command = EnsembleManager._get_shell_command(
-        #     model_path,
-        #     run_type,
-        #     train=True,
-        #     evaluate=False,
-        #     forecast=False,
-        #     use_saved=use_saved,
-        # )
-
-        # # print(shell_command)
-        # try:
-        #     subprocess.run(shell_command, check=True)
-        # except Exception as e:
-        #     logger.error(
-        #         f"Error during shell command execution for model {model_name}: {e}",
-        #         exc_info=True,
-        #     )
-        #     raise
 
     def _evaluate_model_artifact(
         self, model_name: str, run_type: str, eval_type: str
