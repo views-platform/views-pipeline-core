@@ -102,6 +102,14 @@ class EnsembleManager(ModelManager):
     def __init__(
         self, ensemble_path: EnsemblePathManager, wandb_notifications: bool = True, use_prediction_store: bool = True
     ) -> None:
+        """
+        Initialize the EnsembleManager.
+
+        Args:
+            ensemble_path (EnsemblePathManager): The EnsemblePathManager object.
+            wandb_notifications (bool, optional): Flag to enable or disable Weights & Biases slack notifications. Defaults to True.
+            use_prediction_store (bool, optional): Flag to enable or disable the use of the prediction store. Defaults to True.
+        """
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
 
     @staticmethod
@@ -115,16 +123,19 @@ class EnsembleManager(ModelManager):
         eval_type: str = "standard",
     ) -> list:
         """
-
+        Constructs a shell command for running a model script with specified options.
+        
         Args:
-            model_path (ModelPathManager): model path object for the model
-            run_type (str): the type of run (calibration, validation, forecasting)
-            train (bool): if the model should be trained
-            evaluate (bool): if the model should be evaluated
-            forecast (bool): if the model should be used for forecasting
-            use_saved (bool): if the model should use locally stored data
-
-        Returns:
+            model_path (ModelPathManager): Model path object for the model.
+            run_type (str): The type of run (e.g., calibration, validation, forecasting).
+            train (bool): If True, the model should be trained.
+            evaluate (bool): If True, the model should be evaluated.
+            forecast (bool): If True, the model should be used for forecasting.
+            use_saved (bool, optional): If True, the model should use locally stored data. Defaults to False.
+            eval_type (str, optional): The type of evaluation to perform. Defaults to "standard".
+            
+        Returns:    
+            list: A list of strings representing the shell command to be executed.
 
         """
 
@@ -209,6 +220,14 @@ class EnsembleManager(ModelManager):
             train (bool, optional): Flag to indicate if the model should be trained.
             eval (bool, optional): Flag to indicate if the model should be evaluated.
             forecast (bool, optional): Flag to indicate if forecasting should be performed.
+            use_saved (bool, optional): Flag to indicate if saved models should be used.
+        
+        Raises:
+        Exception: If any error occurs during training, evaluation, or forecasting, it is logged and re-raised.
+        
+        Logs:
+        Information and errors related to the execution of model tasks are logged.
+        Alerts are sent to Weights & Biases (wandb) for different stages of the process.
         """
         start_t = time.time()
         try:
@@ -299,7 +318,9 @@ class EnsembleManager(ModelManager):
     
     def _handle_log_creation(self) -> None:
         """
-        Handles the creation of log files for different stages of the model pipeline.
+        This method generates a timestamp for data generation, updates the configuration
+        with this timestamp, and creates a log file for the ensemble model using the 
+        provided configuration and paths.
 
         Returns:
             None
@@ -322,6 +343,23 @@ class EnsembleManager(ModelManager):
     def _generate_new_predictions(
         self, run_type: str, model_path: str|Path, model_name: str, evaluate=False, forecast=False, eval_type="standard"
     ) -> None:
+        """
+        Generates new predictions for a given model if no existing predictions are found.
+
+        Args:
+            run_type (str): The type of run.
+            model_path (str | Path): The path to the model directory.
+            model_name (str): The name of the model.
+            evaluate (bool, optional): Whether to evaluate the model. Defaults to False.
+            forecast (bool, optional): Whether to forecast using the model. Defaults to False.
+            eval_type (str, optional): The type of evaluation to perform. Defaults to "standard".
+
+        Raises:
+            Exception: If an error occurs during the execution of the shell command.
+
+        Returns:
+            None
+        """
         logger.info(f"No existing {run_type} predictions found. Generating new {run_type} predictions...")
         model_config = ModelManager(model_path).configs
         model_config["run_type"] = run_type
