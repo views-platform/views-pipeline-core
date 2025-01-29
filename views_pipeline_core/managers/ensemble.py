@@ -320,7 +320,7 @@ class EnsembleManager(ModelManager):
         )
 
     def _generate_new_predictions(
-        self, run_type: str, model_path: str|Path, model_name: str,evaluate=False, forecast=False, eval_type="standard"
+        self, run_type: str, model_path: str|Path, model_name: str, evaluate=False, forecast=False, eval_type="standard"
     ) -> None:
         logger.info(f"No existing {run_type} predictions found. Generating new {run_type} predictions...")
         model_config = ModelManager(model_path).configs
@@ -387,8 +387,9 @@ class EnsembleManager(ModelManager):
         for sequence_number in range(
             ModelManager._resolve_evaluation_sequence_number(eval_type)
         ):  
+            name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
+            
             if self._use_prediction_store:
-                name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
                 try:
                     pred = pd.DataFrame.forecasts.read_store(
                         run=self._pred_store_name, name=name
@@ -427,7 +428,6 @@ class EnsembleManager(ModelManager):
         name = f"{model_name}_predictions_{run_type}_{ts}"
 
         if self._use_prediction_store:
-            name = f"{model_name}_predictions_{run_type}_{ts}"
             try:
                 pred = pd.DataFrame.forecasts.read_store(
                     run=self._pred_store_name, name=name
@@ -447,7 +447,6 @@ class EnsembleManager(ModelManager):
                 self._generate_new_predictions(run_type, model_path, model_name, forecast=True)
                 pred = read_dataframe(f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}")
 
-    
         return pred
 
     def _train_ensemble(self, use_saved: bool) -> None:
