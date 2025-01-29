@@ -349,24 +349,28 @@ class EnsembleManager(ModelManager):
             models=self.config["models"],
         )
 
-    def _generate_new_predictions(
+    def _execute_shell_script(
         self,
         run_type: str,
-        model_path: str | Path,
+        model_path: Union[str, Path],
         model_name: str,
-        evaluate=False,
-        forecast=False,
-        eval_type="standard",
+        train: bool = False,
+        evaluate: bool = False,
+        forecast: bool = False,
+        use_saved: bool = True,
+        eval_type: str = "standard",
     ) -> None:
         """
-        Generates new predictions for a given model if no existing predictions are found.
+        Executes a shell script for a model artifact.
 
         Args:
             run_type (str): The type of run.
             model_path (str | Path): The path to the model directory.
             model_name (str): The name of the model.
+            train (bool, optional): Whether to train the model. Defaults to False.
             evaluate (bool, optional): Whether to evaluate the model. Defaults to False.
             forecast (bool, optional): Whether to forecast using the model. Defaults to False.
+            use_saved (bool, optional): Whether to use saved data. Defaults to True.
             eval_type (str, optional): The type of evaluation to perform. Defaults to "standard".
 
         Raises:
@@ -375,18 +379,15 @@ class EnsembleManager(ModelManager):
         Returns:
             None
         """
-        logger.info(
-            f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
-        )
         model_config = ModelManager(model_path).configs
         model_config["run_type"] = run_type
         shell_command = EnsembleManager._get_shell_command(
             model_path,
             run_type,
-            train=False,
+            train=train,
             evaluate=evaluate,
             forecast=forecast,
-            use_saved=True,
+            use_saved=use_saved,
             eval_type=eval_type,
         )
 
@@ -420,27 +421,30 @@ class EnsembleManager(ModelManager):
         logger.info(f"Training single model {model_name}...")
 
         model_path = ModelPathManager(model_name)
-        model_config = ModelManager(model_path).configs
-        model_config["run_type"] = run_type
-
-        shell_command = EnsembleManager._get_shell_command(
-            model_path,
-            run_type,
-            train=True,
-            evaluate=False,
-            forecast=False,
-            use_saved=use_saved,
+        self._execute_shell_script(
+            run_type, model_path, model_name, train=True, use_saved=use_saved
         )
+        # model_config = ModelManager(model_path).configs
+        # model_config["run_type"] = run_type
 
-        # print(shell_command)
-        try:
-            subprocess.run(shell_command, check=True)
-        except Exception as e:
-            logger.error(
-                f"Error during shell command execution for model {model_name}: {e}",
-                exc_info=True,
-            )
-            raise
+        # shell_command = EnsembleManager._get_shell_command(
+        #     model_path,
+        #     run_type,
+        #     train=True,
+        #     evaluate=False,
+        #     forecast=False,
+        #     use_saved=use_saved,
+        # )
+
+        # # print(shell_command)
+        # try:
+        #     subprocess.run(shell_command, check=True)
+        # except Exception as e:
+        #     logger.error(
+        #         f"Error during shell command execution for model {model_name}: {e}",
+        #         exc_info=True,
+        #     )
+        #     raise
 
     def _evaluate_model_artifact(
         self, model_name: str, run_type: str, eval_type: str
@@ -474,8 +478,9 @@ class EnsembleManager(ModelManager):
         for sequence_number in range(
             ModelManager._resolve_evaluation_sequence_number(eval_type)
         ):
-            if self._use_prediction_store:
-                name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
+            name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
+
+            if self._use_prediction_store:   
                 try:
                     pred = pd.DataFrame.forecasts.read_store(
                         run=self._pred_store_name, name=name
@@ -484,7 +489,10 @@ class EnsembleManager(ModelManager):
                         f"Loading existing prediction {name} from prediction store"
                     )
                 except Exception as e:
-                    self._generate_new_predictions(
+                    logger.info(
+                        f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
+                    )
+                    self._execute_shell_script(
                         run_type,
                         model_path,
                         model_name,
@@ -503,7 +511,10 @@ class EnsembleManager(ModelManager):
                     pred = read_dataframe(file_path)
                     logger.info(f"Loading existing prediction {name} from local file")
                 else:
-                    self._generate_new_predictions(
+                    logger.info(
+                        f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
+                    )
+                    self._execute_shell_script(
                         run_type,
                         model_path,
                         model_name,
@@ -547,14 +558,16 @@ class EnsembleManager(ModelManager):
         name = f"{model_name}_predictions_{run_type}_{ts}"
 
         if self._use_prediction_store:
-            name = f"{model_name}_predictions_{run_type}_{ts}"
             try:
                 pred = pd.DataFrame.forecasts.read_store(
                     run=self._pred_store_name, name=name
                 )
                 logger.info(f"Loading existing prediction {name} from prediction store")
             except Exception as e:
-                self._generate_new_predictions(
+                logger.info(
+                    f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
+                )
+                self._execute_shell_script(
                     run_type, model_path, model_name, forecast=True
                 )
                 pred = pd.DataFrame.forecasts.read_store(
@@ -569,7 +582,10 @@ class EnsembleManager(ModelManager):
                 pred = read_dataframe(file_path)
                 logger.info(f"Loading existing prediction {name} from local file")
             else:
-                self._generate_new_predictions(
+                logger.info(
+                    f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
+                )
+                self._execute_shell_script(
                     run_type, model_path, model_name, forecast=True
                 )
                 pred = read_dataframe(
