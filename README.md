@@ -175,9 +175,10 @@ datasets. This directly aids in identifying trends, patterns, and potential issu
 As a way of ensuring compatibility throughout the future developments of the VIEWS pipeline, the views-pipeline-core also includes several predefined templates which can be used to generate configuration files, documentation, and other necessary scripts for package, ensemble and model building. These templates allow for freedom in creating new models or ensambles, while also helping to maintain consistency and standardization across the pipeline while following VIEWS formats and design principles.
 
 ---
+## Acknowledgements  
 
-## Funding and Partners 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/views-platform/docs/main/images/views_funders.png" alt="Views Funders" width="80%">
+</p>
 
-<div style="width: 100%; max-width: 1500px; height: 400px; overflow: hidden; position: relative; margin-top: 50px;">
-  <img src="image.png" alt="Funder logos" style="position: absolute; top: -50px; width: 100%; height: auto;">
-</div>
+Special thanks to the **VIEWS MD&D Team** for their collaboration and support.  
