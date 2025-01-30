@@ -7,9 +7,11 @@
   <img src="https://pbs.twimg.com/profile_banners/1237000633896652800/1717069203/1500x500" alt="VIEWS Twitter Header" style="position: absolute; top: -50px; width: 100%; height: auto;">
 </div>
 
+
 # Welcome to views-pipeline-core repository! 
 
 The **views-pipeline-core** contains all the necesary components for execution of the VIEWS pipeline. It is a modular and scalable pipeline that handles data ingestion, preprocessing, model and ensemble training, evaluation, and experiment tracking. In this README reference document you will find of the information about the views-pipeline-core – from the design rationale to all of the individual components in the structure.
+
 
 ## Table of Contents
 
@@ -51,7 +53,9 @@ The development of the VIEWS pipeline is driven by several core objectives.
 
 The `cli/utils.py` file automates command-line argument parsing and validation. It ensures that the user enters valid and compatible arguments when running various commands in the pipeline. This helps to prevent errors and ensures that the pipeline performs as expected.
 
+
 ### Key Functions
+
 
 1. **Argument Validation:** These checks ensure that the user does not provide incompatible or missing arguments when interacting with the pipeline that could cause errors during execution. This also allows for more intuitive and straightforward pipeline execution.
 2. **Error Handling** – Provides error messages and instructions to assist users in providing correct arguments. Attempting to use the --ensemble flag with the --sweep flag results in an error message and program exit. Instructions following the error message ensure that users can navigate through the pipeline in a simple and easily understandable manner.
@@ -76,11 +80,13 @@ The overall setting and properties of the pipeline are centralized in the `Pipel
 
 ---
 
+
 ## Dataloaders
 
 To be able to handle and manage all the input data, the VIEWS pipeline relies on the `ViewsDataLoader` class. This class contains methods and functionality for managing the data operations in the pipeline. This includes retrieving data, validating data partitions, managing drift detection settings, and ensuring data consistency. The `ViewsDataLoader` class can be found in the `dataloaders.py` file. As its main focus is on the core component of data, it is necesary for the `ViewsDataLoader` to be able to seamlessly interact with other pipeline components. 
 
 ### How Dataloaders Fit Into The Pipeline
+
 
 1. **Data Ingestion and Preprocessing** – The `ViewsDataLoader` class collects and loads data from [viewser](https://github.com/prio-data/viewser) as a [pandas dataframe](https://pandas.pydata.org/docs/index.html). By providing methods for validating data partitions and handling drift detection configurations, the `ViewsDataLoader` class ensures data consistency and quality.
 2. **Integration** – The `ViewsDataLoader` class works with other pipeline components, including [`ModelPathManager`](#modelpathmanager) in order to manage model paths, as well as drift detection through configurations for monitoring data drift. This integration ensures that data operations are connected to other pipeline components, such as model training and evaluation, allowing for smooth execution.  
@@ -91,7 +97,9 @@ To be able to handle and manage all the input data, the VIEWS pipeline relies on
 
 ## Managers
 
+
 The VIEWS pipeline includes several management classs in order for the pipeline execution to be as automated as possible, while aslo maintaining and ensuring consistency and accuracy in the forecasting processes. The pipeline management classes include `ModelPathManager`, `EnsamblePathManager`, `ModelManager`, `EnsembleManager`, and `PackageManager`.
+
 
 ### ModelPathManager
 
@@ -103,12 +111,14 @@ The `ModelPathManager` class manages the paths and the directories associated wi
 
 ### EnsemblePathManager
 
+
 Similarly to the `ModelPathManager`, the  `EnsamblePathManager` class manages the paths and directories associated with the VIEWS ensemble models. The class entails the same functionality as the `ModelPathManager`, adapted to the VIEWS ensembles. 
 
 1. **Initialization and Directory Management** – The `EnsamblePathManager` class manages and validates and tracks various
 directories for the ensemble, including configurations, data, artifacts, and scripts.   
 2. **Script Management** – The class also defines methods for initializing and managing script paths required by the ensemble. This includes configuration scripts, main scripts, querysets and various utility scripts. 
 3. **Artifact Management** – The class provides methods for managing ensemble artifacts, including retrieving the latest path and handling artifact files. 
+
 
 ### ModelManager
 
@@ -127,7 +137,9 @@ Consistency is crucial when developing our forecasting models. In order to monit
 forecasting progress, while providing insights for potential debugging and monitoring the pipeline behavior.
 
 
+
 ### EnsembleManager
+
 
 The views-pipeline-core relies extensively on the `EnsembleManager` class, which can be found in the `ensemble.py` file located in the managers directory. Mirroring the functionality of the `ModelManager` class, the `EnsembleManager` is tasked with managing the lifecycles of all ensemble models, including configuration loading, training, evaluation, and forecasting.
 
@@ -160,6 +172,7 @@ In addition to `ModelManager` and `EnsembleManager`, views-pipeline-core also in
 
 Being able to track model performance is of utmost priority in the VIEWS pipeline. For this reason, the VIEWS pipeline is integrated with the [Weights&Biases(W&B)](https://wandb.ai/site/) platform. This allows us to track the evaluation metrics of all models and ensembles. The `utils.py` file contains utility functions for monitoring all evaluation metrics on W&B. The available functions assist in organizing and updating log dictionaries with evaluation metrics, which are critical for tracking and understanding model performance over time and across datasets.
 
+
 ### How Utils Fit Into The Pipeline
 
 ### Key Functions
@@ -176,6 +189,7 @@ datasets. This directly aids in identifying trends, patterns, and potential issu
 
 As a way of ensuring compatibility throughout the future developments of the VIEWS pipeline, the views-pipeline-core also includes several predefined templates which can be used to generate configuration files, documentation, and other necessary scripts for package, ensemble and model building. These templates allow for freedom in creating new models or ensembles, while also helping to maintain consistency and standardization across the pipeline while following VIEWS formats and design principles.
 
+
 ---
 ## Acknowledgements  
 
@@ -184,3 +198,4 @@ As a way of ensuring compatibility throughout the future developments of the VIE
 </p>
 
 Special thanks to the **VIEWS MD&D Team** for their collaboration and support.  
+
