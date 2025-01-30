@@ -441,8 +441,8 @@ class EnsembleManager(ModelManager):
 
         Args:
             model_name (str): The name of the model to evaluate.
-            run_type (str): The type of run (e.g., 'train', 'test', 'validation').
-            eval_type (str): The type of evaluation (e.g., 'full', 'partial').
+            run_type (str): The type of run (e.g., 'calibration', 'validation', 'forecasting').
+            eval_type (str): The type of evaluation (e.g., 'standard', 'long', 'complete', 'live').
 
         Returns:
             List[pd.DataFrame]: A list of DataFrames containing the predictions.
@@ -521,7 +521,7 @@ class EnsembleManager(ModelManager):
 
         Args:
             model_name (str): The name of the model to forecast.
-            run_type (str): The type of run (e.g., 'train', 'test', 'validation').
+            run_type (str): The type of run (e.g., 'forecasting').
 
         Returns:
             pd.DataFrame: A DataFrame containing the forecasted predictions.
