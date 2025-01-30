@@ -5,7 +5,8 @@ from views_pipeline_core.files.utils import read_log_file, create_log_file
 from views_pipeline_core.files.utils import save_dataframe, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
-from views_forecasts.extensions import * 
+
+# from views_forecasts.extensions import *
 from typing import Union, Optional, List, Dict
 import wandb
 import logging
@@ -17,6 +18,7 @@ from datetime import datetime
 import pandas as pd
 import traceback
 import tqdm
+
 logger = logging.getLogger(__name__)
 
 # ============================================================ Ensemble Path Manager ============================================================
@@ -100,9 +102,20 @@ class EnsemblePathManager(ModelPathManager):
 class EnsembleManager(ModelManager):
 
     def __init__(
-        self, ensemble_path: EnsemblePathManager, wandb_notifications: bool = True
+        self,
+        ensemble_path: EnsemblePathManager,
+        wandb_notifications: bool = True,
+        use_prediction_store: bool = True,
     ) -> None:
-        super().__init__(ensemble_path, wandb_notifications)
+        """
+        Initialize the EnsembleManager.
+
+        Args:
+            ensemble_path (EnsemblePathManager): The EnsemblePathManager object.
+            wandb_notifications (bool, optional): Flag to enable or disable Weights & Biases slack notifications. Defaults to True.
+            use_prediction_store (bool, optional): Flag to enable or disable the use of the prediction store. Defaults to True.
+        """
+        super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
 
     @staticmethod
     def _get_shell_command(
@@ -115,16 +128,19 @@ class EnsembleManager(ModelManager):
         eval_type: str = "standard",
     ) -> list:
         """
+        Constructs a shell command for running a model script with specified options.
 
         Args:
-            model_path (ModelPathManager): model path object for the model
-            run_type (str): the type of run (calibration, validation, forecasting)
-            train (bool): if the model should be trained
-            evaluate (bool): if the model should be evaluated
-            forecast (bool): if the model should be used for forecasting
-            use_saved (bool): if the model should use locally stored data
+            model_path (ModelPathManager): Model path object for the model.
+            run_type (str): The type of run (e.g., calibration, validation, forecasting).
+            train (bool): If True, the model should be trained.
+            evaluate (bool): If True, the model should be evaluated.
+            forecast (bool): If True, the model should be used for forecasting.
+            use_saved (bool, optional): If True, the model should use locally stored data. Defaults to False.
+            eval_type (str, optional): The type of evaluation to perform. Defaults to "standard".
 
         Returns:
+            list: A list of strings representing the shell command to be executed.
 
         """
 
@@ -209,6 +225,14 @@ class EnsembleManager(ModelManager):
             train (bool, optional): Flag to indicate if the model should be trained.
             eval (bool, optional): Flag to indicate if the model should be evaluated.
             forecast (bool, optional): Flag to indicate if forecasting should be performed.
+            use_saved (bool, optional): Flag to indicate if saved models should be used.
+
+        Raises:
+        Exception: If any error occurs during training, evaluation, or forecasting, it is logged and re-raised.
+
+        Logs:
+        Information and errors related to the execution of model tasks are logged.
+        Alerts are sent to Weights & Biases (wandb) for different stages of the process.
         """
         start_t = time.time()
         try:
@@ -232,7 +256,8 @@ class EnsembleManager(ModelManager):
                         )
                     except Exception as e:
                         logger.error(
-                            f"{self._model_path.target.title()} training model: {e}", exc_info=True
+                            f"{self._model_path.target.title()} training model: {e}",
+                            exc_info=True,
                         )
                         self._wandb_alert(
                             title=f"{self._model_path.target.title()} Training Error",
@@ -248,9 +273,9 @@ class EnsembleManager(ModelManager):
                         self._handle_log_creation()
                         # Evaluate the model
                         self._evaluate_prediction_dataframe(
-                                df_predictions, ensemble=True
+                            df_predictions, ensemble=True
                         )  # Calculate evaluation metrics with the views-evaluation package
-                        
+
                     except Exception as e:
                         logger.error(f"Error evaluating model: {e}", exc_info=True)
                         self._wandb_alert(
@@ -268,12 +293,15 @@ class EnsembleManager(ModelManager):
                         self._wandb_alert(
                             title=f"Forecasting for ensemble {self.config['name']} completed successfully.",
                             level=wandb.AlertLevel.INFO,
-                            )
+                        )
                         self._handle_log_creation()
-                        self._save_predictions(df_prediction, self._model_path.data_generated)
+                        self._save_predictions(
+                            df_prediction, self._model_path.data_generated
+                        )
                     except Exception as e:
                         logger.error(
-                            f"Error forecasting {self._model_path.target}: {e}", exc_info=True
+                            f"Error forecasting {self._model_path.target}: {e}",
+                            exc_info=True,
                         )
                         self._wandb_alert(
                             title="Model Forecasting Error",
@@ -296,10 +324,12 @@ class EnsembleManager(ModelManager):
         end_t = time.time()
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
-    
+
     def _handle_log_creation(self) -> None:
         """
-        Handles the creation of log files for different stages of the model pipeline.
+        This method generates a timestamp for data generation, updates the configuration
+        with this timestamp, and creates a log file for the ensemble model using the
+        provided configuration and paths.
 
         Returns:
             None
@@ -319,43 +349,109 @@ class EnsembleManager(ModelManager):
             models=self.config["models"],
         )
 
-    def _train_model_artifact(
-        self, model_name: str, run_type: str, use_saved: bool
+    def _execute_shell_script(
+        self,
+        run_type: str,
+        model_path: Union[str, Path],
+        model_name: str,
+        train: bool = False,
+        evaluate: bool = False,
+        forecast: bool = False,
+        use_saved: bool = True,
+        eval_type: str = "standard",
     ) -> None:
-        logger.info(f"Training single model {model_name}...")
+        """
+        Executes a shell script for a model artifact.
 
-        model_path = ModelPathManager(model_name)
+        Args:
+            run_type (str): The type of run.
+            model_path (str | Path): The path to the model directory.
+            model_name (str): The name of the model.
+            train (bool, optional): Whether to train the model. Defaults to False.
+            evaluate (bool, optional): Whether to evaluate the model. Defaults to False.
+            forecast (bool, optional): Whether to forecast using the model. Defaults to False.
+            use_saved (bool, optional): Whether to use saved data. Defaults to True.
+            eval_type (str, optional): The type of evaluation to perform. Defaults to "standard".
+
+        Raises:
+            Exception: If an error occurs during the execution of the shell command.
+
+        Returns:
+            None
+        """
         model_config = ModelManager(model_path).configs
         model_config["run_type"] = run_type
-
         shell_command = EnsembleManager._get_shell_command(
             model_path,
             run_type,
-            train=True,
-            evaluate=False,
-            forecast=False,
+            train=train,
+            evaluate=evaluate,
+            forecast=forecast,
             use_saved=use_saved,
+            eval_type=eval_type,
         )
 
-        # print(shell_command)
         try:
             subprocess.run(shell_command, check=True)
         except Exception as e:
             logger.error(
-                f"Error during shell command execution for model {model_name}: {e}", exc_info=True
+                f"Error during shell command execution for model {model_name}: {e}",
+                exc_info=True,
             )
             raise
+
+    def _train_model_artifact(
+        self, model_name: str, run_type: str, use_saved: bool
+    ) -> None:
+        """
+        Trains a single model artifact.
+
+        This method trains a model specified by the model_name using the provided run_type.
+        It constructs the necessary shell command to execute the training process and runs it.
+        If the training process encounters an error, it logs the error and raises an exception.
+
+        Args:
+            model_name (str): The name of the model to be trained.
+            run_type (str): The type of run to be performed.
+            use_saved (bool): Flag indicating whether to use a saved model.
+
+        Raises:
+            Exception: If there is an error during the execution of the shell command.
+        """
+        logger.info(f"Training single model {model_name}...")
+
+        model_path = ModelPathManager(model_name)
+        self._execute_shell_script(
+            run_type, 
+            model_path, 
+            model_name, 
+            train=True, 
+            use_saved=use_saved
+        )
 
     def _evaluate_model_artifact(
         self, model_name: str, run_type: str, eval_type: str
     ) -> List[pd.DataFrame]:
-        # from views_forecasts.extensions import ForecastAccessor
+        """
+        Evaluate a model artifact by loading or generating predictions.
+
+        This method evaluates a single model by either loading existing predictions
+        from the prediction store or locally, or by generating new predictions if
+        they do not exist. The predictions are returned as a list of pandas DataFrames.
+
+        Args:
+            model_name (str): The name of the model to evaluate.
+            run_type (str): The type of run (e.g., 'calibration', 'validation', 'forecasting').
+            eval_type (str): The type of evaluation (e.g., 'standard', 'long', 'complete', 'live').
+
+        Returns:
+            List[pd.DataFrame]: A list of DataFrames containing the predictions.
+        """
         logger.info(f"Evaluating single model {model_name}...")
 
         model_path = ModelPathManager(model_name)
         path_raw = model_path.data_raw
         path_generated = model_path.data_generated
-        # path_artifacts = model_path.artifacts
         path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
 
         ts = path_artifact.stem[-15:]
@@ -365,8 +461,86 @@ class EnsembleManager(ModelManager):
         for sequence_number in range(
             ModelManager._resolve_evaluation_sequence_number(eval_type)
         ):
-
             name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
+
+            if self._use_prediction_store:   
+                try:
+                    pred = pd.DataFrame.forecasts.read_store(
+                        run=self._pred_store_name, name=name
+                    )
+                    logger.info(
+                        f"Loading existing prediction {name} from prediction store"
+                    )
+                except Exception as e:
+                    logger.info(
+                        f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
+                    )
+                    self._execute_shell_script(
+                        run_type,
+                        model_path,
+                        model_name,
+                        evaluate=True,
+                        eval_type=eval_type,
+                    )
+                    pred = pd.DataFrame.forecasts.read_store(
+                        run=self._pred_store_name, name=name
+                    )
+            else:
+                file_path = (
+                    path_generated
+                    / f"predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}{PipelineConfig().dataframe_format}"
+                )
+                if file_path.exists():
+                    pred = read_dataframe(file_path)
+                    logger.info(f"Loading existing prediction {name} from local file")
+                else:
+                    logger.info(
+                        f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
+                    )
+                    self._execute_shell_script(
+                        run_type,
+                        model_path,
+                        model_name,
+                        evaluate=True,
+                        eval_type=eval_type,
+                    )
+                    pred = read_dataframe(
+                        f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}{PipelineConfig().dataframe_format}"
+                    )
+
+            preds.append(pred)
+
+        return preds
+
+    def _forecast_model_artifact(self, model_name: str, run_type: str) -> pd.DataFrame:
+        """
+        Forecasts a model artifact and returns the predictions as a DataFrame.
+        This method forecasts a single model's artifact based on the provided model name and run type.
+        It first attempts to load existing predictions from the prediction store or a local file.
+        If the predictions do not exist, it generates new predictions and saves them accordingly.
+
+        Args:
+            model_name (str): The name of the model to forecast.
+            run_type (str): The type of run (e.g., 'forecasting').
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the forecasted predictions.
+
+        Raises:
+            Exception: If there is an error loading predictions from the prediction store.
+        """
+        logger.info(f"Forecasting single model {model_name}...")
+
+        model_path = ModelPathManager(model_name)
+        path_raw = model_path.data_raw
+        path_generated = model_path.data_generated
+        path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
+
+        ts = path_artifact.stem[-15:]
+
+        name = f"{model_name}_predictions_{run_type}_{ts}"
+
+        if self._use_prediction_store:
             try:
                 pred = pd.DataFrame.forecasts.read_store(
                     run=self._pred_store_name, name=name
@@ -376,109 +550,43 @@ class EnsembleManager(ModelManager):
                 logger.info(
                     f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
                 )
-                model_config = ModelManager(model_path).configs
-                model_config["run_type"] = run_type
-                shell_command = EnsembleManager._get_shell_command(
-                    model_path,
-                    run_type,
-                    train=False,
-                    evaluate=True,
-                    forecast=False,
-                    use_saved=True,
-                    eval_type=eval_type,
+                self._execute_shell_script(
+                    run_type, model_path, model_name, forecast=True
                 )
-
-                try:
-                    subprocess.run(shell_command, check=True)
-                except Exception as e:
-                    logger.error(
-                        f"Error during shell command execution for model {model_name}: {e}", exc_info=True
-                    )
-                    raise
-
-                # with open(pkl_path, "rb") as file:
-                #     pred = pickle.load(file)
                 pred = pd.DataFrame.forecasts.read_store(
                     run=self._pred_store_name, name=name
                 )
-
-                # data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                # date_fetch_timestamp = read_log_file(
-                #     path_raw / f"{run_type}_data_fetch_log.txt"
-                # ).get("Data Fetch Timestamp", None)
-
-                # create_log_file(
-                #     path_generated,
-                #     model_config,
-                #     ts,
-                #     data_generation_timestamp,
-                #     date_fetch_timestamp,
-                # )
-
-            preds.append(pred)
-
-        return preds
-
-    def _forecast_model_artifact(self, model_name: str, run_type: str) -> pd.DataFrame:
-        # from views_forecasts.extensions import ForecastAccessor
-        logger.info(f"Forecasting single model {model_name}...")
-
-        model_path = ModelPathManager(model_name)
-        path_raw = model_path.data_raw
-        path_generated = model_path.data_generated
-        # path_artifacts = model_path.artifacts
-        path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
-
-        ts = path_artifact.stem[-15:]
-
-        name = f"{model_name}_predictions_{run_type}_{ts}"
-        try:
-            pred = pd.DataFrame.forecasts.read_store(
-                run=self._pred_store_name, name=name
+        else:
+            file_path = (
+                path_generated
+                / f"predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}"
             )
-            logger.info(f"Loading existing prediction {name} from prediction store")
-        except Exception as e:
-            logger.info(
-                f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
-            )
-            model_config = ModelManager(model_path).configs
-            model_config["run_type"] = run_type
-            shell_command = EnsembleManager._get_shell_command(
-                model_path,
-                run_type,
-                train=False,
-                evaluate=False,
-                forecast=True,
-                use_saved=True,
-            )
-            # print(shell_command)
-            try:
-                subprocess.run(shell_command, check=True)
-            except Exception as e:
-                logger.error(
-                    f"Error during shell command execution for model {model_name}: {e}", exc_info=True
+            if file_path.exists():
+                pred = read_dataframe(file_path)
+                logger.info(f"Loading existing prediction {name} from local file")
+            else:
+                logger.info(
+                    f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
                 )
-                raise
+                self._execute_shell_script(
+                    run_type, model_path, model_name, forecast=True
+                )
+                pred = read_dataframe(
+                    f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}"
+                )
 
-            pred = pd.DataFrame.forecasts.read_store(
-                run=self._pred_store_name, name=name
-            )
-
-            # data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # date_fetch_timestamp = read_log_file(
-            #     path_raw / f"{run_type}_data_fetch_log.txt"
-            # ).get("Data Fetch Timestamp", None)
-
-            # create_log_file(
-            #     path_generated,
-            #     model_config,
-            #     ts,
-            #     data_generation_timestamp,
-            #     date_fetch_timestamp,
-            # )
         return pred
 
     def _train_ensemble(self, use_saved: bool) -> None:
+        """
+        Trains an ensemble of models specified in the configuration.
+
+        Args:
+            use_saved (bool): If True, use saved models if available instead of training from scratch.
+
+        Returns:
+            None
+        """
         run_type = self.config["run_type"]
 
         for model_name in tqdm.tqdm(self.config["models"], desc="Training ensemble"):
@@ -486,11 +594,23 @@ class EnsembleManager(ModelManager):
             self._train_model_artifact(model_name, run_type, use_saved)
 
     def _evaluate_ensemble(self, eval_type: str) -> List[pd.DataFrame]:
+        """
+        Evaluates the ensemble of models based on the specified evaluation type.
+
+        This method iterates over the models specified in the configuration, evaluates each model,
+        and aggregates the evaluation metrics.
+
+        Args:
+            eval_type (str): The type of evaluation to perform.
+
+        Returns:
+            List[pd.DataFrame]: A list of aggregated DataFrames containing the evaluation metrics for each model.
+        """
         path_generated_e = self._model_path.data_generated
         run_type = self.config["run_type"]
         dfs = []
         dfs_agg = []
-        
+
         for model_name in tqdm.tqdm(self.config["models"], desc="Evaluating ensemble"):
             tqdm.tqdm.write(f"Current model: {model_name}")
             dfs.append(self._evaluate_model_artifact(model_name, run_type, eval_type))
@@ -506,6 +626,15 @@ class EnsembleManager(ModelManager):
         return dfs_agg
 
     def _forecast_ensemble(self) -> None:
+        """
+        Generates ensemble forecasts by iterating over the models specified in the configuration.
+
+        This method forecasts using each model listed in the configuration, aggregates the results,
+        and returns the aggregated forecast dataframe.
+
+        Returns:
+            None
+        """
         run_type = self.config["run_type"]
         dfs = []
 

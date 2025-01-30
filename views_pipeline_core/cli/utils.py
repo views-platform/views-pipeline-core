@@ -100,6 +100,20 @@ def validate_arguments(args):
         print("To fix: Use --run_type calibration when --sweep is flagged.")
         sys.exit(1)
 
+    if args.sweep and (args.train or args.evaluate):
+        print(
+            "Error: Sweep runs cannot have --train or --evaluate flags set. Sweep does training and evaluation by default. Exiting."
+        )
+        print("To fix: Remove --train, or --evaluate flags when --sweep is flagged.")
+        sys.exit(1)
+    
+    if args.sweep and args.forecast:
+        print(
+            "Error: Sweep runs cannot have --forecast flag set because sweep doesn't do forecasting. Exiting."
+        )
+        print("To fix: Remove --forecast flag when --sweep is flagged.")
+        sys.exit(1)
+
     if args.evaluate and args.run_type == "forecasting":
         print("Error: Forecasting runs cannot evaluate. Exiting.")
         print("To fix: Remove --evaluate flag when --run_type is 'forecasting'.")
