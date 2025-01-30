@@ -18,7 +18,7 @@ class PipelineConfig:
     @property
     def views_pipeline_core_version_range(self) -> str:
         from views_pipeline_core.managers.package import PackageManager
-        return f">={PackageManager.get_latest_release_version_from_github('views-pipeline-core')}, <1.0.0"
+        return f">={PackageManager.get_latest_release_version_from_github('views-pipeline-core')}, <2.0.0"
     
     @property
     def organization_name(self) -> str:
