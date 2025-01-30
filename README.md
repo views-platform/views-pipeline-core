@@ -79,3 +79,11 @@ The VIEWS project is a collaborative effort supported by leading research instit
 
 - **Department of Peace and Conflict Research at the University of Uppsala:**
   The [Department of Peace and Conflict Research at the University of Uppsala](https://www.uu.se/en/department/peace-and-conflict-research) is a leading academic institution in the study of conflict resolution, peacebuilding, and security. The department is renowned for its research and education programs aimed at fostering a deeper understanding of conflict dynamics and peace processes. This department also hosts the [Uppsala Conflict Data Program (UCDP)](https://ucdp.uu.se/), a central data source for the VIEWS project. About half of the VIEWS core team is currently located at the University of Uppsala.
+
+## Acknowledgements  
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/views-platform/docs/main/images/views_funders.png" alt="Views Funders" width="80%">
+</p>
+
+Special thanks to the **VIEWS MD&D Team** for their collaboration and support.  
