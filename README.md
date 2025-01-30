@@ -51,7 +51,7 @@ The development of the VIEWS pipeline is driven by several core objectives.
 
 The `cli/utils.py` file automates command-line argument parsing and validation. It ensures that the user enters valid and compatible arguments when running various commands in the pipeline. This helps to prevent errors and ensures that the pipeline performs as expected.
 
-### CLI: Key Functions
+### Key Functions
 
 1. **Argument Validation:** These checks ensure that the user does not provide incompatible or missing arguments when interacting with the pipeline that could cause errors during execution. This also allows for more intuitive and straightforward pipeline execution.
 2. **Error Handling** – Provides error messages and instructions to assist users in providing correct arguments. Attempting to use the --ensemble flag with the --sweep flag results in an error message and program exit. Instructions following the error message ensure that users can navigate through the pipeline in a simple and easily understandable manner.
@@ -76,11 +76,11 @@ The overall setting and properties of the pipeline are centralized in the `Pipel
 
 ---
 
-## DataLoader
+## Dataloaders
 
 To be able to handle and manage all the input data, the VIEWS pipeline relies on the `ViewsDataLoader` class. This class contains methods and functionality for managing the data operations in the pipeline. This includes retrieving data, validating data partitions, managing drift detection settings, and ensuring data consistency. The `ViewsDataLoader` class can be found in the `dataloaders.py` file. As its main focus is on the core component of data, it is necesary for the `ViewsDataLoader` to be able to seamlessly interact with other pipeline components. 
 
-### How DataLoader Fits Into The Pipeline
+### How Dataloaders Fit Into The Pipeline
 
 1. **Data Ingestion and Preprocessing** – The `ViewsDataLoader` class collects and loads data from [viewser](https://github.com/prio-data/viewser) as a [pandas dataframe](https://pandas.pydata.org/docs/index.html). By providing methods for validating data partitions and handling drift detection configurations, the `ViewsDataLoader` class ensures data consistency and quality.
 2. **Integration** – The `ViewsDataLoader` class works with other pipeline components, including [`ModelPathManager`](#modelpathmanager) in order to manage model paths, as well as drift detection through configurations for monitoring data drift. This integration ensures that data operations are connected to other pipeline components, such as model training and evaluation, allowing for smooth execution.  
@@ -91,7 +91,7 @@ To be able to handle and manage all the input data, the VIEWS pipeline relies on
 
 ## Managers
 
-The VIEWS pipeline includes several management classs in order for the pipeline execution to be as automated as possible, while aslo maintaining and ensuring consistency and accuracy in the forecasting processes. The pipeline management classes include `ModelPathManager`, `EnsamblePathManager`, `ModelManager`, and `PackageManager`.
+The VIEWS pipeline includes several management classs in order for the pipeline execution to be as automated as possible, while aslo maintaining and ensuring consistency and accuracy in the forecasting processes. The pipeline management classes include `ModelPathManager`, `EnsamblePathManager`, `ModelManager`, `EnsembleManager`, and `PackageManager`.
 
 ### ModelPathManager
 
@@ -103,12 +103,12 @@ The `ModelPathManager` class manages the paths and the directories associated wi
 
 ### EnsemblePathManager
 
-Similarly to the `ModelPathManager`, the  `EnsamblePathManager` class manages the paths and directories associated with the VIEWS ensemble models. The class entails the same functionality as the `ModelPathManager`, adapted to the VIEWS ensambles. 
+Similarly to the `ModelPathManager`, the  `EnsamblePathManager` class manages the paths and directories associated with the VIEWS ensemble models. The class entails the same functionality as the `ModelPathManager`, adapted to the VIEWS ensembles. 
 
 1. **Initialization and Directory Management** – The `EnsamblePathManager` class manages and validates and tracks various
 directories for the ensemble, including configurations, data, artifacts, and scripts.   
-2. **Script Management** – The class also defines methods for initializing and managing script paths required by the ensamble. This includes configuration scripts, main scripts, querysets and various utility scripts. 
-3. **Artifact Management** – The class provides methods for managing ensamble artifacts, including retrieving the latest path and handling artifact files. 
+2. **Script Management** – The class also defines methods for initializing and managing script paths required by the ensemble. This includes configuration scripts, main scripts, querysets and various utility scripts. 
+3. **Artifact Management** – The class provides methods for managing ensemble artifacts, including retrieving the latest path and handling artifact files. 
 
 ### ModelManager
 
@@ -122,34 +122,34 @@ Consistency is crucial when developing our forecasting models. In order to monit
 
 1. **Model Lifecycle Management** - The main task of the `ModelManager` class is to manage the entire lifecycle of machine learning models, including configuration loading, training, evaluation, and forecasting. The `ModelManager` ensures that models are managed consistently and efficiently across the entire pipeline. Additipnally, this removes any risk of faulty modelling procedures. 
 2. **Integration with Other Components** - Apart from managing the models themselves, the `ModelManager` class works with other pipeline components, including `ModelPathManager` which directly deals with paths, as well as the `ViewsDataLoader` for any data related tasks. This integration allows for, and ensures that the models are trained and evaluated with the proper parameters and data.
-3. **Configuration Management** -  The `ModelManager` class  also deals with any model configurations such as loading deployment, hyperparameters, metadata, and sweep configurations to ensure proper model setup. This is crucial in keeping the pipeline reproducible.
+3. **Configuration Management** -  The `ModelManager` class also deals with any model configurations such as loading deployment, hyperparameters, metadata, and sweep configurations to ensure proper model setup. This is crucial in keeping the pipeline reproducible.
 4. **Logging and Debugging** - The class is also relies on logging in order to be able to track training, evaluation, and
-forecasting progress, while providing insights for potential debugging and allowing for monitoring the pipeline behavior.
+forecasting progress, while providing insights for potential debugging and monitoring the pipeline behavior.
 
 
 ### EnsembleManager
 
-The views-pipeline-core relies extensively on the `EnsambleManager` class, which can be found in the `ensamble.py` file located in the managers directory. Mirroring the functionality of the `ModelManager` class, the `EnsambleManager` is tasked with managing the lifecycles of all model ensemble models, including configuration loading, training, evaluation, and forecasting.
+The views-pipeline-core relies extensively on the `EnsembleManager` class, which can be found in the `ensemble.py` file located in the managers directory. Mirroring the functionality of the `ModelManager` class, the `EnsembleManager` is tasked with managing the lifecycles of all ensemble models, including configuration loading, training, evaluation, and forecasting.
 
-1. **Initialization** - The `EnsambleManager` class is initialized with a `EnsamblePathManager` instance and optional Weights&Biases  notifications flag. It allows for configurationg of various attributes related to ensamble and data loading.
-2. **Configuration Loading** - Additionally, the class also offers methods for loading ensamble-specific configurations, including deployment, hyperparameters, metadata, and sweeps.
-3. **Model Lifecycle Management** - The `EnsambleManager` class oversees the entire lifecycle of a machine learning ensamble, including training, evaluation, and forecasting. The class ensures that these processes are followed through with consistency and accuracy.
+1. **Initialization** - The `EnsembleManager` class is initialized with a `EnsamblePathManager` instance and optional Weights&Biases  notifications flag. It allows for configurationg of various attributes related to ensemble and data loading.
+2. **Configuration Loading** - Additionally, the class also offers methods for loading ensemble-specific configurations, including deployment, hyperparameters, metadata, and sweeps.
+3. **Model Lifecycle Management** - The `EnsembleManager` class oversees the entire lifecycle of a machine learning ensemble, including training, evaluation, and forecasting. The class ensures that these processes are followed through with consistency and accuracy.
 
-### How ModelManager Fits Into The Pipeline
+### How EnsembleManager Fits Into The Pipeline
 
-1. **Model Lifecycle Management** - The main task of the `EnsambleManager` class is to manage the entire lifecycle of machine learning ensambles, including configuration loading, training, evaluation, and forecasting. The `EnsambleManager` ensures that model ensambles are managed consistently and efficiently across the entire pipeline. Additipnally, this removes any risk of faulty modelling procedures. 
-2. **Integration with Other Components** - Apart from managing the models themselves, the `EnsambleManager` class works with other pipeline components, including `EnsamblePathManager` which directly deals with paths, as well as the `ViewsDataLoader` for any data related tasks. This integration allows for, and ensures that the models are trained and evaluated with the proper parameters and data.
-3. **Configuration Management** -  The `EnsambleManager` class  also deals with any model ensamble configurations such as loading deployment, hyperparameters, metadata, and sweep configurations to ensure proper ensamble setup. This is crucial in keeping the pipeline reproducible.
+1. **Model Lifecycle Management** - The main task of the `EnsembleManager` class is to manage the entire lifecycle of machine learning ensembles, including configuration loading, training, evaluation, and forecasting. The `EnsembleManager` ensures that model ensembles are managed consistently and efficiently across the entire pipeline. Additipnally, this removes any risk of faulty modelling procedures. 
+2. **Integration with Other Components** - Apart from managing the models themselves, the `EnsembleManager` class works with other pipeline components, including `EnsamblePathManager` which directly deals with paths, as well as the `ViewsDataLoader` for any data related tasks. This integration allows for, and ensures that the models are trained and evaluated with the proper parameters and data.
+3. **Configuration Management** -  The `EnsembleManager` class also deals with any model ensemble configurations such as loading deployment, hyperparameters, metadata, and sweep configurations to ensure proper ensemble setup. This is crucial in keeping the pipeline reproducible.
 4. **Logging and Debugging** - The class is also relies on logging in order to be able to track training, evaluation, and
-forecasting progress, while providing insights for potential debugging and allowing for monitoring the pipeline behavior.
+forecasting progress, while providing insights for potential debugging and monitoring the pipeline behavior.
 
 ### PackageManager
 
-In addition to `ModelManager` and `EnsambleManager`, views-pipeline-core also includes a `PackageManager`. The `PackageManager` is located in the `package.py` file, and includes methods and functionalities for handling the [Python Poetry](https://python-poetry.org/) packages. This includes everything from creating new packages, validating existing ones, adding dependencies, to getting the most recent release versions from GitHub.
+In addition to `ModelManager` and `EnsembleManager`, views-pipeline-core also includes a `PackageManager`. The `PackageManager` is located in the `package.py` file, and includes methods and functionalities for handling the [Python Poetry](https://python-poetry.org/) packages. This includes everything from creating new packages, validating existing ones, adding dependencies, to getting the most recent release versions from GitHub.
 
 ### How PackageManager Fits Into The Pipeline
 
-1. **Package Management** - The `PackageManager`class manages the lifecycle of Python Poetry packages in the pipeline. This includes creating new VIEWS packages, validating existing ones, and managing dependencies. This ensures that all of the packages belonging to the pipeline are properly organized and always up to date.
+1. **Package Management** - The `PackageManager`class manages the lifecycle of Python Poetry packages in the pipeline. This includes creating new VIEWS packages, validating existing ones, and managing dependencies. This ensures that all of the packages belonging to VIEWS are properly organized and always up to date.
 2. **Dependency Management** - The `PackageManager` class provides methods to add dependencies, as well as retrieve the latest release versions from GitHub. This directly ensures the pipeline relies on the most recent and compatible versions of its dependencies, which is critical for keeping the pipeline stable and functional.
 3. **Integration with Other Components** -  The `PackageManager` class works with other pipeline components, including the `ModelPathManager`, in order to manage paths and directories. This integration allows for all the package management processes to be seamlessly connected to the rest of the VIEWS pipeline.
 4. **Logging and Debugging** - Similarly to other views-pipeline-core classses,`PackageManager` also relies on logging to track the progress of package management tasks, providing insights for debugging and monitoring, as well as preventing any discrepancies. 
@@ -158,13 +158,13 @@ In addition to `ModelManager` and `EnsambleManager`, views-pipeline-core also in
 
 ## Utils for Weights & Biases
 
-Being able to track model performance is of utmost priority in the VIEWS pipeline. For this reason, the VIEWS pipeline is integrated with the [Weights&Biases(W&B)](https://wandb.ai/site/) platform. This allows us to track the evaluation metrics of all models and ensambles. The `utils.py` file contains utility functions for monitoring all evaluation metrics on W&B. The available functions assist in organizing and updating log dictionaries with evaluation metrics, which are critical for tracking and understanding model performance over time and across datasets.
+Being able to track model performance is of utmost priority in the VIEWS pipeline. For this reason, the VIEWS pipeline is integrated with the [Weights&Biases(W&B)](https://wandb.ai/site/) platform. This allows us to track the evaluation metrics of all models and ensembles. The `utils.py` file contains utility functions for monitoring all evaluation metrics on W&B. The available functions assist in organizing and updating log dictionaries with evaluation metrics, which are critical for tracking and understanding model performance over time and across datasets.
 
 ### How Utils Fit Into The Pipeline
 
 ### Key Functions
 
-1. **Experiment Tracking** – The utility functionsc located in the `utils.py` file are essential for integration with W&B, which tracks experimental models and processes in the pipeline. By logging evaluation metrics in W&B, the pipeline allows for monitoring model performance across multiple experiments, in turn simplifying comparisons between results and identifying the top-performing models or ensambles.
+1. **Experiment Tracking** – The utility functions located in the `utils.py` file are essential for integration with W&B, which tracks experimental models and processes in the pipeline. By logging evaluation metrics in W&B, the pipeline allows for monitoring model performance across multiple experiments, in turn simplifying comparisons between results and identifying the top-performing models or ensembles.
 2. **Model Evaluation** – These functions organize and update log dictionaries with all of the evaluation metrics. By recording and organizing all of the logs, we ensure that the evaluation metrics are recorded in a structured manner, making the interpretation and analysis of the results easier, as well as more straightforward.
 3. **Performance Monitoring** - In addition to offering logging model performance metrics, the VIEWS pipeline also generates log dictionaries for both month- and time-series-wise evaluation metrics to allow for tracking model performance over time and across
 datasets. This directly aids in identifying trends, patterns, and potential issues with the models, allowing for timely and effective interventions and improvements.
@@ -174,7 +174,7 @@ datasets. This directly aids in identifying trends, patterns, and potential issu
 
 ## Templates
 
-As a way of ensuring compatibility throughout the future developments of the VIEWS pipeline, the views-pipeline-core also includes several predefined templates which can be used to generate configuration files, documentation, and other necessary scripts for package, ensemble and model building. These templates allow for freedom in creating new models or ensambles, while also helping to maintain consistency and standardization across the pipeline while following VIEWS formats and design principles.
+As a way of ensuring compatibility throughout the future developments of the VIEWS pipeline, the views-pipeline-core also includes several predefined templates which can be used to generate configuration files, documentation, and other necessary scripts for package, ensemble and model building. These templates allow for freedom in creating new models or ensembles, while also helping to maintain consistency and standardization across the pipeline while following VIEWS formats and design principles.
 
 ---
 ## Acknowledgements  
