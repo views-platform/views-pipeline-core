@@ -1364,6 +1364,11 @@ class ModelManager:
                         f"Evaluating {self._model_path.target} {self.config['name']}..."
                     )
                     df_predictions = self._evaluate_sweep(self._eval_type, model)
+
+                    for i, df in enumerate(df_predictions):
+                            print(f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}")
+                            self._validate_prediction_dataframe(dataframe=df)
+                            
                     if self.config["metrics"]:
                         self._evaluate_prediction_dataframe(
                             df_predictions
