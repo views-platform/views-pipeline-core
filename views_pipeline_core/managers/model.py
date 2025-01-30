@@ -867,6 +867,12 @@ class ModelManager:
         config["run_type"] = args.run_type
         config["sweep"] = args.sweep
 
+        # Check if depvar is a list. If not, convert it to a list. Otherwise raise an error.
+        if isinstance(config["depvar"], str):
+            config["depvar"] = [config["depvar"]]
+        if not isinstance(config["depvar"], list):
+            raise ValueError("depvar must be a string or a list of strings.")
+
         return config
 
     def _update_sweep_config(self, wandb_config) -> Dict:
@@ -886,6 +892,12 @@ class ModelManager:
         }
         config["run_type"] = self._args.run_type
         config["sweep"] = self._args.sweep
+
+        # Check if depvar is a list. If not, convert it to a list. Otherwise raise an error.
+        if isinstance(config["depvar"], str):
+            config["depvar"] = [config["depvar"]]
+        if not isinstance(config["depvar"], list):
+            raise ValueError("depvar must be a string or a list of strings.")
 
         return config
 
@@ -1188,7 +1200,7 @@ class ModelManager:
             df_viewser = read_dataframe(df_path)
 
         logger.info(f"df_viewser read from {df_path}")
-        df_actual = df_viewser[[self.config["depvar"]]]
+        df_actual = df_viewser[self.config["depvar"]]
         step_wise_evaluation, df_step_wise_evaluation = (
             metrics_manager.step_wise_evaluation(
                 df_actual,
@@ -1253,7 +1265,7 @@ class ModelManager:
                 )
                 self._wandb_alert(
                     title=f"Queryset Fetch Complete ({str(args.run_type)})",
-                    text=f"Queryset for {self._model_path.target} {self.config['name']} with depvar {self.config['depvar']} and LoA of {self.config['level']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
+                    text=f"Queryset for {self._model_path.target} {self.config['name']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
                     level=wandb.AlertLevel.INFO,
                 )
             wandb.finish()
@@ -1300,7 +1312,7 @@ class ModelManager:
                 )
                 self._wandb_alert(
                     title=f"Queryset Fetch Complete ({str(args.run_type)})",
-                    text=f"Queryset for {self._model_path.target} {self._model_path.model_name} with depvar {self._config_meta['depvar']} and LoA of {self._config_meta['level']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
+                    text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
                     level=wandb.AlertLevel.INFO,
                 )
             wandb.finish()
