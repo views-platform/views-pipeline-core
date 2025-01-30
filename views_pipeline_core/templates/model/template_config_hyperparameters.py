@@ -1,4 +1,4 @@
-from views_pipeline_core.templates.utils import save_script
+from views_pipeline_core.templates.utils import save_python_script
 from pathlib import Path
 import logging
 
@@ -34,4 +34,4 @@ def get_hp_config():
     }}
     return hyperparameters
 """
-    return save_script(script_path, code)
+    return save_python_script(script_path, code)

@@ -2,7 +2,6 @@ import logging
 import pandas as pd
 from pathlib import Path
 from typing import Union
-
 logger = logging.getLogger(__name__)
 
 
@@ -101,6 +100,23 @@ def create_log_file(path_generated,
                     data_fetch_timestamp,
                     model_type="single",
                     models=None):
+    """
+    Creates a log file for the given model configuration and timestamps.
+    Parameters:
+    path_generated (str): The path where the log file will be generated.
+    model_config (dict): Configuration dictionary for the model containing keys:
+        - "run_type" (str): The type of run (e.g., "calibration", "evaluation").
+        - "name" (str): The name of the model.
+        - "deployment_status" (str): The deployment status of the model.
+    model_timestamp (str): Timestamp for the model.
+    data_generation_timestamp (str): Timestamp for data generation.
+    data_fetch_timestamp (str): Timestamp for data fetching.
+    model_type (str, optional): The type of model, default is "single".
+    models (list, optional): List of model names for which logs should be created, default is None.
+    
+    Returns:
+    None
+    """
     
     run_type = model_config["run_type"]
     model_name = model_config["name"]
@@ -130,23 +146,23 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     - ValueError: If the file extension is not provided or is not supported.
     - Exception: If there is an error saving the DataFrame.
     """
-    FILE_EXTENSION_ERROR_MESSAGE = "The file extension must be provided. E.g. .parquet"
+    FILE_EXTENSION_ERROR_MESSAGE = "A valid file extension must be provided.E.g. .pkl or .parquet"
     
     # Checks
     if not isinstance(save_path, Path):
         save_path = Path(save_path)
-    file_extension = save_path.suffix.lower()
+    file_extension = save_path.suffix
     if dataframe is None:
         raise ValueError("The DataFrame must be provided")
     if not isinstance(dataframe, pd.DataFrame):
         raise ValueError("The DataFrame must be a pandas DataFrame")
     if file_extension is None or file_extension == "":
-        raise ValueError(f"Invalid file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
+        raise ValueError(f"No file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
     
     try:
         logger.debug(f"Saving the DataFrame to {save_path} in {file_extension} format")
         # if file_extension == ".csv":
-        #     dataframe.to_csv(save_path)
+        #     dataframe.to_csv(save_path, index=True)
         # elif file_extension == ".xlsx":
         #     dataframe.to_excel(save_path)
         if file_extension == ".parquet":
@@ -154,7 +170,7 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
         elif file_extension == ".pkl":
             dataframe.to_pickle(save_path)
         else:
-            raise ValueError("The file extension must be provided. E.g. .parquet")
+            raise ValueError(f"{FILE_EXTENSION_ERROR_MESSAGE}")
     except Exception as e:
         logger.exception(f"Error saving the DataFrame to {save_path}: {e}")
         raise
@@ -172,19 +188,19 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     - ValueError: If the file extension is not provided or is not supported.
     - Exception: If there is an error reading the DataFrame.
     """
-    FILE_EXTENSION_ERROR_MESSAGE = "The file extension must be provided. E.g. .parquet"
+    FILE_EXTENSION_ERROR_MESSAGE = "A valid extension must be provided. E.g. .pkl or .parquet"
     
     # Checks
     if not isinstance(file_path, Path):
         file_path = Path(file_path)
-    file_extension = file_path.suffix.lower()
+    file_extension = file_path.suffix
     if file_extension is None or file_extension == "":
-         raise ValueError(f"Invalid file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
+         raise ValueError(f"No file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
     
     try:
         logger.debug(f"Reading the DataFrame from {file_path} in {file_extension} format")
         # if file_extension == ".csv":
-        #     return pd.read_csv(file_path)
+        #     return pd.read_csv(file_path, index_col=[0, 1])
         # elif file_extension == ".xlsx":
         #     return pd.read_excel(file_path)
         if file_extension == ".parquet":

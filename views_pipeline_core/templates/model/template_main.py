@@ -1,4 +1,4 @@
-from views_pipeline_core.templates.utils import save_script
+from views_pipeline_core.templates.utils import save_python_script
 from pathlib import Path
 import logging
 
@@ -36,11 +36,11 @@ def generate(script_path: Path) -> bool:
           specified script directory.
         - The generated script is designed to be executed as a standalone Python script.
     """
-    code = f"""import wandb
+    code = """import wandb
 import warnings
 from pathlib import Path
 from views_pipeline_core.cli.utils import parse_args, validate_arguments
-from views_pipeline_core.logging.utils import setup_logging
+from views_pipeline_core.managers.log import LoggingManager
 from views_pipeline_core.managers.model import ModelPathManager
 
 # Import your model manager class here
@@ -50,11 +50,17 @@ warnings.filterwarnings("ignore")
 
 try:
     model_path = ModelPathManager(Path(__file__))
+    logger = LoggingManager(model_path).get_logger()
+except FileNotFoundError as fnf_error:
+    raise RuntimeError(
+        f"File not found: {fnf_error}. Check the file path and try again."
+    )
+except PermissionError as perm_error:
+    raise RuntimeError(
+        f"Permission denied: {perm_error}. Check your permissions and try again."
+    )
 except Exception as e:
-    raise RuntimeError(f"An unexpected error occurred: {{e}}.")
-
-logger = setup_logging(logging_path=model_path.logging)
-
+    raise RuntimeError(f"Unexpected error: {e}. Check the logs for details.")
 
 if __name__ == "__main__":
     wandb.login()
@@ -65,4 +71,4 @@ if __name__ == "__main__":
     else:
         # YourModelManager(model_path=model_path).execute_single_run(args)
 """
-    return save_script(script_path, code)
+    return save_python_script(script_path, code)

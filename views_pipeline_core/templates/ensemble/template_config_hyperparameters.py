@@ -1,12 +1,12 @@
 from typing import Dict
-from views_pipeline_core.templates.utils import save_script
+from views_pipeline_core.templates.utils import save_python_script
 from pathlib import Path
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def generate(script_dir: Path) -> bool:
+def generate(script_path: Path) -> bool:
     """
     Generates a script that defines a function for obtaining hyperparameter configurations
     necessary for model training.
@@ -30,4 +30,4 @@ def generate(script_dir: Path) -> bool:
     }
     return hp_config
 """
-    return save_script(script_dir, code)
+    return save_python_script(script_path, code)

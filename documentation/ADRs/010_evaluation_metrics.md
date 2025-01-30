@@ -5,7 +5,7 @@
 |---------------------|--------------------|
 | Subject             | Evaluation Metrics |
 | ADR Number          | 010                |
-| Status              | Proposed           |
+| Status              | Deprecated           |
 | Author              | Xiaolong           |
 | Date                | 12.09.2024         |
 
