@@ -1,4 +1,4 @@
-from views_pipeline_core.templates.utils import save_script
+from views_pipeline_core.templates.utils import save_python_script
 from pathlib import Path
 import logging
 logger = logging.getLogger(__name__)
@@ -59,4 +59,4 @@ def generate():
 
     return queryset_base
 """
-    return save_script(script_path, code)
+    return save_python_script(script_path, code)

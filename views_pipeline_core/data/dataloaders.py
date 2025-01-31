@@ -7,10 +7,10 @@ from pathlib import Path
 from datetime import datetime
 from views_pipeline_core.configs import drift_detection
 from views_pipeline_core.files.utils import create_data_fetch_log_file
-from views_pipeline_core.managers.path_manager import ModelPath
 from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
+from views_pipeline_core.managers.model import ModelPathManager
 from ingester3.ViewsMonth import ViewsMonth
 
 logger = logging.getLogger(__name__)
@@ -24,12 +24,12 @@ class ViewsDataLoader:
     create or load volumes, and handle drift detection configurations.
     """
 
-    def __init__(self, model_path: ModelPath, **kwargs):
+    def __init__(self, model_path: ModelPathManager, **kwargs):
         """
-        Initializes the DataLoaders class with a ModelPath object and optional keyword arguments.
+        Initializes the DataLoaders class with a ModelPathManager object and optional keyword arguments.
 
         Args:
-            model_path (ModelPath): An instance of the ModelPath class.
+            model_path (ModelPathManager): An instance of the ModelPathManager class.
             **kwargs: Additional keyword arguments to set instance attributes.
 
         Attributes:
@@ -263,7 +263,7 @@ class ViewsDataLoader:
 
         path_viewser_df = Path(
             os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{PipelineConfig.dataframe_format}")
-        )  # maby change to df...
+        )  
         alerts = None
 
         if use_saved:
@@ -271,7 +271,6 @@ class ViewsDataLoader:
             try:
                 if path_viewser_df.exists():
                     df = read_dataframe(path_viewser_df)
-                    # df = pd.read_pickle(path_viewser_df)
                     logger.info(f"Reading saved data from {path_viewser_df}")
             except Exception as e:
                 raise RuntimeError(
@@ -279,22 +278,20 @@ class ViewsDataLoader:
                 )
         else:
             logger.info(f"Fetching data from viewser...")
-            df, alerts = self._fetch_data_from_viewser(
-                self_test,
-            )  # which is then used here
+            df, alerts = self._fetch_data_from_viewser(self_test) 
             data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             create_data_fetch_log_file(
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
             logger.info(f"Saving data to {path_viewser_df}")
-            # df.to_pickle(path_viewser_df)
             save_dataframe(df, path_viewser_df)
+            
         if validate:
             if self._validate_df_partition(df=df):
                 return df, alerts
             else:
                 raise RuntimeError(
-                    f"file at {path_viewser_df} incompatible with partition {self.partition}"
+                    f"file {path_viewser_df.name} incompatible with partition {self.partition}"
                 )
         logger.debug(f"DataFrame shape: {df.shape if df is not None else 'None'}")
         for ialert, alert in enumerate(

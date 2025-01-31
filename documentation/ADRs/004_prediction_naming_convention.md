@@ -15,20 +15,36 @@ This is particularly important for managing prediction versions, tracking when p
 
 
 ## Decision
+### When run type is calibration or validation
 The prediction naming convention for using a single model will follow this structure:
 ```
-prediction_<max_forecast_step>_forecasting_<timestamp>.pkl
+prediction_<run_type>_<timestamp>_<series_sequence_number>.pkl
 ```
-- max_forecast_step: The maximum forecast step for the prediction.
+- timestamp: The timestamp when the model was trained **(not when the prediction was generated)**. The format is`YYYYMMDD_HHMMSS`.
+- series_sequence_number: When run type is calibration or validation, it produces a list of predictions, each of which is predicted _n_ step head (_n_ ranging from 0 to the maximum forecast step). So the sequence has the same range as steps.
+
+The prediction naming convention for using an ensemble model will follow this structure:
+```
+prediction_<run_type>_<timestamp>_<series_sequence_number>.pkl
+```
+- model_name: The name of the model used for the ensemble prediction.
+- timestamp: The timestamp when **the prediction was generated**. The format is`YYYYMMDD_HHMMSS`.
+- series_sequence_number: When run type is calibration or validation, it produces a list of predictions, each of which is predicted _n_ step head (_n_ ranging from 0 to the maximum forecast step). So the sequence has the same range as steps.
+
+### When run type is forecasting
+The prediction naming convention for using a single model will follow this structure:
+```
+prediction_<run_type>_<timestamp>.pkl
+```
 - timestamp: The timestamp when the model was trained **(not when the prediction was generated)**. The format is`YYYYMMDD_HHMMSS`.
 
-The prediction naming convention for using an ensemble model will follow this structure **(needs further discussion)**:
+The prediction naming convention for using an ensemble model will follow this structure:
 ```
-prediction_<max_forecast_step>_forecasting_<model_name_1><timestamp_1>_<model_name2><timestamp_2>.pkl
+prediction_<run_type>_<timestamp>.pkl
 ```
-- max_forecast_step: The maximum forecast step for the prediction.
 - model_name: The name of the model used for the ensemble prediction.
-- timestamp: The timestamp when the model was trained. The format is`YYYYMMDD_HHMMSS`.
+- timestamp: The timestamp when **the prediction was generated**. The format is`YYYYMMDD_HHMMSS`.
+
 
 ## Consequences
 **Positive Effects:**

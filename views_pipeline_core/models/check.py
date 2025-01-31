@@ -1,7 +1,7 @@
 from datetime import datetime
 import logging
 from pathlib import Path
-from views_pipeline_core.managers.path_manager import ModelPath
+from views_pipeline_core.managers.model import ModelPathManager
 from views_pipeline_core.files.utils import read_log_file
 
 logger = logging.getLogger(__name__)
@@ -111,7 +111,7 @@ def ensemble_model_check(config):
     """
 
     for model_name in config["models"]:
-        model_path = ModelPath(model_name)
+        model_path = ModelPathManager(model_name)
         path_generated = model_path.data_generated
 
         if (

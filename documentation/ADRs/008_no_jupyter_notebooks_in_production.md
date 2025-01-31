@@ -1,12 +1,16 @@
-# No use of Jupyter Notebooks in production*
+# No use of Jupyter Notebooks in production
 
-| ADR Info            | Details                                       |
-|---------------------|-----------------------------------------------|
-| Subject             | No Use of Jupyter Notebooks in Production     |
-| ADR Number          | 008                                           |
-| Status              | Accepted                                      |
-| Author              | Jim, Mihai, Xiaolong, Simon, Sara             |
-| Date                | 30.07.2024                                    |
+# (Deprecated)
+
+This ADR has been migrated to [general_003_no_jupyter_notebooks_in_production.md](https://github.com/views-platform/docs/blob/main/ODRs/general_003_no_jupyter_notebooks_in_production.md)
+
+| ADR Info            | Details                                   |
+|---------------------|-------------------------------------------|
+| Subject             | No Use of Jupyter Notebooks in Production |
+| ADR Number          | 008                                       |
+| Status              | Deprecated                                |
+| Author              | Jim, Mihai, Xiaolong, Simon, Sara         |
+| Date                | 30.07.2024                                |
 
 ## Context
 The decision to not use Jupyter Notebooks (.ipynb) in production environments is driven by the need for maintainable, efficient, and scalable production code. Jupyter Notebooks, while excellent for exploration and prototyping, introduce challenges when used in production systems. These challenges include issues with version control, code modularity, testing, and deployment consistency.

@@ -1,14 +1,13 @@
 from typing import Dict
-from utils import utils_script_gen
+from views_pipeline_core.templates.utils import save_python_script
 from pathlib import Path
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 def generate(
-    script_dir: Path,
+    script_path: Path,
     deployment_type: str = "shadow",
     additional_settings: Dict[str, any] = None,
 ) -> bool:
@@ -72,4 +71,4 @@ def get_deployment_config():
     deployment_config = {deployment_config}
     return deployment_config
 """
-    return utils_script_gen.save_script(script_dir, code)
+    return save_python_script(script_path, code)

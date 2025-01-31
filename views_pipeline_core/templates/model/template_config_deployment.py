@@ -1,5 +1,5 @@
 from typing import Dict
-from views_pipeline_core.templates.utils import save_script
+from views_pipeline_core.templates.utils import save_python_script
 from pathlib import Path
 import logging
 
@@ -70,4 +70,4 @@ def get_deployment_config():
     deployment_config = {deployment_config}
     return deployment_config
 """
-    return save_script(script_path, code)
+    return save_python_script(script_path, code)

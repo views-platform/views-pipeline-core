@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "views_pipeline_core"
-version = "0.1.2"
+version = "1.0.0"
 description = ""
 authors = [
     "Borbála Farkas <borbala.farkas@pcr.uu.se>",
@@ -17,6 +17,8 @@ ingester3 = "^2.1.0"
 properscoring = "^0.1"
 wandb = "^0.18.7"
 pyprojroot="^0.3.0"
+views-evaluation="^0.1.2" 
+views-forecasts = "^0.5.5"
 
 
 

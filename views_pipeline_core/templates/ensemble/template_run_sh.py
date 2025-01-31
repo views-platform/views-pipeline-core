@@ -1,6 +1,6 @@
 from pathlib import Path
 from views_pipeline_core.templates.utils import save_shell_script
-def generate(script_path: Path, package_name: str) -> bool:
+def generate(script_path: Path) -> bool:
     """
     Generates a shell script to set up the environment and run a Python script.
 
@@ -15,8 +15,6 @@ def generate(script_path: Path, package_name: str) -> bool:
     Parameters:
         script_path (Path): 
             The path where the generated shell script will be saved. This should be a valid writable path.
-        package_name (str):
-            The name of the package to be used in the script.
 
     Returns:
         bool: 
@@ -51,7 +49,7 @@ fi
 
 script_path=$(dirname "$(realpath $0)")
 project_path="$( cd "$script_path/../../" >/dev/null 2>&1 && pwd )"
-env_path="$project_path/envs/{package_name}"
+env_path="$project_path/envs/views_ensemble"
 
 eval "$(conda shell.bash hook)"
 
