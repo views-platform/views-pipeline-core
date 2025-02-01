@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 def import_pandas():
     try:
-        import cudf as pd
+        import cudf.pandas as pd
         logger.info("Using CUDA-accelerated library (cudf).")
     except ImportError:
         import pandas as pd
