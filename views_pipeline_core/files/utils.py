@@ -1,5 +1,6 @@
 import logging
-import pandas as pd
+# import pandas as pd
+from views_pipeline_core.hpc import pandas as pd
 from pathlib import Path
 from typing import Union
 logger = logging.getLogger(__name__)

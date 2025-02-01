@@ -15,7 +15,8 @@ import pickle
 from pathlib import Path
 import subprocess
 from datetime import datetime
-import pandas as pd
+# import pandas as pd
+from views_pipeline_core.hpc import pandas as pd
 import traceback
 import tqdm
 

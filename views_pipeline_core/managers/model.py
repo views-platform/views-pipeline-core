@@ -9,7 +9,8 @@ from abc import abstractmethod
 import hashlib
 from datetime import datetime
 import wandb
-import pandas as pd
+# import pandas as pd
+from views_pipeline_core.hpc import pandas as pd
 from pathlib import Path
 from views_pipeline_core.wandb.utils import (
     add_wandb_metrics, 
@@ -25,7 +26,7 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
 # from views_forecasts.extensions import *
 import traceback
-import numpy as np
+# import numpy as np
 import tqdm
 logger = logging.getLogger(__name__)
 

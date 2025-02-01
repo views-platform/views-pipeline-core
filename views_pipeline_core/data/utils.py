@@ -1,5 +1,6 @@
 import logging
-import numpy as np
+# import numpy as np
+from views_pipeline_core.hpc import numpy as np
 import requests
 import json
 
