@@ -28,6 +28,12 @@ def MultiIndex_from_product(*args, **kwargs):
         import pandas as pds
         return pds.MultiIndex.from_product(*args, **kwargs)
 
+def to_list(series):
+    if hasattr(series, 'to_arrow'):
+        return series.to_arrow().to_pylist()
+    else:
+        return series.to_list()
+    
 # Dynamically set the attributes of the current module to match those of the imported library
 current_module = sys.modules[__name__]
 for attr in dir(pd):
