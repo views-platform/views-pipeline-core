@@ -153,6 +153,12 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     file_extension = save_path.suffix
     
     # Modified type check
+    try:
+        import cudf
+        if isinstance(dataframe, cudf.DataFrame):
+            dataframe = dataframe.to_pandas()
+    except ImportError:
+        pass
     if not isinstance(dataframe, pd.DataFrame):
         raise ValueError("Input must be a pandas/cudf DataFrame")
     
