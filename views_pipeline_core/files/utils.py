@@ -149,31 +149,29 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     """
     FILE_EXTENSION_ERROR_MESSAGE = "A valid file extension must be provided.E.g. .pkl or .parquet"
     
-    # Checks
-    if not isinstance(save_path, Path):
-        save_path = Path(save_path)
+    save_path = Path(save_path)
     file_extension = save_path.suffix
-    if dataframe is None:
-        raise ValueError("The DataFrame must be provided")
-    if not isinstance(dataframe, pd.DataFrame):
-        raise ValueError("The DataFrame must be a pandas DataFrame")
-    if file_extension is None or file_extension == "":
-        raise ValueError(f"No file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
     
+    # Modified type check
+    if not isinstance(dataframe, pd.DataFrame):
+        raise ValueError("Input must be a pandas/cudf DataFrame")
+    
+    if file_extension not in [".parquet", ".pkl"]:
+        raise ValueError(FILE_EXTENSION_ERROR_MESSAGE)
+
     try:
-        logger.debug(f"Saving the DataFrame to {save_path} in {file_extension} format")
-        # if file_extension == ".csv":
-        #     dataframe.to_csv(save_path, index=True)
-        # elif file_extension == ".xlsx":
-        #     dataframe.to_excel(save_path)
+        logger.debug(f"Saving DataFrame to {save_path}")
         if file_extension == ".parquet":
-            dataframe.to_parquet(save_path)
+            # cudf requires pyarrow for parquet
+            dataframe.to_parquet(save_path, engine='pyarrow')
         elif file_extension == ".pkl":
-            dataframe.to_pickle(save_path)
-        else:
-            raise ValueError(f"{FILE_EXTENSION_ERROR_MESSAGE}")
+            # Handle both libraries' pickle serialization
+            if hasattr(dataframe, 'to_pickle'):
+                dataframe.to_pickle(save_path)
+            else:
+                dataframe.to_pandas().to_pickle(save_path)
     except Exception as e:
-        logger.exception(f"Error saving the DataFrame to {save_path}: {e}")
+        logger.exception(f"Error saving DataFrame: {e}")
         raise
 
 def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
@@ -189,27 +187,23 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     - ValueError: If the file extension is not provided or is not supported.
     - Exception: If there is an error reading the DataFrame.
     """
-    FILE_EXTENSION_ERROR_MESSAGE = "A valid extension must be provided. E.g. .pkl or .parquet"
+    FILE_EXTENSION_ERROR_MESSAGE = "Valid extensions: .pkl or .parquet"
     
-    # Checks
-    if not isinstance(file_path, Path):
-        file_path = Path(file_path)
-    file_extension = file_path.suffix
-    if file_extension is None or file_extension == "":
-         raise ValueError(f"No file extension {file_extension} found. {FILE_EXTENSION_ERROR_MESSAGE}")
-    
+    file_path = Path(file_path)
+    if file_path.suffix not in [".parquet", ".pkl"]:
+        raise ValueError(FILE_EXTENSION_ERROR_MESSAGE)
+
     try:
-        logger.debug(f"Reading the DataFrame from {file_path} in {file_extension} format")
-        # if file_extension == ".csv":
-        #     return pd.read_csv(file_path, index_col=[0, 1])
-        # elif file_extension == ".xlsx":
-        #     return pd.read_excel(file_path)
-        if file_extension == ".parquet":
-            return pd.read_parquet(file_path)
-        elif file_extension == ".pkl":
-            return pd.read_pickle(file_path)
-        else:
-            raise ValueError(FILE_EXTENSION_ERROR_MESSAGE)
+        logger.debug(f"Reading DataFrame from {file_path}")
+        if file_path.suffix == ".parquet":
+            return pd.read_parquet(file_path, engine='pyarrow')
+        elif file_path.suffix == ".pkl":
+            # Handle GPU-accelerated pickling if available
+            if hasattr(pd, 'read_pickle'):
+                return pd.read_pickle(file_path)
+            else:
+                import pandas as fallback_pd
+                return fallback_pd.read_pickle(file_path)
     except Exception as e:
-        logger.exception(f"Error reading the DataFrame from {file_path}: {e}")
+        logger.exception(f"Error reading DataFrame: {e}")
         raise
