@@ -14,13 +14,24 @@ def import_pandas():
 
 pd = import_pandas()
 
-# Dynamically expose all attributes from the imported library (cudf/pandas)
+# --- Fix for cudf's missing tolist() in Series ---
+if hasattr(pd, 'Series') and not hasattr(pd.Series, 'tolist'):
+    # Only needed for cudf versions where tolist() raises an error
+    def series_tolist(self):
+        """Monkey-patch tolist() for cudf.Series to match pandas behavior."""
+        return self.to_arrow().to_pylist()
+    pd.Series.tolist = series_tolist
+
+# --- Unified API Exposure ---
 current_module = sys.modules[__name__]
 for attr in dir(pd):
-    # Avoid overwriting existing module attributes
     if not hasattr(current_module, attr):
         setattr(current_module, attr, getattr(pd, attr))
 
-# Compatibility or utility functions (if necessary)
+# --- Simplified Utility Functions ---
+def to_list(series):
+    """Universal list conversion (now redundant but kept for compatibility)."""
+    return series.tolist()  # Works for both pandas/cudf after patching
+
 def is_dataframe(obj):
     return isinstance(obj, pd.DataFrame)
