@@ -8,17 +8,25 @@ def import_pandas():
     try:
         import cudf as pd
 
-        # Patch Series and Index for pandas compatibility
+        # Patch Series
         if not hasattr(pd.Series, "tolist"):
             pd.Series.tolist = lambda self: self.to_arrow().to_pylist()
 
-        if not hasattr(pd.Index, "tolist"):
-            pd.Index.tolist = lambda self: self.to_arrow().to_pylist()
+        # Patch Index and MultiIndex
+        def _index_tolist(self):
+            return self.to_pandas().tolist()
 
-        if not hasattr(pd.MultiIndex, "tolist"):
-            pd.MultiIndex.tolist = (
-                lambda self: self.to_frame().to_pandas().values.tolist()
-            )
+        def _index_iter(self):
+            return iter(self.tolist())
+
+        def _index_array(self):
+            return self.to_pandas().values
+
+        # Apply patches to all index types
+        for idx_type in [pd.Index, pd.MultiIndex]:
+            idx_type.tolist = _index_tolist
+            idx_type.__iter__ = _index_iter
+            idx_type.__array__ = _index_array  # For numpy/pandas conversions
         logger.info("Using CUDA-accelerated library (cudf).")
     except ImportError:
         import pandas as pd
@@ -46,9 +54,9 @@ for attr in dir(pd):
 
 
 # --- Simplified Utility Functions ---
-def to_list(series):
-    """Universal list conversion (now redundant but kept for compatibility)."""
-    return series.tolist()  # Works for both pandas/cudf after patching
+# def to_list(obj):
+#     """Universal conversion to Python list for Series/Index/MultiIndex."""
+#     return obj.tolist()  # Uses patched methods
 
 
 def is_dataframe(obj):
