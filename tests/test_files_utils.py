@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, mock_open
 from views_pipeline_core.files.utils import read_log_file, create_data_fetch_log_file, create_specific_log_file, create_log_file, read_dataframe, save_dataframe
-import pandas as pd
+from views_pipeline_core.hpc import pandas as pd
 
 def test_read_log_file():
     """

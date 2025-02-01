@@ -4,7 +4,8 @@ import pickle
 from unittest.mock import patch, MagicMock, ANY, PropertyMock, mock_open, call
 from views_pipeline_core.managers.ensemble import EnsembleManager
 from views_pipeline_core.managers.model import ModelPathManager, ModelManager
-import pandas as pd
+# from views_pipeline_core.hpc import numpy as np
+from views_pipeline_core.hpc import pandas as pd
 import wandb
 import subprocess
 

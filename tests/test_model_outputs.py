@@ -1,5 +1,5 @@
 import pytest
-import pandas as pd
+from views_pipeline_core.hpc import pandas as pd
 from views_pipeline_core.models.outputs import ModelOutputs, generate_output_dict # todo
 import wandb
 

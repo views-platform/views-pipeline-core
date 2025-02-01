@@ -1,6 +1,6 @@
 import pytest
-import pandas as pd
-import numpy as np
+from views_pipeline_core.hpc import numpy as np
+from views_pipeline_core.hpc import pandas as pd
 from views_pipeline_core.data.utils import ensure_float64
 
 def test_ensure_float64_all_float64():
