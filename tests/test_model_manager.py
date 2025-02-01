@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch, mock_open
 from views_pipeline_core.managers.model import ModelManager
 import wandb
-import pandas as pd
+from views_pipeline_core.hpc import pandas as pd
 from pathlib import Path
 
 @pytest.fixture
