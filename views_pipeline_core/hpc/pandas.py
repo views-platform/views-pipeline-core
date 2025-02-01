@@ -6,6 +6,8 @@ logger = logging.getLogger(__name__)
 def import_pandas():
     try:
         import cudf as pd
+        if not hasattr(pd.Series, 'tolist'):
+            pd.Series.tolist = lambda self: self.to_arrow().to_pylist()
         logger.info("Using CUDA-accelerated library (cudf).")
     except ImportError:
         import pandas as pd
@@ -15,12 +17,13 @@ def import_pandas():
 pd = import_pandas()
 
 # --- Fix for cudf's missing tolist() in Series ---
-if hasattr(pd, 'Series') and not hasattr(pd.Series, 'tolist'):
-    # Only needed for cudf versions where tolist() raises an error
-    def series_tolist(self):
-        """Monkey-patch tolist() for cudf.Series to match pandas behavior."""
-        return self.to_arrow().to_pylist()
-    pd.Series.tolist = series_tolist
+# if hasattr(pd, 'Series') and not hasattr(pd.Series, 'tolist'):
+#     # Only needed for cudf versions where tolist() raises an error
+#     def series_tolist(self):
+#         """Monkey-patch tolist() for cudf.Series to match pandas behavior."""
+#         return self.to_arrow().to_pylist()
+#     pd.Series.tolist = series_tolist
+
 
 # --- Unified API Exposure ---
 current_module = sys.modules[__name__]
