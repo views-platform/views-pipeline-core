@@ -14,27 +14,13 @@ def import_pandas():
 
 pd = import_pandas()
 
-# Define a unified interface for common pandas/cudf operations
-def DataFrame(*args, **kwargs):
-    return pd.DataFrame(*args, **kwargs)
-
-def Series(*args, **kwargs):
-    return pd.Series(*args, **kwargs)
-
-def MultiIndex_from_product(*args, **kwargs):
-    if hasattr(pd, 'MultiIndex'):
-        return pd.MultiIndex.from_product(*args, **kwargs)
-    else:
-        import pandas as pds
-        return pds.MultiIndex.from_product(*args, **kwargs)
-
-def to_list(series):
-    if hasattr(series, 'to_arrow'):
-        return series.to_arrow().to_pylist()
-    else:
-        return series.to_list()
-    
-# Dynamically set the attributes of the current module to match those of the imported library
+# Dynamically expose all attributes from the imported library (cudf/pandas)
 current_module = sys.modules[__name__]
 for attr in dir(pd):
-    setattr(current_module, attr, getattr(pd, attr))
+    # Avoid overwriting existing module attributes
+    if not hasattr(current_module, attr):
+        setattr(current_module, attr, getattr(pd, attr))
+
+# Compatibility or utility functions (if necessary)
+def is_dataframe(obj):
+    return isinstance(obj, pd.DataFrame)
