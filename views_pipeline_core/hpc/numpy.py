@@ -1,41 +1,44 @@
 import logging
 import sys
+import inspect  # For parameter validation
 
 logger = logging.getLogger(__name__)
 
 def import_numpy():
-    """Dynamically import cupy/numpy with deep NumPy compatibility."""
+    """Dynamically import cupy/numpy with strict parameter validation."""
     try:
         import cupy as cp
         logger.info("Using CUDA-accelerated library (cupy).")
         
-        # --- Critical Patch: Make numpy functions handle cupy arrays ---
+        # Get original numpy reference
         import numpy as original_np
         
-        # Patch numpy.asarray globally
+        # Get valid parameters for numpy.asarray
         original_asarray = original_np.asarray
-        
+        sig = inspect.signature(original_asarray)
+        valid_params = sig.parameters.keys()
+
         def patched_asarray(a, dtype=None, **kwargs):
-            """Convert cupy arrays to numpy arrays automatically."""
-            if hasattr(a, '__cuda_array_interface__'):  # Check for cupy array
-                return original_asarray(a.get(), dtype=dtype, **kwargs)
-            return original_asarray(a, dtype=dtype, **kwargs)
-        
+            """Handle cupy arrays and filter unsupported parameters."""
+            # Convert cupy arrays to numpy first
+            if hasattr(a, '__cuda_array_interface__'):
+                a = a.get()
+            
+            # Filter kwargs to only valid parameters
+            filtered_kwargs = {k: v for k, v in kwargs.items() 
+                              if k in valid_params}
+            
+            return original_asarray(a, dtype=dtype, **filtered_kwargs)
+
+        # Apply comprehensive patches
         original_np.asarray = patched_asarray
-        
-        # Patch other numpy functions that might receive cupy arrays
         original_np.array = lambda a, *args, **kwargs: (
             patched_asarray(a, *args, **kwargs)
         )
         
-        # --- CuPy-specific patches ---
-        # Enable implicit conversion in cupy's own interface
+        # Enable implicit conversions
         cp.ndarray.__array__ = lambda self: self.get()
         
-        # Patch tolist() for compatibility
-        if not hasattr(cp.ndarray, 'tolist'):
-            cp.ndarray.tolist = lambda self: self.get().tolist()
-            
         return cp
         
     except ImportError:
@@ -43,7 +46,7 @@ def import_numpy():
         logger.warning("GPU-accelerated library not found. Using numpy.")
         return np
 
-# Initialize the unified numpy/cupy interface
+# Initialize unified interface
 np = import_numpy()
 
 # Expose all API functions
