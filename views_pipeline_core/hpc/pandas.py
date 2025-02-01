@@ -8,6 +8,9 @@ def import_pandas():
         import cudf as pd
         if not hasattr(pd.Series, 'tolist'):
             pd.Series.tolist = lambda self: self.to_arrow().to_pylist()
+        # Make cudf DataFrame appear as pandas DataFrame for isinstance checks
+        pd.core.frame.DataFrame.__module__ = 'pandas.core.frame'
+        pd.core.series.Series.__module__ = 'pandas.core.series'
         logger.info("Using CUDA-accelerated library (cudf).")
     except ImportError:
         import pandas as pd
