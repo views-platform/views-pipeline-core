@@ -62,7 +62,7 @@ def generate_wandb_step_wise_log_dict(
     """
     for key, value in asdict(dict_of_eval_dicts[step]).items():
         if value is not None:
-            log_dict[f"step-wise/{key}_{conflict_type}"] = value
+            log_dict[f"step-wise/{key}-{conflict_type}"] = value
 
     return log_dict
 
@@ -88,7 +88,7 @@ def generate_wandb_month_wise_log_dict(
     """
     for key, value in asdict(dict_of_eval_dicts[month]).items():
         if value is not None:
-            log_dict[f"month-wise/{key}_{conflict_type}"] = value
+            log_dict[f"month-wise/{key}-{conflict_type}"] = value
 
     return log_dict
 
@@ -114,7 +114,7 @@ def generate_wandb_time_series_wise_log_dict(
     """
     for key, value in asdict(dict_of_eval_dicts[time_series]).items():
         if value is not None:
-            log_dict[f"time-series-wise/{key}_{conflict_type}"] = value
+            log_dict[f"time-series-wise/{key}-{conflict_type}"] = value
 
     return log_dict
 
@@ -200,10 +200,10 @@ def log_wandb_log_dict(
     )
 
     for key, value in mean_step_wise.items():
-        wandb.log({f"step_wise_{conflict_type}_{key.lower()}_mean": value})
+        wandb.log({f"step_wise_{key.lower()}_mean_{conflict_type}": value})
 
     for key, value in mean_month_wise.items():
-        wandb.log({f"month_wise_{conflict_type}_{key.lower()}_mean": value})
+        wandb.log({f"month_wise_{key.lower()}_mean_{conflict_type}": value})
 
     for key, value in mean_time_series_wise.items():
-        wandb.log({f"time_series_wise_{conflict_type}_{key.lower()}_mean": value})
+        wandb.log({f"time_series_wise_{key.lower()}_mean_{conflict_type}": value})
