@@ -787,6 +787,7 @@ class ModelManager:
     @staticmethod
     def _generate_evaluation_file_name(
         evaluation_type: str,
+        conflict_type: str,
         run_type: str,
         timestamp: str,
         file_extension: str,
@@ -796,6 +797,7 @@ class ModelManager:
 
         Args:
             evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
+            conflict_type (str): The type of conflict (e.g., sb, os, ns).
             run_type (str): The type of run (e.g., calibration, validation).
             timestamp (str): The timestamp of the generated file.
             file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
@@ -804,7 +806,7 @@ class ModelManager:
             str: The generated prediction file name.
         """
         # logger.info(f"sequence_number: {sequence_number}")
-        return f"eval_{evaluation_type}_{run_type}_{timestamp}{file_extension}"
+        return f"eval_{evaluation_type}_{conflict_type}_{run_type}_{timestamp}{file_extension}"
 
     def __get_pred_store_name(self) -> str:
         """
@@ -1053,6 +1055,7 @@ class ModelManager:
         df_time_series_wise_evaluation: pd.DataFrame,
         df_month_wise_evaluation: pd.DataFrame,
         path_generated: Union[str, Path],
+        conflict_type: str,
     ) -> None:
         """
         Save the model evaluation metrics to the specified path and log them to WandB.
@@ -1062,6 +1065,7 @@ class ModelManager:
             df_time_series_wise_evaluation (pd.DataFrame): DataFrame containing time series-wise evaluation metrics.
             df_month_wise_evaluation (pd.DataFrame): DataFrame containing month-wise evaluation metrics.
             path_generated (str or Path): The path where the outputs should be saved.
+            conflict_type (str): The conflict type (e.g., 'sb', 'os', 'ns').
         """
         try:
             path_generated = Path(path_generated)
@@ -1069,6 +1073,7 @@ class ModelManager:
 
             eval_step_path = ModelManager._generate_evaluation_file_name(
                 "step",
+                conflict_type,
                 self.config["run_type"],
                 self.config["timestamp"],
                 file_extension=PipelineConfig().dataframe_format,
@@ -1076,6 +1081,7 @@ class ModelManager:
 
             eval_ts_path = ModelManager._generate_evaluation_file_name(
                 "ts",
+                conflict_type,
                 self.config["run_type"],
                 self.config["timestamp"],
                 file_extension=PipelineConfig().dataframe_format,
@@ -1083,6 +1089,7 @@ class ModelManager:
 
             eval_month_path = ModelManager._generate_evaluation_file_name(
                 "month",
+                conflict_type,
                 self.config["run_type"],
                 self.config["timestamp"],
                 file_extension=PipelineConfig().dataframe_format,
@@ -1257,18 +1264,22 @@ class ModelManager:
                 metrics_manager.step_wise_evaluation(
                     df_actual,
                     df_predictions,
-                    self.config["depvar"],
+                    depvar,
                     self.config["steps"],
                 )
             )
             time_series_wise_evaluation, df_time_series_wise_evaluation = (
                 metrics_manager.time_series_wise_evaluation(
-                    df_actual, df_predictions, self.config["depvar"]
+                    df_actual, 
+                    df_predictions, 
+                    depvar
                 )
             )
             month_wise_evaluation, df_month_wise_evaluation = (
                 metrics_manager.month_wise_evaluation(
-                    df_actual, df_predictions, self.config["depvar"]
+                    df_actual, 
+                    df_predictions, 
+                    depvar
                 )
             )
 
@@ -1286,6 +1297,7 @@ class ModelManager:
                     df_time_series_wise_evaluation,
                     df_month_wise_evaluation,
                     self._model_path.data_generated,
+                    conflict_type,
                 )
 
                 for i, df in enumerate(df_predictions):
@@ -1582,7 +1594,7 @@ class ModelManager:
         #     raise ValueError(f"Invalid dataframe type: {type(dataframe)}. Expected pd.DataFrame or pd.MultiIndex.")
 
         if dataframe.empty:
-            print("\033[91mPrediction DataFrame is empty.\033[0m")  # Red text
+            # print("\033[91mPrediction DataFrame is empty.\033[0m")  # Red text
             raise ValueError("Prediction DataFrame is empty.")
         else:
             print("\033[92mPrediction DataFrame is not empty.\033[0m")  # Green text
