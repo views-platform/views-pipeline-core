@@ -44,7 +44,8 @@ def add_wandb_metrics():
 def generate_wandb_step_wise_log_dict(
     log_dict: dict, 
     dict_of_eval_dicts: Dict[str, EvaluationMetrics], 
-    step: str
+    step: str,
+    conflict_type: str
 ) -> dict:
     """
     Generate a WandB log dictionary for step-wise evaluation metrics.
@@ -54,13 +55,14 @@ def generate_wandb_step_wise_log_dict(
         dict_of_eval_dicts (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
             where the keys are steps and values are `EvaluationMetrics` instances.
         step (str): The specific time step (month forecasted) for which metrics are logged (e.g., 'step01').
+        conflict_type (str): The type of conflict for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and step.
     """
     for key, value in asdict(dict_of_eval_dicts[step]).items():
         if value is not None:
-            log_dict[f"step-wise/{key}"] = value
+            log_dict[f"step-wise/{key}_{conflict_type}"] = value
 
     return log_dict
 
@@ -68,7 +70,8 @@ def generate_wandb_step_wise_log_dict(
 def generate_wandb_month_wise_log_dict(
     log_dict: dict, 
     dict_of_eval_dicts: Dict[str, EvaluationMetrics], 
-    month: str
+    month: str,
+    conflict_type: str
 ) -> dict:
     """
     Generate a WandB log dictionary for month-wise evaluation metrics.
@@ -78,13 +81,14 @@ def generate_wandb_month_wise_log_dict(
         dict_of_eval_dicts (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
             where the keys are months and values are `EvaluationMetrics` instances.
         month (str): The specific month for which metrics are logged (e.g., 'month501').
+        conflict_type (str): The type of conflict for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and month.
     """
     for key, value in asdict(dict_of_eval_dicts[month]).items():
         if value is not None:
-            log_dict[f"month-wise/{key}"] = value
+            log_dict[f"month-wise/{key}_{conflict_type}"] = value
 
     return log_dict
 
@@ -92,7 +96,8 @@ def generate_wandb_month_wise_log_dict(
 def generate_wandb_time_series_wise_log_dict(
     log_dict: dict, 
     dict_of_eval_dicts: Dict[str, EvaluationMetrics], 
-    time_series: str
+    time_series: str,
+    conflict_type: str
 ) -> dict:
     """
     Generate a WandB log dictionary for time-series-wise evaluation metrics.
@@ -102,13 +107,14 @@ def generate_wandb_time_series_wise_log_dict(
         dict_of_eval_dicts (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
             where the keys are time series and values are `EvaluationMetrics` instances.
         time_series (str): The specific time series for which metrics are logged (e.g., 'ts01').
+        conflict_type (str): The type of conflict for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and time series
     """
     for key, value in asdict(dict_of_eval_dicts[time_series]).items():
         if value is not None:
-            log_dict[f"time-series-wise/{key}"] = value
+            log_dict[f"time-series-wise/{key}_{conflict_type}"] = value
 
     return log_dict
 
@@ -162,27 +168,27 @@ def log_wandb_log_dict(
     for step in step_wise_evaluation.keys():
         s = int(re.search(r"\d+", step).group())
         log_dict = {}
-        log_dict[f"step-wise/step/{conflict_type}"] = s
+        log_dict[f"step-wise/step"] = s
         step_wise_log_dict = generate_wandb_step_wise_log_dict(
-            log_dict, step_wise_evaluation, step
+            log_dict, step_wise_evaluation, step, conflict_type
         )
         wandb.log(step_wise_log_dict)
 
     for month in month_wise_evaluation.keys():
         m = int(re.search(r"\d+", month).group())
         log_dict = {}
-        log_dict[f"month-wise/month/{conflict_type}"] = m
+        log_dict[f"month-wise/month"] = m
         month_wise_log_dict = generate_wandb_month_wise_log_dict(
-            log_dict, month_wise_evaluation, month
+            log_dict, month_wise_evaluation, month, conflict_type
         )
         wandb.log(month_wise_log_dict)
 
     for time_series in time_series_wise_evaluation.keys():
         ts = int(re.search(r"\d+", time_series).group())
         log_dict = {}
-        log_dict[f"time-series-wise/time-series/{conflict_type}"] = ts
+        log_dict[f"time-series-wise/time-series"] = ts
         ts_wise_log_dict = generate_wandb_time_series_wise_log_dict(
-            log_dict, time_series_wise_evaluation, time_series
+            log_dict, time_series_wise_evaluation, time_series, conflict_type
         )
         wandb.log(ts_wise_log_dict)
 
