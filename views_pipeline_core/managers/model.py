@@ -1601,27 +1601,27 @@ class ModelManager:
 
         if isinstance(self.config["depvar"], list):
             for depvar in self.config["depvar"]:
-                if depvar in dataframe.columns.to_list():
+                if f"pred_{depvar}" in dataframe.columns.to_list():
                     print(
-                        f"\033[92m{depvar} found in dataframe columns.\033[0m"
+                        f"\033[92mpred_{depvar} found in dataframe columns.\033[0m"
                     )  # Green text
                 else:
                     # print(f"\033[91m{depvar} not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
                     raise ValueError(
-                        f"{depvar} not found in dataframe columns. Found {dataframe.columns.to_list()} instead."
+                        f"pred_{depvar} not found in dataframe columns. Found {dataframe.columns.to_list()} instead."
                     )
         elif isinstance(self.config["depvar"], str):
             if (
-                self.config["depvar"] in dataframe.columns.to_list()
+                f"pred_{self.config['depvar']}" in dataframe.columns.to_list()
                 or "step_combined" in dataframe.columns.to_list()
             ):
                 print(
-                    f"\033[92m{self.config['depvar']} or step_combined found in dataframe columns.\033[0m"
+                    f"\033[92mpred_{self.config['depvar']} or step_combined found in dataframe columns.\033[0m"
                 )  # Green text
             else:
                 # print(f"\033[91m{self.config['depvar']} not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
                 raise ValueError(
-                    f"{self.config['depvar']} not found in dataframe columns. Found {dataframe.columns.to_list()} instead."
+                    f"pred_{self.config['depvar']} not found in dataframe columns. Found {dataframe.columns.to_list()} instead."
                 )
         else:
             # print(f"\033[91mInvalid depvar type: {type(self.config['depvar'])}. Expected str or list.\033[0m")  # Red text
