@@ -742,6 +742,7 @@ class ModelManager:
     #             f"Conflict type not found in depvar column '{depvar}'. Valid conflict types are 'sb', 'os', and 'ns'."
     #         )
 
+    @staticmethod
     def _get_conflict_type(depvar: str) -> str:
         """Determine conflict type from dependent variable by checking split parts.
         
