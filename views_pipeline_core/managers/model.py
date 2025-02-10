@@ -717,30 +717,50 @@ class ModelManager:
         else:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
-    @staticmethod
+    # @staticmethod
+    # def _get_conflict_type(depvar: str) -> str:
+    #     """
+    #     Get the conflict type based on the dependent variable.
+
+    #     Args:
+    #         depvar (str): The dependent variable.
+
+    #     Returns:
+    #         str: The conflict type (e.g., 'sb', 'os', 'ns').
+
+    #     Raises:
+    #         ValueError: If the conflict type is not found as valid dependent variable
+    #     """
+    #     if "sb" in depvar.split("_"):
+    #         return "sb"
+    #     elif "ns" in depvar.split("_"): # Logic error
+    #         return "os"
+    #     elif "ns" in depvar.split("_"):
+    #         return "ns"
+    #     else:
+    #         raise ValueError(
+    #             f"Conflict type not found in depvar column '{depvar}'. Valid conflict types are 'sb', 'os', and 'ns'."
+    #         )
+
     def _get_conflict_type(depvar: str) -> str:
-        """
-        Get the conflict type based on the dependent variable.
-
+        """Determine conflict type from dependent variable by checking split parts.
+        
         Args:
-            depvar (str): The dependent variable.
-
+            depvar: Dependent variable string containing conflict type (e.g., 'var_sb').
+        
         Returns:
-            str: The conflict type (e.g., 'sb', 'os', 'ns').
-
+            One of 'sb', 'os', or 'ns' based on the first found in depvar parts.
+        
         Raises:
-            ValueError: If the conflict type is not found as valid dependent variable
+            ValueError: If none of the valid conflict types are found.
         """
-        if "sb" in depvar.split("_"):
-            return "sb"
-        elif "ns" in depvar.split("_"):
-            return "os"
-        elif "ns" in depvar.split("_"):
-            return "ns"
-        else:
-            raise ValueError(
-                f"Conflict type not found in depvar column '{depvar}'. Valid conflict types are 'sb', 'os', and 'ns'."
-            )
+        parts = depvar.split('_')
+        for conflict in ('sb', 'os', 'ns'):
+            if conflict in parts:
+                return conflict
+        raise ValueError(
+            f"Conflict type not found in '{depvar}'. Valid types: 'sb', 'os', 'ns'."
+        )
 
     @staticmethod
     def generate_model_file_name(run_type: str, file_extension: str) -> str:
@@ -1574,144 +1594,72 @@ class ModelManager:
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
 
-    def _validate_prediction_dataframe(self, dataframe: pd.DataFrame):
-        """
-        Validates the prediction DataFrame against the actual values.
+    def _validate_prediction_dataframe(self, dataframe: pd.DataFrame) -> None:
+        """Validate prediction dataframe structure and required components."""
+        # Table formatting helpers
+        def print_status(message: str, passed: bool) -> None:
+            color = "92" if passed else "91"
+            status = "✓ PASS" if passed else "✗ FAIL"
+            print(f"\033[{color}m{status:<8} | {message}\033[0m")
 
-        Args:
-            df_predictions (pd.DataFrame): The DataFrame containing the prediction results.
+        # Print table header
+        print("\n\033[1mVALIDATION REPORT\033[0m")
+        print("\033[94mStatus   | Check\033[0m")
+        print("---------|----------------------------------------")
 
-        Returns:
-            None
-
-        Raises:
-            ValueError: If the prediction DataFrame is empty or does not contain the expected columns.
-        """
-        pgm_indices = {0: ["month_id"], 1: ["priogrid_id", "priogrid_gid"]}
-        cm_indices = {0: ["month_id"], 1: ["country_id"]}
-
-        # if not isinstance(dataframe, pd.DataFrame) or isinstance(dataframe, pd.MultiIndex):
-        #     raise ValueError(f"Invalid dataframe type: {type(dataframe)}. Expected pd.DataFrame or pd.MultiIndex.")
-
+        # Base validation
         if dataframe.empty:
-            # print("\033[91mPrediction DataFrame is empty.\033[0m")  # Red text
-            raise ValueError("Prediction DataFrame is empty.")
-        else:
-            print("\033[92mPrediction DataFrame is not empty.\033[0m")  # Green text
+            print_status("DataFrame contains data", False)
+            raise ValueError("Prediction DataFrame is empty")
+        print_status("DataFrame contains data", True)
 
-        if isinstance(self.config["depvar"], list):
-            for depvar in self.config["depvar"]:
-                if f"pred_{depvar}" in dataframe.columns.to_list():
-                    print(
-                        f"\033[92mpred_{depvar} found in dataframe columns.\033[0m"
-                    )  # Green text
-                else:
-                    # print(f"\033[91m{depvar} not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                    raise ValueError(
-                        f"pred_{depvar} not found in dataframe columns. Found {dataframe.columns.to_list()} instead."
-                    )
-        elif isinstance(self.config["depvar"], str):
-            if (
-                f"pred_{self.config['depvar']}" in dataframe.columns.to_list()
-                or "step_combined" in dataframe.columns.to_list()
-            ):
-                print(
-                    f"\033[92mpred_{self.config['depvar']} or step_combined found in dataframe columns.\033[0m"
-                )  # Green text
-            else:
-                # print(f"\033[91m{self.config['depvar']} not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                raise ValueError(
-                    f"pred_{self.config['depvar']} not found in dataframe columns. Found {dataframe.columns.to_list()} instead."
-                )
-        else:
-            # print(f"\033[91mInvalid depvar type: {type(self.config['depvar'])}. Expected str or list.\033[0m")  # Red text
-            raise ValueError(
-                f"Invalid depvar type: {type(self.config['depvar'])}. Expected str or list. Check your model's meta_config.py."
-            )
+        # Depvar validation
+        depvar = self.config["depvar"]
+        if not isinstance(depvar, (str, list)):
+            print_status("Valid depvar type", False)
+            raise ValueError(f"Invalid depvar type: {type(depvar)}")
+        print_status("Valid depvar type format", True)
+
+        required_columns = {f"pred_{dv}" for dv in ([depvar] if isinstance(depvar, str) else depvar)}
+        missing = [col for col in required_columns if col not in dataframe.columns]
+        
+        if missing:
+            print_status("Required prediction columns present", False)
+            raise ValueError(f"Missing columns: {missing}. Found: {list(dataframe.columns)}")
+        print_status("All required prediction columns present", True)
+
+        # Structural validation
+        model_config = {
+            'pgm': {'indices': ["priogrid_id", "priogrid_gid"], 'columns': []},
+            'cm': {'indices': ["country_id"], 'columns': ["country_id", "month_id"]}
+        }
+        found_model = None
+        index_names = dataframe.index.names if isinstance(dataframe.index, pd.MultiIndex) else []
 
         if isinstance(dataframe.index, pd.MultiIndex):
-            # check for the expected columns in the MultiIndex
-            if dataframe.index.names[1] in pgm_indices[1]:
-                print(
-                    f"\033[92mPrediction DataFrame is a MultiIndex for PGM. Found {dataframe.index.names[1]} at index 1.\033[0m"
-                )  # Green text
-                if dataframe.index.names[0] in pgm_indices[0]:
-                    print(
-                        f"\033[92m{pgm_indices[0]} found in dataframe indices at index 0.\033[0m"
-                    )  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe indices. Found {dataframe.index.names[0]} instead.\033[0m")  # Red text
-                    raise ValueError(
-                        f"Month ID not found in dataframe indices. Found {dataframe.index.names[0]} instead."
-                    )
-            elif dataframe.index.names[1] in cm_indices[1]:
-                print(
-                    f"\033[92mPrediction DataFrame is a MultiIndex for CM. Found {dataframe.index.names[1]} at index 1.\033[0m"
-                )  # Green text
-                if dataframe.index.names[0] in cm_indices[0]:
-                    print(
-                        f"\033[92m{cm_indices[0]} found in dataframe indices at index 0.\033[0m"
-                    )  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe indices. Found {dataframe.index.names[0]} instead.\033[0m")  # Red text
-                    raise ValueError(
-                        f"Month ID not found in dataframe indices. Found {dataframe.index.names[0]} instead."
-                    )
-            else:
-                # print(f"\033[91mValid indices for pgm or cm not found in prediction DataFrame. Found {dataframe.index.names}.\033[0m")  # Red text
-                raise ValueError(
-                    f"Valid indices for pgm or cm not found in prediction DataFrame. Found {dataframe.index.names}."
-                )
-        elif isinstance(dataframe.index, pd.Index):
-            # check for the expected columns in the DataFrame
-            if cm_indices[1][0] in dataframe.columns.to_list():
-                print(
-                    "\033[92mPrediction DataFrame is a DataFrame for CM.\033[0m"
-                )  # Green text
-                if cm_indices[0][0] in dataframe.columns.to_list():
-                    print(
-                        "\033[92mMonth ID found in dataframe columns.\033[0m"
-                    )  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                    raise ValueError(
-                        f"Month ID not found in dataframe columns. Found {dataframe.columns.to_list()} instead."
-                    )
-            elif pgm_indices[1][0] in dataframe.columns.to_list():
-                print(
-                    "\033[92mPrediction DataFrame is a DataFrame for PGM.\033[0m"
-                )  # Green text
-                if pgm_indices[0][0] in dataframe.columns.to_list():
-                    print(
-                        "\033[92mMonth ID found in dataframe columns.\033[0m"
-                    )  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                    raise ValueError(
-                        f"Month ID not found in dataframe columns. Found {dataframe.columns.to_list()} instead."
-                    )
-            elif pgm_indices[1][1] in dataframe.columns.to_list():
-                print(
-                    "\033[92mPrediction DataFrame is a DataFrame for PGM.\033[0m"
-                )  # Green text
-                if pgm_indices[0][0] in dataframe.columns.to_list():
-                    print(
-                        "\033[92mMonth ID found in dataframe columns.\033[0m"
-                    )  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                    raise ValueError(
-                        f"Month ID not found in dataframe columns. Found {dataframe.columns.to_list()} instead."
-                    )
-            else:
-                # print(f"\033[91mValid columns for pgm or cm not found in prediction DataFrame. Found {dataframe.columns}.\033[0m")  # Red text
-                raise ValueError(
-                    f"Valid columns for pgm or cm not found in prediction DataFrame. Found {dataframe.columns.to_list()}."
-                )
+            for model, config in model_config.items():
+                if any(idx in config['indices'] for idx in index_names):
+                    found_model = model
+                    if "month_id" not in index_names:
+                        print_status(f"{model.upper()} month_id index present", False)
+                        raise ValueError(f"Missing month_id in index for {model.upper()}")
+                    print_status(f"{model.upper()} index structure valid", True)
+                    break
         else:
-            raise ValueError(
-                f"Invalid dataframe type: {type(dataframe)}. Expected pd.DataFrame or pd.MultiIndex."
-            )
+            for model, config in model_config.items():
+                if any(col in dataframe.columns for col in config['columns']):
+                    found_model = model
+                    if "month_id" not in dataframe.columns:
+                        print_status(f"{model.upper()} month_id column present", False)
+                        raise ValueError(f"Missing month_id column for {model.upper()}")
+                    print_status(f"{model.upper()} column structure valid", True)
+                    break
+
+        if not found_model:
+            print_status("Data structure recognized", False)
+            raise ValueError(f"Unrecognized structure. Index: {index_names}, Columns: {list(dataframe.columns)}")
+
+        print("--------------------------------------------------\n")
 
     @abstractmethod
     def _train_model_artifact(self) -> any:
