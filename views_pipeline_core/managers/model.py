@@ -1140,11 +1140,11 @@ class ModelManager:
                 }
             )
 
-            # self._wandb_alert(
-            #     title=f"{self._model_path.target.title} Outputs Saved",
-            #     text=f"{self._model_path.target.title} evaluation metrics for {self.config['name']} have been successfully saved and logged to WandB at {path_generated.relative_to(self._model_path.root)}.",
-            #     level=wandb.AlertLevel.INFO,
-            # )
+            self._wandb_alert(
+                title=f"{self._model_path.target.title} Outputs Saved",
+                text=f"{self._model_path.target.title} evaluation metrics for {self.config['name']} have been successfully saved and logged to WandB at {path_generated.relative_to(self._model_path.root)}.",
+                level=wandb.AlertLevel.INFO,
+            )
         except Exception as e:
             logger.error(f"Error saving model outputs: {e}", exc_info=True)
             self._wandb_alert(
@@ -1193,11 +1193,11 @@ class ModelManager:
             wandb.save(str(path_generated / predictions_name))
             wandb.log({"predictions": wandb.Table(dataframe=df_predictions)})
 
-            # self._wandb_alert(
-            #     title="Predictions Saved",
-            #     text=f"Predictions for {self._model_path.target} {self.config['name']} have been successfully saved and logged to WandB and locally at {path_generated.relative_to(self._model_path.root)}.",
-            #     level=wandb.AlertLevel.INFO,
-            # )
+            self._wandb_alert(
+                title="Predictions Saved",
+                text=f"Predictions for {self._model_path.target} {self.config['name']} have been successfully saved and logged to WandB and locally at {path_generated.relative_to(self._model_path.root)}.",
+                level=wandb.AlertLevel.INFO,
+            )
         except Exception as e:
             logger.error(f"Error saving predictions: {e}", exc_info=True)
             self._wandb_alert(
@@ -1348,11 +1348,11 @@ class ModelManager:
                     use_saved=args.saved,
                     validate=True,
                 )
-                # self._wandb_alert(
-                #     title=f"Queryset Fetch Complete ({str(args.run_type)})",
-                #     text=f"Queryset for {self._model_path.target} {self.config['name']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
-                #     level=wandb.AlertLevel.INFO,
-                # )
+                self._wandb_alert(
+                    title=f"Queryset Fetch Complete ({str(args.run_type)})",
+                    text=f"Queryset for {self._model_path.target} {self.config['name']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
+                    level=wandb.AlertLevel.INFO,
+                )
             wandb.finish()
 
             self._execute_model_tasks(
@@ -1395,11 +1395,11 @@ class ModelManager:
                     self_test=args.drift_self_test,
                     partition=args.run_type,
                 )
-                # self._wandb_alert(
-                #     title=f"Queryset Fetch Complete ({str(args.run_type)})",
-                #     text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
-                #     level=wandb.AlertLevel.INFO,
-                # )
+                self._wandb_alert(
+                    title=f"Queryset Fetch Complete ({str(args.run_type)})",
+                    text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
+                    level=wandb.AlertLevel.INFO,
+                )
             wandb.finish()
 
             sweep_id = wandb.sweep(
@@ -1446,15 +1446,15 @@ class ModelManager:
                         f"Sweeping {self._model_path.target} {self.config['name']}..."
                     )
                     model = self._train_model_artifact()
-                    # self._wandb_alert(
-                    #     title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
-                    #     text=(
-                    #         f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```"
-                    #         if self._sweep
-                    #         else ""
-                    #     ),
-                    #     level=wandb.AlertLevel.INFO,
-                    # )
+                    self._wandb_alert(
+                        title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
+                        text=(
+                            f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```"
+                            if self._sweep
+                            else ""
+                        ),
+                        level=wandb.AlertLevel.INFO,
+                    )
                     logger.info(
                         f"Evaluating {self._model_path.target} {self.config['name']}..."
                     )
@@ -1483,15 +1483,15 @@ class ModelManager:
                             self._handle_log_creation(
                                 train=train, eval=eval, forecast=forecast
                             )
-                        # self._wandb_alert(
-                        #     title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
-                        #     text=(
-                        #         f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{self._config_hyperparameters}\n```"
-                        #         if not self._sweep
-                        #         else ""
-                        #     ),
-                        #     level=wandb.AlertLevel.INFO,
-                        # )
+                        self._wandb_alert(
+                            title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
+                            text=(
+                                f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{self._config_hyperparameters}\n```"
+                                if not self._sweep
+                                else ""
+                            ),
+                            level=wandb.AlertLevel.INFO,
+                        )
                     except Exception as e:
                         logger.error(
                             f"{self._model_path.target.title()} training model: {e}",
@@ -1555,10 +1555,10 @@ class ModelManager:
                         )  # Forecast the model
                         self._validate_prediction_dataframe(dataframe=df_predictions)
 
-                        # self._wandb_alert(
-                        #     title=f"Forecasting for {self._model_path.target} {self.config['name']} completed successfully.",
-                        #     level=wandb.AlertLevel.INFO,
-                        # )
+                        self._wandb_alert(
+                            title=f"Forecasting for {self._model_path.target} {self.config['name']} completed successfully.",
+                            level=wandb.AlertLevel.INFO,
+                        )
 
                         self._handle_log_creation(
                             train=train, eval=eval, forecast=forecast
