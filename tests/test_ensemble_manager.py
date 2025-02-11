@@ -380,8 +380,7 @@ class TestParametrized():
         expected_command, # it is necessary to be here
         expected_methods_called # it is necessary to be here)
     ):
-        with patch ("views_pipeline_core.managers.ensemble.ModelManager") as mock_ModelManager, \
-            patch ("views_pipeline_core.managers.ensemble.EnsembleManager") as mock_EnsembleManager, \
+        with patch ("views_pipeline_core.managers.ensemble.EnsembleManager") as mock_EnsembleManager, \
             patch("views_pipeline_core.managers.ensemble.subprocess.run") as mock_subprocess_run, \
             patch("views_pipeline_core.managers.ensemble.logger") as mock_logger:
 
@@ -396,7 +395,6 @@ class TestParametrized():
                 use_saved = args.saved,
                 eval_type = args.eval_type,
             )
-            mock_ModelManager.assert_called_once_with(mock_model_path)
             mock_EnsembleManager._get_shell_command.assert_called_once_with(
                 mock_model_path,
                 "test_run",
@@ -484,8 +482,15 @@ class TestParametrized():
             patch("views_pipeline_core.managers.ensemble.ModelManager._resolve_evaluation_sequence_number") as mock_resolve, \
             patch.object(ModelManager, '_ModelManager__load_config') as mock_load_config:
 
+            #path_generated = mock_ModelPathManager("test_model").data_generated
+            mock_artifact_path = MagicMock()
+            mock_artifact_path.stem = "predictions_test_run_202401011200000"
+            mock_ModelPathManager.get_latest_model_artifact_path.return_value = mock_artifact_path  
+
             manager = mock_ensemble_manager
             manager._evaluate_model_artifact(model_name = "test_model", run_type = "test_run", eval_type = args.evaluate)
+
+            mock_ModelPathManager.assert_called_once_with("test_model")
 
             mock_resolve.return_value = 5
 
