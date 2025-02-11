@@ -379,8 +379,6 @@ class EnsembleManager(ModelManager):
         Returns:
             None
         """
-        model_config = ModelManager(model_path).configs
-        model_config["run_type"] = run_type
         shell_command = EnsembleManager._get_shell_command(
             model_path,
             run_type,
@@ -450,10 +448,8 @@ class EnsembleManager(ModelManager):
         logger.info(f"Evaluating single model {model_name}...")
 
         model_path = ModelPathManager(model_name)
-        path_raw = model_path.data_raw
         path_generated = model_path.data_generated
         path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
-
         ts = path_artifact.stem[-15:]
 
         preds = []
