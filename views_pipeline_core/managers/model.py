@@ -1321,14 +1321,6 @@ class ModelManager:
                     conflict_type,
                 )
 
-                for i, df in enumerate(df_predictions):
-                    self._save_predictions(df, self._model_path.data_generated, i)
-
-        # self._wandb_alert(
-        #     title=f"Evaluation Complete for {self._model_path.target} {self.config['name']}",
-        #     text=f"{self._generate_evaluation_table(metric_dict=wandb.run.summary._as_dict())}",
-        # )
-
     def execute_single_run(self, args) -> None:
         """
         Executes a single run of the model, including data fetching, training, evaluation, and forecasting.
@@ -1441,8 +1433,7 @@ class ModelManager:
                 # self.config = wandb.config
                 if self._sweep:
                     self.config = self._update_sweep_config(wandb.config)
-                    # print(f"Config: {self.config}")
-                    # print(f"Wandb Config: {wandb.config}")
+                
                     logger.info(
                         f"Sweeping {self._model_path.target} {self.config['name']}..."
                     )
@@ -1520,16 +1511,13 @@ class ModelManager:
                                 f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
                             )
                             self._validate_prediction_dataframe(dataframe=df)
-
-                        # for i, df in enumerate(tqdm.tqdm(df_predictions, desc="Validating evaluation dataframes", total=len(df_predictions))):
-                        #     tqdm.tqdm.write(f"Validating evaluation dataframe of sequence {i}/{len(df_predictions)}")
-                        #     self._validate_prediction_dataframe(dataframe=df)
+                            self._save_predictions(df, self._model_path.data_generated, i)
 
                         self._handle_log_creation(
                             train=train, eval=eval, forecast=forecast
                         )
                         # Evaluate the model
-                        if self.config["metrics"]:
+                        if self.config["metrics"] and self.config["algorithm"] != "SHURF":
                             self._evaluate_prediction_dataframe(
                                 df_predictions
                             )  # Calculate evaluation metrics with the views-evaluation package
@@ -1564,6 +1552,7 @@ class ModelManager:
                         self._handle_log_creation(
                             train=train, eval=eval, forecast=forecast
                         )
+                        
                         self._save_predictions(
                             df_predictions, self._model_path.data_generated
                         )
