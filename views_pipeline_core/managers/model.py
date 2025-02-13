@@ -717,31 +717,6 @@ class ModelManager:
         else:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
-    # @staticmethod
-    # def _get_conflict_type(depvar: str) -> str:
-    #     """
-    #     Get the conflict type based on the dependent variable.
-
-    #     Args:
-    #         depvar (str): The dependent variable.
-
-    #     Returns:
-    #         str: The conflict type (e.g., 'sb', 'os', 'ns').
-
-    #     Raises:
-    #         ValueError: If the conflict type is not found as valid dependent variable
-    #     """
-    #     if "sb" in depvar.split("_"):
-    #         return "sb"
-    #     elif "ns" in depvar.split("_"): # Logic error
-    #         return "os"
-    #     elif "ns" in depvar.split("_"):
-    #         return "ns"
-    #     else:
-    #         raise ValueError(
-    #             f"Conflict type not found in depvar column '{depvar}'. Valid conflict types are 'sb', 'os', and 'ns'."
-    #         )
-
     @staticmethod
     def _get_conflict_type(depvar: str) -> str:
         """Determine conflict type from dependent variable by checking split parts.
@@ -1278,9 +1253,9 @@ class ModelManager:
 
         logger.info(f"df_viewser read from {df_path}")
         # Multiple targets
+        df_actual = df_viewser[self.config["depvar"]]
         for depvar in self.config["depvar"]:
             conflict_type = ModelManager._get_conflict_type(depvar)
-            df_actual = df_viewser[self.config["depvar"]]
             step_wise_evaluation, df_step_wise_evaluation = (
                 metrics_manager.step_wise_evaluation(
                     df_actual,
