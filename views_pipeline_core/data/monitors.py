@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 
-class PredictionComparator:
+class OutputDriftDetection:
     """
     A class to process and compare prediction data.
     """
@@ -116,8 +116,8 @@ raw_data_dict = {
     "new_pred_path": "../../../../Desktop/predictions_forecasting_20250217_11521_with_electric_relaxation.parquet",
 }
 
-#processor = PredictionComparator(raw_data_dict["old_pred_path"], raw_data_dict["new_pred_path"])
-processor = PredictionComparator()
+#processor = OutputDriftDetection(raw_data_dict["old_pred_path"], raw_data_dict["new_pred_path"])
+processor = OutputDriftDetection()
 country_predictions = processor.generate_predictions_by_country()
 month_predictions = processor.generate_predictions_by_month()
 print(country_predictions[0])
