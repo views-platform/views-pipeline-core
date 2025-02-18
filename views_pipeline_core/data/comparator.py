@@ -6,18 +6,22 @@ class PredictionComparator:
     A class to process and compare prediction data.
     """
 
-    def __init__(self, old_pred_path, new_pred_path):
+    def __init__(self, old_pred_path=None, new_pred_path=None):
         """
-        Initializes the PredictionProcessor with file paths.
-        
+        Initializes the PredictionComparator class.
+        If paths are not provided, the user will be prompted to enter them.
+
         Parameters:
-        old_pred_path (str): Path to the CSV file containing old predictions.
-        new_pred_path (str): Path to the Parquet file containing new predictions.
+        old_pred_path (str, optional): Path to the old predictions file (CSV).
+        new_pred_path (str, optional): Path to the new predictions file (Parquet).
         """
-        self.old_pred_path = old_pred_path
-        self.new_pred_path = new_pred_path
-        self.df_old_pred = self.load_dataframe(old_pred_path)
-        self.df_new_pred = self.load_dataframe(new_pred_path)
+
+        self.old_pred_path = old_pred_path or input(f"Enter path for old predictions: ") 
+        self.new_pred_path = new_pred_path or input(f"Enter path for new predictions: ") 
+
+        self.df_old = self.load_dataframe(self.old_pred_path)
+        self.df_new = self.load_dataframe(self.new_pred_path)
+        
 
     @staticmethod
     def load_dataframe(file_path):
@@ -54,13 +58,13 @@ class PredictionComparator:
         """
         df_pred_list = []
 
-        for country in self.df_new_pred.index.get_level_values(1).unique():
-            df_gen_temp = self.df_new_pred["pred_ln_ged_sb_dep"].reset_index()
+        for country in self.df_new.index.get_level_values(1).unique():
+            df_gen_temp = self.df_new["pred_ln_ged_sb_dep"].reset_index()
             df_gen_temp["country_id"] = country
             df_gen_temp.rename(columns={'pred_ln_ged_sb_dep': 'new_pred_ln'}, inplace=True)
             df_gen_temp = df_gen_temp[["country_id", "month_id", "new_pred_ln"]]
 
-            df_csv_temp = self.df_old_pred.loc[self.df_old_pred['country_id'] == country,['country_id', 'month_id', 'main_mean_ln']]
+            df_csv_temp = self.df_old.loc[self.df_old['country_id'] == country,['country_id', 'month_id', 'main_mean_ln']]
             df_csv_temp = df_csv_temp.reset_index(drop=True)
             df_csv_temp.rename(columns={'main_mean_ln': 'old_pred_ln'}, inplace=True)
 
@@ -78,13 +82,13 @@ class PredictionComparator:
         """
         df_pred_list = []
 
-        for month in self.df_new_pred.index.get_level_values(0).unique():  # Get unique month_ids
-            df_gen_temp = self.df_new_pred["pred_ln_ged_sb_dep"].reset_index()
+        for month in self.df_new.index.get_level_values(0).unique():  # Get unique month_ids
+            df_gen_temp = self.df_new["pred_ln_ged_sb_dep"].reset_index()
             df_gen_temp["month_id"] = month
             df_gen_temp.rename(columns={'pred_ln_ged_sb_dep': 'new_pred_ln'}, inplace=True)
             df_gen_temp = df_gen_temp[["country_id", "month_id", "new_pred_ln"]]
 
-            df_csv_temp = self.df_old_pred.loc[self.df_old_pred['month_id'] == month,['country_id', 'month_id', 'main_mean_ln']]
+            df_csv_temp = self.df_old.loc[self.df_old['month_id'] == month,['country_id', 'month_id', 'main_mean_ln']]
             df_csv_temp = df_csv_temp.reset_index(drop=True)
             df_csv_temp.rename(columns={'main_mean_ln': 'old_pred_ln'}, inplace=True)
 
@@ -112,7 +116,8 @@ raw_data_dict = {
     "new_pred_path": "../../../../Desktop/predictions_forecasting_20250217_11521_with_electric_relaxation.parquet",
 }
 
-processor = PredictionComparator(raw_data_dict["old_pred_path"], raw_data_dict["new_pred_path"])
+#processor = PredictionComparator(raw_data_dict["old_pred_path"], raw_data_dict["new_pred_path"])
+processor = PredictionComparator()
 country_predictions = processor.generate_predictions_by_country()
 month_predictions = processor.generate_predictions_by_month()
 print(country_predictions[0])
