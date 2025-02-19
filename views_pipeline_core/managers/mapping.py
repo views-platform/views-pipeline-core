@@ -32,10 +32,9 @@ class MappingManager:
         self._isoab_cache_dataframe = None
 
     def __get_country_shapefile(self):
-        return gpd.read_file(
-            "/Users/dylanpinheiro/Desktop/views-platform/experiments/shapefiles/ne_110m_admin_0_countries/ne_110m_admin_0_countries.shp"
-        )
-
+        path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "country" / "ne_110m_admin_0_countries.shp"
+        return gpd.read_file(path)
+    
     def __get_priogrid_shapefile(self):
         pass
 
