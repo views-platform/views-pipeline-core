@@ -36,8 +36,8 @@ def generate(script_path: Path, model_name: str) -> bool:
         "depvar": "ln_ged_sb_dep",  # Eg. "ln_ged_sb_dep"
         "level": "pgm", # Eg. "pgm", "cm"
         "aggregation": "median", # Eg. "median", "mean"
-        "creator": "Your name here" 
         "metrics": ["RMSLE", "CRPS"],
+        "creator": "Your name here" 
     }}
     return meta_config
 """
