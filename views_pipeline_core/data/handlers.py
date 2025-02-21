@@ -42,10 +42,13 @@ class ViewsDataset:
         
         self.validate_indices()
 
+        # Handle situation where you only want specific cols. Too much work. Future problem.
         self.pred_vars = self.get_pred_vars()
         self.is_prediction = len(self.pred_vars) > 0
         if self.is_prediction:
             self.dep_vars = self.pred_vars  
+            if dep_vars is not None:
+                logger.warning(f"Ignoring specified dependent variables in prediction mode. Make sure all columns follow pred_* naming scheme. ({self.original_columns})")
         else:
             self.dep_vars = dep_vars
             if self.dep_vars is not None:
@@ -55,6 +58,30 @@ class ViewsDataset:
                 del missing_vars
         self.indep_vars = self.get_indep_vars()
         self.sample_size = self._validate_prediction_structure()
+
+    def _rebuild_index_mappings(self) -> None:
+        """Create sorted index mappings for tensor alignment using pandas Index."""
+        self._time_values = self.dataframe.index.get_level_values(self._time_id).unique().sort_values()
+        self._entity_values = self.dataframe.index.get_level_values(self._entity_id).unique().sort_values()
+        
+        # Convert to pandas Index for efficient lookups
+        self._time_values = pd.Index(self._time_values)
+        self._entity_values = pd.Index(self._entity_values)
+
+
+    def _get_time_index(self, time_id: int) -> int:
+        """Get positional index for time ID using vectorized lookup."""
+        indices = self._time_values.get_indexer([time_id])
+        if indices[0] == -1:
+            raise KeyError(f"Time ID {time_id} not found. Available: {self._time_values.tolist()}")
+        return indices[0]
+
+    def _get_entity_index(self, entity_id: int) -> int:
+        """Get positional index for entity ID using vectorized lookup."""
+        indices = self._entity_values.get_indexer([entity_id])
+        if indices[0] == -1:
+            raise KeyError(f"Entity ID {entity_id} not found. Available: {self._entity_values.tolist()}")
+        return indices[0]
 
     def _convert_to_arrays(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -171,8 +198,18 @@ class ViewsDataset:
             - Otherwise, returns the features tensor, optionally including dependent variables, as a numpy array or a tuple of numpy arrays.
         """
         if self.is_prediction:
-            return self._prediction_to_tensor()
-        return self._features_to_tensor(include_dep_vars)
+            if not hasattr(self, '_prediction_tensor_cache'):
+                self._prediction_tensor_cache = self._prediction_to_tensor()
+            return self._prediction_tensor_cache
+        else:
+            if not hasattr(self, '_features_tensor_cache'):
+                self._features_tensor_cache = self._features_to_tensor(include_dep_vars=True)
+            if include_dep_vars:
+                return self._features_tensor_cache
+            else:
+                # Extract indices of independent variables
+                indep_var_indices = [self.dataframe.columns.get_loc(var) for var in self.indep_vars]
+                return self._features_tensor_cache[:, :, indep_var_indices]
 
     def _features_to_tensor(self, include_dep_vars: bool = True) -> np.ndarray:
         """
@@ -403,40 +440,6 @@ class ViewsDataset:
                 
         return pd.concat(dfs, axis=1)
 
-    def calculate_credible_interval(self, interval: float = 0.9) -> pd.DataFrame:
-        """
-        Calculate symmetric credible intervals for predictions.
-        
-        Parameters:
-        interval (float): The credible interval range. Default is 0.9.
-        
-        Returns:
-        pd.DataFrame: A DataFrame containing the lower and upper bounds of the credible intervals 
-                      for each dependent variable.
-        
-        Raises:
-        ValueError: If the dataframe is not a prediction dataframe.
-        """
-        if not self.is_prediction:
-            raise ValueError("Credible intervals only available for prediction dataframes")
-            
-        tensor = self.to_tensor()
-        alpha = (1 - interval)/2  # half of the complement of the interval
-        quantiles = [alpha, 1-alpha]
-        intervals = []
-        
-        for var_idx, var_name in enumerate(self.dep_vars):
-            var_tensor = tensor[..., var_idx]
-            q_low, q_high = np.quantile(var_tensor, quantiles, axis=2)
-            
-            df = pd.DataFrame({
-                f'{var_name}_lower': q_low.flatten(),
-                f'{var_name}_upper': q_high.flatten()
-            }, index=self.dataframe.index)
-            intervals.append(df)
-        
-        return pd.concat(intervals, axis=1)
-
     def sample_predictions(self, num_samples: int = 1) -> pd.DataFrame:
         """
         Draw random samples from the prediction distribution.
@@ -503,28 +506,38 @@ class ViewsDataset:
         Returns:
         np.ndarray: Subset tensor with dimensions [time, entity, ...]
         """
+
         tensor = self.to_tensor()
-        
+
         # Convert scalar inputs to lists
         if time_ids is not None and not isinstance(time_ids, list):
             time_ids = [time_ids]
         if entity_ids is not None and not isinstance(entity_ids, list):
             entity_ids = [entity_ids]
 
-        # Get indices
-        time_indices = []
+        # Get indices using pandas Index for vectorized lookup
+        time_indices = None
         if time_ids is not None:
-            time_indices = [self._get_time_index(t) for t in time_ids]
-        entity_indices = []
-        if entity_ids is not None:
-            entity_indices = [self._get_entity_index(e) for e in entity_ids]
+            time_indices = self._time_values.get_indexer(time_ids)
+            if (time_indices == -1).any():
+                invalid = [tid for tid, idx in zip(time_ids, time_indices) if idx == -1]
+                raise KeyError(f"Invalid time IDs: {invalid}")
+            time_indices = time_indices.tolist()
 
-        # Perform subsetting
-        if time_indices and entity_indices:
+        entity_indices = None
+        if entity_ids is not None:
+            entity_indices = self._entity_values.get_indexer(entity_ids)
+            if (entity_indices == -1).any():
+                invalid = [eid for eid, idx in zip(entity_ids, entity_indices) if idx == -1]
+                raise KeyError(f"Invalid entity IDs: {invalid}")
+            entity_indices = entity_indices.tolist()
+
+        # Perform subsetting using numpy advanced indexing
+        if time_indices is not None and entity_indices is not None:
             return tensor[np.ix_(time_indices, entity_indices)]
-        elif time_indices:
+        elif time_indices is not None:
             return tensor[time_indices]
-        elif entity_indices:
+        elif entity_indices is not None:
             return tensor[:, entity_indices]
         else:
             return tensor
@@ -567,7 +580,7 @@ class ViewsDataset:
         # Get subset if specified
         if time_ids is not None or entity_ids is not None:
             subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-            temp_ds = ViewsDataset(subset_df)
+            temp_ds = ViewsDataset(subset_df, dep_vars=self.dep_vars)
             X = temp_ds.to_tensor(include_dep_vars=False)
             y_tensor = temp_ds.to_tensor(include_dep_vars=True)
         else:
@@ -779,8 +792,8 @@ class ViewsDataset:
 
         # Create color map if not provided
         if colors is None:
-            cmap = plt.cm.get_cmap('tab20', len(alphas))
-            colors = [cmap(i) for i in np.linspace(0, 1, len(alphas))]
+            # Use a colorblind-friendly color palette
+            colors = sns.color_palette("colorblind", len(alphas))
         elif len(colors) != len(alphas):
             raise ValueError("Number of colors must match number of alpha levels")
 
@@ -816,39 +829,58 @@ class ViewsDataset:
     def _calculate_single_hdi(self, data: np.ndarray, alpha: float) -> Tuple[float, float]:
         """Calculate HDI for a 1D array"""
         sorted_data = np.sort(data)
-        n = len(sorted_data)
-        ci_index = int(np.floor((1 - alpha) * n))
+        n_samples = len(sorted_data)
         
-        if ci_index == 0:
-            return (sorted_data.min(), sorted_data.max())
+        # Calculate number of samples to include in HDI
+        h = max(1, int(np.ceil(alpha * n_samples)))
+        window_size = h
         
-        widths = sorted_data[ci_index:] - sorted_data[:n-ci_index]
-        min_idx = np.argmin(widths)
-        return (sorted_data[min_idx], sorted_data[min_idx + ci_index])
+        # Validate window size
+        if window_size > n_samples:
+            raise ValueError(
+                f"Window size ({window_size}) exceeds sample count ({n_samples})"
+            )
+        
+        # Skip calculation if only 1 sample (width = 0)
+        if window_size == 1:
+            return (sorted_data[0], sorted_data[-1])
+        else:
+            # Generate sliding windows for upper bounds
+            windows = np.lib.stride_tricks.sliding_window_view(
+                sorted_data, window_shape=window_size
+            )
+            upper = windows[..., -1]  # Last element of each window (maximum)
+            lower = windows[..., 0]   # First element of each window (minimum)
+            
+            # Find narrowest interval
+            widths = upper - lower
+            min_idx = np.nanargmin(widths)
+            
+            return (lower[min_idx], upper[min_idx])
     
-    def _rebuild_index_mappings(self):
-        """Create sorted index mappings for tensor alignment"""
-        self._time_values = self.dataframe.index.get_level_values(self._time_id).unique().sort_values()
-        self._entity_values = self.dataframe.index.get_level_values(self._entity_id).unique().sort_values()
+    # def _rebuild_index_mappings(self):
+    #     """Create sorted index mappings for tensor alignment"""
+    #     self._time_values = self.dataframe.index.get_level_values(self._time_id).unique().sort_values()
+    #     self._entity_values = self.dataframe.index.get_level_values(self._entity_id).unique().sort_values()
         
-        self._time_to_idx = {t: i for i, t in enumerate(self._time_values)}
-        self._entity_to_idx = {e: i for i, e in enumerate(self._entity_values)}
+    #     self._time_to_idx = {t: i for i, t in enumerate(self._time_values)}
+    #     self._entity_to_idx = {e: i for i, e in enumerate(self._entity_values)}
 
-    def _get_entity_index(self, entity_id: int) -> int:
-        """Get positional index for entity ID with validation"""
-        try:
-            return self._entity_to_idx[entity_id]
-        except KeyError:
-            raise KeyError(f"Entity ID {entity_id} not found in index. "
-                          f"Available entities: {self._entity_values.tolist()}")
+    # def _get_entity_index(self, entity_id: int) -> int:
+    #     """Get positional index for entity ID with validation"""
+    #     try:
+    #         return self._entity_to_idx[entity_id]
+    #     except KeyError:
+    #         raise KeyError(f"Entity ID {entity_id} not found in index. "
+    #                       f"Available entities: {self._entity_values.tolist()}")
 
-    def _get_time_index(self, time_id: int) -> int:
-        """Get positional index for time ID with validation"""
-        try:
-            return self._time_to_idx[time_id]
-        except KeyError:
-            raise KeyError(f"Time ID {time_id} not found in index. "
-                          f"Available times: {self._time_values.tolist()}")
+    # def _get_time_index(self, time_id: int) -> int:
+    #     """Get positional index for time ID with validation"""
+    #     try:
+    #         return self._time_to_idx[time_id]
+    #     except KeyError:
+    #         raise KeyError(f"Time ID {time_id} not found in index. "
+    #                       f"Available times: {self._time_values.tolist()}")
 
     def report_hdi(self, alphas: Tuple[float, ...] = (0.5, 0.9, 0.95)) -> pd.DataFrame:
         """
@@ -882,30 +914,12 @@ class ViewsDataset:
 class PGMDataset(ViewsDataset):
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names[1] in ['priogrid_gid', 'pg_id']:
-            logger.warning(f"PGMDataset requires 'priogrid_id' as entity ID, found {self.dataframe.index.names[1]}. Renaming to 'priogrid_id'")
-            self.dataframe.index = self.dataframe.index.set_names(['month_id', 'priogrid_id'])
-        if self.dataframe.index.names != ['month_id', 'priogrid_id']:
+        # if self.dataframe.index.names[1] in ['priogrid_gid', 'pg_id']:
+        #     logger.warning(f"PGMDataset requires 'priogrid_id' as entity ID, found {self.dataframe.index.names[1]}. Renaming to 'priogrid_id'")
+        #     self.dataframe.index = self.dataframe.index.set_names(['month_id', 'priogrid_id'])
+        if self.dataframe.index.names != ['month_id', 'priogrid_gid']:
             raise ValueError(f"PGMDataset requires indices ['month_id', 'priogrid_id'], found {self.dataframe.index.names}")
         
-    def get_tensor_by_time_and_gid(self, month_id: int, gid: int, grid_size: int = 3) -> np.ndarray:
-        """
-        Get spatial context tensor for specific month and grid cell
-        
-        Args:
-            month_id: Target month ID
-            gid: Center grid cell ID
-            grid_size: Context window size
-            
-        Returns:
-            numpy array of shape [features, grid_size, grid_size]
-        """
-        context_tensor, ordered_gids = self.get_spatial_context(gid, grid_size)
-        time_idx = self._get_time_index(month_id)
-        
-        # Reshape to spatial dimensions
-        return context_tensor[time_idx].reshape(-1, grid_size, grid_size).transpose(1, 2, 0)
-    
 class CMDataset(ViewsDataset):
     """
     Country-month tensor with index validation.
