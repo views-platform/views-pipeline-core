@@ -35,7 +35,8 @@ def test_pgm_cm_point_ln():
 
         return data
 
-    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"])
+    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"],
+                   shell=True, check=True)
 
     pgm_test_data = get_ln_pgm_qs()
 
@@ -123,7 +124,8 @@ def test_pgm_cm_point_lr():
 
         return data
 
-    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"])
+    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"],
+                   shell=True, check=True)
 
     pgm_test_data = get_lr_pgm_qs()
 
