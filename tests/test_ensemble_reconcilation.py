@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from viewser import Queryset, Column
 from views_pipeline_core.ensembles import reconciliation
+import subprocess
 
 def test_pgm_cm_point_ln():
 
@@ -11,6 +12,8 @@ def test_pgm_cm_point_ln():
     a third dataframe mapping pg-cells to countries via viewser, with logged data
 
     """
+
+    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"])
 
     pgm_test_data = get_ln_pgm_qs()
 
@@ -76,6 +79,8 @@ def test_pgm_cm_point_lr():
     a third dataframe mapping pg-cells to countries via viewser, with linear data
 
     """
+
+    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"])
 
     pgm_test_data = get_lr_pgm_qs()
 
