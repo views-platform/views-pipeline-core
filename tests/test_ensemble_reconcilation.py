@@ -13,6 +13,28 @@ def test_pgm_cm_point_ln():
 
     """
 
+    def get_ln_pgm_qs():
+        qs = (Queryset("test_point_rec_ln_pgm", "priogrid_month")
+              .with_column(Column("ln_ged_sb", from_loa="priogrid_month", from_column="ged_sb_best_sum_nokgi")
+                           .transform.ops.ln()
+                           )
+              )
+
+        data = qs.publish().fetch()
+
+        return data
+
+    def get_ln_cm_qs():
+        qs = (Queryset("test_point_rec_ln_cm", "country_month")
+              .with_column(Column("ln_ged_sb", from_loa="country_month", from_column="ged_sb_best_sum_nokgi")
+                           .transform.ops.ln()
+                           )
+              )
+
+        data = qs.publish().fetch()
+
+        return data
+
     subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"])
 
     pgm_test_data = get_ln_pgm_qs()
@@ -80,6 +102,27 @@ def test_pgm_cm_point_lr():
 
     """
 
+    def get_lr_pgm_qs():
+        qs = (Queryset("test_point_rec_lr_pgm", "priogrid_month")
+              .with_column(Column("lr_ged_sb", from_loa="priogrid_month", from_column="ged_sb_best_sum_nokgi")
+
+                           )
+              )
+
+        data = qs.publish().fetch()
+
+        return data
+
+    def get_lr_cm_qs():
+        qs = (Queryset("test_point_rec_lr_cm", "country_month")
+              .with_column(Column("lr_ged_sb", from_loa="country_month", from_column="ged_sb_best_sum_nokgi")
+                           )
+              )
+
+        data = qs.publish().fetch()
+
+        return data
+
     subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"])
 
     pgm_test_data = get_lr_pgm_qs()
@@ -136,45 +179,5 @@ def test_pgm_cm_point_lr():
 
     assert np.allclose(np.array(pg_values), np.array(cm_values),rtol=0.01)
 
-def get_ln_pgm_qs():
-    qs = (Queryset("test_point_rec_ln_pgm", "priogrid_month")
-          .with_column(Column("ln_ged_sb", from_loa="priogrid_month", from_column="ged_sb_best_sum_nokgi")
-                       .transform.ops.ln()
-                       )
-          )
 
-    data = qs.publish().fetch()
 
-    return data
-
-def get_ln_cm_qs():
-    qs = (Queryset("test_point_rec_ln_cm", "country_month")
-          .with_column(Column("ln_ged_sb", from_loa="country_month", from_column="ged_sb_best_sum_nokgi")
-                       .transform.ops.ln()
-                       )
-          )
-
-    data = qs.publish().fetch()
-
-    return data
-
-def get_lr_pgm_qs():
-    qs = (Queryset("test_point_rec_lr_pgm", "priogrid_month")
-          .with_column(Column("lr_ged_sb", from_loa="priogrid_month", from_column="ged_sb_best_sum_nokgi")
-
-                           )
-              )
-
-    data = qs.publish().fetch()
-
-    return data
-
-def get_lr_cm_qs():
-    qs = (Queryset("test_point_rec_lr_cm", "country_month")
-          .with_column(Column("lr_ged_sb", from_loa="country_month", from_column="ged_sb_best_sum_nokgi")
-                           )
-              )
-
-    data = qs.publish().fetch()
-
-    return data
