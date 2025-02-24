@@ -125,6 +125,22 @@ class PackageManager:
         Raises:
             requests.exceptions.RequestException: If an error occurs while making the request to GitHub.
         """
+
+        # **Step 1: Try getting the latest version using `git ls-remote`**
+        repo_url = f"https://github.com/{organization_name}/{repository_name}"
+        try:
+            cmd = f"git ls-remote --tags {repo_url}"
+            output = subprocess.check_output(cmd, shell=True).decode()
+            tags = [line.split("refs/tags/")[-1] for line in output.split("\n") if "refs/tags/" in line]
+            if tags:
+                latest_tag = sorted(tags, key=lambda v: v.lstrip("v"))[-1]
+                # logger.info(f"Latest tag found using `git ls-remote`: {latest_tag}")
+                return latest_tag.lstrip("v")
+
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Failed to get latest version using `git ls-remote`: {e}. Falling back to GitHub API.")
+        
+        # **Step 2: If `git` fails, fallback to GitHub API**
         # Define the GitHub URL for the package
         github_url = f"""https://api.github.com/repos/{organization_name}/{repository_name}/releases/latest"""
         # Get the latest release information from GitHub
