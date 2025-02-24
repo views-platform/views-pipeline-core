@@ -155,9 +155,9 @@ class EnsembleManager(ModelManager):
                                f" {self._config_meta['depvar']}, {reconcile_with_meta_config['models']}")
 
         if self._config_meta['depvar'].startswith('ln_') or self._config_meta['depvar'].startswith('lx_'):
-            self.reconcile_logged = True
+            self.reconcile_logged = 'ln'
         elif self._config_meta['depvar'].startswith('lr_'):
-            self.reconcile_logged = False
+            self.reconcile_logged = 'lr'
         else:
             raise RuntimeError(f"Point reconcilation can only be performed on logged ('ln_ or 'lx')"
                                f"or linear ('lr_) targets, not {self.config['depvar']}")
@@ -723,7 +723,7 @@ class EnsembleManager(ModelManager):
                 reconciler = reconciliation.ReconcilePgmWithCmPoint(df_pgm=df_prediction,
                                                                     df_cm=df_cm,
                                                                     target='step_combined',
-                                                                    log_feature=self.reconcile_logged)
+                                                                    target_type=self.reconcile_logged)
 
                 df_prediction = reconciler.reconcile()
 
