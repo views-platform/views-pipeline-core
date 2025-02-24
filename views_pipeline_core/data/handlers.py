@@ -7,6 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
 import logging
+import scipy.stats as stats
+from joblib import Parallel, delayed
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,8 @@ class ViewsDataset:
                 if missing_vars:
                     raise ValueError(f"Missing dependent variables: {missing_vars}")
                 del missing_vars
+            else:
+                raise ValueError("Dependent variables must be specified for non-prediction dataframes. Example usage: ViewsDataset(dataframe, dep_vars=['ln_sb_best'])")
         self.indep_vars = self.get_indep_vars()
         self.sample_size = self._validate_prediction_structure()
 
@@ -137,7 +141,7 @@ class ViewsDataset:
 
             # Ensure no independent variables present
             if len(self.indep_vars) > 0:
-                raise ValueError("Prediction dataframe should only contain pred_* columns")
+                raise ValueError(f"Prediction dataframe should only contain pred_* columns. Found {self.indep_vars}")
 
             return sample_sizes[0]
         return 0
@@ -310,6 +314,193 @@ class ViewsDataset:
             columns=columns
         )
         return reconstructed.loc[self.original_index]
+    
+    def calculate_map(self, enforce_non_negative: bool = False) -> pd.DataFrame:
+        """
+        Calculate Maximum A Posteriori (MAP) estimates for prediction distributions.
+        
+        Parameters:
+        enforce_non_negative (bool): If True, forces MAP estimates to be non-negative
+        
+        Returns:
+        pd.DataFrame: DataFrame with MAP estimates (time × entity × variables)
+        """
+        if not self.is_prediction:
+            raise ValueError("MAP calculation only valid for prediction dataframes")
+
+        tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
+        sorted_tensor = np.sort(tensor, axis=2)  # Pre-sort all samples
+        map_results = []
+
+        for var_idx, var_name in enumerate(self.dep_vars):
+            var_tensor = sorted_tensor[..., var_idx]
+            orig_shape = var_tensor.shape[:2]
+            
+            # Flatten for parallel processing
+            flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
+            
+            # Parallel execution
+            with Parallel(n_jobs=-1, prefer="threads") as parallel:
+                map_flat = parallel(
+                    delayed(self._compute_single_map)(samples, enforce_non_negative)
+                    for samples in flat_tensor
+                )
+            
+            map_estimates = np.array(map_flat).reshape(orig_shape)
+            df = self._create_stat_dataframe(var_name, map_estimates)
+            map_results.append(df)
+            
+        return pd.concat(map_results, axis=1)
+
+    def _compute_single_map(self, samples: np.ndarray, enforce_non_negative: bool) -> float:
+        """Compute MAP for a single set of samples (1D array)"""
+        # Filter valid samples and check length
+        valid_samples = samples[~np.isnan(samples)]
+        n = len(valid_samples)
+        if n < 10:  # Require minimum samples for reliable estimation
+            return np.nan
+        
+        # Sort once upfront for all calculations
+        sorted_samples = np.sort(valid_samples)
+        
+        # Adaptive credible mass based on distribution shape
+        try:
+            skew = stats.skew(sorted_samples)
+            cm = 0.05 if skew > 5 else (0.10 if n > 5000 else 0.25)
+        except:
+            cm = 0.25
+        
+        # Calculate HDI bounds
+        h = max(1, int(np.ceil(cm * n)))
+        if h >= n:
+            hdi_min, hdi_max = sorted_samples[0], sorted_samples[-1]
+        else:
+            windows = np.lib.stride_tricks.sliding_window_view(sorted_samples, h)
+            widths = windows[:, -1] - windows[:, 0]
+            min_idx = np.nanargmin(widths)
+            hdi_min, hdi_max = windows[min_idx, 0], windows[min_idx, -1]
+        
+        # Handle edge cases after HDI calculation
+        if hdi_min == hdi_max:
+            return float(hdi_min)
+        
+        # Subset to HDI region
+        subset_mask = (sorted_samples >= hdi_min) & (sorted_samples <= hdi_max)
+        subset = sorted_samples[subset_mask]
+        if len(subset) < 2:
+            return np.nan
+        
+        # Handle uniform distributions explicitly
+        if np.all(subset == subset[0]):
+            return float(subset[0])
+        
+        # Robust bin width calculation
+        q75, q25 = np.percentile(subset, [75, 25])
+        iqr = max(q75 - q25, 1e-8)  # Prevent zero division
+        bin_width = 2 * iqr / (len(subset) ** (1/3))
+        
+        # Fallback for pathological cases
+        data_range = subset[-1] - subset[0]
+        if bin_width <= 0 or np.isnan(bin_width):
+            bin_width = data_range / 20 if data_range > 0 else 1.0
+        
+        # Calculate bin count with safe bounds
+        bin_count = int(np.ceil(data_range / bin_width)) if data_range > 0 else 1
+        bin_count = max(10, min(100, bin_count))
+        
+        # Final histogram calculation
+        hist, edges = np.histogram(subset, bins=bin_count, density=True)
+        map_estimate = (edges[:-1] + edges[1:])[np.argmax(hist)] / 2
+        
+        # Apply non-negative constraint
+        if enforce_non_negative:
+            map_estimate = max(0.0, map_estimate)
+            
+        return float(map_estimate)
+
+    def _determine_credible_mass(self, samples: np.ndarray) -> float:
+        """Determine optimal credible mass for HDI calculation"""
+        if len(samples) < 2:
+            return 0.25
+        
+        try:
+            skewness = stats.skew(samples)
+        except:
+            skewness = 0
+            
+        if skewness > 5:
+            return 0.05
+        elif len(samples) > 5000:
+            return 0.10
+        return 0.25
+
+    def _create_adaptive_histogram(self, subset: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Create histogram with adaptive binning using Freedman-Diaconis rule"""
+        iqr_value = stats.iqr(subset)
+        if iqr_value == 0:  # Fallback for uniform distributions
+            bin_width = (subset.max() - subset.min()) / 10
+        else:
+            bin_width = 2 * iqr_value / (len(subset) ** (1/3))
+        
+        if bin_width == 0:
+            return np.histogram(subset, bins=1)
+        
+        num_bins = max(10, int((subset.max() - subset.min()) / bin_width))
+        return np.histogram(subset, bins=num_bins, density=True)
+
+    def _create_stat_dataframe(self, var_name: str, values: np.ndarray) -> pd.DataFrame:
+        """Helper to format statistic results into DataFrame"""
+        time_steps = self.dataframe.index.get_level_values(self._time_id).unique()
+        entities = self.dataframe.index.get_level_values(self._entity_id).unique()
+        
+        return pd.DataFrame(
+            values,
+            index=time_steps,
+            columns=entities
+        ).stack().to_frame(f"{var_name}_map")
+    
+    def plot_map(self,
+               entity_id: Optional[int] = None,
+               time_id: Optional[int] = None,
+               var_name: Optional[str] = None,
+               hdi_alpha: float = 0.9,
+               ax: Optional[plt.Axes] = None,
+               colors: Optional[List[str]] = None,) -> plt.Axes:
+        """
+        Plot MAP estimate with HDI and distribution.
+        
+        Parameters:
+        entity_id: Specific entity to plot
+        time_id: Specific time step to plot
+        var_name: Variable to plot
+        hdi_alpha: Credibility level for HDI
+        ax: Matplotlib axes object
+        
+        Returns:
+        matplotlib.axes.Axes
+        """
+        ax = self.plot_hdi(entity_id=entity_id, time_id=time_id, var_name=var_name, alphas=(hdi_alpha,), ax=ax, colors=colors)
+        
+        # Get MAP estimate
+        map_df = self.calculate_map()
+        
+        # Get coordinates
+        if entity_id is not None and time_id is not None:
+            map_value = map_df.loc[(time_id, entity_id), f"{var_name}_map"]
+            title_suffix = f"at Time {time_id}, Entity {entity_id}"
+        else:
+            map_value = map_df[f"{var_name}_map"].mean()
+            title_suffix = "Aggregated View"
+            
+        # Add MAP line
+        ax.axvline(map_value, color='#E74C3C', linestyle='--', linewidth=2,
+                  label=f'MAP Estimate: {map_value:.2f}')
+        
+        # Update title and legend
+        ax.set_title(f"{var_name} Distribution with MAP {title_suffix}")
+        ax.legend()
+        
+        return ax
 
     def _prediction_to_dataframe(self, tensor: np.ndarray) -> pd.DataFrame:
         """
