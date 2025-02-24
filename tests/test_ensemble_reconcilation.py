@@ -4,6 +4,7 @@ import numpy as np
 from viewser import Queryset, Column
 from views_pipeline_core.ensembles import reconciliation
 import subprocess
+import time
 
 def test_pgm_cm_point_ln():
 
@@ -35,8 +36,8 @@ def test_pgm_cm_point_ln():
 
         return data
 
-    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"],
-                   shell=True, check=True)
+    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"])
+    time.sleep(20)
 
     pgm_test_data = get_ln_pgm_qs()
 
@@ -124,8 +125,9 @@ def test_pgm_cm_point_lr():
 
         return data
 
-    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"],
-                   shell=True, check=True)
+    subprocess.run(["viewser", "config", "set", "REMOTE_URL", "https://viewser.viewsforecasting.org"])
+
+    time.sleep(20)
 
     pgm_test_data = get_lr_pgm_qs()
 
