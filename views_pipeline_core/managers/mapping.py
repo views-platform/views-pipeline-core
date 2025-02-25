@@ -38,12 +38,11 @@ class MappingManager:
         self._isoab_cache_dataframe = None
 
     def __get_country_shapefile(self):
-        # path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "country" / "ne_110m_admin_0_countries.shp"
-        path = "/Users/dylanpinheiro/Desktop/views-platform/views-pipeline-core/views_pipeline_core/mapping/shapefiles/country/ne_110m_admin_0_countries.shp"
+        path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "country" / "ne_110m_admin_0_countries.shp"
         return gpd.read_file(path)
 
     def __get_priogrid_shapefile(self):
-        path = "/Users/dylanpinheiro/Desktop/views-platform/experiments/shapefiles/priogrid_cellshp/priogrid_cell.shp"
+        path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "priogrid" / "priogrid_cell.shp"
         return gpd.read_file(path)
 
     def __check_missing_geometries(
