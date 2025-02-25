@@ -25,7 +25,7 @@ from views_pipeline_core.files.utils import (
     read_log_file,
 )
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_evaluation.evaluation.metrics import MetricsManager
+from views_evaluation.evaluation.evaluation_manager import EvaluationManager
 
 logger = logging.getLogger(__name__)
 
@@ -1235,7 +1235,8 @@ class ModelManager:
         Raises:
             None
         """
-        metrics_manager = MetricsManager(self.config["metrics"])
+        # metrics_manager = MetricsManager(self.config["metrics"])
+        evaluation_manager = EvaluationManager(self.config["metrics"])
         if not ensemble:
             df_path = (
                 self._model_path.data_raw
@@ -1255,29 +1256,13 @@ class ModelManager:
         # Multiple targets
         df_actual = df_viewser[self.config["depvar"]]
         for depvar in self.config["depvar"]:
+            logger.info(f"Calculating evaluation metrics for {depvar}")
             conflict_type = ModelManager._get_conflict_type(depvar)
-            step_wise_evaluation, df_step_wise_evaluation = (
-                metrics_manager.step_wise_evaluation(
-                    df_actual,
-                    df_predictions,
-                    depvar,
-                    self.config["steps"],
-                )
-            )
-            time_series_wise_evaluation, df_time_series_wise_evaluation = (
-                metrics_manager.time_series_wise_evaluation(
-                    df_actual, 
-                    df_predictions, 
-                    depvar
-                )
-            )
-            month_wise_evaluation, df_month_wise_evaluation = (
-                metrics_manager.month_wise_evaluation(
-                    df_actual, 
-                    df_predictions, 
-                    depvar
-                )
-            )
+
+            eval_result_dict = evaluation_manager.evaluate(df_actual, df_predictions, depvar, steps=self.config["steps"], is_uncertainty=False)
+            step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
+            time_series_wise_evaluation, df_time_series_wise_evaluation = eval_result_dict["time_series"]
+            month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
 
             log_wandb_log_dict(
                 step_wise_evaluation,
