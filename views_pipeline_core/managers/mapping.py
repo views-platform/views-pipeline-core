@@ -15,27 +15,32 @@ logger = logging.getLogger(__name__)
 class MappingManager:
     def __init__(self, views_dataset: Union[PGMDataset, CMDataset]):
         self._dataset = views_dataset
-        self._dataframe = views_dataset.dataframe
+        self._dataframe = self._dataset.dataframe
+        self._entity_id = self._dataset._entity_id
+        self._time_id = self._dataset._time_id
         if isinstance(views_dataset, PGMDataset):
             from ingester3.extensions import PgAccessor
+
             self._world = self.__get_priogrid_shapefile()
-            self.target = "pgm"
+
         elif isinstance(views_dataset, CMDataset):
             from ingester3.extensions import CAccessor
+
             self._world = self.__get_country_shapefile()
-            self.target = "cm"
         else:
             raise ValueError("Invalid dataset type. Must be a PGMDataset or CMDataset.")
         self._mapping_dataframe = self.__init_mapping_dataframe(self._dataframe)
+        # self._mapping_dataframe = self._dataframe.reset_index()
 
         self._isoab_cache_dataframe = None
 
     def __get_country_shapefile(self):
         path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "country" / "ne_110m_admin_0_countries.shp"
         return gpd.read_file(path)
-    
+
     def __get_priogrid_shapefile(self):
-        pass
+        path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "priogrid" / "priogrid_cell.shp"
+        return gpd.read_file(path)
 
     def __init_mapping_dataframe(self, dataframe: pd.DataFrame):
         _dataframe = dataframe.copy().reset_index()
@@ -44,28 +49,37 @@ class MappingManager:
             _dataframe = _dataframe.merge(
                 self._world, left_on="isoab", right_on="ADM0_A3", how="left"
             )
+        if isinstance(self._dataset, PGMDataset):
+            # _dataframe = self.__add_cid(dataframe=_dataframe)
+            _dataframe = _dataframe.merge(self._world, left_on=self._entity_id, right_on="gid", how="left")
         return _dataframe
 
     def __add_isoab(self, dataframe: pd.DataFrame):
         if isinstance(self._dataset, CMDataset):
-            dataframe.rename(columns={"country_id": "c_id"}, inplace=True)
-            dataframe["isoab"] = dataframe.c.isoab
-            dataframe.rename(columns={"c_id": "country_id"}, inplace=True)
+            dataframe.rename(columns={self._entity_id: "c_id"}, inplace=True)
+            dataframe["country_name"] = dataframe.c.name
+            dataframe.rename(columns={"c_id": self._entity_id}, inplace=True)
+        return dataframe
+    
+    def __add_cid(self, dataframe: pd.DataFrame):
+        if isinstance(self._dataset, PGMDataset):
+            dataframe.rename(columns={self._entity_id: "pg_id"}, inplace=True)
+            dataframe["c_id"] = dataframe.pg.c_id
+            dataframe["country_name"] = dataframe.pg.name
+            dataframe.rename(columns={"pg_id": self._entity_id}, inplace=True)
         return dataframe
 
-    def get_subset_mapping_dataframe(self,
-        time_ids: int,
-        entity_ids: Optional[Union[int, List[int]]] = None) -> pd.DataFrame:
+    def get_subset_mapping_dataframe(
+        self,
+        time_ids: Optional[int] = None,
+        entity_ids: Optional[Union[int, List[int]]] = None,
+    ) -> pd.DataFrame:
         """
-        Retrieves a subset of the mapping dataframe based on the provided time and entity IDs.
+        Get subset dataframe for specified time.
 
-        Args:
-            time_ids (int): The time identifier(s) to filter the dataframe.
-            entity_ids (Optional[Union[int, List[int]]], optional): The entity identifier(s) [priogrid_id or country_id] to filter the dataframe. 
-            Defaults to None.
-
-        Returns:
-            pd.DataFrame: A pandas DataFrame containing the subset of the mapping data.
+        Parameters:
+        time_ids: Single time ID
+        entity_ids: Single entity ID or list of entity IDs
         """
         _dataframe = self._dataset.get_subset_dataframe(
             time_ids=time_ids, entity_ids=entity_ids
@@ -74,30 +88,6 @@ class MappingManager:
         return _dataframe
 
     def plot_map(self, mapping_dataframe: pd.DataFrame, target: str):
-        """
-        Plots a map based on the provided mapping dataframe and target variable.
-
-        Parameters:
-        -----------
-        mapping_dataframe : pd.DataFrame
-            DataFrame containing the mapping data, including geometries and the target variable.
-        target : str
-            The target variable to be plotted. Must be a dependent variable or feature in the dataset.
-
-        Raises:
-        -------
-        ValueError
-            If the target is not a dependent variable or feature in the dataset.
-            If more than one month is found in the mapping_dataframe.
-
-        Notes:
-        ------
-        This function is designed to work with CMDataset instances and assumes that the mapping_dataframe
-        contains a 'geometry' column for plotting.
-
-        The function will plot the boundaries and the target variable on a map, with a color bar indicating
-        the range of the target variable values.
-        """
         target_options = set(self._dataset.dep_vars).union(
             set(self._dataset.indep_vars)
         )
@@ -106,18 +96,18 @@ class MappingManager:
                 f"Target must be a dependent variable or feature in the dataset. Choose from {target_options}"
             )
 
-        month = mapping_dataframe["month_id"].dropna().unique()
-        if len(month) > 1:
+        time_unit = mapping_dataframe[self._time_id].dropna().unique()
+        if len(time_unit) > 1:
             raise ValueError(
-                f"Only one month can be plotted at a time. Found months {month} in mapping_dataframe"
+                f"Only one {self._time_id} can be plotted at a time. Found units {time_unit} in mapping_dataframe"
             )
-        month = month[0]
+        time_unit = time_unit[0]
 
         mapping_dataframe[target] = mapping_dataframe[target].apply(
             lambda x: x[0] if isinstance(x, np.ndarray) and len(x) == 1 else x
         )
 
-        if isinstance(self._dataset, CMDataset):
+        if isinstance(self._dataset, CMDataset) or isinstance(self._dataset, PGMDataset):
             mapping_dataframe = mapping_dataframe.set_geometry("geometry")
             fig, ax = plt.subplots(1, 1, figsize=(15, 10))
             mapping_dataframe.boundary.plot(ax=ax, linewidth=0.3, color="black")
@@ -135,7 +125,7 @@ class MappingManager:
             )
 
             # Add title and labels
-            plt.title(f"{target} for month {int(month)}", fontsize=15)
+            plt.title(f"{target} for {self._time_id} {int(time_unit)}", fontsize=15)
             plt.xlabel("Longitude", fontsize=12)
             plt.ylabel("Latitude", fontsize=12)
 

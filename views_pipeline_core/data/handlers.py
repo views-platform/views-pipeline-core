@@ -1385,10 +1385,7 @@ class ViewsDataset:
 class PGMDataset(ViewsDataset):
     def validate_indices(self) -> None:
         super().validate_indices()
-        # if self.dataframe.index.names[1] in ['priogrid_gid', 'pg_id']:
-        #     logger.warning(f"PGMDataset requires 'priogrid_id' as entity ID, found {self.dataframe.index.names[1]}. Renaming to 'priogrid_id'")
-        #     self.dataframe.index = self.dataframe.index.set_names(['month_id', 'priogrid_id'])
-        if self.dataframe.index.names != ['month_id', 'priogrid_gid'] or self.dataframe.index.names != ['year_id', 'priogrid_gid']:
+        if self.dataframe.index.names != ['month_id', 'priogrid_id'] and self.dataframe.index.names != ['year_id', 'priogrid_id']:
             raise ValueError(f"PGMDataset requires indices ['month_id'/'year_id', 'priogrid_id'], found {self.dataframe.index.names}")
         
 class CMDataset(ViewsDataset):
@@ -1401,7 +1398,7 @@ class CMDataset(ViewsDataset):
     """
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names != ['month_id', 'country_id'] or self.dataframe.index.names != ['year_id', 'country_id']:
+        if self.dataframe.index.names != ['month_id', 'country_id'] and self.dataframe.index.names != ['year_id', 'country_id']:
             raise ValueError(f"CMDataset requires indices ['month_id'/'year_id', 'country_id'], found {self.dataframe.index.names}")
     
 
