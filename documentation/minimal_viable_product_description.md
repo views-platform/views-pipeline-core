@@ -8,7 +8,7 @@ The goal of the new pipeline is to produce predictions that either match or exce
 ## **MVP Requirements and Deliverables**
 
 ### **1. PGM Predictions from Legacy Models**  
-The MVP will produce PGM-level predictions from the majority of models implemented in the old pipeline. The models selected for inclusion are documented in the model [catalogs](https://github.com/prio-data/views_pipeline/tree/main/documentation/catalogs), which track the transition to the new pipeline. When possible, unmodified DARTS models will be used if they meet the project's classification performance requirements. Adaptations for each model should not exceed three days; any models requiring longer adaptation will be deprioritized. **Models that rely on the old step shifter are deemed unmaintainable and will not be included**.
+The MVP will produce PGM-level predictions from the majority of models implemented in the old pipeline. The models selected for inclusion are documented in the model [catalogs](https://github.com/views-platform/views-models/blob/main/README.md#catalogs), which track the transition to the new pipeline. When possible, unmodified DARTS models will be used if they meet the project's classification performance requirements. Adaptations for each model should not exceed three days; any models requiring longer adaptation will be deprioritized. **Models that rely on the old step shifter are deemed unmaintainable and will not be included**.
 
 > **Definition of Unmaintainable Models**:  
 > - **Unmaintainable models** are those with significant technical debt or complex dependencies that hinder long-term maintenance. A model is unmaintainable if:
@@ -32,7 +32,7 @@ The HydraNet models will be integrated and deployed to produce PGM-level predict
 ---
 
 ### **3. CM Predictions from Legacy Models**  
-The MVP will produce CM-level predictions from most models implemented in the old pipeline, with selections documented in the model [catalogs](https://github.com/prio-data/views_pipeline/tree/main/documentation/catalogs). When feasible, unmodified DARTS models will be used. Complex adaptations for CM models will be deprioritized unless they are essential to overall system functionality and performance.
+The MVP will produce CM-level predictions from most models implemented in the old pipeline, with selections documented in the model [catalogs](https://github.com/views-platform/views-models/blob/main/README.md#catalogs). When feasible, unmodified DARTS models will be used. Complex adaptations for CM models will be deprioritized unless they are essential to overall system functionality and performance.
 
 > **Clarifications and Prioritization**:  
 > - **Complex Adaptations**: This refers to extensive changes to a model’s architecture or code that require unique, non-reusable adjustments (e.g., adapting non-DARTS models with custom handling for data or dependency conflicts). This also includes models not currently implemented in Python. Complex adaptations will be deprioritized if they exceed the MVP’s adaptation timeframe of three development days.
@@ -113,13 +113,13 @@ Once the MVP is complete, these steps will be prioritized to ensure long-term st
 ## **MVP Requirements and Deliverables**
 
 ### **1. PGM Predictions from Legacy Models**  
-Produce PGM-level predictions from the majority of models implemented in the old pipeline. The models to be included should be referenced from the model [catalogs](https://github.com/prio-data/views_pipeline/tree/main/documentation/catalogs), which track the transition to the new pipeline. Where applicable, unmodified DARTS models should be considered if their classification performance meets the project’s needs. Adaptation efforts for any individual model should not exceed three working days. Any models that cannot be adapted within this timeframe should be deprioritized for now. Unmaintainable or deprecated models will not be included in the MVP.
+Produce PGM-level predictions from the majority of models implemented in the old pipeline. The models to be included should be referenced from the model [catalogs](https://github.com/views-platform/views-models/blob/main/README.md#catalogs), which track the transition to the new pipeline. Where applicable, unmodified DARTS models should be considered if their classification performance meets the project’s needs. Adaptation efforts for any individual model should not exceed three working days. Any models that cannot be adapted within this timeframe should be deprioritized for now. Unmaintainable or deprecated models will not be included in the MVP.
 
 ### **2. HydraNet PGM Predictions**  
 Integrate and deploy HydraNet models to produce PGM-level predictions. At least one HydraNet model must be fully operational and producing predictions within the system, ensuring its compatibility alongside legacy models.
 
 ### **3. CM Predictions from Legacy Models**  
-Produce CM-level predictions from the majority of models implemented in the old pipeline. The models to be included should be referenced from the model [catalogs](https://github.com/prio-data/views_pipeline/tree/main/documentation/catalogs), which track the transition to the new pipeline. Where applicable, unmodified DARTS models should be considered if their classification performance meets the project’s needs. Complex adaptations for CM models should be deprioritized unless they are critical for ensuring overall system functionality and performance.
+Produce CM-level predictions from the majority of models implemented in the old pipeline. The models to be included should be referenced from the model [catalogs](https://github.com/views-platform/views-models/blob/main/README.md#catalogs), which track the transition to the new pipeline. Where applicable, unmodified DARTS models should be considered if their classification performance meets the project’s needs. Complex adaptations for CM models should be deprioritized unless they are critical for ensuring overall system functionality and performance.
 
 ### **4. Ensembles**  
 Implement a mean ensemble method for aggregating predictions from both PGM and CM-level models. Additionally, deploy a median ensemble as a shadow model to serve as a baseline for comparison and validation purposes.
