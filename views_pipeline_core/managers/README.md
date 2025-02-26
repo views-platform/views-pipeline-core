@@ -95,6 +95,19 @@ mpm.view_directories()
 forecast_artifact = mpm.get_latest_model_artifact_path("forecasting")
 ```
 
+#### ModelPathManager Structure
+
+```mermaid
+graph TD
+    A[User Input] --> B{Path/Name?}
+    B -->|Path| C[Extract Model Name]
+    B -->|Name| D[Validate Format]
+    C --> E[Build Directories]
+    D --> E
+    E --> F[Verify Filesystem]
+    F --> G[Ready for Use]
+```
+
 ### ModelManager Class
 
 #### Key Responsibilities
@@ -267,19 +280,6 @@ flowchart TD
 ```
 
 ### Design Rationale
-
-#### ModelPathManager Structure
-
-```mermaid
-graph TD
-    A[User Input] --> B{Path/Name?}
-    B -->|Path| C[Extract Model Name]
-    B -->|Name| D[Validate Format]
-    C --> E[Build Directories]
-    D --> E
-    E --> F[Verify Filesystem]
-    F --> G[Ready for Use]
-```
 
 #### Key Architecture Decisions
 
