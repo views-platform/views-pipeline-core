@@ -108,7 +108,7 @@ graph TD
     F --> G[Ready for Use]
 ```
 
-### ModelManager Class
+## ModelManager Class
 
 #### Key Responsibilities
 - End-to-end model lifecycle management
