@@ -192,7 +192,7 @@ eval_df = manager._evaluate_prediction_dataframe(predictions)
 wandb.log({"metrics": eval_df})
 ```
 
-#### Excution Graph
+#### Execution Graph
 
 ```mermaid
 %%{init: {'theme': 'neutral', 'themeVariables': { 'primaryColor': '#F0F7FF', 'edgeLabelBackground':'#FFF'}}}%%
