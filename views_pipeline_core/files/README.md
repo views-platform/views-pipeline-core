@@ -133,4 +133,14 @@ Loads serialized DataFrames with format detection.
 df = read_dataframe("forecasts_202403.pkl")
 ```
 
+### Design Notes
+
+**Log File Structure**
+
+[Model Type] Model Name: orange_pasta    
+[Model Type] Model Timestamp: 20240315_093000    
+Data Generation Timestamp: 20240315_142300    
+Data Fetch Timestamp: 20240315_140000    
+Deployment Status: shadow    
+
 
