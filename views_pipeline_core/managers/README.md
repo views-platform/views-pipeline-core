@@ -389,9 +389,9 @@ Must contain **a list prediction dataframes**. The list is of the same length as
 
 | Column Pattern       | Data Type       | Description                      |
 |----------------------|-----------------|----------------------------------|
-| `pred_{depvar}`      | list/np.ndarray | Prediction samples (N samples)   |
+| `pred_{depvar}`      | list/np.ndarray/float | Prediction samples (N samples)   |
 
-**Example Structure:**
+**Example Structures:**
 ```python
                      pred_ln_sb_best
 month_id priogrid_id                             
@@ -400,21 +400,37 @@ month_id priogrid_id
 501      100001      [1.10, 1.15, ...]
 ```
 
+```python
+                     pred_ln_sb_best
+month_id priogrid_id                             
+500      100001      0.49
+         100002      0.00
+501      100001      1.15
+```
+
 #### 2.2 Forecast DataFrames
 
 Contains only prediction columns:
 
 | Column Pattern       | Data Type       | Description                    |
 |----------------------|-----------------|--------------------------------|
-| `pred_{depvar}`      | list/np.ndarray | Prediction samples (N samples) |
+| `pred_{depvar}`      | list/np.ndarray/float | Prediction samples (N samples) |
 
-**Example Structure:**
+**Example Structures:**
 ```python
                      pred_ln_ns_best
 month_id country_id                             
 502      4           [0.31, 0.29, ..., 0.33]
          6           [0.05, 0.07, ..., 0.04]
 503      4           [0.28, 0.30, ..., 0.29]
+```
+
+```python
+                     pred_ln_ns_best
+month_id country_id                             
+502      4           0.29
+         6           0.07
+503      4           0.30
 ```
 
 ### 3. Uncertainty Representation
