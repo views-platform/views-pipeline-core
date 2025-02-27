@@ -44,7 +44,7 @@ eval_<evaluation_schema>_<conflict_type>__<run_type>_<timestamp>.pkl
 **Negative Effects:**
 - **Longer File Names**: Could be cumbersome in environments where shorter names are preferred.
 - **Adjustment Required**: Existing scripts or systems may need updates to accommodate the new naming structure.
-- **Timestamo inconsistency**: Differences in timestamp usage between single and ensemble models could lead to confusion.
+- **Timestamp inconsistency**: Differences in timestamp usage between single and ensemble models could lead to confusion.
 
 ## Rationale
 The decision to use this naming convention ensures that:
