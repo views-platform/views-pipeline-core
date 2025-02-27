@@ -18,14 +18,14 @@ This is particularly important for managing prediction versions, tracking when p
 ### When run type is calibration or validation
 The prediction naming convention for using a single model will follow this structure:
 ```
-prediction_<run_type>_<timestamp>_<series_sequence_number>.pkl
+predictions_<run_type>_<timestamp>_<series_sequence_number>.pkl
 ```
 - timestamp: The timestamp when the model was trained **(not when the prediction was generated)**. The format is`YYYYMMDD_HHMMSS`.
 - series_sequence_number: When run type is calibration or validation, it produces a list of predictions, each of which is predicted _n_ step head (_n_ ranging from 0 to the maximum forecast step). So the sequence has the same range as steps.
 
 The prediction naming convention for using an ensemble model will follow this structure:
 ```
-prediction_<run_type>_<timestamp>_<series_sequence_number>.pkl
+predictions_<run_type>_<timestamp>_<series_sequence_number>.pkl
 ```
 - model_name: The name of the model used for the ensemble prediction.
 - timestamp: The timestamp when **the prediction was generated**. The format is`YYYYMMDD_HHMMSS`.
@@ -34,13 +34,13 @@ prediction_<run_type>_<timestamp>_<series_sequence_number>.pkl
 ### When run type is forecasting
 The prediction naming convention for using a single model will follow this structure:
 ```
-prediction_<run_type>_<timestamp>.pkl
+predictions_<run_type>_<timestamp>.pkl
 ```
 - timestamp: The timestamp when the model was trained **(not when the prediction was generated)**. The format is`YYYYMMDD_HHMMSS`.
 
 The prediction naming convention for using an ensemble model will follow this structure:
 ```
-prediction_<run_type>_<timestamp>.pkl
+predictions_<run_type>_<timestamp>.pkl
 ```
 - model_name: The name of the model used for the ensemble prediction.
 - timestamp: The timestamp when **the prediction was generated**. The format is`YYYYMMDD_HHMMSS`.
