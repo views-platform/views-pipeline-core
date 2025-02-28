@@ -17,7 +17,7 @@ The **views-pipeline-core** contains all the necesary components for execution o
 
 <!-- toc -->
 
-- [Plattform Specific Installation Guide](#installation-guide)
+- [Platform Specific Installation Guide](#installation-guide)
 - [Design Objectives](#design-objectives)
 - [CLI](#cli)
 - [Configs](#configs)
@@ -37,7 +37,7 @@ The **views-pipeline-core** contains all the necesary components for execution o
 
 ---
 
-## Platform Specifc Installation Guide
+## Platform Specific Installation Guide
 
 To execute VIEWS pipeline code, carefully review this section and ensure that you meet all technical requirements.
 
@@ -58,7 +58,7 @@ As a last point, consider that the training of some models might require a GPU. 
 
 **2. Set up the Environment**
 
-**Step 1:** Start by creating a conda environment (Python verson 3.11) and activate it. Git clone the [views-pipeline-core](https://github.com/views-platform/views-pipeline-core) repo and the other VIEWS pipeline components. 
+**Step 1:** Start by creating a conda environment (Python version 3.11) and activate it. Git clone the [views-pipeline-core](https://github.com/views-platform/views-pipeline-core) repo and the other VIEWS pipeline components. 
 
 **Step 2:** Run  the following commands to make sure the viewser configs are set properly:
 `viewser config set REMOTE_URL https://viewser.viewsforecasting.org`
