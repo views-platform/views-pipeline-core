@@ -61,10 +61,10 @@ As a last point, consider that the training of some models might require a GPU. 
 **Step 1:** Start by creating a conda environment (Python version 3.11) and activate it. Git clone the [views-pipeline-core](https://github.com/views-platform/views-pipeline-core) repo and the other VIEWS pipeline components. 
 
 **Step 2:** Run  the following commands to make sure the viewser configs are set properly:
-`viewser config set REMOTE_URL https://viewser.viewsforecasting.org`
-`viewser config set AZURE_BLOB_STORAGE_ACCOUNT_NAME viewsblobs`
-`viewser config set AZURE_BLOB_STORAGE_ACCOUNT_KEY ilP95+ci1mRVqFnqoKBRWzN8W99KWshw3YV9gup4MskVf4KiDZeFtcwtX9e5Ej0vsSF8DXOF+DBosTj8wgjwg==`
-`viewser config set MODEL_METADATA_DATABASE_HOSTNAME gjoll.muspelheim.local`
+- `viewser config set REMOTE_URL https://viewser.viewsforecasting.org`
+- `viewser config set AZURE_BLOB_STORAGE_ACCOUNT_NAME viewsblobs`
+- `viewser config set AZURE_BLOB_STORAGE_ACCOUNT_KEY ilP95+ci1mRVqFnqoKBRWzN8W99KWshw3YV9gup4MskVf4KiDZeFtcwtX9e5Ej0vsSF8DXOF+DBosTj8wgjwg==`
+- `viewser config set MODEL_METADATA_DATABASE_HOSTNAME gjoll.muspelheim.local`
 
 **Step 3:** Navigate to [views-models](https://github.com/views-platform/views-models) and select the model/ensemble you want to run. Make sure you have the rights to run the `run.sh` file in the respective model/ensemble directory: `chmod +x run.sh`
 
