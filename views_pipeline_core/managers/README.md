@@ -479,8 +479,9 @@ index = pd.MultiIndex.from_tuples(
     names=['month_id', 'priogrid_id']
 )
 
+sequence_length = 12
+
 data = {
-    'ln_sb_best': [0.512, 0.000, 1.204],
     'pred_ln_sb_best': [
         np.random.normal(0.5, 0.1, 1000),
         np.random.normal(0.0, 0.05, 1000), 
@@ -488,7 +489,7 @@ data = {
     ]
 }
 
-df_eval = pd.DataFrame(data, index=index)
+df_eval = [pd.DataFrame(data, index=index)] * sequence_length
 ```
 
 #### 5.1 CM Forecast Output
