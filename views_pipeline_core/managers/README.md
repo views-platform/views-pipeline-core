@@ -542,3 +542,173 @@ The `LoggingManager` class provides a centralized logging solution for machine l
 def __init__(self, model_path: ModelPathManager)
 def get_logger(self) -> logging.Logger
 
+# MappingManager Documentation
+
+## Overview
+The `MappingManager` class provides geospatial visualization capabilities for VIEWS datasets (both country-month and priogrid-month formats). It handles:
+- Shapefile integration
+- Geometry validation
+- Interactive and static map generation
+- Dataset subset selection
+
+## Class Initialization
+
+```python
+def __init__(self, views_dataset: Union[PGMDataset, CMDataset])
+```
+
+### Parameters:
+
+`views_dataset`: Initialized dataset object of type `PGMDataset` or `CMDataset`
+
+### Example:
+
+```python
+from views_pipeline_core.data.handlers import CMDataset
+from mapping_manager import MappingManager
+
+# Initialize country-month dataset
+cm_dataset = CMDataset(...)  
+mapper = MappingManager(cm_dataset)
+```
+
+### Key Methods
+
+#### 1. `get_subset_mapping_dataframe`
+
+```python
+def get_subset_mapping_dataframe(
+    self,
+    time_ids: Optional[Union[int, List[int]]] = None,
+    entity_ids: Optional[Union[int, List[int]]] = None
+) -> pd.DataFrame
+```
+
+**Parameters:**
+- `time_ids`: Single time ID or list of time IDs
+- `entity_ids`: Single entity ID or list of entity IDs
+
+**Returns:**
+- Subset GeoDataFrame with geometries merged
+
+**Example:**
+
+```python
+# Get data for time_id=500 and country_ids [4, 10]
+subset_df = mapper.get_subset_mapping_dataframe(
+    time_ids=500,
+    entity_ids=[4, 10]
+)
+```
+
+#### 2. `plot_map`
+
+```python
+def plot_map(
+    self,
+    mapping_dataframe: pd.DataFrame,
+    target: str,
+    interactive: bool = False,
+    as_html: bool = False
+) -> Union[plt.Figure, str]
+```
+
+**Parameters:**
+- `mapping_dataframe`: DataFrame from `get_subset_mapping_dataframe`
+- `target`: Feature/target variable to visualize
+- `interactive`: Generate Plotly map if True
+- `as_html`: Return HTML string instead of figure object
+
+**Returns:**
+- Matplotlib figure or Plotly figure/HTML string
+
+**Example:**
+
+# Static matplotlib plot
+
+```python
+static_fig = mapper.plot_map(subset_df, "ln_ged_best", interactive=False)
+```
+
+# Interactive Plotly HTML
+
+```python
+interactive_html = mapper.plot_map(
+    subset_df, 
+    "ln_ged_best", 
+    interactive=True, 
+    as_html=True
+)
+```
+
+### Full Workflow Examples
+
+#### Country-Month Visualization
+
+```python
+# 1. Initialize dataset and manager
+cm_dataset = CMDataset(...)
+mapper = MappingManager(cm_dataset)
+
+# 2. Get full dataset with geometries
+full_cm_df = mapper.get_subset_mapping_dataframe()
+
+# 3. Generate interactive map
+fig = mapper.plot_map(full_cm_df, "ln_ged_best", interactive=True)
+fig.show()
+
+# 4. Create static image for single month
+single_month_df = mapper.get_subset_mapping_dataframe(time_ids=500)
+static_fig = mapper.plot_map(single_month_df, "ln_ged_best")
+static_fig.savefig("cm_map.png")
+```
+
+#### Priogrid-Month Visualization
+
+```python
+# 1. Initialize PGM dataset
+pgm_dataset = PGMDataset(...)
+pgm_mapper = MappingManager(pgm_dataset)
+
+# 2. Get subset for multiple time periods
+pgm_subset = pgm_mapper.get_subset_mapping_dataframe(
+    time_ids=[500, 501, 502],
+    entity_ids=[1200:1300]  # Specific grid cells
+)
+
+# 3. Create animated visualization
+html_output = pgm_mapper.plot_map(
+    pgm_subset,
+    "x_poly_1",
+    interactive=True,
+    as_html=True
+)
+
+# Save HTML output
+with open("pgm_interactive.html", "w") as f:
+    f.write(html_output)
+```
+
+### Key Features
+
+#### Geometry Handling
+- Automatically merges statistical data with shapefiles
+- Validates geometries with warnings for:
+  - Missing geometries
+  - Empty geometries
+  - Invalid spatial references
+- CRS standardization (EPSG:4326 for visualization)
+
+#### Visualization Options
+
+**Static Maps (Matplotlib):**
+- Single time period only
+- Customizable color scales
+- Built-in legend and labels
+
+**Interactive Maps (Plotly):**
+- Time slider for temporal animation
+- Hover tooltips with metadata
+- HTML export capability
+
+
