@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "views_pipeline_core"
-version = "1.0.0"
+version = "1.1.0"
 description = ""
 authors = [
     "Borbála Farkas <borbala.farkas@pcr.uu.se>",
@@ -19,8 +19,11 @@ wandb = "^0.18.7"
 pyprojroot="^0.3.0"
 views-evaluation="^0.1.2" 
 views-forecasts = "^0.5.5"
-
-
+geopandas = "^1.0.1"
+seaborn = "^0.13.2"
+plotly = "^6.0.0"
+plotly-expression = "^0.4.1"
+scipy = "^1.15.1"
 
 [build-system]
 requires = ["poetry-core"]
