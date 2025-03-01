@@ -179,7 +179,7 @@ The `ViewsDataset` class provides a unified interface for handling spatiotempora
 - Parallel processing for performance-critical operations
 
 Designed for two primary modes:
-1. **Feature Mode**: For model training/evaluation with explicit dependent variables
+1. **Feature Mode**: For model training/evaluation with explicit targets
 2. **Prediction Mode**: For storing/analyzing model outputs (`pred_*` columns)
 
 ## Class Structure
@@ -187,14 +187,14 @@ Designed for two primary modes:
 ### Initialization
 ```python
 ViewsDataset(source: Union[pd.DataFrame, str, Path], 
-            dep_vars: Optional[List[str]] = None,
+            targets: Optional[List[str]] = None,
             broadcast_features: bool = False)
 ```
 
 | Parameter           | Type               | Description                                      |
 |---------------------|--------------------|--------------------------------------------------|
 | source              | DataFrame/Path     | Input data with MultiIndex (time, entity)        |
-| dep_vars            | List[str]          | Required for feature mode (dependent variables)  |
+| targets            | List[str]          | Required for feature mode (dependent variables)  |
 | broadcast_features  | bool               | Expand scalar features to match sample size      |
 
 **Index Requirements:**
@@ -265,7 +265,7 @@ ViewsDataset(source: Union[pd.DataFrame, str, Path],
     # Load training data
     train_data = ViewsDataset(
         "data/calibration.feather",
-        dep_vars=["ged_sb"],
+        targets=["ged_sb"],
         broadcast_features=True
     )
     X, y = train_data.split_data()  # Get features/targets
