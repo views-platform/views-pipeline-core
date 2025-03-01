@@ -264,7 +264,7 @@ ViewsDataset(source: Union[pd.DataFrame, str, Path],
     ```python
     # Load training data
     train_data = ViewsDataset(
-        "data/calibration.feather",
+        "data/calibration.parquet",
         targets=["ged_sb"],
         broadcast_features=True
     )
@@ -280,7 +280,7 @@ ViewsDataset(source: Union[pd.DataFrame, str, Path],
 
     ```python
     # Load forecast results
-    preds = ViewsDataset("forecasts/2024-03.parquet")
+    preds = ViewsDataset("/forecasting_2025.parquet")
 
     # Calculate metrics
     hdi_df = preds.calculate_hdi(alpha=0.8)
