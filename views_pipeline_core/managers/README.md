@@ -1,3 +1,54 @@
+# Table of Contents
+
+- [ModelPathManager and ModelManager Documentation](#modelpathmanager-and-modelmanager-documentation)
+  - [ModelPathManager Class](#modelpathmanager-class)
+    - [Key Responsibilities](#key-responsibilities)
+    - [Core Methods](#core-methods)
+      - [Initialization](#initialization)
+      - [Directory Management](#directory-management)
+      - [Artifact Handling](#artifact-handling)
+      - [Validation Methods](#validation-methods)
+    - [Example Use Cases](#example-use-cases)
+    - [ModelPathManager Structure](#modelpathmanager-structure)
+  - [ModelManager Class](#modelmanager-class)
+    - [Key Responsibilities](#key-responsibilities-1)
+    - [Core Methods](#core-methods-1)
+      - [Training Execution](#training-execution)
+      - [Sweep Management](#sweep-management)
+      - [Prediction Handling](#prediction-handling)
+    - [Example Use Cases](#example-use-cases-1)
+    - [Execution Graph](#execution-graph)
+  - [Design Rationale](#design-rationale)
+    - [Key Architecture Decisions](#key-architecture-decisions)
+  - [Error Handling](#error-handling)
+    - [Common Validation Checks](#common-validation-checks)
+    - [Alert System](#alert-system)
+  - [Abstract Methods Implementation](#abstract-methods-implementation)
+- [Dataframe Structures for Evaluation and Forecast Methods](#dataframe-structures-for-evaluation-and-forecast-methods)
+  - [Index Structure](#index-structure)
+  - [Column Requirements](#column-requirements)
+  - [Uncertainty Representation](#uncertainty-representation)
+  - [Validation Checks](#validation-checks)
+  - [Full Examples](#full-examples)
+- [LoggingManager Documentation](#loggingmanager-documentation)
+  - [Overview](#overview)
+  - [Features](#features)
+  - [Class Definition](#class-definition)
+    - [Attributes](#attributes)
+    - [Methods](#methods)
+- [MappingManager Documentation](#mappingmanager-documentation)
+  - [Overview](#overview-1)
+  - [Class Initialization](#class-initialization)
+  - [Key Methods](#key-methods)
+  - [Full Workflow Examples](#full-workflow-examples)
+  - [Key Features](#key-features)
+- [PackageManager Documentation](#packagemanager-documentation)
+  - [Overview](#overview-2)
+  - [Class Architecture](#class-architecture)
+  - [Initialization](#initialization-1)
+  - [Core Methods](#core-methods-2)
+  - [Troubleshooting Guide](#troubleshooting-guide)
+
 # ModelPathManager and ModelManager Documentation
 
 ## Overview
@@ -712,4 +763,125 @@ with open("pgm_interactive.html", "w") as f:
 - Hover tooltips with metadata
 - HTML export capability
 
+# PackageManager Documentation
+
+## Overview
+The `PackageManager` class provides comprehensive management of Python Poetry packages within the VIEWS ecosystem, handling:
+- Package creation and validation
+- Dependency management
+- GitHub integration for release tracking
+- Organizational naming conventions
+
+## Class Architecture
+
+### Initialization
+
+#### Constructor
+
+```python
+def __init__(self, package_path: Union[str, Path], validate: bool = True)
+```
+
+**Parameters:**
+- `package_path`: Path to existing package or package name for remote operations
+- `validate`: Enable path validation (default: True)
+
+**Initialization Modes:**
+
+**Local Package Mode (when path exists):**
+- Validates package structure
+- Sets up core paths
+
+**Remote Package Mode (when using package name):**
+- Validates naming convention
+- Fetches latest GitHub release
+
+**Example Initializations:**
+
+```python
+# Local package mode
+local_pkg = PackageManager(Path("/path/to/views-my-package"))
+
+# Remote package mode
+remote_pkg = PackageManager("views-another-package")
+```
+
+### Core Methods
+
+#### 1. `create_views_package()`
+
+```python
+def create_views_package(self)
+```
+
+Creates new Poetry package with VIEWS standards:
+- Enforces Python 3.11-3.14 compatibility
+- Automatically adds views-pipeline-core dependency
+- Creates standard directory structure
+
+**Flow:**
+
+```mermaid
+flowchart TD
+    A[Start] --> B{Validate Path}
+    B -->|Valid| C[Install Poetry]
+    C --> D[Create Package Structure]
+    D --> E[Add Core Dependency]
+    E --> F[Validate Structure]
+    F --> G[End]
+    B -->|Invalid| H[Raise Error]
+```
+
+**Example:**
+
+```python
+new_pkg = PackageManager(Path("/new/packages/views-new-package"))
+new_pkg.create_views_package()
+```
+
+#### 2. `add_dependency()`
+
+```python
+def add_dependency(self, package_name: str, version: str = None)
+```
+
+Manages package dependencies through Poetry:
+- Supports exact versions or version ranges
+- Handles Poetry installation checks
+- Validates package operations
+
+**Example:**
+
+```python
+local_pkg.add_dependency("pandas", ">=2.0.0")
+local_pkg.add_dependency("numpy")  # Latest version
+```
+
+#### 3. `validate_views_package()`
+
+```python
+def validate_views_package(self)
+```
+
+Performs comprehensive validation:
+- Poetry configuration check
+- Dependency resolution
+- Directory structure validation
+- Organizational naming conventions
+
+**Example:**
+
+```python
+if local_pkg.validate_views_package():
+    print("Package valid for deployment")
+```
+
+### Troubleshooting Guide
+
+| Issue                   | Solution                                      |
+|-------------------------|-----------------------------------------------|
+| Poetry not found        | Run `pip install poetry` manually             |
+| Invalid package name    | Follow `views-<projectname>` format           |
+| Dependency conflicts    | Use `poetry update` in package directory      |
+| Path validation errors  | Check directory permissions and structure     |
 
