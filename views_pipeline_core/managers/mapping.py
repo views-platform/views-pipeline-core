@@ -285,8 +285,8 @@ class MappingManager:
             If the target is not a dependent variable or feature in the dataset.
             If `interactive` is False and the mapping dataframe contains more than one unique time unit.
         """
-        target_options = set(self._dataset.dep_vars).union(
-            set(self._dataset.indep_vars)
+        target_options = set(self._dataset.targets).union(
+            set(self._dataset.features)
         )
         if target not in target_options:
             raise ValueError(
