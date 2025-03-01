@@ -7,8 +7,10 @@ from pathlib import Path
 import seaborn as sns
 import matplotlib.pyplot as plt
 import geopandas as gpd
-# import cartopy.crs as ccrs
+import cartopy.crs as ccrs
 import plotly.express as px
+from io import BytesIO
+import base64
 
 # nbformat dependency is required
 
@@ -42,7 +44,7 @@ class MappingManager:
         return gpd.read_file(path)
 
     def __get_priogrid_shapefile(self):
-        path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "priogrid" / "priogrid_cell.shp"
+        path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "priogrid_cellshp" / "priogrid_cell.shp"
         return gpd.read_file(path)
 
     def __check_missing_geometries(
@@ -76,6 +78,9 @@ class MappingManager:
 
     def __init_mapping_dataframe(self, dataframe: pd.DataFrame) -> gpd.GeoDataFrame:
         _dataframe = dataframe.reset_index()
+
+        numeric_cols = _dataframe.select_dtypes(include=np.number).columns
+        _dataframe[numeric_cols] = _dataframe[numeric_cols].astype(np.float32)
 
         if isinstance(self._dataset, CMDataset):
             # Add ISO codes to the dataframe
@@ -152,6 +157,12 @@ class MappingManager:
         # Convert to geographic CRS for Plotly
         mapping_dataframe = mapping_dataframe.to_crs(epsg=4326).copy()
 
+        # Simplify geometries for faster rendering
+        mapping_dataframe["geometry"] = mapping_dataframe.geometry.simplify(
+            tolerance=0.02,  # Adjust based on data scale (degrees for EPSG:4326)
+            preserve_topology=True,
+        )
+
         # Create figure with slider
         fig = px.choropleth(
             mapping_dataframe,
@@ -199,7 +210,7 @@ class MappingManager:
             showocean=False,
             showsubunits=True,
             subunitcolor="rgba(200,200,200,0.2)",
-            subunitwidth=0.2,
+            subunitwidth=0.05,
         )
 
         # Add latitude/longitude grid styling
@@ -219,7 +230,6 @@ class MappingManager:
     def _plot_static_map(
         self, mapping_dataframe: gpd.GeoDataFrame, target: str, time_unit: int
     ):
-        # mapping_dataframe = mapping_dataframe.set_geometry("geometry")
         fig, ax = plt.subplots(1, 1, figsize=(15, 10))
         mapping_dataframe.boundary.plot(ax=ax, linewidth=0.3, color="black")
         # ax.set_axis_off()
@@ -256,11 +266,10 @@ class MappingManager:
             sm, ax=ax, orientation="horizontal", fraction=0.036, pad=0.1
         )
 
-        # plt.show()
-        return plt
+        return fig
 
     def plot_map(
-        self, mapping_dataframe: pd.DataFrame, target: str, interactive: bool = False
+        self, mapping_dataframe: pd.DataFrame, target: str, interactive: bool = False, as_html: bool = False,
     ):
         """
         Plots a map based on the provided mapping dataframe and target variable.
@@ -272,18 +281,20 @@ class MappingManager:
         target : str
             The target variable to plot. Must be a dependent variable or feature in the dataset.
         interactive : bool, optional
-            If True, an interactive map will be plotted. If False, a static map will be plotted. Default is False.
+            If True, creates an interactive plot. Default is False.
+        as_html : bool, optional
+            If True, returns the plot as an HTML string. Default is False.
 
         Returns:
         --------
-        matplotlib.figure.Figure or plotly.graph_objs.Figure
-            The plotted map figure. The type of figure returned depends on the value of the `interactive` parameter.
+        fig or str
+            The plot figure object or an HTML string if `as_html` is True.
 
         Raises:
         -------
         ValueError
             If the target is not a dependent variable or feature in the dataset.
-            If `interactive` is False and the mapping dataframe contains more than one unique time unit.
+            If static plots are requested with multiple time units.
         """
         target_options = set(self._dataset.targets).union(
             set(self._dataset.features)
@@ -298,9 +309,24 @@ class MappingManager:
         )
 
         if interactive:
-            return self._plot_interactive_map(mapping_dataframe, target)
+            fig = self._plot_interactive_map(mapping_dataframe, target)
+            if as_html:
+                return fig.to_html(full_html=False)
+            else:
+                return fig
         else:
             time_units = mapping_dataframe[self._time_id].dropna().unique()
             if len(time_units) > 1:
                 raise ValueError("Static plots require single time unit")
-            return self._plot_static_map(mapping_dataframe, target, time_units[0])
+            fig = self._plot_static_map(mapping_dataframe, target, time_units[0])
+            if as_html:
+                # Convert figure to HTML image
+                buf = BytesIO()
+                fig.savefig(buf, format="png", bbox_inches="tight", dpi=150)
+                plt.close(fig)
+                buf.seek(0)
+                img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
+                html_img = f'<img src="data:image/png;base64,{img_str}">'
+                return html_img
+            else:
+                return fig
