@@ -4,10 +4,8 @@ from views_pipeline_core.data.handlers import PGMDataset, CMDataset
 import logging
 from typing import Union, Optional, List
 from pathlib import Path
-import seaborn as sns
 import matplotlib.pyplot as plt
 import geopandas as gpd
-import cartopy.crs as ccrs
 import plotly.express as px
 from io import BytesIO
 import base64
@@ -40,11 +38,23 @@ class MappingManager:
         self._isoab_cache_dataframe = None
 
     def __get_country_shapefile(self):
-        path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "country" / "ne_110m_admin_0_countries.shp"
+        path = (
+            Path(__file__).parent.parent
+            / "mapping"
+            / "shapefiles"
+            / "country"
+            / "ne_110m_admin_0_countries.shp"
+        )
         return gpd.read_file(path)
 
     def __get_priogrid_shapefile(self):
-        path = Path(__file__).parent.parent / "mapping" / "shapefiles" / "priogrid_cellshp" / "priogrid_cell.shp"
+        path = (
+            Path(__file__).parent.parent
+            / "mapping"
+            / "shapefiles"
+            / "priogrid_cellshp"
+            / "priogrid_cell.shp"
+        )
         return gpd.read_file(path)
 
     def __check_missing_geometries(
@@ -269,7 +279,11 @@ class MappingManager:
         return fig
 
     def plot_map(
-        self, mapping_dataframe: pd.DataFrame, target: str, interactive: bool = False, as_html: bool = False,
+        self,
+        mapping_dataframe: pd.DataFrame,
+        target: str,
+        interactive: bool = False,
+        as_html: bool = False,
     ):
         """
         Plots a map based on the provided mapping dataframe and target variable.
@@ -296,9 +310,7 @@ class MappingManager:
             If the target is not a dependent variable or feature in the dataset.
             If static plots are requested with multiple time units.
         """
-        target_options = set(self._dataset.targets).union(
-            set(self._dataset.features)
-        )
+        target_options = set(self._dataset.targets).union(set(self._dataset.features))
         if target not in target_options:
             raise ValueError(
                 f"Target must be a dependent variable or feature in the dataset. Choose from {target_options}"
