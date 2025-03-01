@@ -257,12 +257,12 @@ class ViewsDataset:
             return [col for col in self.dataframe.columns if col not in self.pred_vars]
         return [col for col in self.dataframe.columns if col not in self.targets]
 
-    def to_tensor(self, include_dep_vars: bool = True) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    def to_tensor(self, include_targets: bool = True) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """
         Converts the data to a tensor format.
 
         Parameters:
-        include_dep_vars (bool): If True, include dependent variables in the tensor. Default is True.
+        include_targets (bool): If True, include dependent variables in the tensor. Default is True.
 
         Returns:
         Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]: 
@@ -277,20 +277,20 @@ class ViewsDataset:
             if not self.broadcast_features:
                 raise ValueError("Tensor operations are disabled when broadcast_features=False")
             if not hasattr(self, '_features_tensor_cache'):
-                self._features_tensor_cache = self._features_to_tensor(include_dep_vars=True)
-            if include_dep_vars:
+                self._features_tensor_cache = self._features_to_tensor(include_targets=True)
+            if include_targets:
                 return self._features_tensor_cache
             else:
                 # Extract indices of independent variables
-                indep_var_indices = [self.dataframe.columns.get_loc(var) for var in self.features]
-                return self._features_tensor_cache[:, :, :, indep_var_indices]
+                feature_indices = [self.dataframe.columns.get_loc(var) for var in self.features]
+                return self._features_tensor_cache[:, :, :, feature_indices]
 
-    def _features_to_tensor(self, include_dep_vars: bool = True) -> np.ndarray:
+    def _features_to_tensor(self, include_targets: bool = True) -> np.ndarray:
         """
         Converts the dataframe features into a 3D tensor.
         Parameters:
         -----------
-        include_dep_vars : bool, optional
+        include_targets : bool, optional
             If True, includes dependent variables in the tensor. Defaults to True.
         Returns:
         --------
@@ -303,7 +303,7 @@ class ViewsDataset:
         - The resulting tensor has the shape (number of time steps, number of entities, number of features).
         """
 
-        current_columns = self.dataframe.columns if include_dep_vars else self.features
+        current_columns = self.dataframe.columns if include_targets else self.features
     
         # Get aligned index
         full_idx = pd.MultiIndex.from_product(
@@ -984,15 +984,15 @@ class ViewsDataset:
             if time_ids is not None or entity_ids is not None:
                 subset_df = self.get_subset_dataframe(time_ids, entity_ids)
                 temp_ds = ViewsDataset(subset_df, targets=self.targets)
-                X = temp_ds.to_tensor(include_dep_vars=False)  # (time, entity, samples, features)
-                y_tensor = temp_ds.to_tensor(include_dep_vars=True)  # (time, entity, samples, all_vars)
+                X = temp_ds.to_tensor(include_targets=False)  # (time, entity, samples, features)
+                y_tensor = temp_ds.to_tensor(include_targets=True)  # (time, entity, samples, all_vars)
             else:
-                X = self.to_tensor(include_dep_vars=False)
-                y_tensor = self.to_tensor(include_dep_vars=True)
+                X = self.to_tensor(include_targets=False)
+                y_tensor = self.to_tensor(include_targets=True)
             
             # Extract target variables across all samples
-            dep_var_indices = [self.dataframe.columns.get_loc(var) for var in self.targets]
-            y = y_tensor[:, :, :, dep_var_indices]  # (time, entity, samples, targets)
+            feature_indices = [self.dataframe.columns.get_loc(var) for var in self.targets]
+            y = y_tensor[:, :, :, feature_indices]  # (time, entity, samples, targets)
             
             # Validate 4D shapes (time, entity, samples, vars)
             if X.shape[:3] != y.shape[:3]:  # Compare time, entity, samples dimensions
@@ -1004,33 +1004,33 @@ class ViewsDataset:
             return X, y
 
     def check_integrity(self,
-                      include_dep_vars: bool = True,
+                      include_targets: bool = True,
                       time_ids: Optional[Union[int, List[int]]] = None,
                       entity_ids: Optional[Union[int, List[int]]] = None) -> bool:
         """
         Validate tensor reconstruction integrity, optionally for subset
         
         Parameters:
-        include_dep_vars: Whether to include dependent variables
+        include_targets: Whether to include dependent variables
         time_ids: Time IDs to validate (None for all)
         entity_ids: Entity IDs to validate (None for all)
         """
-        if self.is_prediction and not include_dep_vars:
+        if self.is_prediction and not include_targets:
             raise ValueError("Cannot exclude dependent variables in prediction mode")
             
         # Get subset if specified
         if time_ids is not None or entity_ids is not None:
             subset_df = self.get_subset_dataframe(time_ids, entity_ids)
             temp_ds = ViewsDataset(subset_df)
-            tensor = temp_ds.to_tensor(include_dep_vars)
+            tensor = temp_ds.to_tensor(include_targets)
             reconstructed = temp_ds.to_dataframe(tensor)
             original = subset_df
         else:
-            tensor = self.to_tensor(include_dep_vars)
+            tensor = self.to_tensor(include_targets)
             reconstructed = self.to_dataframe(tensor)
             original = self.dataframe
             
-        if include_dep_vars:
+        if include_targets:
             return original.equals(reconstructed)
         else:
             return original[self.features].equals(reconstructed[self.features])
