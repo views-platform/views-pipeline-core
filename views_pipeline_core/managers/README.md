@@ -511,3 +511,34 @@ df_forecast = pd.DataFrame(data, index=index)
 
 This structure ensures compatibility with the VIEWS evaluation framework while allowing efficient storage and processing of both point estimates and probabilistic predictions.
 
+# LoggingManager Documentation
+
+## Overview
+The `LoggingManager` class provides a centralized logging solution for machine learning pipelines. It handles:
+- Custom logging configuration via YAML
+- Dynamic log path management
+- Error handling and fallback configurations
+
+## Features
+- **YAML-based Configuration** - External logging configuration
+- **Automatic Directory Creation** - Ensures log directories exist
+- **Multiple Handlers** - Supports simultaneous file and console logging
+- **Environment Awareness** - Handles different execution contexts
+- **Error Resilience** - Fallback to basic logging on configuration failures
+
+## Class Definition
+
+### Attributes
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `model_path` | `ModelPathManager` | Manages pipeline directory structure |
+| `_default_level` | `int` | Fallback logging level (default: INFO) |
+| `_logging_is_active` | `bool` | Master switch for logging system |
+| `_logging_path` | `Path` | Calculated path for log storage |
+| `_logger` | `logging.Logger` | Central logger instance |
+
+### Methods
+```python
+def __init__(self, model_path: ModelPathManager)
+def get_logger(self) -> logging.Logger
+
