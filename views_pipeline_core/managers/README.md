@@ -541,6 +541,7 @@ The `LoggingManager` class provides a centralized logging solution for machine l
 ```python
 def __init__(self, model_path: ModelPathManager)
 def get_logger(self) -> logging.Logger
+```
 
 # MappingManager Documentation
 
@@ -624,13 +625,13 @@ def plot_map(
 
 **Example:**
 
-# Static matplotlib plot
+#### Static matplotlib plot
 
 ```python
 static_fig = mapper.plot_map(subset_df, "ln_ged_best", interactive=False)
 ```
 
-# Interactive Plotly HTML
+#### Interactive Plotly HTML
 
 ```python
 interactive_html = mapper.plot_map(
@@ -679,7 +680,7 @@ pgm_subset = pgm_mapper.get_subset_mapping_dataframe(
 # 3. Create animated visualization
 html_output = pgm_mapper.plot_map(
     pgm_subset,
-    "x_poly_1",
+    "ln_ged_best",
     interactive=True,
     as_html=True
 )
