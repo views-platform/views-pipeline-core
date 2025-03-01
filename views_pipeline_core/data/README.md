@@ -359,7 +359,7 @@ ViewsDataset(source: Union[pd.DataFrame, str, Path],
         1. Calculate HDI → 2. Adaptive Histogram Binning → 3. KDE Refinement → 4. Mode Detection
         ```
 
-    - **HDI Algorithm:**
+    - **HDI Algorithm:** (See [Highest Density Intervals (HDI)](https://github.com/views-platform/docs/blob/main/Organizational%20Guides/quick_hdi_introduction.md) for more information)
 
         ```python
         sliding_window_view(sorted_data) → find narrowest interval → handle edge cases
