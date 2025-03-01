@@ -718,24 +718,24 @@ class ModelManager:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
     @staticmethod
-    def _get_conflict_type(depvar: str) -> str:
+    def _get_conflict_type(target: str) -> str:
         """Determine conflict type from dependent variable by checking split parts.
         
         Args:
-            depvar: Dependent variable string containing conflict type (e.g., 'var_sb').
+            target: Dependent variable string containing conflict type (e.g., 'var_sb').
         
         Returns:
-            One of 'sb', 'os', or 'ns' based on the first found in depvar parts.
+            One of 'sb', 'os', or 'ns' based on the first found in target parts.
         
         Raises:
             ValueError: If none of the valid conflict types are found.
         """
-        parts = depvar.split('_')
+        parts = target.split('_')
         for conflict in ('sb', 'os', 'ns'):
             if conflict in parts:
                 return conflict
         raise ValueError(
-            f"Conflict type not found in '{depvar}'. Valid types: 'sb', 'os', 'ns'."
+            f"Conflict type not found in '{target}'. Valid types: 'sb', 'os', 'ns'."
         )
 
     @staticmethod
@@ -904,7 +904,7 @@ class ModelManager:
         config["run_type"] = args.run_type
         config["sweep"] = args.sweep
 
-        # Check if depvar is a list. If not, convert it to a list. Otherwise raise an error.
+        # Check if target is a list. If not, convert it to a list. Otherwise raise an error.
         if isinstance(config["depvar"], str):
             config["depvar"] = [config["depvar"]]
         if not isinstance(config["depvar"], list):
@@ -1254,13 +1254,13 @@ class ModelManager:
         logger.info(f"df_viewser read from {df_path}")
         # Multiple targets
         df_actual = df_viewser[self.config["depvar"]]
-        for depvar in self.config["depvar"]:
-            conflict_type = ModelManager._get_conflict_type(depvar)
+        for target in self.config["depvar"]:
+            conflict_type = ModelManager._get_conflict_type(target)
             step_wise_evaluation, df_step_wise_evaluation = (
                 metrics_manager.step_wise_evaluation(
                     df_actual,
                     df_predictions,
-                    depvar,
+                    target,
                     self.config["steps"],
                 )
             )
@@ -1268,14 +1268,14 @@ class ModelManager:
                 metrics_manager.time_series_wise_evaluation(
                     df_actual, 
                     df_predictions, 
-                    depvar
+                    target
                 )
             )
             month_wise_evaluation, df_month_wise_evaluation = (
                 metrics_manager.month_wise_evaluation(
                     df_actual, 
                     df_predictions, 
-                    depvar
+                    target
                 )
             )
 
@@ -1578,14 +1578,14 @@ class ModelManager:
             raise ValueError("Prediction DataFrame is empty")
         print_status("DataFrame contains data", True)
 
-        # Depvar validation
-        depvar = self.config["depvar"]
-        if not isinstance(depvar, (str, list)):
-            print_status("Valid depvar type", False)
-            raise ValueError(f"Invalid depvar type: {type(depvar)}")
-        print_status("Valid depvar type format", True)
+        # target validation
+        target = self.config["depvar"]
+        if not isinstance(target, (str, list)):
+            print_status("Valid target type", False)
+            raise ValueError(f"Invalid target type: {type(target)}")
+        print_status("Valid target type format", True)
 
-        required_columns = {f"pred_{dv}" for dv in ([depvar] if isinstance(depvar, str) else depvar)}
+        required_columns = {f"pred_{dv}" for dv in ([target] if isinstance(target, str) else target)}
         missing = [col for col in required_columns if col not in dataframe.columns]
         
         if missing:
