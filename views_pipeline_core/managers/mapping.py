@@ -7,7 +7,7 @@ from pathlib import Path
 import seaborn as sns
 import matplotlib.pyplot as plt
 import geopandas as gpd
-import cartopy.crs as ccrs
+# import cartopy.crs as ccrs
 import plotly.express as px
 
 # nbformat dependency is required
@@ -262,6 +262,29 @@ class MappingManager:
     def plot_map(
         self, mapping_dataframe: pd.DataFrame, target: str, interactive: bool = False
     ):
+        """
+        Plots a map based on the provided mapping dataframe and target variable.
+
+        Parameters:
+        -----------
+        mapping_dataframe : pd.DataFrame
+            The dataframe containing the mapping data.
+        target : str
+            The target variable to plot. Must be a dependent variable or feature in the dataset.
+        interactive : bool, optional
+            If True, an interactive map will be plotted. If False, a static map will be plotted. Default is False.
+
+        Returns:
+        --------
+        matplotlib.figure.Figure or plotly.graph_objs.Figure
+            The plotted map figure. The type of figure returned depends on the value of the `interactive` parameter.
+
+        Raises:
+        -------
+        ValueError
+            If the target is not a dependent variable or feature in the dataset.
+            If `interactive` is False and the mapping dataframe contains more than one unique time unit.
+        """
         target_options = set(self._dataset.dep_vars).union(
             set(self._dataset.indep_vars)
         )

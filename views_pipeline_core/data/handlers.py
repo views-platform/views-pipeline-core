@@ -16,7 +16,7 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 class ViewsDataset:
-    def __init__(self, source: Union[pd.DataFrame, str, Path], dep_vars: Optional[List[str]] = None, broadcast_features=False):
+    def __init__(self, source: Union[pd.DataFrame, str, Path], targets: Optional[List[str]] = None, broadcast_features=False):
         """
         Initialize the ViewsDataset with a source.
 
@@ -33,13 +33,13 @@ class ViewsDataset:
         """
         self.broadcast_features = broadcast_features
         if isinstance(source, pd.DataFrame):
-            self._init_dataframe(source, dep_vars)
+            self._init_dataframe(source, targets)
         elif ModelPathManager._is_path(source):
-            self._init_dataframe(read_dataframe(source), dep_vars)
+            self._init_dataframe(read_dataframe(source), targets)
         else:
             raise ValueError("Invalid input type for ViewsDataset")
         
-    def _init_dataframe(self, dataframe: pd.DataFrame, dep_vars: Optional[List[str]] = None) -> None:
+    def _init_dataframe(self, dataframe: pd.DataFrame, targets: Optional[List[str]] = None) -> None:
         self.original_columns = dataframe.columns.tolist()
     
         # Convert and sort FIRST before saving original index
@@ -55,20 +55,20 @@ class ViewsDataset:
         self.pred_vars = self.get_pred_vars()
         self.is_prediction = len(self.pred_vars) > 0
         if self.is_prediction:
-            self.dep_vars = self.pred_vars
-            self.indep_vars = self.get_indep_vars()
-            if dep_vars is not None:
+            self.targets = self.pred_vars
+            self.features = self.get_features()
+            if targets is not None:
                 logger.warning(f"Ignoring specified dependent variables in prediction mode. Make sure all columns follow pred_* naming scheme. ({self.original_columns})")
             self.sample_size = self._validate_prediction_structure()
         else:
-            self.dep_vars = dep_vars
-            self.indep_vars = self.get_indep_vars()
-            if self.dep_vars is not None:
-                missing_vars = set(self.dep_vars) - set(self.dataframe.columns)
+            self.targets = targets
+            self.features = self.get_features()
+            if self.targets is not None:
+                missing_vars = set(self.targets) - set(self.dataframe.columns)
                 if missing_vars:
                     raise ValueError(f"Missing dependent variables: {missing_vars}")
             else:
-                raise ValueError("Dependent variables must be specified for non-prediction dataframes. Example usage: ViewsDataset(dataframe, dep_vars=['ln_sb_best'])")
+                raise ValueError("Dependent variables must be specified for non-prediction dataframes. Example usage: ViewsDataset(dataframe, targets=['ln_sb_best'])")
             
             if self.broadcast_features:
                 self._validate_feature_samples()
@@ -147,7 +147,7 @@ class ViewsDataset:
         """Validate and normalize prediction structure for both scalar and distributional predictions."""
         if self.is_prediction:
             # Convert scalar predictions to single-element arrays
-            for var in self.dep_vars:
+            for var in self.targets:
                 first_val = self.dataframe[var].iloc[0]
                 
                 # Handle different data types
@@ -171,17 +171,17 @@ class ViewsDataset:
 
             # Verify all prediction columns now contain arrays
             if not all(self.dataframe[var].apply(lambda x: isinstance(x, np.ndarray)).all()
-                    for var in self.dep_vars):
+                    for var in self.targets):
                 raise ValueError("Prediction columns must contain array-like values after conversion")
 
             # Check consistent sample sizes
-            sample_sizes = [len(self.dataframe[var].iloc[0]) for var in self.dep_vars]
+            sample_sizes = [len(self.dataframe[var].iloc[0]) for var in self.targets]
             if len(set(sample_sizes)) > 1:
                 raise ValueError(f"Inconsistent sample sizes in prediction columns: {sample_sizes}")
 
             # Ensure no independent variables present
-            if len(self.indep_vars) > 0:
-                raise ValueError(f"Prediction dataframe should only contain pred_* columns. Found {self.indep_vars}")
+            if len(self.features) > 0:
+                raise ValueError(f"Prediction dataframe should only contain pred_* columns. Found {self.features}")
 
             return sample_sizes[0]
         return 0
@@ -238,24 +238,24 @@ class ViewsDataset:
         Returns:
             List[str]: A list of column names from the dataframe that start with 'pred_'.
         """
-        # if self.dep_vars:
+        # if self.targets:
         #     raise ValueError("Cannot identify prediction variables when dependent variables are specified")
         return [col for col in self.dataframe.columns if col.startswith('pred_')]
 
-    def get_indep_vars(self) -> List[str]:
+    def get_features(self) -> List[str]:
         """
         Get independent variables.
 
         This method returns a list of column names from the dataframe that are 
         considered independent variables. Independent variables are those that 
-        are not present in the list of dependent variables (`dep_vars`).
+        are not present in the list of dependent variables (`targets`).
 
         Returns:
             List[str]: A list of column names representing the independent variables.
         """
         if self.is_prediction:
             return [col for col in self.dataframe.columns if col not in self.pred_vars]
-        return [col for col in self.dataframe.columns if col not in self.dep_vars]
+        return [col for col in self.dataframe.columns if col not in self.targets]
 
     def to_tensor(self, include_dep_vars: bool = True) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """
@@ -282,7 +282,7 @@ class ViewsDataset:
                 return self._features_tensor_cache
             else:
                 # Extract indices of independent variables
-                indep_var_indices = [self.dataframe.columns.get_loc(var) for var in self.indep_vars]
+                indep_var_indices = [self.dataframe.columns.get_loc(var) for var in self.features]
                 return self._features_tensor_cache[:, :, :, indep_var_indices]
 
     def _features_to_tensor(self, include_dep_vars: bool = True) -> np.ndarray:
@@ -302,33 +302,8 @@ class ViewsDataset:
         - The tensor is constructed by reindexing the dataframe to ensure all time steps and entities are included.
         - The resulting tensor has the shape (number of time steps, number of entities, number of features).
         """
-        # current_columns = self.dataframe.columns if include_dep_vars else self.indep_vars
-        # entities = self.original_index.get_level_values(self._entity_id).unique()
-        # time_steps = self.original_index.get_level_values(self._time_id).unique()
-        # sample_size = self.sample_size
-        # num_vars = len(current_columns)
-        
-        # # Initialize 4D tensor filled with NaNs
-        # tensor = np.full((len(time_steps), len(entities), sample_size, num_vars), np.nan)
-        
-        # # Create full index to include all time and entity combinations
-        # full_idx = pd.MultiIndex.from_product([time_steps, entities], names=[self._time_id, self._entity_id])
-        # full_df = self.dataframe.reindex(full_idx)[current_columns]
-        
-        # # Iterate over each time step and entity to fill the tensor
-        # for j, time in enumerate(time_steps):
-        #     time_data = full_df.xs(time, level=self._time_id)
-        #     for i, entity in enumerate(entities):
-        #         if (time, entity) in full_df.index:
-        #             row = time_data.loc[entity]
-        #             for var_idx, var in enumerate(current_columns):
-        #                 samples = row[var]
-        #                 # Ensure the sample array has the correct length
-        #                 if len(samples) != sample_size:
-        #                     samples = np.resize(samples, sample_size)
-        #                 tensor[j, i, :, var_idx] = samples
-        # return tensor
-        current_columns = self.dataframe.columns if include_dep_vars else self.indep_vars
+
+        current_columns = self.dataframe.columns if include_dep_vars else self.features
     
         # Get aligned index
         full_idx = pd.MultiIndex.from_product(
@@ -355,41 +330,26 @@ class ViewsDataset:
         """
         Convert predictions to a 4D tensor.
         This method converts the predictions stored in the dataframe to a 4D tensor
-        with dimensions (time × entity × samples × vars).
+        with dimensions (time × entity × samples × targets).
         
         Returns:
-            np.ndarray: A 4D tensor with dimensions (time × entity × samples × vars),
+            np.ndarray: A 4D tensor with dimensions (time × entity × samples × targets),
                         where each element is a prediction value or NaN if the prediction
                         is not available.
         """
-        # entities = self.dataframe.index.get_level_values(self._entity_id).unique()
-        # time_steps = self.dataframe.index.get_level_values(self._time_id).unique()
-        # num_vars = len(self.dep_vars)
-        
-        # tensor = np.full((len(time_steps), len(entities), self.sample_size, num_vars), np.nan)
-        
-        # # Create temporary grid with original data ordered by time first
-        # full_idx = pd.MultiIndex.from_product([time_steps, entities], names=[self._time_id, self._entity_id])
-        # full_df = self.dataframe.reindex(full_idx)
-        
-        # for j, time in enumerate(time_steps):
-        #     for i, entity in enumerate(entities):
-        #         if (time, entity) in full_df.index:
-        #             for k, var in enumerate(self.dep_vars):
-        #                 tensor[j, i, :, k] = full_df.loc[(time, entity), var]
-        # return tensor
+
         full_idx = pd.MultiIndex.from_product([
         self._time_values, 
         self._entity_values], names=[self._time_id, self._entity_id])
     
         # Pre-allocate tensor with correct NaN structure
         tensor = np.full(
-            (len(self._time_values), len(self._entity_values), self.sample_size, len(self.dep_vars)),
+            (len(self._time_values), len(self._entity_values), self.sample_size, len(self.targets)),
             np.nan,
             dtype=np.float64  # Match original data type
         )
         
-        for var_idx, var in enumerate(self.dep_vars):
+        for var_idx, var in enumerate(self.targets):
             # Get aligned data with proper NaN handling
             var_series = self.dataframe[var].reindex(full_idx)
             
@@ -433,28 +393,12 @@ class ViewsDataset:
         Convert a 4D features tensor back to a pandas DataFrame.
 
         Parameters:
-        tensor (np.ndarray): 4D tensor with shape (time × entity × samples × variables).
+        tensor (np.ndarray): 4D tensor with shape (time × entity × samples × features).
 
         Returns:
         pd.DataFrame: DataFrame with MultiIndex (time, entity) and variables as columns.
         """
-        # n_time, n_entities, n_samples, n_vars = tensor.shape
-        # current_columns = self.dataframe.columns if n_vars == len(self.dataframe.columns) else self.indep_vars
-        # time_steps = self.original_index.get_level_values(self._time_id).unique()
-        # entities = self.original_index.get_level_values(self._entity_id).unique()
-        
-        # data = {}
-        # for var_idx, var_name in enumerate(current_columns):
-        #     var_data = tensor[:, :, :, var_idx].reshape(-1, n_samples)
-        #     data[var_name] = [arr for arr in var_data]
-        
-        # reconstructed = pd.DataFrame(
-        #     data,
-        #     index=pd.MultiIndex.from_product([time_steps, entities], names=[self._time_id, self._entity_id])
-        # )
-        # return reconstructed.loc[self.original_index]
-        
-        # Get dimensions
+
         n_time, n_entities, n_samples, n_vars = tensor.shape
         
         # Create MultiIndex for rows (time × entity)
@@ -479,43 +423,6 @@ class ViewsDataset:
         
         return df.loc[self.original_index]
     
-    # def calculate_map(self, enforce_non_negative: bool = False) -> pd.DataFrame:
-    #     """
-    #     Calculate Maximum A Posteriori (MAP) estimates for prediction distributions.
-        
-    #     Parameters:
-    #     enforce_non_negative (bool): If True, forces MAP estimates to be non-negative
-        
-    #     Returns:
-    #     pd.DataFrame: DataFrame with MAP estimates (time × entity × variables)
-    #     """
-    #     if not self.is_prediction:
-    #         raise ValueError("MAP calculation only valid for prediction dataframes")
-
-    #     tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
-    #     map_results = []
-
-    #     for var_idx, var_name in enumerate(self.dep_vars):
-    #         var_tensor = tensor[..., var_idx]
-    #         orig_shape = var_tensor.shape[:2]
-            
-    #         # Flatten for parallel processing
-    #         flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
-            
-    #         # Parallel execution with error handling
-    #         with Parallel(n_jobs=-1, prefer="threads") as parallel:
-    #             map_flat = parallel(
-    #                 delayed(self._compute_single_map_with_checks)(
-    #                     samples, 
-    #                     enforce_non_negative
-    #                 ) for samples in flat_tensor
-    #             )
-            
-    #         map_estimates = np.array(map_flat).reshape(orig_shape)
-    #         df = self._create_map_dataframe(var_name, map_estimates)
-    #         map_results.append(df)
-            
-    #     return pd.concat(map_results, axis=1)
 
     def calculate_map(self, enforce_non_negative: bool = False, features: Optional[List[str]] = None) -> pd.DataFrame:
         """
@@ -523,10 +430,10 @@ class ViewsDataset:
 
         Parameters:
         enforce_non_negative (bool): If True, forces MAP estimates to be non-negative
-        features (List[str]): List of features to calculate MAP for. If None, uses all prediction variables.
+        features (List[str]): List of features to calculate MAP for. If None, uses all prediction targets.
 
         Returns:
-        pd.DataFrame: DataFrame with MAP estimates (time × entity × variables)
+        pd.DataFrame: DataFrame with MAP estimates (time × entity × targets)
         """
 
         if not self.is_prediction:
@@ -534,12 +441,12 @@ class ViewsDataset:
 
         # Validate features parameter
         if features is not None:
-            invalid = set(features) - set(self.dep_vars)
+            invalid = set(features) - set(self.targets)
             if invalid:
                 raise ValueError(f"Invalid features specified: {invalid}")
             selected_vars = features
         else:
-            selected_vars = self.dep_vars
+            selected_vars = self.targets
 
         tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
         map_results = []
@@ -548,7 +455,7 @@ class ViewsDataset:
         sorted_tensor = np.sort(tensor, axis=2)
 
         for var_name in tqdm(selected_vars, desc="Processing features"):
-            var_idx = self.dep_vars.index(var_name)
+            var_idx = self.targets.index(var_name)
             var_tensor = sorted_tensor[..., var_idx]
             orig_shape = var_tensor.shape[:2]
             
@@ -722,14 +629,15 @@ class ViewsDataset:
            plot_kde: bool = True,
            max_bins: int = 100) -> plt.Axes:
         """
-        Plot MAP estimate with HDI and distribution.
-        
-        Parameters:
-        entity_id: Specific entity to plot
-        time_id: Specific time step to plot
-        var_name: Variable to plot
-        hdi_alpha: Credibility level for HDI
-        ax: Matplotlib axes object
+        entity_id (Optional[int]): Specific entity to plot.
+        time_id (Optional[int]): Specific time step to plot.
+        var_name (Optional[str]): Variable to plot.
+        hdi_alpha (float): Credibility level for HDI. Default is 0.9.
+        ax (Optional[plt.Axes]): Matplotlib axes object. If None, a new axis is created.
+        colors (Optional[List[str]]): List of colors for HDI and MAP lines. If None, default colors are used.
+        plot_kde (bool): Whether to plot Kernel Density Estimate. Default is True.
+        max_bins (int): Maximum number of bins for histogram. Default is 100.
+        plt.Axes: Matplotlib axes object with the plot.
         
         Returns:
         matplotlib.axes.Axes
@@ -738,12 +646,12 @@ class ViewsDataset:
         ax = ax or plt.gca()
         
         # Validate inputs
-        if var_name is None or var_name not in self.dep_vars:
-            raise ValueError(f"Invalid variable {var_name}. Choose from {self.dep_vars}")
+        if var_name is None or var_name not in self.targets:
+            raise ValueError(f"Invalid variable {var_name}. Choose from {self.targets}")
         
         # Get relevant data slice
         tensor = self.to_tensor()
-        var_idx = self.dep_vars.index(var_name)
+        var_idx = self.targets.index(var_name)
         data = tensor[..., var_idx]
 
         # Slice data based on selections
@@ -823,7 +731,7 @@ class ViewsDataset:
         pd.DataFrame: DataFrame with MultiIndex (time, entity) and variables as columns.
         """
         n_time, n_entities, n_samples, n_vars = tensor.shape
-        current_columns = self.dep_vars
+        current_columns = self.targets
         time_steps = self.dataframe.index.get_level_values(self._time_id).unique()
         entities = self.dataframe.index.get_level_values(self._entity_id).unique()
 
@@ -886,7 +794,7 @@ class ViewsDataset:
         tensor = self.to_tensor()
         stats = []
         
-        for var_idx, var_name in enumerate(self.dep_vars):
+        for var_idx, var_name in enumerate(self.targets):
             var_tensor = tensor[..., var_idx]
             stats.append({
                 'variable': var_name,
@@ -959,7 +867,7 @@ class ViewsDataset:
         tensor = self.to_tensor()
         samples = []
         
-        for var_idx, var_name in enumerate(self.dep_vars):
+        for var_idx, var_name in enumerate(self.targets):
             var_tensor = tensor[..., var_idx]
             sampled = np.apply_along_axis(
                 lambda x: np.random.choice(x, num_samples),
@@ -1075,7 +983,7 @@ class ViewsDataset:
             # Get subset if specified
             if time_ids is not None or entity_ids is not None:
                 subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-                temp_ds = ViewsDataset(subset_df, dep_vars=self.dep_vars)
+                temp_ds = ViewsDataset(subset_df, targets=self.targets)
                 X = temp_ds.to_tensor(include_dep_vars=False)  # (time, entity, samples, features)
                 y_tensor = temp_ds.to_tensor(include_dep_vars=True)  # (time, entity, samples, all_vars)
             else:
@@ -1083,7 +991,7 @@ class ViewsDataset:
                 y_tensor = self.to_tensor(include_dep_vars=True)
             
             # Extract target variables across all samples
-            dep_var_indices = [self.dataframe.columns.get_loc(var) for var in self.dep_vars]
+            dep_var_indices = [self.dataframe.columns.get_loc(var) for var in self.targets]
             y = y_tensor[:, :, :, dep_var_indices]  # (time, entity, samples, targets)
             
             # Validate 4D shapes (time, entity, samples, vars)
@@ -1125,7 +1033,7 @@ class ViewsDataset:
         if include_dep_vars:
             return original.equals(reconstructed)
         else:
-            return original[self.indep_vars].equals(reconstructed[self.indep_vars])
+            return original[self.features].equals(reconstructed[self.features])
     
 
     @property
@@ -1138,7 +1046,7 @@ class ViewsDataset:
 
     @property
     def num_features(self) -> int:
-        return len(self.indep_vars)
+        return len(self.features)
 
     def __repr__(self) -> str:
         return (f"ViewsDataset(time_steps={self.num_time_steps}, "
@@ -1170,7 +1078,7 @@ class ViewsDataset:
         tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
         hdi_results = []
 
-        for var_idx, var_name in enumerate(self.dep_vars):
+        for var_idx, var_name in enumerate(self.targets):
             var_tensor = tensor[..., var_idx]  # Shape: (time, entity, samples)
             sorted_data = np.sort(var_tensor, axis=2)
             n_samples = sorted_data.shape[2]
@@ -1256,8 +1164,8 @@ class ViewsDataset:
         """
         if not self.is_prediction:
             raise ValueError("HDI plotting only available for prediction dataframes")
-        if var_name not in self.dep_vars or var_name is None:
-            raise ValueError(f"Invalid variable {var_name}. Choose from {self.dep_vars}")
+        if var_name not in self.targets or var_name is None:
+            raise ValueError(f"Invalid variable {var_name}. Choose from {self.targets}")
         if not isinstance(alphas, tuple):
             alphas = (alphas,)
         if not all(0 < a < 1 for a in alphas):
@@ -1265,7 +1173,7 @@ class ViewsDataset:
 
         # Get relevant data
         tensor = self.to_tensor()
-        var_idx = self.dep_vars.index(var_name)
+        var_idx = self.targets.index(var_name)
         data = tensor[..., var_idx]
 
         # Slice data based on selections
@@ -1369,7 +1277,7 @@ class ViewsDataset:
         reports = []
         for alpha in alphas:
             hdi_df = self.calculate_hdi(alpha)
-            for var in self.dep_vars:
+            for var in self.targets:
                 var_hdi = hdi_df[[f"{var}_hdi_lower", f"{var}_hdi_upper"]]
                 reports.append({
                     'variable': var,
