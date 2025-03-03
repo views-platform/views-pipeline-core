@@ -1129,7 +1129,7 @@ class ViewsDataset:
         # Get subset if specified
         if time_ids is not None or entity_ids is not None:
             subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-            temp_ds = ViewsDataset(subset_df, targets=self.targets)
+            temp_ds = ViewsDataset(subset_df, targets=self.targets, broadcast_features=self.broadcast_features)
             X = temp_ds.to_tensor(
                 include_targets=False
             )  # (time, entity, samples, features)
