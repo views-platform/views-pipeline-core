@@ -1,49 +1,95 @@
-# THIS README SHOULD BE MINIMAL AND MOST OF THE STUFF BELOW BE MIGRATED TO ADRs, THE GLOSSARY, OR SIMILAR.
+
+# Documentation of VIEWS Pipeline Core
+
+## Overview
+This repository contains the core components of the **views_pipeline_core** package, a structured pipeline for data processing, model management, and evaluation. Below is an overview of the directory structure along with descriptions of each component.
+
+## Directory Structure
+
+```
+views_pipeline_core/
+├── __init__.py                     # Package initialization
+├── cli/                             # Command-line interface utilities
+├── configs/                         # Configuration files and settings
+├── data/                            # Data processing and storage
+├── files/                           # File handling utilities
+├── managers/                        # Model and ensemble management (see managers/README.md)
+├── models/                          # Model definitions and related utilities
+├── templates/                       # Template configurations for models and ensembles
+├── wandb/                           # Weights & Biases logging and utilities
+└── README.md                        # Main documentation
+```
+
+## Detailed Breakdown
+
+### `cli/`
+Contains utilities for command-line interactions with the pipeline.
+- `utils.py`: Helper functions for CLI interactions.
+
+**Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/cli).
+
+### `configs/`
+Holds configuration files for different components of the pipeline:
+- `drift_detection.py`: Configuration related to drift detection.
+- `pipeline.py`: General pipeline configurations.
+- `logging.yaml`: Logging settings.
+
+**Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/configs).
+
+### `data/`
+Handles data storage and loading.
+- `dataloaders.py`: Functions for loading datasets.
+- `handlers.py`: Data processing utilities.
+- `utils.py`: Helper functions for managing data.
+
+**Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/dataloaders).
+
+### `files/`
+Handles file operations and management.
+- `utils.py`: File processing utilities.
+
+**Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/files).
+
+### `managers/`
+Handles model and ensemble management. **Detailed documentation available in `managers/README.md`**
+
+**Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/managers).
+
+### `models/`
+Defines models and their outputs.
+- `check.py`: Validates model consistency.
+- `outputs.py`: Handles model outputs and transformations.
+
+**Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/models).
+
+### `templates/`
+Contains templates for different components of the pipeline, such as models and ensembles.
+- `ensemble/`: Configuration templates for ensemble models.
+- `model/`: Configuration templates for individual models.
+- `package/`: Templates for packaging and deployment.
+
+**Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/templates).
+
+### `wandb/`
+Handles integration with Weights & Biases for experiment tracking.
+- `utils.py`: Functions for logging results to W&B.
+
+**Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/wandb).
 
 
 
-# Documentation of VIEWS Pipeline
+*For further details, please check the specific README files inside the respective directories.*
 
-This is a collection of high-level documentation for the entire repository/pipeline. We aim to also offer in-depth documentation in folder READMEs and docstrings of functions and classes within the code.
 
-## Motivation and Rationale
-The VIEWS early-warning system pipeline produces predictions on a monthly basis, for a variety of models. However, in the last months, several errors have occured that compromise the quality of our forecasts. Additionally, the pipeline does not yet adhere to best practices standards relating to the structure and implementation. As a result, the VIEWS Pipeline is being rewritten and improved during a 5-day hackathon. 
 
-A diagram of the pipeline schematics is available [here](https://github.com/prio-data/views_pipeline/blob/main/documentation/pipeline_diagram001.pdf).
 
-We aim to develop a minimal solution first, that can be further developed in the future to accommodate more needs and models. The initial models implemented during the hackathon in February 2024 are: 2 baseline models (all zero, no change), 2 production models (orange pasta, yellow pikachu), and 1 bespoke shadow model (Hydranet).
 
-The most important changes relate to the following elements: standardizing  moving away from Notebooks and towards scripts; implementing alert gates for input and performance drift; using the platform Weights & Biases for logging and visualizing model outputs; using the platform Prefect to carry out the entire monthly run, from fetching the input data through a queryset to allocating predictions in the prediction store on Fimbulthul server.
 
-## Goals of the pipeline
 
-1. **Maintainability**:
-    - **Continuous Maintenance**: the code should be adaptable and easy to update without needing to overhaul the entire code base. This approach ensures long-term sustainability.
-    - **Accessibility**: The code should be understandable by any Python-proficient collaborator in the VIEWS team - not just specialists or the original authors.
-    - **Documentation**: Well-specified documentation must accompany the code, detailing its purpose and functionality clearly, so that no additional information is needed for understanding.
 
-2. **Flexibility**:
-    - **Rapid Testing and Integration**: The pipeline should allow for quick experimentation with new models or ensembles, enabling their fast integration AND removal.
-    - **Ease of Modification**: Adding, retiring, or modifying models and ensembles should be straightforward, even by (python-proficient) collaborators who are not the original model or pipeline authors.
-    - **Adaptability and modularity**: The process of altering the model lineup should be modular and not require extensive reworking of the overall system/code base.
 
-3. **Scalability**:
-    - **Global Expansion**: The pipeline should support scaling up to handle data and models with global coverage - even at highly disaggregate temporal and spatial levels.
-    - **Incorporating Uncertainty**: It must be capable of integrating quantification of uncertainty.
-    - **Furture-ready** It must be ready for new Levels of Analysis (LOAs), novel models, more features, and additional targets.
-    - **Handling Diverse Data**: The system should be versatile enough to include and process various kinds of data, including both structured (tabular) and unstructured data (image/text).
 
-4. **Reliability**:
-    - **Automated Execution**: The full production pipeline should run monthly with minimal human intervention.
-    - **Robustness in Partial Failure**: In case of a breakdown in certain parts (model or data-pipe issues), the unaffected components should continue operating.
-    - **Issue Identification**: Faulty or compromised elements should be easily detectable through quality assurance processes (see below).
 
-5. **Quality Assurance (Monitoring)**:
-    - **Input Monitoring**: There should be mechanisms to quickly assess input data for any drift each time forecasts are generated.
-    - **Output Monitoring**: Similarly, the output of the models should be evaluated for drift each time forecasts are generated.
-    - **Performance Assessment**: Lastly, continuous and timely evaluation of each model's and ensemble's performance is necessary to detect and address any performance drift.
-
-In summary, our pipeline aims to be maintainable, flexible, scalable, reliable, and continuously monitored for quality, ensuring it can adapt, grow, and perform efficiently well into the foreseeable future.
 
 ## Definition of Key Terms
 
