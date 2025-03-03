@@ -354,6 +354,9 @@ class ViewsDataset:
         - The resulting tensor has the shape (number of time steps, number of entities, number of features).
         """
 
+        if self.dataframe.empty:
+            return np.empty((0, 0, 0, 0))
+
         current_columns = self.dataframe.columns if include_targets else self.features
 
         # Get aligned index
@@ -575,7 +578,10 @@ class ViewsDataset:
         float
             The estimated MAP.
         """
+        
         samples = np.asarray(samples)
+        if np.all(np.isnan(samples)):
+            return np.nan
 
         if len(samples) == 0:
             logger.error("❌ No valid samples. Returning MAP = 0.0")
@@ -1220,6 +1226,9 @@ class ViewsDataset:
             raise ValueError("HDI calculation only valid for prediction dataframes")
         if not 0 < alpha < 1:
             raise ValueError(f"Alpha must be between 0 and 1, got {alpha}")
+        
+        if self.dataframe.empty:
+            return pd.DataFrame()
 
         tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
         hdi_results = []
@@ -1396,6 +1405,9 @@ class ViewsDataset:
         self, data: np.ndarray, alpha: float
     ) -> Tuple[float, float]:
         """Calculate HDI for a 1D array"""
+        if np.all(np.isnan(data)):
+            return (np.nan, np.nan)
+        
         sorted_data = np.sort(data)
         n_samples = len(sorted_data)
 
