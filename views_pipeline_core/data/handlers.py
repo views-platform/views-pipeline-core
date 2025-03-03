@@ -102,6 +102,12 @@ class ViewsDataset:
                         self.dataframe[col] = self.dataframe[col].apply(np.array)
                 # Disable tensor operations by not setting sample_size
                 self.sample_size = None
+        self._split_tensor_cache = {}
+        self._max_tensor_cache_size = 128  # Set a maximum cache size
+
+    def _clear_tensor_cache_if_needed(self):
+        if len(self._split_tensor_cache) > self._max_tensor_cache_size:
+            self._split_tensor_cache.clear()
 
     @staticmethod
     @contextmanager
@@ -578,7 +584,7 @@ class ViewsDataset:
         float
             The estimated MAP.
         """
-        
+
         samples = np.asarray(samples)
         if np.all(np.isnan(samples)):
             return np.nan
@@ -1125,33 +1131,39 @@ class ViewsDataset:
         """
         if self.is_prediction:
             raise ValueError("Data splitting not applicable to prediction dataframes")
-
-        # Get subset if specified
-        if time_ids is not None or entity_ids is not None:
-            subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-            temp_ds = ViewsDataset(subset_df, targets=self.targets, broadcast_features=self.broadcast_features)
-            X = temp_ds.to_tensor(
-                include_targets=False
-            )  # (time, entity, samples, features)
-            y_tensor = temp_ds.to_tensor(
-                include_targets=True
-            )  # (time, entity, samples, all_vars)
+        
+        key = (tuple(time_ids) if time_ids is not None else None, tuple(entity_ids) if entity_ids is not None else None)
+        if key in self._split_tensor_cache:
+            # print(f"Using cached split data for {key}")
+            return self._split_tensor_cache[key]
         else:
-            X = self.to_tensor(include_targets=False)
-            y_tensor = self.to_tensor(include_targets=True)
+            # Get subset if specified
+            self._clear_tensor_cache_if_needed()
+            if time_ids is not None or entity_ids is not None:
+                subset_df = self.get_subset_dataframe(time_ids, entity_ids)
+                temp_ds = ViewsDataset(subset_df, targets=self.targets, broadcast_features=self.broadcast_features)
+                X = temp_ds.to_tensor(
+                    include_targets=False
+                )  # (time, entity, samples, features)
+                y_tensor = temp_ds.to_tensor(
+                    include_targets=True
+                )  # (time, entity, samples, all_vars)
+            else:
+                X = self.to_tensor(include_targets=False)
+                y_tensor = self.to_tensor(include_targets=True)
 
-        # Extract target variables across all samples
-        feature_indices = [self.dataframe.columns.get_loc(var) for var in self.targets]
-        y = y_tensor[:, :, :, feature_indices]  # (time, entity, samples, targets)
+            # Extract target variables across all samples
+            feature_indices = [self.dataframe.columns.get_loc(var) for var in self.targets]
+            y = y_tensor[:, :, :, feature_indices]  # (time, entity, samples, targets)
 
-        # Validate 4D shapes (time, entity, samples, vars)
-        if X.shape[:3] != y.shape[:3]:  # Compare time, entity, samples dimensions
-            raise ValueError(
-                f"Shape mismatch: X {X.shape[:3]} (time×entity×samples) "
-                f"vs y {y.shape[:3]} (time×entity×samples)"
-            )
-
-        return X, y
+            # Validate 4D shapes (time, entity, samples, vars)
+            if X.shape[:3] != y.shape[:3]:  # Compare time, entity, samples dimensions
+                raise ValueError(
+                    f"Shape mismatch: X {X.shape[:3]} (time×entity×samples) "
+                    f"vs y {y.shape[:3]} (time×entity×samples)"
+                )
+            self._split_tensor_cache[key] = X, y
+            return X, y
 
     def check_integrity(
         self,
@@ -1226,7 +1238,7 @@ class ViewsDataset:
             raise ValueError("HDI calculation only valid for prediction dataframes")
         if not 0 < alpha < 1:
             raise ValueError(f"Alpha must be between 0 and 1, got {alpha}")
-        
+
         if self.dataframe.empty:
             return pd.DataFrame()
 
@@ -1407,7 +1419,7 @@ class ViewsDataset:
         """Calculate HDI for a 1D array"""
         if np.all(np.isnan(data)):
             return (np.nan, np.nan)
-        
+
         sorted_data = np.sort(data)
         n_samples = len(sorted_data)
 
