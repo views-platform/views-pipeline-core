@@ -1259,7 +1259,7 @@ class ModelManager:
             logger.info(f"Calculating evaluation metrics for {target}")
             conflict_type = ModelManager._get_conflict_type(target)
 
-            eval_result_dict = evaluation_manager.evaluate(df_actual, df_predictions, target, steps=self.config["steps"], is_uncertainty=False)
+            eval_result_dict = evaluation_manager.evaluate(df_actual, df_predictions, target, steps=self.config["steps"])
             step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
             time_series_wise_evaluation, df_time_series_wise_evaluation = eval_result_dict["time_series"]
             month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
