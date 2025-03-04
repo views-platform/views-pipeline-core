@@ -17,7 +17,7 @@ This is particularly important for managing prediction versions, tracking when p
 ## Decision
 The evaluation naming convention for a single model follows this structure:
 ```
-eval_<evaluation_schema>_<conflict_type>__<run_type>_<timestamp>.pkl
+eval_<evaluation_schema>_<conflict_type>_<run_type>_<timestamp>.pkl
 ```
 - evaluation_schema: Three ways to calculate metrics - month (month-wise), ts (time-series-wise), and step (step-wise).
 - conflict_type: Three categories of armed conflict - sb (state-based), ns (non state-based), and os (one-sided).
@@ -26,7 +26,7 @@ eval_<evaluation_schema>_<conflict_type>__<run_type>_<timestamp>.pkl
 
 The evaluation naming convention for an ensemble model has the same structure:
 ```
-eval_<evaluation_schema>_<conflict_type>__<run_type>_<timestamp>.pkl
+eval_<evaluation_schema>_<conflict_type>_<run_type>_<timestamp>.pkl
 ```
 - evaluation_schema: Three ways to calculate metrics - month (month-wise), ts (time-series-wise), and step (step-wise).
 - conflict_type: Three categories of armed conflict - sb (state-based), ns (non state-based), and os (one-sided).
