@@ -169,7 +169,7 @@ class MappingManager:
 
         # Simplify geometries for faster rendering
         mapping_dataframe["geometry"] = mapping_dataframe.geometry.simplify(
-            tolerance=0.02,  # Adjust based on data scale (degrees for EPSG:4326)
+            tolerance=0.20,  # Adjust based on data scale (degrees for EPSG:4326)
             preserve_topology=True,
         )
 
@@ -184,8 +184,10 @@ class MappingManager:
             hover_data=[self._entity_id, self._time_id, target],
             color_continuous_scale="OrRd",
             range_color=(
-                mapping_dataframe[target].min(),
-                mapping_dataframe[target].max(),
+                # mapping_dataframe[target].min(),
+                # mapping_dataframe[target].max(),
+                mapping_dataframe[target].quantile(0.05),
+                mapping_dataframe[target].quantile(0.95)
             ),
             labels={self._time_id: "Time Period", target: target},
         )
@@ -208,6 +210,12 @@ class MappingManager:
             ],
         )
 
+        fig.update_traces(
+            marker_line_width=0.5,
+            marker_opacity=0.9,
+            selector=dict(type='choropleth')
+        )
+        
         # Improve map rendering
         fig.update_geos(
             fitbounds="locations",
@@ -216,7 +224,7 @@ class MappingManager:
             countrycolor="rgba(100,100,100,0.3)",  # Lighter gray
             countrywidth=0.3,  # Thinner borders
             # Add grid line styling
-            showlakes=False,
+            showlakes=True,
             showocean=False,
             showsubunits=True,
             subunitcolor="rgba(200,200,200,0.2)",
@@ -224,16 +232,16 @@ class MappingManager:
         )
 
         # Add latitude/longitude grid styling
-        fig.update_layout(
-            geo=dict(
-                lonaxis=dict(
-                    showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
-                ),
-                lataxis=dict(
-                    showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
-                ),
-            )
-        )
+        # fig.update_layout(
+        #     geo=dict(
+        #         lonaxis=dict(
+        #             showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
+        #         ),
+        #         lataxis=dict(
+        #             showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
+        #         ),
+        #     )
+        # )
 
         return fig
 
