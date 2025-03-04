@@ -25,7 +25,7 @@ log_data = read_log_file("/data/raw/calibration_log.txt")
 print(log_data["Data Fetch Timestamp"])
 ```
 
-### `create_data_fetch_log_file(path_raw, run_type, model_name, data_fetch_timestamp)`
+#### `create_data_fetch_log_file(path_raw, run_type, model_name, data_fetch_timestamp)`
 
 Creates standardized data fetch logs.
 
@@ -47,7 +47,7 @@ create_data_fetch_log_file(
 )
 ```
 
-### `create_specific_log_file(...)`
+#### `create_specific_log_file(...)`
 
 Creates detailed model-specific logs.
 
@@ -79,7 +79,7 @@ create_specific_log_file(
 )
 ```
 
-### `create_log_file(...)`
+#### `create_log_file(...)`
 
 High-level log creation with ensemble support.
 

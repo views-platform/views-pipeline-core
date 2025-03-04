@@ -207,7 +207,7 @@ def _save_predictions(self, df_predictions, path_generated)
 Saves forecasts with versioning:
 
 ```python
-self._save_predictions(forecast_df, Path("results/[runtype_timestamp]"))
+self._save_predictions(forecast_df, Path("orange_pasta/data/generated/predictions_forecasting_20250218_132543.parquet"))
 ```
 
 ### Example Use Cases
