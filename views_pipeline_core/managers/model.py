@@ -904,10 +904,18 @@ class ModelManager:
         config["run_type"] = args.run_type
         config["sweep"] = args.sweep
 
+        # Check if deployment status is deprecated. If so, raise an error.
+        if config["deployment_status"] == "deprecated":
+            logger.error(
+                f"Model {self._model_path.model_name} has been deprecated. Please use a different model."
+            )
+            raise ValueError("Model is deprecated and cannot be used.")
+        
         # Check if target is a list. If not, convert it to a list. Otherwise raise an error.
         if isinstance(config["depvar"], str):
             config["depvar"] = [config["depvar"]]
         if not isinstance(config["depvar"], list):
+            logger.error("Target must be a string or a list of strings.")
             raise ValueError("Target must be a string or a list of strings.")
 
         return config
