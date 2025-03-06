@@ -39,7 +39,7 @@ The **views-pipeline-core** contains all the necesary components for execution o
 
 ## Installation
 
-**Views-pipeline-core** can easily be installed using the pip package manager. Set up a conda environment with Python version 3.11, activate it and run `pip install views-pipeline-code`.
+**Views-pipeline-core** can easily be installed using the pip package manager. Set up a conda environment with Python version 3.11, activate it and run `pip install views-pipeline-core`.
 
 ## Design Objectives
 
