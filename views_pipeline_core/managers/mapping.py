@@ -52,7 +52,7 @@ class MappingManager:
             Path(__file__).parent.parent
             / "mapping"
             / "shapefiles"
-            / "priogrid_cellshp"
+            / "priogrid"
             / "priogrid_cell.shp"
         )
         return gpd.read_file(path)
@@ -259,8 +259,8 @@ class MappingManager:
             legend=False,
             legend_kwds={"label": f"{target}", "orientation": "horizontal"},
             cmap="OrRd",
-            vmin=self._mapping_dataframe[target].min(),
-            vmax=self._mapping_dataframe[target].max(),
+            vmin=mapping_dataframe[target].quantile(0.05),
+            vmax=mapping_dataframe[target].quantile(0.95),
             linewidth=0.1,
             color="#404040",  # Darker gray instead of black
             alpha=0.5,  # Add transparency
