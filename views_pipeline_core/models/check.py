@@ -69,7 +69,7 @@ def check_model_conditions(path_generated, run_type):
     return True
 
 
-def check_model_deployment_status(path_generated, run_type, deployment_status):
+def check_ensemble_model_deployment_status(path_generated, run_type, ensemble_deployment_status):
     """
     Checks if the ensemble model meets the required deployment status conditions based on the log file.
 
@@ -88,10 +88,18 @@ def check_model_deployment_status(path_generated, run_type, deployment_status):
         return False
 
     model_name = log_data["Single Model Name"]
-    model_dp_status = log_data["Deployment Status"]
+    single_model_dp_status = log_data["Deployment Status"]
 
     # More check conditions can be added here
-    if model_dp_status == "Deployed" and deployment_status != "Deployed":
+    if ensemble_deployment_status == 'Deprecated':
+        logger.error(f"Deployment status is deprecated. Exiting.")
+        return False
+    
+    if single_model_dp_status == 'Deprecated':
+        logger.error(f"Model {model_name} deployment status is deprecated. Exiting.")
+        return False
+
+    if single_model_dp_status == "Deployed" and ensemble_deployment_status != "Deployed":
         logger.error(f"Model {model_name} deployment status is deployed "
                      f"but the ensemble is not. Exiting.")
         return False
@@ -116,7 +124,7 @@ def ensemble_model_check(config):
 
         if (
                 (not check_model_conditions(path_generated, config["run_type"])) or
-                (not check_model_deployment_status(path_generated, config["run_type"], config["deployment_status"]))
+                (not check_ensemble_model_deployment_status(path_generated, config["run_type"], config["deployment_status"]))
         ):
             exit(1)  # Shut down if conditions are not met
     logger.info(f"Model {config['name']} meets the required conditions.")
