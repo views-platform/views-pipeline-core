@@ -2,22 +2,31 @@
 # Documentation of VIEWS Pipeline Core
 
 ## Overview
-This repository contains the core components of the **views_pipeline_core** package, a structured pipeline for data processing, model management, and evaluation. Below is an overview of the directory structure along with descriptions of each component.
+This repository contains the core components of the **views-pipeline-core** package, a structured pipeline for data processing, model management, and evaluation. Additionally, this folder includes the [ADR](https://github.com/views-platform/views-pipeline-core/tree/main/documentation/ADRs)s (Architectural Decision Records), which provide further context and details about the architectural decisions made during the development of the package. Below is an overview of the directory structure along with descriptions of each component.
 
 ## Directory Structure
 
 ```
-views_pipeline_core/
-├── __init__.py                     # Package initialization
-├── cli/                             # Command-line interface utilities
-├── configs/                         # Configuration files and settings
-├── data/                            # Data processing and storage
-├── files/                           # File handling utilities
-├── managers/                        # Model and ensemble management (see managers/README.md)
-├── models/                          # Model definitions and related utilities
-├── templates/                       # Template configurations for models and ensembles
-├── wandb/                           # Weights & Biases logging and utilities
-└── README.md                        # Main documentation
+.github/                              # GitHub configuration files
+dist/                                 # Distribution files
+documentation/                        # Documentation files
+tests/                                # Folder containing tests
+views_pipeline_core/                  # Core package
+├── __init__.py                       # Package initialization
+├── cli/                              # Command-line interface utilities
+├── configs/                          # Configuration files and settings
+├── data/                             # Data processing and storage
+├── files/                            # File handling utilities
+├── managers/                         # Model and ensemble management (see managers/README.md)
+├── models/                           # Model definitions and related utilities
+├── templates/                        # Template configurations for models and ensembles
+├── wandb/                            # Weights & Biases logging and utilities
+└── README.md                         # Main documentation
+.gitignore                            # Git ignore rules 
+README.md                             # Main project documentation
+image.png                             # Image resources
+pyproject.toml                        # Python project configuration
+
 ```
 
 ## Detailed Breakdown
