@@ -127,10 +127,11 @@ class PackageManager:
         """
         # Define the GitHub URL for the package
         github_url = f"""https://api.github.com/repos/{organization_name}/{repository_name}/releases/latest"""
+
         # Get the latest release information from GitHub
         try:
             response = requests.get(github_url)
-            # print(response.json())
+#            print(response.json())
 
             if response.status_code == 200:
                 data = response.json()

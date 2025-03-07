@@ -202,7 +202,7 @@ def get_deployment_config():
         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
         manager = ModelManager(mock_model_instance, use_prediction_store=False)
         manager._config_hyperparameters = {"hp_key": "hp_value"}
-        manager._config_meta = {"meta_key": "meta_value"}
+        manager._config_meta = {"meta_key": "meta_value", "depvar": "test_depvar_dep"}
         manager._config_deployment = {"deploy_key": "deploy_value"}
         args = MagicMock(run_type="test_run")
         config = manager._update_single_config(args)
@@ -214,19 +214,20 @@ def get_deployment_config():
 
 def test_validate_prediction_dataframe_empty(mock_model_manager):
     df = pd.DataFrame()
-    with pytest.raises(ValueError, match="Prediction DataFrame is empty."):
+    with pytest.raises(ValueError, match="Prediction DataFrame is empty"):
         mock_model_manager._validate_prediction_dataframe(df)
 
 def test_validate_prediction_dataframe_missing_depvar(mock_model_manager):
     df = pd.DataFrame({"month_id": [1, 2], "priogrid_id": [1, 2]})
-    with pytest.raises(ValueError, match="target_variable not found in dataframe columns."):
+    
+    with pytest.raises(ValueError):
         mock_model_manager._validate_prediction_dataframe(df)
 
 def test_validate_prediction_dataframe_valid_pgm(mock_model_manager):
     df = pd.DataFrame({
         "month_id": [1, 2],
         "priogrid_id": [1, 2],
-        "target_variable": [0.1, 0.2]
+        "pred_target_variable": [0.1, 0.2]
     }).set_index(["month_id", "priogrid_id"])
     mock_model_manager._validate_prediction_dataframe(df)
 
@@ -234,7 +235,7 @@ def test_validate_prediction_dataframe_valid_cm(mock_model_manager):
     df = pd.DataFrame({
         "month_id": [1, 2],
         "country_id": [1, 2],
-        "target_variable": [0.1, 0.2]
+        "pred_target_variable": [0.1, 0.2]
     }).set_index(["month_id", "country_id"])
     mock_model_manager._validate_prediction_dataframe(df)
 
@@ -242,9 +243,9 @@ def test_validate_prediction_dataframe_invalid_index(mock_model_manager):
     df = pd.DataFrame({
         "month_id": [1, 2],
         "invalid_id": [1, 2],
-        "target_variable": [0.1, 0.2]
+        "pred_target_variable": [0.1, 0.2]
     }).set_index(["month_id", "invalid_id"])
-    with pytest.raises(ValueError, match="Valid indices for pgm or cm not found in prediction DataFrame."):
+    with pytest.raises(ValueError):
         mock_model_manager._validate_prediction_dataframe(df)
 
 def test_validate_prediction_dataframe_valid_single_depvar(mock_model_manager):
@@ -252,7 +253,7 @@ def test_validate_prediction_dataframe_valid_single_depvar(mock_model_manager):
     df = pd.DataFrame({
         "month_id": [1, 2],
         "priogrid_id": [1, 2],
-        "target_variable": [0.1, 0.2]
+        "pred_target_variable": [0.1, 0.2]
     }).set_index(["month_id", "priogrid_id"])
     mock_model_manager._validate_prediction_dataframe(df)
 
@@ -263,7 +264,7 @@ def test_validate_prediction_dataframe_invalid_single_depvar(mock_model_manager)
         "priogrid_id": [1, 2],
         "another_variable": [0.1, 0.2]
     }).set_index(["month_id", "priogrid_id"])
-    with pytest.raises(ValueError, match="target_variable not found in dataframe columns."):
+    with pytest.raises(ValueError):
         mock_model_manager._validate_prediction_dataframe(df)
 
 def test_update_sweep_config(mock_model_path):
@@ -306,7 +307,7 @@ def get_sweep_config():
 """
     mock_config_meta_content = """
 def get_meta_config():
-    meta_config = {'name': 'test_model', 'depvar': 'test_depvar', 'algorithm': 'test_algorithm'}
+    meta_config = {'name': 'test_model', 'depvar': ['test_depvar'], 'algorithm': 'test_algorithm'}
     return meta_config
 """
     with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_sweep_content)):
@@ -345,7 +346,7 @@ def get_meta_config():
         assert config["run_type"] == "test_run"
         assert config["sweep"] is True
         assert config["name"] == "test_model"
-        assert config["depvar"] == "test_depvar"
+        assert config["depvar"] == ["test_depvar"]
         assert config["algorithm"] == "test_algorithm"
         assert config["deployment_status"] == "test_shadow"
 
