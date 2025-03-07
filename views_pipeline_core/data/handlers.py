@@ -16,7 +16,7 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 
-class ViewsDataset:
+class __ViewsDataset:
     def __init__(
         self,
         source: Union[pd.DataFrame, str, Path],
@@ -76,10 +76,10 @@ class ViewsDataset:
             if self.targets is not None:
                 missing_vars = set(self.targets) - set(self.dataframe.columns)
                 if missing_vars:
-                    raise ValueError(f"Missing dependent variables: {missing_vars}")
+                    raise ValueError(f"Missing targets: {missing_vars}")
             else:
                 raise ValueError(
-                    "Dependent variables must be specified for non-prediction dataframes. Example usage: ViewsDataset(dataframe, targets=['ln_sb_best'])"
+                    "Targets must be specified for non-prediction dataframes. Example usage: ViewsDataset(dataframe, targets=['ln_sb_best'])"
                 )
 
             if self.broadcast_features:
@@ -1144,7 +1144,7 @@ class ViewsDataset:
             self._clear_tensor_cache_if_needed()
             if time_ids is not None or entity_ids is not None:
                 subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-                temp_ds = ViewsDataset(
+                temp_ds = __ViewsDataset(
                     subset_df,
                     targets=self.targets,
                     broadcast_features=self.broadcast_features,
@@ -1194,7 +1194,7 @@ class ViewsDataset:
         # Get subset if specified
         if time_ids is not None or entity_ids is not None:
             subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-            temp_ds = ViewsDataset(subset_df)
+            temp_ds = __ViewsDataset(subset_df)
             tensor = temp_ds.to_tensor(include_targets)
             reconstructed = temp_ds.to_dataframe(tensor)
             original = subset_df
@@ -1222,7 +1222,7 @@ class ViewsDataset:
 
     def __repr__(self) -> str:
         return (
-            f"ViewsDataset(time_steps={self.num_time_steps}, "
+            f"__ViewsDataset(time_steps={self.num_time_steps}, "
             f"entities={self.num_entities}, "
             f"features={self.num_features}, "
             f"prediction_mode={self.is_prediction})"
@@ -1491,7 +1491,7 @@ class ViewsDataset:
         return pd.DataFrame(reports)
 
 
-class PGDataset(ViewsDataset):
+class __PGDataset(__ViewsDataset):
     _accessor_name = "pg"
 
     def validate_indices(self) -> None:
@@ -1540,8 +1540,19 @@ class PGDataset(ViewsDataset):
         # Use c accessor to get country names
         return country_df.c.name.to_frame(name="country_name")
 
+    # def get_continent(self) -> pd.DataFrame:
+    #     """Get continent for priogrids through country mapping"""
+    #     # Get country IDs from priogrids
+    #     country_ids = self._get_entity_attr('c_id')
 
-class PGMDataset(PGDataset):
+    #     # Create temporary DataFrame with country IDs
+    #     country_df = pd.DataFrame({'c_id': country_ids}, index=self.dataframe.index)
+
+    #     # Get continent using country dataset logic
+    #     return country_df.c.get_continent()
+
+
+class PGMDataset(__PGDataset):
     from ingester3.extensions import PGMAccessor
 
     def validate_indices(self) -> None:
@@ -1571,7 +1582,7 @@ class PGMDataset(PGDataset):
         return dates.to_frame(name="date")
 
 
-class PGYDataset(ViewsDataset):
+class PGYDataset(__ViewsDataset):
     from ingester3.extensions import PGYAccessor
 
     def validate_indices(self) -> None:
@@ -1582,7 +1593,7 @@ class PGYDataset(ViewsDataset):
             )
 
 
-class CDataset(ViewsDataset):
+class __CDataset(__ViewsDataset):
     # from ingester3.extensions import CAccessor
     _accessor_name = "c"
 
@@ -1622,8 +1633,46 @@ class CDataset(ViewsDataset):
             }
         )
 
+    def get_region(self) -> pd.DataFrame:
+        """Get combined region information"""
+        return pd.DataFrame(
+            {
+                "in_africa": self._get_entity_attr("in_africa"),
+                "in_me": self._get_entity_attr("in_me"),
+            }
+        )
 
-class CMDataset(CDataset):
+    def get_continent(self) -> pd.DataFrame:
+        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        # Get GW codes
+        gwcode = self._get_entity_attr("gwcode")
+
+        # Define continent mapping based on GW code ranges (Gleditsch & Ward system)
+        continent_rules = [
+            (gwcode.between(400, 625), "Africa"),  # African states
+            (gwcode.between(630, 698), "Middle East"),  # Middle East
+            (gwcode.between(200, 395), "Europe"),  # Western Europe
+            (gwcode.between(2, 165), "Americas"),  # Americas
+            (gwcode.between(700, 990), "Asia"),  # Asia/Pacific
+            (gwcode == 999, "International"),  # Special codes
+        ]
+
+        # Create default 'Other' category
+        continent = pd.Series("Other", index=gwcode.index)
+
+        # Apply mapping rules
+        for condition, name in continent_rules:
+            continent = continent.where(~condition, name)
+
+        # Use with existing regional flags. Does not really work well.
+        # region = self.get_region()
+        # continent = continent.where(~region['in_africa'], 'Africa')
+        # continent = continent.where(~region['in_me'], 'Middle East')
+
+        return continent.to_frame(name="continent")
+
+
+class CMDataset(__CDataset):
     from ingester3.extensions import CMAccessor
 
     def validate_indices(self) -> None:
@@ -1658,7 +1707,7 @@ class CMDataset(CDataset):
         return ((months - 1) // 3 + 1).to_frame(name="quarter")
 
 
-class CYDataset(CDataset):
+class CYDataset(__CDataset):
     from ingester3.extensions import CYAccessor
 
     def validate_indices(self) -> None:

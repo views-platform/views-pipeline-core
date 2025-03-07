@@ -87,7 +87,7 @@ class MappingManager:
         return mapping_dataframe
 
     def __init_mapping_dataframe(self, dataframe: pd.DataFrame) -> gpd.GeoDataFrame:
-        _dataframe = dataframe.reset_index()
+        _dataframe = dataframe.reset_index()[self._dataset.targets + [self._entity_id, self._time_id]]
 
         numeric_cols = _dataframe.select_dtypes(include=np.number).columns
         _dataframe[numeric_cols] = _dataframe[numeric_cols].astype(np.float32)
@@ -128,19 +128,63 @@ class MappingManager:
             )
 
     def __add_isoab(self, dataframe: pd.DataFrame):
-        if isinstance(self._dataset, CMDataset):
-            dataframe.rename(columns={self._entity_id: "c_id"}, inplace=True)
-            dataframe["country_name"] = dataframe.c.name
-            dataframe["isoab"] = dataframe.c.isoab
-            dataframe.rename(columns={"c_id": self._entity_id}, inplace=True)
+        # if isinstance(self._dataset, CMDataset):
+        #     dataframe.rename(columns={self._entity_id: "c_id"}, inplace=True)
+        #     dataframe["country_name"] = dataframe.c.name
+        #     dataframe["isoab"] = dataframe.c.isoab
+        #     dataframe.rename(columns={"c_id": self._entity_id}, inplace=True)
+        # return dataframe
+        # Get ISO codes and country names through dataset methods
+        iso_df = self._dataset.get_isoab().reset_index()
+        name_df = self._dataset.get_name().reset_index()
+        
+        # Merge with main dataframe
+        dataframe = dataframe.merge(
+            iso_df[[self._time_id, self._entity_id, 'isoab']],
+            on=[self._time_id, self._entity_id],
+            how='left'
+        )
+        dataframe = dataframe.merge(
+            name_df[[self._time_id, self._entity_id, 'name']],
+            on=[self._time_id, self._entity_id],
+            how='left'
+        )
+        dataframe.rename(columns={'name': 'country_name'}, inplace=True)
+            
         return dataframe
 
     def __add_cid(self, dataframe: pd.DataFrame):
+        # if isinstance(self._dataset, PGMDataset):
+        #     dataframe.rename(columns={self._entity_id: "pg_id"}, inplace=True)
+        #     dataframe["c_id"] = dataframe.pg.c_id
+        #     dataframe["country_name"] = dataframe.pg.name
+        #     dataframe.rename(columns={"pg_id": self._entity_id}, inplace=True)
+        # return dataframe
         if isinstance(self._dataset, PGMDataset):
-            dataframe.rename(columns={self._entity_id: "pg_id"}, inplace=True)
-            dataframe["c_id"] = dataframe.pg.c_id
-            dataframe["country_name"] = dataframe.pg.name
-            dataframe.rename(columns={"pg_id": self._entity_id}, inplace=True)
+            # Get country IDs through dataset method
+            cid_df = self._dataset.get_country_id().reset_index()
+            
+            # Get country names using CDataset
+            country_ids = cid_df['c_id'].unique()
+            temp_country_df = pd.DataFrame({'c_id': country_ids})
+            temp_cdataset = CMDataset(temp_country_df, targets=[])  # Use CMDataset for month alignment
+            
+            # Merge names
+            name_df = temp_cdataset.get_name().reset_index()
+            cid_df = cid_df.merge(
+                name_df[['c_id', 'name']],
+                on='c_id',
+                how='left'
+            )
+            
+            # Merge with main dataframe
+            dataframe = dataframe.merge(
+                cid_df,
+                on=[self._time_id, self._entity_id],
+                how='left'
+            )
+            dataframe.rename(columns={'name': 'country_name'}, inplace=True)
+            
         return dataframe
 
     def get_subset_mapping_dataframe(
@@ -280,7 +324,7 @@ class MappingManager:
             ),
         )
         sm._A = []
-        cbar = fig.colorbar(
+        fig.colorbar(
             sm, ax=ax, orientation="horizontal", fraction=0.036, pad=0.1
         )
 
