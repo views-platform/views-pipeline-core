@@ -7,8 +7,7 @@ import matplotlib.pyplot as plt
 from views_pipeline_core.managers.mapping import MappingManager
 
 class ReportManager:
-    def __init__(self, mapping_manager: MappingManager):
-        self.mapping_manager = mapping_manager
+    def __init__(self):
         self.content = []
         self._plotly_js_loaded = False
 
@@ -20,30 +19,27 @@ class ReportManager:
 
     def add_map(
         self,
-        target: str,
-        time_ids: Optional[Union[int, List[int]]] = None,
-        entity_ids: Optional[Union[int, List[int]]] = None,
-        interactive: bool = False,
+        map_html: str,
         height: int = 600
     ) -> None:
-        subset_df = self.mapping_manager.get_subset_mapping_dataframe(
-            time_ids=time_ids, 
-            entity_ids=entity_ids
-        )
+        # subset_df = self.mapping_manager.get_subset_mapping_dataframe(
+        #     time_ids=time_ids, 
+        #     entity_ids=entity_ids
+        # )
         
-        map_html = self.mapping_manager.plot_map(
-            subset_df, 
-            target, 
-            interactive=interactive, 
-            as_html=True
-        )
+        # map_html = self.mapping_manager.plot_map(
+        #     subset_df, 
+        #     target, 
+        #     interactive=interactive, 
+        #     as_html=True
+        # )
         
-        if interactive:
-            # Ensure Plotly JS is loaded
-            if not self._plotly_js_loaded:
-                self.content.insert(0, self._get_plotly_script())
-                self._plotly_js_loaded = True
-            
+        # if interactive:
+        #     # Ensure Plotly JS is loaded
+        if not self._plotly_js_loaded:
+            self.content.insert(0, self._get_plotly_script())
+            self._plotly_js_loaded = True
+        
             # Wrap in responsive container
             map_html = f'<div style="height:{height}px; margin:20px 0">{map_html}</div>'
         

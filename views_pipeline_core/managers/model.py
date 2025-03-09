@@ -723,18 +723,18 @@ class ModelManager:
     @staticmethod
     def _get_conflict_type(target: str) -> str:
         """Determine conflict type from dependent variable by checking split parts.
-        
+
         Args:
             target: Dependent variable string containing conflict type (e.g., 'var_sb').
-        
+
         Returns:
             One of 'sb', 'os', or 'ns' based on the first found in target parts.
-        
+
         Raises:
             ValueError: If none of the valid conflict types are found.
         """
-        parts = target.split('_')
-        for conflict in ('sb', 'os', 'ns'):
+        parts = target.split("_")
+        for conflict in ("sb", "os", "ns"):
             if conflict in parts:
                 return conflict
         raise ValueError(
@@ -1163,7 +1163,9 @@ class ModelManager:
             # Save to prediction store
             if self._use_prediction_store:
                 name = (
-                    self._model_path.model_name + "_" + self._predictions_name.split(".")[0]
+                    self._model_path.model_name
+                    + "_"
+                    + self._predictions_name.split(".")[0]
                 )  # remove extension
                 df_predictions.forecasts.set_run(self._pred_store_name)
                 df_predictions.forecasts.to_store(name=name, overwrite=True)
@@ -1269,17 +1271,11 @@ class ModelManager:
             )
             time_series_wise_evaluation, df_time_series_wise_evaluation = (
                 metrics_manager.time_series_wise_evaluation(
-                    df_actual, 
-                    df_predictions, 
-                    target
+                    df_actual, df_predictions, target
                 )
             )
             month_wise_evaluation, df_month_wise_evaluation = (
-                metrics_manager.month_wise_evaluation(
-                    df_actual, 
-                    df_predictions, 
-                    target
-                )
+                metrics_manager.month_wise_evaluation(df_actual, df_predictions, target)
             )
 
             log_wandb_log_dict(
@@ -1413,7 +1409,7 @@ class ModelManager:
                 # self.config = wandb.config
                 if self._sweep:
                     self.config = self._update_sweep_config(wandb.config)
-                
+
                     logger.info(
                         f"Sweeping {self._model_path.target} {self.config['name']}..."
                     )
@@ -1491,13 +1487,18 @@ class ModelManager:
                                 f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
                             )
                             self._validate_prediction_dataframe(dataframe=df)
-                            self._save_predictions(df, self._model_path.data_generated, i)
+                            self._save_predictions(
+                                df, self._model_path.data_generated, i
+                            )
 
                         self._handle_log_creation(
                             train=train, eval=eval, forecast=forecast
                         )
                         # Evaluate the model
-                        if self.config["metrics"] and self.config["algorithm"] != "SHURF":
+                        if (
+                            self.config["metrics"]
+                            and self.config["algorithm"] != "SHURF"
+                        ):
                             self._evaluate_prediction_dataframe(
                                 df_predictions
                             )  # Calculate evaluation metrics with the views-evaluation package
@@ -1532,13 +1533,15 @@ class ModelManager:
                         self._handle_log_creation(
                             train=train, eval=eval, forecast=forecast
                         )
-                        
+
                         self._save_predictions(
                             df_predictions, self._model_path.data_generated
                         )
 
                         if report:
-                            self._generate_forecast_report(forecast_dataframe=df_predictions)
+                            self._generate_forecast_report(
+                                forecast_dataframe=df_predictions
+                            )
                     except Exception as e:
                         logger.error(
                             f"Error forecasting {self._model_path.target}: {e}",
@@ -1569,6 +1572,7 @@ class ModelManager:
 
     def _validate_prediction_dataframe(self, dataframe: pd.DataFrame) -> None:
         """Validate prediction dataframe structure and required components."""
+
         # Table formatting helpers
         def print_status(message: str, passed: bool) -> None:
             color = "92" if passed else "91"
@@ -1593,34 +1597,42 @@ class ModelManager:
             raise ValueError(f"Invalid target type: {type(target)}")
         print_status("Valid target type format", True)
 
-        required_columns = {f"pred_{dv}" for dv in ([target] if isinstance(target, str) else target)}
+        required_columns = {
+            f"pred_{dv}" for dv in ([target] if isinstance(target, str) else target)
+        }
         missing = [col for col in required_columns if col not in dataframe.columns]
-        
+
         if missing:
             print_status("Required prediction columns present", False)
-            raise ValueError(f"Missing columns: {missing}. Found: {list(dataframe.columns)}")
+            raise ValueError(
+                f"Missing columns: {missing}. Found: {list(dataframe.columns)}"
+            )
         print_status("All required prediction columns present", True)
 
         # Structural validation
         model_config = {
-            'pgm': {'indices': ["priogrid_id", "priogrid_gid"], 'columns': []},
-            'cm': {'indices': ["country_id"], 'columns': ["country_id", "month_id"]}
+            "pgm": {"indices": ["priogrid_id", "priogrid_gid"], "columns": []},
+            "cm": {"indices": ["country_id"], "columns": ["country_id", "month_id"]},
         }
         found_model = None
-        index_names = dataframe.index.names if isinstance(dataframe.index, pd.MultiIndex) else []
+        index_names = (
+            dataframe.index.names if isinstance(dataframe.index, pd.MultiIndex) else []
+        )
 
         if isinstance(dataframe.index, pd.MultiIndex):
             for model, config in model_config.items():
-                if any(idx in config['indices'] for idx in index_names):
+                if any(idx in config["indices"] for idx in index_names):
                     found_model = model
                     if "month_id" not in index_names:
                         print_status(f"{model.upper()} month_id index present", False)
-                        raise ValueError(f"Missing month_id in index for {model.upper()}")
+                        raise ValueError(
+                            f"Missing month_id in index for {model.upper()}"
+                        )
                     print_status(f"{model.upper()} index structure valid", True)
                     break
         else:
             for model, config in model_config.items():
-                if any(col in dataframe.columns for col in config['columns']):
+                if any(col in dataframe.columns for col in config["columns"]):
                     found_model = model
                     if "month_id" not in dataframe.columns:
                         print_status(f"{model.upper()} month_id column present", False)
@@ -1630,36 +1642,54 @@ class ModelManager:
 
         if not found_model:
             print_status("Data structure recognized", False)
-            raise ValueError(f"Unrecognized structure. Index: {index_names}, Columns: {list(dataframe.columns)}")
+            raise ValueError(
+                f"Unrecognized structure. Index: {index_names}, Columns: {list(dataframe.columns)}"
+            )
 
         print("--------------------------------------------------\n")
 
-
-    def _generate_forecast_report(self, forecast_dataframe: pd.DataFrame) -> None:
+    def _generate_forecast_report(
+        self, forecast_dataframe: pd.DataFrame, historical_dataframe: pd.DataFrame = None
+    ) -> None:
         """Generate a forecast report based on the prediction DataFrame."""
-        dataset_classes = {
-            "cm": CMDataset,
-            "pgm": PGMDataset
-        }
-        
-        def _create_report(dataset_cls: Union[CMDataset, PGMDataset], dataframe: pd.DataFrame) -> Path:
+        dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
+
+        def _create_report(
+            dataset_cls: Union[CMDataset, PGMDataset], dataframe: pd.DataFrame
+        ) -> Path:
             """Helper function to create and export report."""
             dataset = dataset_cls(dataframe)
+
+            report_manager = ReportManager()
             mapping_manager = MappingManager(dataset)
-            report_manager = ReportManager(mapping_manager)
-            
             # Build report content
-            report_manager.add_heading(f"Forecast Report for {self._model_path.model_name}", level=1)
+            report_manager.add_heading(
+                f"Forecast Report for {self._model_path.model_name}", level=1
+            )
             report_manager.add_heading("Maps", level=2)
-            
+
+            subset_dataframe = mapping_manager.get_subset_mapping_dataframe(
+                entity_ids=None, time_ids=None
+            )
+
             for target in self.config["depvar"]:
                 report_manager.add_heading(f"Forecast for {target}", level=3)
-                report_manager.add_map(target=f"pred_{target}", interactive=True)
-            
+                # report_manager.add_map(target=f"pred_{target}", interactive=True)
+                report_manager.add_map(
+                    map_html=mapping_manager.plot_map(
+                        mapping_dataframe=subset_dataframe,
+                        target=f"pred_{target}",
+                        interactive=True,
+                        as_html=True,
+                    )
+                )
+
             # Generate report path
-            report_path = self._model_path.reports / \
-                f"report_{self._predictions_name.replace(PipelineConfig().dataframe_format, '.html')}"
-            
+            report_path = (
+                self._model_path.reports
+                / f"report_{self._predictions_name.replace(PipelineConfig().dataframe_format, '.html')}"
+            )
+
             # Export report
             report_manager.export_as_html(report_path)
             return report_path
@@ -1672,12 +1702,12 @@ class ModelManager:
 
         # Create and export report
         report_path = _create_report(dataset_cls, forecast_dataframe)
-        
+
         # Send WandB alert
         self._wandb_alert(
             title="Forecast Report Generated",
             text=f"Forecast report for {self._model_path.model_name} has been successfully "
-                f"generated and saved to WandB and locally at {report_path}."
+            f"generated and saved to WandB and locally at {report_path}.",
         )
 
     @abstractmethod
