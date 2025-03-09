@@ -966,7 +966,7 @@ class ModelManager:
         if self._wandb_notifications and wandb.run:
             try:
                 # Replace the user's home directory with '[USER_HOME]' in the alert text
-                text = str(text).replace(str(Path.home()), "[USER_HOME]")
+                text = str(text).replace(str(self._model_path.models), "[REDACTED]")
                 wandb.alert(
                     title=title,
                     text=text,
