@@ -1540,7 +1540,11 @@ class ModelManager:
 
                         if report:
                             self._generate_forecast_report(
-                                forecast_dataframe=df_predictions
+                                forecast_dataframe=df_predictions,
+                                historical_dataframe=read_dataframe(
+                                    self._model_path.data_raw
+                                    / f"{self.config["run_type"]}_viewser_df{PipelineConfig.dataframe_format}"
+                                ),
                             )
                     except Exception as e:
                         logger.error(
@@ -1649,7 +1653,9 @@ class ModelManager:
         print("--------------------------------------------------\n")
 
     def _generate_forecast_report(
-        self, forecast_dataframe: pd.DataFrame, historical_dataframe: pd.DataFrame = None
+        self,
+        forecast_dataframe: pd.DataFrame,
+        historical_dataframe: pd.DataFrame = None,
     ) -> None:
         """Generate a forecast report based on the prediction DataFrame."""
         dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
