@@ -26,6 +26,9 @@ from views_pipeline_core.files.utils import (
 )
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.metrics import MetricsManager
+from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+from views_pipeline_core.managers.mapping import MappingManager
+from views_pipeline_core.managers.report import ReportManager
 
 logger = logging.getLogger(__name__)
 
@@ -1148,25 +1151,25 @@ class ModelManager:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
-            predictions_name = ModelManager._generate_output_file_name(
+            self._predictions_name = ModelManager._generate_output_file_name(
                 "predictions",
                 self.config["run_type"],
                 self.config["timestamp"],
                 sequence_number,
                 file_extension=PipelineConfig().dataframe_format,
             )
-            save_dataframe(df_predictions, path_generated / predictions_name)
+            save_dataframe(df_predictions, path_generated / self._predictions_name)
 
             # Save to prediction store
             if self._use_prediction_store:
                 name = (
-                    self._model_path.model_name + "_" + predictions_name.split(".")[0]
+                    self._model_path.model_name + "_" + self._predictions_name.split(".")[0]
                 )  # remove extension
                 df_predictions.forecasts.set_run(self._pred_store_name)
                 df_predictions.forecasts.to_store(name=name, overwrite=True)
 
             # Log predictions to WandB
-            wandb.save(str(path_generated / predictions_name))
+            wandb.save(str(path_generated / self._predictions_name))
             wandb.log({"predictions": wandb.Table(dataframe=df_predictions)})
 
             self._wandb_alert(
@@ -1329,6 +1332,7 @@ class ModelManager:
                 eval=args.evaluate,
                 forecast=args.forecast,
                 artifact_name=args.artifact_name,
+                report=args.report,
             )
         except Exception as e:
             logger.error(f"Error during single run execution: {e}", exc_info=True)
@@ -1390,6 +1394,7 @@ class ModelManager:
         eval: Optional[bool] = None,
         forecast: Optional[bool] = None,
         artifact_name: Optional[str] = None,
+        report: Optional[bool] = None,
     ) -> None:
         """
         Executes various model-related tasks including training, evaluation, and forecasting.
@@ -1531,6 +1536,9 @@ class ModelManager:
                         self._save_predictions(
                             df_predictions, self._model_path.data_generated
                         )
+
+                        if report:
+                            self._generate_forecast_report(forecast_dataframe=df_predictions)
                     except Exception as e:
                         logger.error(
                             f"Error forecasting {self._model_path.target}: {e}",
@@ -1625,6 +1633,52 @@ class ModelManager:
             raise ValueError(f"Unrecognized structure. Index: {index_names}, Columns: {list(dataframe.columns)}")
 
         print("--------------------------------------------------\n")
+
+
+    def _generate_forecast_report(self, forecast_dataframe: pd.DataFrame) -> None:
+        """Generate a forecast report based on the prediction DataFrame."""
+        dataset_classes = {
+            "cm": CMDataset,
+            "pgm": PGMDataset
+        }
+        
+        def _create_report(dataset_cls: Union[CMDataset, PGMDataset], dataframe: pd.DataFrame) -> Path:
+            """Helper function to create and export report."""
+            dataset = dataset_cls(dataframe)
+            mapping_manager = MappingManager(dataset)
+            report_manager = ReportManager(mapping_manager)
+            
+            # Build report content
+            report_manager.add_heading(f"Forecast Report for {self._model_path.model_name}", level=1)
+            report_manager.add_heading("Maps", level=2)
+            
+            for target in self.config["depvar"]:
+                report_manager.add_heading(f"Forecast for {target}", level=3)
+                report_manager.add_map(target=f"pred_{target}", interactive=True)
+            
+            # Generate report path
+            report_path = self._model_path.reports / \
+                f"report_{self._predictions_name.replace(PipelineConfig().dataframe_format, '.html')}"
+            
+            # Export report
+            report_manager.export_as_html(report_path)
+            return report_path
+
+        try:
+            # Get appropriate dataset class
+            dataset_cls = dataset_classes[self.config["level"]]
+        except KeyError:
+            raise ValueError(f"Invalid level: {self.config['level']}")
+
+        # Create and export report
+        report_path = _create_report(dataset_cls, forecast_dataframe)
+        
+        # Send WandB alert
+        self._wandb_alert(
+            title="Forecast Report Generated",
+            text=f"Forecast report for {self._model_path.model_name} has been successfully "
+                f"generated and saved to WandB and locally at {report_path}."
+        )
 
     @abstractmethod
     def _train_model_artifact(self) -> any:

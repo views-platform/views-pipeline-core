@@ -32,7 +32,8 @@ class MappingManager:
             self._world = self.__get_country_shapefile()
         else:
             raise ValueError("Invalid dataset type. Must be a PGMDataset or CMDataset.")
-        self._mapping_dataframe = self.__init_mapping_dataframe(self._dataframe)
+        # self._mapping_dataframe = self.__init_mapping_dataframe(self._dataframe)
+        self._mapping_dataframe = None
         # self._mapping_dataframe = self._dataframe.reset_index()
 
         self._isoab_cache_dataframe = None
@@ -375,7 +376,7 @@ class MappingManager:
         if interactive:
             fig = self._plot_interactive_map(mapping_dataframe, target)
             if as_html:
-                return fig.to_html(full_html=False)
+                return fig.to_html(full_html=True)
             else:
                 return fig
         else:

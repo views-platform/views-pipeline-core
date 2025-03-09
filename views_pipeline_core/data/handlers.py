@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
-from views_pipeline_core.managers.model import ModelPathManager
+
 from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -37,6 +37,7 @@ class __ViewsDataset:
         Raises:
         ValueError: If the source is not a pandas DataFrame, string, or Path object.
         """
+        from views_pipeline_core.managers.model import ModelPathManager
         self.broadcast_features = broadcast_features
         if isinstance(source, pd.DataFrame):
             self._init_dataframe(source, targets)
@@ -352,7 +353,7 @@ class __ViewsDataset:
         Returns:
         --------
         np.ndarray
-            A 3D tensor with dimensions (time_steps, entities, features).
+            A 4D tensor with dimensions (time_steps, entities, samples, features).
         Notes:
         ------
         - The tensor is filled with NaN values initially.
