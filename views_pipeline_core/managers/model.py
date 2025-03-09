@@ -1713,7 +1713,7 @@ class ModelManager:
         self._wandb_alert(
             title="Forecast Report Generated",
             text=f"Forecast report for {self._model_path.model_name} has been successfully "
-            f"generated and saved to WandB and locally at {report_path}.",
+            f"generated and saved locally at {report_path}.",
         )
 
     @abstractmethod
