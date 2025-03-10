@@ -203,12 +203,12 @@ def get_deployment_config():
         manager = ModelManager(mock_model_instance, use_prediction_store=False)
         manager._config_hyperparameters = {"hp_key": "hp_value"}
         manager._config_meta = {"meta_key": "meta_value", "depvar": "test_depvar_dep"}
-        manager._config_deployment = {"deploy_key": "deploy_value"}
+        manager._config_deployment = {"deployment_status": "deploy_value"}
         args = MagicMock(run_type="test_run")
         config = manager._update_single_config(args)
         assert config["hp_key"] == "hp_value"
         assert config["meta_key"] == "meta_value"
-        assert config["deploy_key"] == "deploy_value"
+        assert config["deployment_status"] == "deploy_value"
         assert config["run_type"] == "test_run"
         # assert config["sweep"] is False
 
