@@ -1543,7 +1543,7 @@ class ModelManager:
                                 forecast_dataframe=df_predictions,
                                 historical_dataframe=read_dataframe(
                                     self._model_path.data_raw
-                                    / f"{self.config["run_type"]}_viewser_df{PipelineConfig.dataframe_format}"
+                                    / f"{self.config['run_type']}_viewser_df{PipelineConfig.dataframe_format}"
                                 ),
                             )
                     except Exception as e:
