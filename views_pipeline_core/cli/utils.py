@@ -99,9 +99,9 @@ def parse_args():
 
 
 def validate_arguments(args):
-    if args.report and args.run_type != "forecasting":
+    if args.report and args.run_type != "forecasting" and args.forecast:
         print(
-            "Error: --report flag can only be used with --run_type forecasting. Exiting."
+            "Error: --report flag can only be used with --run_type forecasting and in forecasting mode (-f). Exiting."
         )
         sys.exit(1)
 
