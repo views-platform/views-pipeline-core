@@ -11,26 +11,26 @@
 | Date                | 29.10.2024.     |
 
 ## Context
-We wanted to have a catalog about all of the models in the pipeline. We needed to do that both for the old and the new pipeline because the structure of the two pipelines and the way how the querysets are organised are different. We also had to be sure that the catalogs update whenever a model is modified or added.
+A catalog was needed to document all models in the pipeline. This was required for both the old and new pipelines due to differences in their structures and the organization of querysets. Additionally, it was essential to ensure that the catalogs update automatically whenever a model is modified or added.
 
 ## Decision
 ### New pipeline
-*In the new pipeline there are two spearate catalogs for 'country level' and 'priogrid level' models with the following structure:*
+*In the new pipeline there are two separate catalogs for 'country level' and 'priogrid level' models with the following structure:*
 | Model Name | Algorithm | Target | Input Features | Non-default Hyperparameters | Forecasting Type | Implementation Status | Implementation Date | Author |
 | ---------- | --------- | ------ | -------------- | --------------------------- | ---------------- | --------------------- | ------------------- | ------ |
-| electric_relaxation | RandomForestClassifier | ged_sb_dep | - [escwa001_cflong](https://github.com/prio-data/views_pipeline/blob/main/common_querysets/queryset_electric_relaxation.py) | - [hyperparameters electric_relaxation](https://github.com/prio-data/views_pipeline/blob/main/models/electric_relaxation/configs/config_hyperparameters.py) | None | shadow | NA | Sara |
+| electric_relaxation | RandomForestClassifier | ged_sb_dep | - [escwa001_cflong](https://github.com/views-platform/views-models/blob/main/models/electric_relaxation/configs/config_queryset.py) | - [hyperparameters electric_relaxation](https://github.com/views-platform/views-models/blob/main/models/electric_relaxation/configs/config_hyperparameters.py) | None | shadow | NA | Sara |
 
 Configs used to create the catalog:
-- `views_pipeline/models/*/configs/config_meta.py`
-- `views_pipeline/models/*/configs/config_deployment.py`
-- `views_pipeline/models/*/configs/config_hyperparameters.py`
-- `views_pipeline/common_querysets/*`
+- `views_models/models/*/configs/config_meta.py`
+- `views_models/models/*/configs/config_deployment.py`
+- `views_models/models/*/configs/config_hyperparameters.py`
+- `views_models/models/*/configs/config_queryset.py`
 
 Columns:
 - **Model Name**: name of the model, always in a form of `adjective_noun`
 - **Algorithm**: "algorithm" from `config_meta.py`
-- **Target**: "depvar" from `config_meta.py`
-- **Input Features**: "queryset" from `config_meta.py` that points to the queryset in `common_querysets`folder
+- **Target**: "depvar" from `config_meta.py` (it will be changed to "target(s)")
+- **Input Features**: "queryset" from `config_meta.py` that points to the `config_queryset.py` file in the corresponding model directory
 - **Non-default Hyperparameters**: "hyperparameters model_name" that points to `config_hyperparameters.py`
 - **Forecasting Type**: TBD
 - **Implementation Status**: "deployment_status" from `config_deployment.py` (e.g. shadow, deployed, baseline, or deprecated)
@@ -60,7 +60,7 @@ Columns:
 - **Author**: TBD
 
 ### GitHub actions
-The catalogs are updated via GitHub actions. Action for the new pipeline: [update_views_pipeline_cm_catalog.yml](https://github.com/prio-data/viewsforecasting/blob/github_workflows/.github/workflows/update_views_pipeline_cm_catalog.yml), action for the old pipeline: [check_if_new_model_added.yml](https://github.com/prio-data/views_pipeline/blob/production/.github/workflows/check_if_new_model_added.yml). They trigger when the config files are modified on the `production` and `development` branch. These GitHub actions can also be triggered manually for testing reason. The GitHub actions can only push to non-protected branches.
+The catalogs are updated via GitHub actions. Action for the new pipeline: [update_catalogs.yml](https://github.com/views-platform/views-models/blob/main/.github/workflows/update_catalogs.yml). It triggers when the config files are modified on the `production` and `development` branch. These GitHub actions can also be triggered manually for testing reason. The GitHub actions can only push to non-protected branches.
 
 
 ### Overview
@@ -68,7 +68,7 @@ Creating catalogs for 'country level' and 'priogrid level' that update automatic
 
 
 ## Consequences
-Clear overview about our existing models in the `views_pipeline/documentation/catalogs/` directory.
+Clear overview about our existing models in [views_models/README.md](https://github.com/views-platform/views-models/blob/main/README.md#catalogs).
 
 **Positive Effects:**
 - Our models become trackable and presentable.
@@ -90,7 +90,7 @@ Every information about the models are found at one place. Models can be tracked
 
 
 ## Additional Notes
-- Involving GitHub actions led to the separation of `production` and `development`branch, since they cannot push to a protected branch (`production`). More detailed information is found in **ADR #023**.
+- Involving GitHub actions led to the separation of `production` and `development`branch, since they cannot push to a protected branch (`production`). More detailed information is found in [ODR #04](https://github.com/views-platform/docs/blob/main/ODRs/process_004_production_development.md).
 
 - Implementation of an alerting system, if GitHub actions fail.
 
