@@ -5,37 +5,45 @@
 | Subject             | Local Data Storage  |
 | ADR Number          | 001   |
 | Status              | Proposed   |
-| Author              | Simon   |
-| Date                | [Insert Date (DD.MM.YYYY)]     |
+| Author              | Xiaolong   |
+| Date                | 28.02.2025     |
 
 ## Context
-*Describe the issue that necessitated the decision, including any factors considered during the decision-making process. This should provide a clear understanding of the challenges or opportunities addressed by the ADR.*
+Efficient and organized data storage is critical for model development and reproducibility within VIEWS pipeline. There is a lack of local storage conventions in the ole pipeline. Without a clear structure, data accessibility and consistency become challenging, leading to potential inefficiencies in debugging, training, and validation processes. 
 
 ## Decision
-*Detail the decision that was made, including any alternatives that were considered and the reasons for choosing the implemented solution. Provide enough technical specifics to justify the approach.*
+To ensure clarity and uniformity in data storage, the following directory structure is adopted within each model's directory:
+- Raw Data Storage (`views-models/{model_name}/data/raw/`)
+    - Contains unaltered, original datasets as obtained from data ingestion.
+    - Raw data are named as `{run_type}_viewser_df.parquet`
+- Generated Data Storage (`views-models/{model_name}/data/generated/`)
+    - Contains data outputs generated during intermediate processing steps. 
+    - Examples include (1) evaluation and forecast which use date time to show versions; (2) log files that track when these files are generated.
+- Processed Data Storage  (`views-models/{model_name}/data/processed/`)
+    - Stores transformed and ready-to-use data.
+    - Examples including tensor data.
 
-### Overview
-*Overview of the decision in a clear and concise manner.*
 
 ## Consequences
-*Discuss the positive and negative effects of the decision. Include both immediate outcomes and long-term implications for the project's architecture. Highlight how the decision aligns with the challenges outlined in the context.*
 
 **Positive Effects:**
-- List the benefits of the decision.
+- Provides a well-defined structure for data organization, improving accessibility.
+- Reduces errors related to data versioning and accidental overwrites.
+- Simplifies debugging by maintaining a clear distinction between raw, generated, and processed data.
+- Supports reproducibility by standardizing data storage conventions across models.
 
 **Negative Effects:**
-- List the potential drawbacks or challenges introduced by the decision.
+- Requires discipline in maintaining strict adherence to the directory structure.
+
+- May increase storage requirements due to the separation of raw, generated, and processed data.
 
 ## Rationale
-*Explain the reasoning behind the decision, including any specific advantages that influenced the choice. This section should reflect the factors mentioned in the context.*
+By enforcing a structured data storage policy, we enable better tracking of data transformations, reduce the likelihood of data inconsistencies, and improve the overall reliability of our modeling pipeline. This approach ensures that raw data remains immutable, while generated and processed data are properly managed for efficient experimentation and deployment.
+
 
 ### Considerations
-*List any considerations that were part of the decision-making process, such as potential risks, dependency issues, or impacts on existing systems.*
-
-## Additional Notes
-*Include any additional information that might be relevant to the decision, such as implications for development workflows, future maintenance, or related decisions.*
+- Long suffix for generated data is troublesome. Consider establishing better versioning mechanisms for processed data to track changes over time.
 
 ## Feedback and Suggestions
-*Invite team members or stakeholders to provide feedback or suggest improvements on the decision or its implementation.*
+Any feedback or suggestion is welcomed
 
----
