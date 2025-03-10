@@ -40,15 +40,15 @@ Contains utilities for command-line interactions with the pipeline.
 ### `configs/`
 Holds configuration files for different components of the pipeline:
 - `drift_detection.py`: Configuration related to drift detection.
-- `pipeline.py`: General pipeline configurations.
+- `pipeline.py`: PipelineConfig class.
 - `logging.yaml`: Logging settings.
 
 **Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/configs).
 
 ### `data/`
 Handles data storage and loading.
-- `dataloaders.py`: Functions for loading datasets.
-- `handlers.py`: Data processing utilities.
+- `dataloaders.py`: ViewsDataLoader class for loading datasets.
+- `handlers.py`: ViewsDataset class.
 - `utils.py`: Helper functions for managing data.
 
 **Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/dataloaders).
@@ -60,14 +60,18 @@ Handles file operations and management.
 **Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/files).
 
 ### `managers/`
-Handles model and ensemble management. **Detailed documentation available in `managers/README.md`**
+Handles model and ensemble management. 
+- `model.py`: ModelPathManager and ModelManager classes.
+- `ensemble.py`: EnsemblePathManager and EnsembleManager classes.
+- `package.py`: PackageManager class.
+- `log.py`: LoggingManager class.
 
 **Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/managers).
 
 ### `models/`
 Defines models and their outputs.
 - `check.py`: Validates model consistency.
-- `outputs.py`: Handles model outputs and transformations.
+- `outputs.py`: Handles model outputs and transformations with ModelOutputs class.
 
 **Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/models).
 
