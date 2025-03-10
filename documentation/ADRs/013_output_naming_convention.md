@@ -15,22 +15,23 @@ This is particularly important for managing prediction versions, tracking when p
 
 
 ## Decision
-The evaluation/output naming convention for using a single model will follow this structure:
+The evaluation naming convention for a single model follows this structure:
 ```
-<evaluation/output>_<max_forecast_step>_<run_type>_<timestamp>.pkl
+eval_<evaluation_schema>_<conflict_type>_<run_type>_<timestamp>.pkl
 ```
-- max_forecast_step: The maximum forecast step for the prediction.
+- evaluation_schema: Three ways to calculate metrics - month (month-wise), ts (time-series-wise), and step (step-wise).
+- conflict_type: Three categories of armed conflict - sb (state-based), ns (non state-based), and os (one-sided).
 - run_type: The type of run (e.g., calibration, validation).
-- timestamp: The timestamp when the model was trained. The format is`YYYYMMDD_HHMMSS`.
+- timestamp: The timestamp when **the model was trained**. The format is`YYYYMMDD_HHMMSS`.
 
-The evaluation naming convention for using an ensemble model will follow this structure:
+The evaluation naming convention for an ensemble model has the same structure:
 ```
-<evaluation/output>_<max_forecast_step>_<run_type>_<model_name_1><timestamp_1>_<model_name2><timestamp_2>.pkl
+eval_<evaluation_schema>_<conflict_type>_<run_type>_<timestamp>.pkl
 ```
-- max_forecast_step: The maximum forecast step for the prediction.
+- evaluation_schema: Three ways to calculate metrics - month (month-wise), ts (time-series-wise), and step (step-wise).
+- conflict_type: Three categories of armed conflict - sb (state-based), ns (non state-based), and os (one-sided).
 - run_type: The type of run (e.g., calibration, validation).
-- model_name: The name of the model used for the ensemble prediction.
-- timestamp: The timestamp when the model was trained. The format is`YYYYMMDD_HHMMSS`.
+- timestamp: The timestamp when **the evaluation is generated**. The format is`YYYYMMDD_HHMMSS`.
 
 ## Consequences
 **Positive Effects:**
@@ -38,11 +39,12 @@ The evaluation naming convention for using an ensemble model will follow this st
 - **Easier File Management**: Simplifies handling of prediction files, especially when dealing with multiple models or datasets.
 - **Improved Traceability**: Facilitates identification of which model produces the prediction/ output/ evaluation.
 - **Enhanced Automation**: Enables smooth automation of tasks like archiving or fetching the latest predictions, as the timestamp provides a clear indicator of file recency.
-
+- **Less Complicated Names**: Reduces the timestamp in the ensemble evaluation file name to one, minimizing unnecessary complexity.
 
 **Negative Effects:**
 - **Longer File Names**: Could be cumbersome in environments where shorter names are preferred.
 - **Adjustment Required**: Existing scripts or systems may need updates to accommodate the new naming structure.
+- **Timestamp inconsistency**: Differences in timestamp usage between single and ensemble models could lead to confusion.
 
 ## Rationale
 The decision to use this naming convention ensures that:
