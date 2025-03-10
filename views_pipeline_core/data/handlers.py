@@ -1497,7 +1497,7 @@ class __PGDataset(__ViewsDataset):
 
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names[1] != "priogrid_id" or self.dataframe.index.names[1] != "priogrid_gid":
+        if self.dataframe.index.names[1] != "priogrid_id" and self.dataframe.index.names[1] != "priogrid_gid":
             raise ValueError(
                 f"PGDataset requires index 1 to be 'priogrid_id', found {self.dataframe.index.names}"
             )
