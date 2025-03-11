@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 from views_pipeline_core.files.utils import read_dataframe
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
+import scipy.stats as stats
 
 # Fixtures for test data
 @pytest.fixture
@@ -97,7 +98,7 @@ class TestTensorConversion:
 class TestStatisticalMethods:
     """Tests for statistical calculations (MAP, HDI)"""
     
-    def test_map_calculation(self, sample_predictions_df):
+    def test_map_df(self, sample_predictions_df):
         """Test MAP estimation logic"""
         ds = _ViewsDataset(sample_predictions_df)
         map_df = ds.calculate_map()
@@ -113,6 +114,40 @@ class TestStatisticalMethods:
             assert (map_values >= samples.min()).all()
             assert (map_values <= samples.max()).all()
 
+    def test_map_function(self, sample_predictions_df):
+        """Test MAP computation on various extreme distributions."""
+        np.random.seed(42)
+        ds = _ViewsDataset(sample_predictions_df)
+        test_cases = {
+            "Normal": (stats.norm.rvs(loc=5, scale=2, size=10000), 5),
+            "Half-Normal": (stats.halfnorm.rvs(loc=0, scale=2, size=10000), 0),
+            "Cauchy": (stats.cauchy.rvs(loc=0, scale=1, size=10000), 0),
+            "Laplace": (stats.laplace.rvs(loc=0, scale=1, size=10000), 0),
+            "Power-Law": (np.random.pareto(a=3, size=10000) + 1, 1),
+            "Bimodal": (np.concatenate([
+                stats.norm.rvs(loc=-3, scale=1, size=5000), 
+                stats.norm.rvs(loc=3, scale=1, size=5000)
+            ]), None),  # No single mode
+
+            # **🚀 EXTREME DISTRIBUTIONS**
+            "Student-t (df=1, Cauchy-like)": (stats.t.rvs(df=1, loc=0, scale=1, size=10000), 0),
+            "Beta(0.5, 0.5) (U-shaped)": (stats.beta.rvs(0.5, 0.5, size=10000), None),  # No single mode
+            "Skewed Normal (alpha=10)": (stats.skewnorm.rvs(a=10, loc=0, scale=2, size=10000), 0),
+            "Triangular (mode=2)": (stats.triang.rvs(c=0.5, loc=0, scale=4, size=10000), 2),
+            "Trimodal": (np.concatenate([
+                stats.norm.rvs(loc=-5, scale=1, size=3000),
+                stats.norm.rvs(loc=0, scale=1, size=4000),
+                stats.norm.rvs(loc=5, scale=1, size=3000)
+            ]), None),  # No single mode
+            "Extreme-Value (Gumbel)": (stats.gumbel_r.rvs(loc=0, scale=2, size=10000), 0),
+        }
+
+        for name, (samples, true_mode) in test_cases.items():
+            map_estimate = ds._simon_compute_single_map(samples, enforce_non_negative=False)
+
+            if true_mode is not None:
+                assert np.isclose(np.round(map_estimate, decimals=1), true_mode, atol=0.5)
+
     def test_hdi_calculation(self, sample_predictions_df):
         """Test HDI interval calculation"""
         ds = _ViewsDataset(sample_predictions_df)
@@ -124,6 +159,43 @@ class TestStatisticalMethods:
             lower = hdi_df[f"{var}_hdi_lower"]
             upper = hdi_df[f"{var}_hdi_upper"]
             assert (lower <= upper).all()
+
+    def test_distribution_hdi_function(self, sample_predictions_df):
+        """Test HDI computation on various extreme distributions."""
+        np.random.seed(42)  # For reproducibility
+        ds = _ViewsDataset(sample_predictions_df)
+        test_cases = {
+            "Normal": stats.norm.rvs(loc=5, scale=2, size=10000),
+            "Half-Normal": stats.halfnorm.rvs(loc=0, scale=2, size=10000),
+            "Cauchy": stats.cauchy.rvs(loc=0, scale=1, size=10000),
+            "Laplace": stats.laplace.rvs(loc=0, scale=1, size=10000),
+            "Power-Law": np.random.pareto(a=3, size=10000) + 1,
+            "Bimodal": np.concatenate([
+                stats.norm.rvs(loc=-3, scale=1, size=5000), 
+                stats.norm.rvs(loc=3, scale=1, size=5000)
+            ]),
+
+            # **🚀 EXTREME DISTRIBUTIONS**
+            "Student-t (df=1, Cauchy-like)": stats.t.rvs(df=1, loc=0, scale=1, size=10000),
+            "Beta(0.5, 0.5) (U-shaped)": stats.beta.rvs(0.5, 0.5, size=10000),
+            "Skewed Normal (alpha=10)": stats.skewnorm.rvs(a=10, loc=0, scale=2, size=10000),
+            "Triangular (mode=2)": stats.triang.rvs(c=0.5, loc=0, scale=4, size=10000),
+            "Trimodal": np.concatenate([
+                stats.norm.rvs(loc=-5, scale=1, size=3000),
+                stats.norm.rvs(loc=0, scale=1, size=4000),
+                stats.norm.rvs(loc=5, scale=1, size=3000)
+            ]),
+            "Extreme-Value (Gumbel)": stats.gumbel_r.rvs(loc=0, scale=2, size=10000),
+        }
+
+        credible_mass = 0.95
+
+        for name, samples in test_cases.items():
+            hdi_min, hdi_max = ds._calculate_single_hdi(samples, credible_mass)
+            in_hdi = (samples >= hdi_min) & (samples <= hdi_max)
+            coverage = np.mean(in_hdi)
+
+            assert np.isclose(coverage, credible_mass, atol=0.01)
 
     def test_edge_case_single_sample(self):
         """Test handling of single-sample predictions"""
