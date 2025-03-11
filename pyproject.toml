@@ -22,7 +22,7 @@ views-forecasts = "^0.5.5"
 geopandas = "^1.0.1"
 seaborn = "^0.13.2"
 plotly = "^6.0.0"
-plotly-expression = "^0.4.1"
+plotly-express = "^0.4.1"
 scipy = "^1.15.1"
 
 [build-system]
