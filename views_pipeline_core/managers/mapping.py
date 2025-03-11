@@ -32,7 +32,8 @@ class MappingManager:
             self._world = self.__get_country_shapefile()
         else:
             raise ValueError("Invalid dataset type. Must be a PGMDataset or CMDataset.")
-        self._mapping_dataframe = self.__init_mapping_dataframe(self._dataframe)
+        # self._mapping_dataframe = self.__init_mapping_dataframe(self._dataframe)
+        self._mapping_dataframe = None
         # self._mapping_dataframe = self._dataframe.reset_index()
 
         self._isoab_cache_dataframe = None
@@ -52,7 +53,7 @@ class MappingManager:
             Path(__file__).parent.parent
             / "mapping"
             / "shapefiles"
-            / "priogrid_cellshp"
+            / "priogrid"
             / "priogrid_cell.shp"
         )
         return gpd.read_file(path)
@@ -87,7 +88,7 @@ class MappingManager:
         return mapping_dataframe
 
     def __init_mapping_dataframe(self, dataframe: pd.DataFrame) -> gpd.GeoDataFrame:
-        _dataframe = dataframe.reset_index()
+        _dataframe = dataframe.reset_index()[self._dataset.targets + [self._entity_id, self._time_id]]
 
         numeric_cols = _dataframe.select_dtypes(include=np.number).columns
         _dataframe[numeric_cols] = _dataframe[numeric_cols].astype(np.float32)
@@ -128,19 +129,63 @@ class MappingManager:
             )
 
     def __add_isoab(self, dataframe: pd.DataFrame):
-        if isinstance(self._dataset, CMDataset):
-            dataframe.rename(columns={self._entity_id: "c_id"}, inplace=True)
-            dataframe["country_name"] = dataframe.c.name
-            dataframe["isoab"] = dataframe.c.isoab
-            dataframe.rename(columns={"c_id": self._entity_id}, inplace=True)
+        # if isinstance(self._dataset, CMDataset):
+        #     dataframe.rename(columns={self._entity_id: "c_id"}, inplace=True)
+        #     dataframe["country_name"] = dataframe.c.name
+        #     dataframe["isoab"] = dataframe.c.isoab
+        #     dataframe.rename(columns={"c_id": self._entity_id}, inplace=True)
+        # return dataframe
+        # Get ISO codes and country names through dataset methods
+        iso_df = self._dataset.get_isoab().reset_index()
+        name_df = self._dataset.get_name().reset_index()
+        
+        # Merge with main dataframe
+        dataframe = dataframe.merge(
+            iso_df[[self._time_id, self._entity_id, 'isoab']],
+            on=[self._time_id, self._entity_id],
+            how='left'
+        )
+        dataframe = dataframe.merge(
+            name_df[[self._time_id, self._entity_id, 'name']],
+            on=[self._time_id, self._entity_id],
+            how='left'
+        )
+        dataframe.rename(columns={'name': 'country_name'}, inplace=True)
+            
         return dataframe
 
     def __add_cid(self, dataframe: pd.DataFrame):
+        # if isinstance(self._dataset, PGMDataset):
+        #     dataframe.rename(columns={self._entity_id: "pg_id"}, inplace=True)
+        #     dataframe["c_id"] = dataframe.pg.c_id
+        #     dataframe["country_name"] = dataframe.pg.name
+        #     dataframe.rename(columns={"pg_id": self._entity_id}, inplace=True)
+        # return dataframe
         if isinstance(self._dataset, PGMDataset):
-            dataframe.rename(columns={self._entity_id: "pg_id"}, inplace=True)
-            dataframe["c_id"] = dataframe.pg.c_id
-            dataframe["country_name"] = dataframe.pg.name
-            dataframe.rename(columns={"pg_id": self._entity_id}, inplace=True)
+            # Get country IDs through dataset method
+            cid_df = self._dataset.get_country_id().reset_index()
+            
+            # Get country names using CDataset
+            country_ids = cid_df['c_id'].unique()
+            temp_country_df = pd.DataFrame({'c_id': country_ids})
+            temp_cdataset = CMDataset(temp_country_df, targets=[])  # Use CMDataset for month alignment
+            
+            # Merge names
+            name_df = temp_cdataset.get_name().reset_index()
+            cid_df = cid_df.merge(
+                name_df[['c_id', 'name']],
+                on='c_id',
+                how='left'
+            )
+            
+            # Merge with main dataframe
+            dataframe = dataframe.merge(
+                cid_df,
+                on=[self._time_id, self._entity_id],
+                how='left'
+            )
+            dataframe.rename(columns={'name': 'country_name'}, inplace=True)
+            
         return dataframe
 
     def get_subset_mapping_dataframe(
@@ -169,7 +214,7 @@ class MappingManager:
 
         # Simplify geometries for faster rendering
         mapping_dataframe["geometry"] = mapping_dataframe.geometry.simplify(
-            tolerance=0.02,  # Adjust based on data scale (degrees for EPSG:4326)
+            tolerance=0.20,  # Adjust based on data scale (degrees for EPSG:4326)
             preserve_topology=True,
         )
 
@@ -184,8 +229,10 @@ class MappingManager:
             hover_data=[self._entity_id, self._time_id, target],
             color_continuous_scale="OrRd",
             range_color=(
-                mapping_dataframe[target].min(),
-                mapping_dataframe[target].max(),
+                # mapping_dataframe[target].min(),
+                # mapping_dataframe[target].max(),
+                mapping_dataframe[target].quantile(0.05),
+                mapping_dataframe[target].quantile(0.95)
             ),
             labels={self._time_id: "Time Period", target: target},
         )
@@ -208,6 +255,12 @@ class MappingManager:
             ],
         )
 
+        fig.update_traces(
+            marker_line_width=0.5,
+            marker_opacity=0.9,
+            selector=dict(type='choropleth')
+        )
+        
         # Improve map rendering
         fig.update_geos(
             fitbounds="locations",
@@ -216,7 +269,7 @@ class MappingManager:
             countrycolor="rgba(100,100,100,0.3)",  # Lighter gray
             countrywidth=0.3,  # Thinner borders
             # Add grid line styling
-            showlakes=False,
+            showlakes=True,
             showocean=False,
             showsubunits=True,
             subunitcolor="rgba(200,200,200,0.2)",
@@ -224,16 +277,16 @@ class MappingManager:
         )
 
         # Add latitude/longitude grid styling
-        fig.update_layout(
-            geo=dict(
-                lonaxis=dict(
-                    showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
-                ),
-                lataxis=dict(
-                    showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
-                ),
-            )
-        )
+        # fig.update_layout(
+        #     geo=dict(
+        #         lonaxis=dict(
+        #             showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
+        #         ),
+        #         lataxis=dict(
+        #             showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
+        #         ),
+        #     )
+        # )
 
         return fig
 
@@ -251,8 +304,8 @@ class MappingManager:
             legend=False,
             legend_kwds={"label": f"{target}", "orientation": "horizontal"},
             cmap="OrRd",
-            vmin=self._mapping_dataframe[target].min(),
-            vmax=self._mapping_dataframe[target].max(),
+            vmin=mapping_dataframe[target].quantile(0.05),
+            vmax=mapping_dataframe[target].quantile(0.95),
             linewidth=0.1,
             color="#404040",  # Darker gray instead of black
             alpha=0.5,  # Add transparency
@@ -272,7 +325,7 @@ class MappingManager:
             ),
         )
         sm._A = []
-        cbar = fig.colorbar(
+        fig.colorbar(
             sm, ax=ax, orientation="horizontal", fraction=0.036, pad=0.1
         )
 
@@ -323,7 +376,7 @@ class MappingManager:
         if interactive:
             fig = self._plot_interactive_map(mapping_dataframe, target)
             if as_html:
-                return fig.to_html(full_html=False)
+                return fig.to_html(full_html=True)
             else:
                 return fig
         else:

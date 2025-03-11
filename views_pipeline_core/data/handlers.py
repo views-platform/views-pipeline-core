@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
-from views_pipeline_core.managers.model import ModelPathManager
+
 from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -16,7 +16,7 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 
-class ViewsDataset:
+class _ViewsDataset:
     def __init__(
         self,
         source: Union[pd.DataFrame, str, Path],
@@ -37,6 +37,7 @@ class ViewsDataset:
         Raises:
         ValueError: If the source is not a pandas DataFrame, string, or Path object.
         """
+        from views_pipeline_core.managers.model import ModelPathManager
         self.broadcast_features = broadcast_features
         if isinstance(source, pd.DataFrame):
             self._init_dataframe(source, targets)
@@ -76,10 +77,10 @@ class ViewsDataset:
             if self.targets is not None:
                 missing_vars = set(self.targets) - set(self.dataframe.columns)
                 if missing_vars:
-                    raise ValueError(f"Missing dependent variables: {missing_vars}")
+                    raise ValueError(f"Missing targets: {missing_vars}")
             else:
                 raise ValueError(
-                    "Dependent variables must be specified for non-prediction dataframes. Example usage: ViewsDataset(dataframe, targets=['ln_sb_best'])"
+                    "Targets must be specified for non-prediction dataframes. Example usage: ViewsDataset(dataframe, targets=['ln_sb_best'])"
                 )
 
             if self.broadcast_features:
@@ -352,7 +353,7 @@ class ViewsDataset:
         Returns:
         --------
         np.ndarray
-            A 3D tensor with dimensions (time_steps, entities, features).
+            A 4D tensor with dimensions (time_steps, entities, samples, features).
         Notes:
         ------
         - The tensor is filled with NaN values initially.
@@ -1131,8 +1132,11 @@ class ViewsDataset:
         """
         if self.is_prediction:
             raise ValueError("Data splitting not applicable to prediction dataframes")
-        
-        key = (tuple(time_ids) if time_ids is not None else None, tuple(entity_ids) if entity_ids is not None else None)
+
+        key = (
+            tuple(time_ids) if time_ids is not None else None,
+            tuple(entity_ids) if entity_ids is not None else None,
+        )
         if key in self._split_tensor_cache:
             # print(f"Using cached split data for {key}")
             return self._split_tensor_cache[key]
@@ -1141,7 +1145,11 @@ class ViewsDataset:
             self._clear_tensor_cache_if_needed()
             if time_ids is not None or entity_ids is not None:
                 subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-                temp_ds = ViewsDataset(subset_df, targets=self.targets, broadcast_features=self.broadcast_features)
+                temp_ds = _ViewsDataset(
+                    subset_df,
+                    targets=self.targets,
+                    broadcast_features=self.broadcast_features,
+                )
                 X = temp_ds.to_tensor(
                     include_targets=False
                 )  # (time, entity, samples, features)
@@ -1153,7 +1161,9 @@ class ViewsDataset:
                 y_tensor = self.to_tensor(include_targets=True)
 
             # Extract target variables across all samples
-            feature_indices = [self.dataframe.columns.get_loc(var) for var in self.targets]
+            feature_indices = [
+                self.dataframe.columns.get_loc(var) for var in self.targets
+            ]
             y = y_tensor[:, :, :, feature_indices]  # (time, entity, samples, targets)
 
             # Validate 4D shapes (time, entity, samples, vars)
@@ -1185,7 +1195,7 @@ class ViewsDataset:
         # Get subset if specified
         if time_ids is not None or entity_ids is not None:
             subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-            temp_ds = ViewsDataset(subset_df)
+            temp_ds = _ViewsDataset(subset_df)
             tensor = temp_ds.to_tensor(include_targets)
             reconstructed = temp_ds.to_dataframe(tensor)
             original = subset_df
@@ -1213,7 +1223,7 @@ class ViewsDataset:
 
     def __repr__(self) -> str:
         return (
-            f"ViewsDataset(time_steps={self.num_time_steps}, "
+            f"_ViewsDataset(time_steps={self.num_time_steps}, "
             f"entities={self.num_entities}, "
             f"features={self.num_features}, "
             f"prediction_mode={self.is_prediction})"
@@ -1482,37 +1492,228 @@ class ViewsDataset:
         return pd.DataFrame(reports)
 
 
-class PGMDataset(ViewsDataset):
+class _PGDataset(_ViewsDataset):
+    _accessor_name = "pg"
+
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names != ["month_id", "priogrid_id"]:
+        if self.dataframe.index.names[1] != "priogrid_id" and self.dataframe.index.names[1] != "priogrid_gid":
             raise ValueError(
-                f"PGMDataset requires indices ['month_id', 'priogrid_id'], found {self.dataframe.index.names}"
+                f"PGDataset requires index 1 to be 'priogrid_id', found {self.dataframe.index.names}"
+            )
+
+    def _get_entity_attr(self, attr: str) -> pd.Series:
+        """Helper method to get entity attributes using accessor"""
+        entity_ids = self.dataframe.index.get_level_values(self._entity_id)
+        temp_df = pd.DataFrame({"pg_id": entity_ids}, index=self.dataframe.index)
+        return getattr(temp_df.pg, attr)
+
+    def get_country_id(self) -> pd.DataFrame:
+        """Get country ID for each priogrid"""
+        return self._get_entity_attr("c_id").to_frame(name="country_id")
+
+    def get_lat_lon(self) -> pd.DataFrame:
+        """Get latitude and longitude for each priogrid"""
+        return pd.DataFrame(
+            {"lat": self._get_entity_attr("lat"), "lon": self._get_entity_attr("lon")}
+        )
+
+    def get_row_col(self) -> pd.DataFrame:
+        """Get row and column indices for each priogrid"""
+        return pd.DataFrame(
+            {"row": self._get_entity_attr("row"), "col": self._get_entity_attr("col")}
+        )
+
+    def get_country_iso(self) -> pd.DataFrame:
+        """Get ISO code for the country of each priogrid"""
+        country_ids = self._get_entity_attr("c_id")
+        temp_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
+        return temp_df.c.isoab.to_frame(name="country_iso")
+
+    def get_name(self) -> pd.DataFrame:
+        """Get country names for each priogrid"""
+        # Get country IDs from priogrids
+        country_ids = self._get_entity_attr("c_id")
+
+        # Create temporary DataFrame with country IDs
+        country_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
+
+        # Use c accessor to get country names
+        return country_df.c.name.to_frame(name="country_name")
+
+    # def get_continent(self) -> pd.DataFrame:
+    #     """Get continent for priogrids through country mapping"""
+    #     # Get country IDs from priogrids
+    #     country_ids = self._get_entity_attr('c_id')
+
+    #     # Create temporary DataFrame with country IDs
+    #     country_df = pd.DataFrame({'c_id': country_ids}, index=self.dataframe.index)
+
+    #     # Get continent using country dataset logic
+    #     return country_df.c.get_continent()
+
+
+class PGMDataset(_PGDataset):
+    from ingester3.extensions import PGMAccessor
+
+    def validate_indices(self) -> None:
+        super().validate_indices()
+        if self.dataframe.index.names[0] != "month_id":
+            raise ValueError(
+                f"PGMDataset requires index 0 to be 'month_id', found {self.dataframe.index.names}"
+            )
+
+    def _get_time_attr(self, attr: str) -> pd.Series:
+        """Helper method to get temporal attributes using accessor"""
+        time_ids = self.dataframe.index.get_level_values(self._time_id)
+        temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
+        return getattr(temp_df.m, attr)
+
+    def get_year(self) -> pd.DataFrame:
+        return self._get_time_attr("year").to_frame(name="year")
+
+    def get_month(self) -> pd.DataFrame:
+        return self._get_time_attr("month").to_frame(name="month")
+
+    def get_date(self) -> pd.DataFrame:
+        """Get first day of month as datetime"""
+        years = self.get_year()["year"]
+        months = self.get_month()["month"]
+        dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
+        return dates.to_frame(name="date")
+
+
+class PGYDataset(_ViewsDataset):
+    from ingester3.extensions import PGYAccessor
+
+    def validate_indices(self) -> None:
+        super().validate_indices()
+        if self.dataframe.index.names[0] != "year_id":
+            raise ValueError(
+                f"PGYDataset requires index 0 to be 'year_id', found {self.dataframe.index.names}"
             )
 
 
-class PGYDataset(ViewsDataset):
+class _CDataset(_ViewsDataset):
+    # from ingester3.extensions import CAccessor
+    _accessor_name = "c"
+
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names != ["year_id", "priogrid_id"]:
+        if self.dataframe.index.names[1] != "country_id":
             raise ValueError(
-                f"PGYDataset requires indices ['year_id', 'priogrid_id'], found {self.dataframe.index.names}"
+                f"CDataset requires index 1 to be 'country_id', found {self.dataframe.index.names}"
             )
 
+    def _get_entity_attr(self, attr: str) -> pd.Series:
+        """Helper method to get country attributes using accessor"""
+        entity_ids = self.dataframe.index.get_level_values(self._entity_id)
+        temp_df = pd.DataFrame({"c_id": entity_ids}, index=self.dataframe.index)
+        return getattr(temp_df.c, attr)
 
-class CMDataset(ViewsDataset):
+    def get_isoab(self) -> pd.DataFrame:
+        return self._get_entity_attr("isoab").to_frame(name="isoab")
+
+    def get_name(self) -> pd.DataFrame:
+        return self._get_entity_attr("name").to_frame(name="name")
+
+    def get_gwcode(self) -> pd.DataFrame:
+        return self._get_entity_attr("gwcode").to_frame(name="gwcode")
+
+    def get_isonum(self) -> pd.DataFrame:
+        return self._get_entity_attr("isonum").to_frame(name="isonum")
+
+    def get_capname(self) -> pd.DataFrame:
+        return self._get_entity_attr("capname").to_frame(name="capname")
+
+    def get_cap_lat_lon(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "cap_lat": self._get_entity_attr("caplat"),
+                "cap_lon": self._get_entity_attr("caplong"),
+            }
+        )
+
+    def get_region(self) -> pd.DataFrame:
+        """Get combined region information"""
+        return pd.DataFrame(
+            {
+                "in_africa": self._get_entity_attr("in_africa"),
+                "in_me": self._get_entity_attr("in_me"),
+            }
+        )
+
+    def get_continent(self) -> pd.DataFrame:
+        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        # Get GW codes
+        gwcode = self._get_entity_attr("gwcode")
+
+        # Define continent mapping based on GW code ranges (Gleditsch & Ward system)
+        continent_rules = [
+            (gwcode.between(400, 625), "Africa"),  # African states
+            (gwcode.between(630, 698), "Middle East"),  # Middle East
+            (gwcode.between(200, 395), "Europe"),  # Western Europe
+            (gwcode.between(2, 165), "Americas"),  # Americas
+            (gwcode.between(700, 990), "Asia"),  # Asia/Pacific
+            (gwcode == 999, "International"),  # Special codes
+        ]
+
+        # Create default 'Other' category
+        continent = pd.Series("Other", index=gwcode.index)
+
+        # Apply mapping rules
+        for condition, name in continent_rules:
+            continent = continent.where(~condition, name)
+
+        # Use with existing regional flags. Does not really work well.
+        # region = self.get_region()
+        # continent = continent.where(~region['in_africa'], 'Africa')
+        # continent = continent.where(~region['in_me'], 'Middle East')
+
+        return continent.to_frame(name="continent")
+
+
+class CMDataset(_CDataset):
+    from ingester3.extensions import CMAccessor
+
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names != ["month_id", "country_id"]:
+        if self.dataframe.index.names[0] != "month_id":
             raise ValueError(
-                f"CMDataset requires indices ['month_id', 'country_id'], found {self.dataframe.index.names}"
+                f"CMDataset requires index 0 to be 'month_id', found {self.dataframe.index.names}"
             )
 
+    def _get_time_attr(self, attr: str) -> pd.Series:
+        """Helper method to get temporal attributes using accessor"""
+        time_ids = self.dataframe.index.get_level_values(self._time_id)
+        temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
+        return getattr(temp_df.m, attr)
 
-class CYDataset(ViewsDataset):
+    def get_year(self) -> pd.DataFrame:
+        return self._get_time_attr("year").to_frame(name="year")
+
+    def get_month(self) -> pd.DataFrame:
+        return self._get_time_attr("month").to_frame(name="month")
+
+    def get_date(self) -> pd.DataFrame:
+        """Get first day of month as datetime"""
+        years = self.get_year()["year"]
+        months = self.get_month()["month"]
+        dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
+        return dates.to_frame(name="date")
+
+    def get_quarter(self) -> pd.DataFrame:
+        """Get fiscal quarter from month"""
+        months = self.get_month()["month"]
+        return ((months - 1) // 3 + 1).to_frame(name="quarter")
+
+
+class CYDataset(_CDataset):
+    from ingester3.extensions import CYAccessor
+
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names != ["year_id", "country_id"]:
+        if self.dataframe.index.names[0] != "year_id":
             raise ValueError(
-                f"CMDataset requires indices ['year_id', 'country_id'], found {self.dataframe.index.names}"
+                f"CYDataset requires index 0 to be 'year_id', found {self.dataframe.index.names}"
             )

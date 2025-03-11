@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from views_pipeline_core.files.utils import read_dataframe
-from views_pipeline_core.data.handlers import ViewsDataset, PGMDataset, CMDataset
+from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
 
 # Fixtures for test data
 @pytest.fixture
@@ -34,12 +34,12 @@ def sample_predictions_df():
                      np.array([0.5, 0.6]), np.array([0.7, 0.8])]
     }, index=index)
 
-class TestViewsDatasetInitialization:
+class Test_ViewsDatasetInitialization:
     """Tests for initialization and basic properties"""
     
     def test_valid_dataframe_init(self, sample_features_df):
         """Test initialization with valid DataFrame"""
-        ds = ViewsDataset(sample_features_df, targets=['target'])
+        ds = _ViewsDataset(sample_features_df, targets=['target'])
         
         assert ds.dataframe.shape == (4, 3)
         assert ds.targets == ['target']
@@ -48,7 +48,7 @@ class TestViewsDatasetInitialization:
 
     def test_prediction_mode_detection(self, sample_predictions_df):
         """Test automatic prediction mode detection"""
-        ds = ViewsDataset(sample_predictions_df)
+        ds = _ViewsDataset(sample_predictions_df)
         
         assert ds.is_prediction
         assert ds.targets == ['pred_var1', 'pred_var2']
@@ -57,20 +57,20 @@ class TestViewsDatasetInitialization:
     def test_invalid_source_type(self):
         """Test initialization with invalid source type"""
         with pytest.raises(ValueError):
-            ViewsDataset({"invalid": "type"})
+            _ViewsDataset({"invalid": "type"})
 
     def test_missing_targets(self, sample_features_df):
         """Test error handling for missing targets"""
         with pytest.raises(ValueError) as excinfo:
-            ViewsDataset(sample_features_df, targets=['missing'])
-        assert "Missing dependent variables" in str(excinfo.value)
+            _ViewsDataset(sample_features_df, targets=['missing'])
+        assert "Missing targets" in str(excinfo.value)
 
 class TestTensorConversion:
     """Tests for tensor conversion functionality"""
     
     def test_features_to_tensor(self, sample_features_df):
         """Test tensor conversion in features mode"""
-        ds = ViewsDataset(sample_features_df, targets=['target'], broadcast_features=True)
+        ds = _ViewsDataset(sample_features_df, targets=['target'], broadcast_features=True)
         tensor = ds.to_tensor()
         
         # Validate tensor dimensions
@@ -80,7 +80,7 @@ class TestTensorConversion:
 
     def test_prediction_to_tensor(self, sample_predictions_df):
         """Test tensor conversion in prediction mode"""
-        ds = ViewsDataset(sample_predictions_df)
+        ds = _ViewsDataset(sample_predictions_df)
         tensor = ds.to_tensor()
         
         assert tensor.shape == (2, 2, 2, 2)  # (time, entity, samples, vars)
@@ -88,7 +88,7 @@ class TestTensorConversion:
 
     def test_tensor_roundtrip(self, sample_features_df):
         """Test dataframe -> tensor -> dataframe integrity"""
-        ds = ViewsDataset(sample_features_df, targets=['target'], broadcast_features=True)
+        ds = _ViewsDataset(sample_features_df, targets=['target'], broadcast_features=True)
         tensor = ds.to_tensor()
         reconstructed = ds.to_dataframe(tensor)
         
@@ -99,7 +99,7 @@ class TestStatisticalMethods:
     
     def test_map_calculation(self, sample_predictions_df):
         """Test MAP estimation logic"""
-        ds = ViewsDataset(sample_predictions_df)
+        ds = _ViewsDataset(sample_predictions_df)
         map_df = ds.calculate_map()
         
         # Validate structure
@@ -115,7 +115,7 @@ class TestStatisticalMethods:
 
     def test_hdi_calculation(self, sample_predictions_df):
         """Test HDI interval calculation"""
-        ds = ViewsDataset(sample_predictions_df)
+        ds = _ViewsDataset(sample_predictions_df)
         hdi_df = ds.calculate_hdi(alpha=0.5)
         
         # Validate interval structure
@@ -131,7 +131,7 @@ class TestStatisticalMethods:
         df = pd.DataFrame({
             'pred_var': [np.array([5.0])]
         }, index=index)
-        ds = ViewsDataset(df)
+        ds = _ViewsDataset(df)
         
         map_df = ds.calculate_map()
         hdi_df = ds.calculate_hdi()
@@ -166,12 +166,12 @@ class TestEdgeCases:
         """Test initialization with empty DataFrame"""
         df = pd.DataFrame()
         with pytest.raises(ValueError):
-            ViewsDataset(df)
+            _ViewsDataset(df)
 
     # def test_missing_indices(self, sample_features_df):
     #     """Test handling of missing indices after reindexing"""
     #     # Initialize with broadcast_features=True
-    #     ds = ViewsDataset(sample_features_df, 
+    #     ds = _ViewsDataset(sample_features_df, 
     #                     targets=['target'],
     #                     broadcast_features=True)
         
@@ -180,7 +180,7 @@ class TestEdgeCases:
         
     #     # Remove one time step from original data
     #     subset_df = sample_features_df.loc[sample_features_df.index.get_level_values(0) != 1]
-    #     ds_subset = ViewsDataset(subset_df, targets=['target'], broadcast_features=True)
+    #     ds_subset = _ViewsDataset(subset_df, targets=['target'], broadcast_features=True)
         
     #     # Get subset tensor
     #     subset_tensor = ds_subset.to_tensor()
@@ -198,7 +198,7 @@ class TestEdgeCases:
     #     df = pd.DataFrame({
     #         'pred_var': [np.array([np.nan, np.nan])]
     #     }, index=index)
-    #     ds = ViewsDataset(df)
+    #     ds = _ViewsDataset(df)
         
     #     map_df = ds.calculate_map()
     #     hdi_df = ds.calculate_hdi()
@@ -212,7 +212,7 @@ class TestSubsetting:
     
     def test_tensor_subsetting(self, sample_features_df):
         """Test tensor subsetting by time/entity"""
-        ds = ViewsDataset(sample_features_df, targets=['target'], broadcast_features=True)
+        ds = _ViewsDataset(sample_features_df, targets=['target'], broadcast_features=True)
         
         # Subset by time
         time_subset = ds.get_subset_tensor(time_ids=1)
@@ -224,7 +224,7 @@ class TestSubsetting:
 
     def test_dataframe_subsetting(self, sample_features_df):
         """Test dataframe subsetting by time/entity"""
-        ds = ViewsDataset(sample_features_df, targets=['target'])
+        ds = _ViewsDataset(sample_features_df, targets=['target'])
         subset = ds.get_subset_dataframe(time_ids=1, entity_ids=101)
         
         assert subset.shape == (1, 3)

@@ -91,10 +91,20 @@ def parse_args():
         help="Type of evaluation to be performed"
     )
 
+    parser.add_argument(
+        "-re", "--report", action="store_true", help="Generate forecast report. Can only be used when --run_type forecasting."
+    )
+
     return parser.parse_args()
 
 
 def validate_arguments(args):
+    if args.report and args.run_type != "forecasting" and args.forecast:
+        print(
+            "Error: --report flag can only be used with --run_type forecasting and in forecasting mode (-f). Exiting."
+        )
+        sys.exit(1)
+
     if args.sweep and args.run_type != "calibration":
         print("Error: Sweep runs must have --run_type set to 'calibration'. Exiting.")
         print("To fix: Use --run_type calibration when --sweep is flagged.")
