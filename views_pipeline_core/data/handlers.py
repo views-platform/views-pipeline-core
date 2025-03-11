@@ -11,7 +11,7 @@ import scipy.stats as stats
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 from contextlib import contextmanager
-from ingester3.extensions import PGYAccessor, PGMAccessor, CMAccessor, CYAccessor
+
 
 logger = logging.getLogger(__name__)
 
@@ -1554,7 +1554,7 @@ class _PGDataset(_ViewsDataset):
 
 
 class PGMDataset(_PGDataset):
-    # from ingester3.extensions import PGMAccessor
+    from ingester3.extensions import PGMAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -1584,7 +1584,7 @@ class PGMDataset(_PGDataset):
 
 
 class PGYDataset(_ViewsDataset):
-    # from ingester3.extensions import PGYAccessor
+    from ingester3.extensions import PGYAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -1674,7 +1674,7 @@ class _CDataset(_ViewsDataset):
 
 
 class CMDataset(_CDataset):
-    # from ingester3.extensions import CMAccessor
+    from ingester3.extensions import CMAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -1709,7 +1709,7 @@ class CMDataset(_CDataset):
 
 
 class CYDataset(_CDataset):
-    # from ingester3.extensions import CYAccessor
+    from ingester3.extensions import CYAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()
