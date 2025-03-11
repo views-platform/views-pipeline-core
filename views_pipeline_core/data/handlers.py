@@ -16,7 +16,7 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 
-class __ViewsDataset:
+class _ViewsDataset:
     def __init__(
         self,
         source: Union[pd.DataFrame, str, Path],
@@ -1145,7 +1145,7 @@ class __ViewsDataset:
             self._clear_tensor_cache_if_needed()
             if time_ids is not None or entity_ids is not None:
                 subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-                temp_ds = __ViewsDataset(
+                temp_ds = _ViewsDataset(
                     subset_df,
                     targets=self.targets,
                     broadcast_features=self.broadcast_features,
@@ -1195,7 +1195,7 @@ class __ViewsDataset:
         # Get subset if specified
         if time_ids is not None or entity_ids is not None:
             subset_df = self.get_subset_dataframe(time_ids, entity_ids)
-            temp_ds = __ViewsDataset(subset_df)
+            temp_ds = _ViewsDataset(subset_df)
             tensor = temp_ds.to_tensor(include_targets)
             reconstructed = temp_ds.to_dataframe(tensor)
             original = subset_df
@@ -1223,7 +1223,7 @@ class __ViewsDataset:
 
     def __repr__(self) -> str:
         return (
-            f"__ViewsDataset(time_steps={self.num_time_steps}, "
+            f"_ViewsDataset(time_steps={self.num_time_steps}, "
             f"entities={self.num_entities}, "
             f"features={self.num_features}, "
             f"prediction_mode={self.is_prediction})"
@@ -1492,7 +1492,7 @@ class __ViewsDataset:
         return pd.DataFrame(reports)
 
 
-class __PGDataset(__ViewsDataset):
+class _PGDataset(_ViewsDataset):
     _accessor_name = "pg"
 
     def validate_indices(self) -> None:
@@ -1553,7 +1553,7 @@ class __PGDataset(__ViewsDataset):
     #     return country_df.c.get_continent()
 
 
-class PGMDataset(__PGDataset):
+class PGMDataset(_PGDataset):
     from ingester3.extensions import PGMAccessor
 
     def validate_indices(self) -> None:
@@ -1583,7 +1583,7 @@ class PGMDataset(__PGDataset):
         return dates.to_frame(name="date")
 
 
-class PGYDataset(__ViewsDataset):
+class PGYDataset(_ViewsDataset):
     from ingester3.extensions import PGYAccessor
 
     def validate_indices(self) -> None:
@@ -1594,7 +1594,7 @@ class PGYDataset(__ViewsDataset):
             )
 
 
-class __CDataset(__ViewsDataset):
+class _CDataset(_ViewsDataset):
     # from ingester3.extensions import CAccessor
     _accessor_name = "c"
 
@@ -1673,7 +1673,7 @@ class __CDataset(__ViewsDataset):
         return continent.to_frame(name="continent")
 
 
-class CMDataset(__CDataset):
+class CMDataset(_CDataset):
     from ingester3.extensions import CMAccessor
 
     def validate_indices(self) -> None:
@@ -1708,7 +1708,7 @@ class CMDataset(__CDataset):
         return ((months - 1) // 3 + 1).to_frame(name="quarter")
 
 
-class CYDataset(__CDataset):
+class CYDataset(_CDataset):
     from ingester3.extensions import CYAccessor
 
     def validate_indices(self) -> None:
