@@ -1494,7 +1494,7 @@ class _ViewsDataset:
 
 class _PGDataset(_ViewsDataset):
     _accessor_name = "pg"
-
+    
     def validate_indices(self) -> None:
         super().validate_indices()
         if self.dataframe.index.names[1] != "priogrid_id" and self.dataframe.index.names[1] != "priogrid_gid":
@@ -1504,34 +1504,40 @@ class _PGDataset(_ViewsDataset):
 
     def _get_entity_attr(self, attr: str) -> pd.Series:
         """Helper method to get entity attributes using accessor"""
+        from ingester3.extensions import PgAccessor
         entity_ids = self.dataframe.index.get_level_values(self._entity_id)
         temp_df = pd.DataFrame({"pg_id": entity_ids}, index=self.dataframe.index)
         return getattr(temp_df.pg, attr)
 
     def get_country_id(self) -> pd.DataFrame:
         """Get country ID for each priogrid"""
+        from ingester3.extensions import PgAccessor
         return self._get_entity_attr("c_id").to_frame(name="country_id")
 
     def get_lat_lon(self) -> pd.DataFrame:
         """Get latitude and longitude for each priogrid"""
+        from ingester3.extensions import PgAccessor
         return pd.DataFrame(
             {"lat": self._get_entity_attr("lat"), "lon": self._get_entity_attr("lon")}
         )
 
     def get_row_col(self) -> pd.DataFrame:
         """Get row and column indices for each priogrid"""
+        from ingester3.extensions import PgAccessor
         return pd.DataFrame(
             {"row": self._get_entity_attr("row"), "col": self._get_entity_attr("col")}
         )
 
     def get_country_iso(self) -> pd.DataFrame:
         """Get ISO code for the country of each priogrid"""
+        from ingester3.extensions import PgAccessor
         country_ids = self._get_entity_attr("c_id")
         temp_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
         return temp_df.c.isoab.to_frame(name="country_iso")
 
     def get_name(self) -> pd.DataFrame:
         """Get country names for each priogrid"""
+        from ingester3.extensions import PgAccessor
         # Get country IDs from priogrids
         country_ids = self._get_entity_attr("c_id")
 
@@ -1565,17 +1571,21 @@ class PGMDataset(_PGDataset):
 
     def _get_time_attr(self, attr: str) -> pd.Series:
         """Helper method to get temporal attributes using accessor"""
+        from ingester3.extensions import PGMAccessor
         time_ids = self.dataframe.index.get_level_values(self._time_id)
         temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
         return getattr(temp_df.m, attr)
 
     def get_year(self) -> pd.DataFrame:
+        from ingester3.extensions import PGMAccessor
         return self._get_time_attr("year").to_frame(name="year")
 
     def get_month(self) -> pd.DataFrame:
+        from ingester3.extensions import PGMAccessor
         return self._get_time_attr("month").to_frame(name="month")
 
     def get_date(self) -> pd.DataFrame:
+        from ingester3.extensions import PGMAccessor
         """Get first day of month as datetime"""
         years = self.get_year()["year"]
         months = self.get_month()["month"]
@@ -1584,7 +1594,7 @@ class PGMDataset(_PGDataset):
 
 
 class PGYDataset(_ViewsDataset):
-    from ingester3.extensions import PGYAccessor
+    # from ingester3.extensions import PGYAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -1607,26 +1617,33 @@ class _CDataset(_ViewsDataset):
 
     def _get_entity_attr(self, attr: str) -> pd.Series:
         """Helper method to get country attributes using accessor"""
+        from ingester3.extensions import CAccessor
         entity_ids = self.dataframe.index.get_level_values(self._entity_id)
         temp_df = pd.DataFrame({"c_id": entity_ids}, index=self.dataframe.index)
         return getattr(temp_df.c, attr)
 
     def get_isoab(self) -> pd.DataFrame:
+        from ingester3.extensions import CAccessor
         return self._get_entity_attr("isoab").to_frame(name="isoab")
 
     def get_name(self) -> pd.DataFrame:
+        from ingester3.extensions import CAccessor
         return self._get_entity_attr("name").to_frame(name="name")
 
     def get_gwcode(self) -> pd.DataFrame:
+        from ingester3.extensions import CAccessor
         return self._get_entity_attr("gwcode").to_frame(name="gwcode")
 
     def get_isonum(self) -> pd.DataFrame:
+        from ingester3.extensions import CAccessor
         return self._get_entity_attr("isonum").to_frame(name="isonum")
 
     def get_capname(self) -> pd.DataFrame:
+        from ingester3.extensions import CAccessor
         return self._get_entity_attr("capname").to_frame(name="capname")
 
     def get_cap_lat_lon(self) -> pd.DataFrame:
+        from ingester3.extensions import CAccessor
         return pd.DataFrame(
             {
                 "cap_lat": self._get_entity_attr("caplat"),
@@ -1636,6 +1653,7 @@ class _CDataset(_ViewsDataset):
 
     def get_region(self) -> pd.DataFrame:
         """Get combined region information"""
+        from ingester3.extensions import CAccessor
         return pd.DataFrame(
             {
                 "in_africa": self._get_entity_attr("in_africa"),
@@ -1645,6 +1663,7 @@ class _CDataset(_ViewsDataset):
 
     def get_continent(self) -> pd.DataFrame:
         """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        from ingester3.extensions import CAccessor
         # Get GW codes
         gwcode = self._get_entity_attr("gwcode")
 
@@ -1674,7 +1693,6 @@ class _CDataset(_ViewsDataset):
 
 
 class CMDataset(_CDataset):
-    from ingester3.extensions import CMAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -1685,18 +1703,22 @@ class CMDataset(_CDataset):
 
     def _get_time_attr(self, attr: str) -> pd.Series:
         """Helper method to get temporal attributes using accessor"""
+        from ingester3.extensions import CMAccessor
         time_ids = self.dataframe.index.get_level_values(self._time_id)
         temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
         return getattr(temp_df.m, attr)
 
     def get_year(self) -> pd.DataFrame:
+        from ingester3.extensions import CMAccessor
         return self._get_time_attr("year").to_frame(name="year")
 
     def get_month(self) -> pd.DataFrame:
+        from ingester3.extensions import CMAccessor
         return self._get_time_attr("month").to_frame(name="month")
 
     def get_date(self) -> pd.DataFrame:
         """Get first day of month as datetime"""
+        from ingester3.extensions import CMAccessor
         years = self.get_year()["year"]
         months = self.get_month()["month"]
         dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
@@ -1704,12 +1726,13 @@ class CMDataset(_CDataset):
 
     def get_quarter(self) -> pd.DataFrame:
         """Get fiscal quarter from month"""
+        from ingester3.extensions import CMAccessor
         months = self.get_month()["month"]
         return ((months - 1) // 3 + 1).to_frame(name="quarter")
 
 
 class CYDataset(_CDataset):
-    from ingester3.extensions import CYAccessor
+    # from ingester3.extensions import CYAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()

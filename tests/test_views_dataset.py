@@ -1,8 +1,6 @@
 import pytest
 import pandas as pd
 import numpy as np
-from pathlib import Path
-from views_pipeline_core.files.utils import read_dataframe
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
 import scipy.stats as stats
 
