@@ -1560,7 +1560,7 @@ class _PGDataset(_ViewsDataset):
 
 
 class PGMDataset(_PGDataset):
-    from ingester3.extensions import PGMAccessor
+    # from ingester3.extensions import PGMAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()
