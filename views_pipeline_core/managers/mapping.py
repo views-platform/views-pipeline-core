@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from views_pipeline_core.data.handlers import PGMDataset, CMDataset
+from views_pipeline_core.data.handlers import PGMDataset, CMDataset, _CDataset
 import logging
 from typing import Union, Optional, List
 from pathlib import Path
@@ -34,9 +34,6 @@ class MappingManager:
             raise ValueError("Invalid dataset type. Must be a PGMDataset or CMDataset.")
         # self._mapping_dataframe = self.__init_mapping_dataframe(self._dataframe)
         self._mapping_dataframe = None
-        # self._mapping_dataframe = self._dataframe.reset_index()
-
-        self._isoab_cache_dataframe = None
 
     def __get_country_shapefile(self):
         path = (
@@ -88,7 +85,9 @@ class MappingManager:
         return mapping_dataframe
 
     def __init_mapping_dataframe(self, dataframe: pd.DataFrame) -> gpd.GeoDataFrame:
-        _dataframe = dataframe.reset_index()[self._dataset.targets + [self._entity_id, self._time_id]]
+        _dataframe = dataframe.reset_index()[
+            self._dataset.targets + [self._entity_id, self._time_id]
+        ]
 
         numeric_cols = _dataframe.select_dtypes(include=np.number).columns
         _dataframe[numeric_cols] = _dataframe[numeric_cols].astype(np.float32)
@@ -138,20 +137,20 @@ class MappingManager:
         # Get ISO codes and country names through dataset methods
         iso_df = self._dataset.get_isoab().reset_index()
         name_df = self._dataset.get_name().reset_index()
-        
+
         # Merge with main dataframe
         dataframe = dataframe.merge(
-            iso_df[[self._time_id, self._entity_id, 'isoab']],
+            iso_df[[self._time_id, self._entity_id, "isoab"]],
             on=[self._time_id, self._entity_id],
-            how='left'
+            how="left",
         )
         dataframe = dataframe.merge(
-            name_df[[self._time_id, self._entity_id, 'name']],
+            name_df[[self._time_id, self._entity_id, "name"]],
             on=[self._time_id, self._entity_id],
-            how='left'
+            how="left",
         )
-        dataframe.rename(columns={'name': 'country_name'}, inplace=True)
-            
+        dataframe.rename(columns={"name": "country_name"}, inplace=True)
+
         return dataframe
 
     def __add_cid(self, dataframe: pd.DataFrame):
@@ -164,28 +163,24 @@ class MappingManager:
         if isinstance(self._dataset, PGMDataset):
             # Get country IDs through dataset method
             cid_df = self._dataset.get_country_id().reset_index()
-            
+
             # Get country names using CDataset
-            country_ids = cid_df['c_id'].unique()
-            temp_country_df = pd.DataFrame({'c_id': country_ids})
-            temp_cdataset = CMDataset(temp_country_df, targets=[])  # Use CMDataset for month alignment
-            
+            country_ids = cid_df["c_id"].unique()
+            temp_country_df = pd.DataFrame({"c_id": country_ids})
+            temp_cdataset = CMDataset(
+                temp_country_df, targets=[]
+            )  # Use CMDataset for month alignment
+
             # Merge names
             name_df = temp_cdataset.get_name().reset_index()
-            cid_df = cid_df.merge(
-                name_df[['c_id', 'name']],
-                on='c_id',
-                how='left'
-            )
-            
+            cid_df = cid_df.merge(name_df[["c_id", "name"]], on="c_id", how="left")
+
             # Merge with main dataframe
             dataframe = dataframe.merge(
-                cid_df,
-                on=[self._time_id, self._entity_id],
-                how='left'
+                cid_df, on=[self._time_id, self._entity_id], how="left"
             )
-            dataframe.rename(columns={'name': 'country_name'}, inplace=True)
-            
+            dataframe.rename(columns={"name": "country_name"}, inplace=True)
+
         return dataframe
 
     def get_subset_mapping_dataframe(
@@ -217,6 +212,9 @@ class MappingManager:
             tolerance=0.20,  # Adjust based on data scale (degrees for EPSG:4326)
             preserve_topology=True,
         )
+        hover_data = [self._entity_id, self._time_id, target]
+        if isinstance(self._dataset, _CDataset):
+            hover_data.append("country_name")
 
         # Create figure with slider
         fig = px.choropleth(
@@ -226,21 +224,21 @@ class MappingManager:
             color=target,
             animation_frame=self._time_id,
             projection="natural earth",
-            hover_data=[self._entity_id, self._time_id, target],
+            hover_data=hover_data,
             color_continuous_scale="OrRd",
             range_color=(
                 # mapping_dataframe[target].min(),
                 # mapping_dataframe[target].max(),
                 mapping_dataframe[target].quantile(0.05),
-                mapping_dataframe[target].quantile(0.95)
+                mapping_dataframe[target].quantile(0.95),
             ),
             labels={self._time_id: "Time Period", target: target},
         )
 
         # Adjust layout for larger size
         fig.update_layout(
-            height=800,  # Increased from default 450
-            width=1200,  # Increased from default 700
+            height=900,  # Increased from default 450
+            # width=1200,  # Increased from default 700
             autosize=True,
             margin={"r": 0, "t": 40, "l": 0, "b": 40},
             sliders=[
@@ -254,13 +252,40 @@ class MappingManager:
                 }
             ],
         )
+        # fig.update_layout(
+        #     height=1000,  # Increased height
+        #     margin={"r": 0, "t": 40, "l": 0, "b": 140},  # More bottom space
+        #     sliders=[
+        #         {
+        #             "currentvalue": {
+        #                 "prefix": f"{self._time_id}: ",
+        #                 "font": {"size": 14},
+        #                 "xanchor": "right",
+        #                 "offset": 20,
+        #             },
+        #             "pad": {"t": 50, "b": 100},  # Increased bottom padding
+        #             "len": 0.95,
+        #             "x": 0.05,  # Left-align slider
+        #         }
+        #     ],
+        # )
+        fig.update_layout(
+            annotations=[
+                dict(
+                    x=0.5,
+                    y=-0.15,  # Position below main plot
+                    showarrow=False,
+                    text="",
+                    xref="paper",
+                    yref="paper",
+                )
+            ]
+        )
 
         fig.update_traces(
-            marker_line_width=0.5,
-            marker_opacity=0.9,
-            selector=dict(type='choropleth')
+            marker_line_width=0.5, marker_opacity=0.9, selector=dict(type="choropleth")
         )
-        
+
         # Improve map rendering
         fig.update_geos(
             fitbounds="locations",
@@ -325,9 +350,7 @@ class MappingManager:
             ),
         )
         sm._A = []
-        fig.colorbar(
-            sm, ax=ax, orientation="horizontal", fraction=0.036, pad=0.1
-        )
+        fig.colorbar(sm, ax=ax, orientation="horizontal", fraction=0.036, pad=0.1)
 
         return fig
 

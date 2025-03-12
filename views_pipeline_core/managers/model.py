@@ -29,6 +29,7 @@ from views_evaluation.evaluation.evaluation_manager import EvaluationManager
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.managers.mapping import MappingManager
 from views_pipeline_core.managers.report import ReportManager
+from views_pipeline_core.visualizations.historical import HistoricalLineGraph
 
 logger = logging.getLogger(__name__)
 
@@ -913,7 +914,7 @@ class ModelManager:
                 f"Model {self._model_path.model_name} has been deprecated. Please use a different model."
             )
             raise ValueError("Model is deprecated and cannot be used.")
-        
+
         # Check if target is a list. If not, convert it to a list. Otherwise raise an error.
         if isinstance(config["depvar"], str):
             config["depvar"] = [config["depvar"]]
@@ -998,7 +999,6 @@ class ModelManager:
             str: A formatted string representing the evaluation table.
         """
         from tabulate import tabulate
-
         # create an empty dataframe with columns 'Metric' and 'Value'
         metric_df = pd.DataFrame(columns=["Metric", "Value"])
         for key, value in metric_dict.items():
@@ -1272,9 +1272,13 @@ class ModelManager:
             logger.info(f"Calculating evaluation metrics for {target}")
             conflict_type = ModelManager._get_conflict_type(target)
 
-            eval_result_dict = evaluation_manager.evaluate(df_actual, df_predictions, target, steps=self.config["steps"])
+            eval_result_dict = evaluation_manager.evaluate(
+                df_actual, df_predictions, target, steps=self.config["steps"]
+            )
             step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
-            time_series_wise_evaluation, df_time_series_wise_evaluation = eval_result_dict["time_series"]
+            time_series_wise_evaluation, df_time_series_wise_evaluation = (
+                eval_result_dict["time_series"]
+            )
             month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
 
             log_wandb_log_dict(
@@ -1659,14 +1663,12 @@ class ModelManager:
         """Generate a forecast report based on the prediction DataFrame."""
         dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
 
-        def _create_report(
-            dataset_cls: Union[CMDataset, PGMDataset], dataframe: pd.DataFrame
-        ) -> Path:
+        def _create_report() -> Path:
             """Helper function to create and export report."""
-            dataset = dataset_cls(dataframe)
+            forecast_dataset = dataset_cls(forecast_dataframe)
 
             report_manager = ReportManager()
-            mapping_manager = MappingManager(dataset)
+            mapping_manager = MappingManager(forecast_dataset)
             # Build report content
             report_manager.add_heading(
                 f"Forecast Report for {self._model_path.model_name}", level=1
@@ -1677,18 +1679,35 @@ class ModelManager:
                 entity_ids=None, time_ids=None
             )
 
-            for target in self.config["depvar"]:
+            for target in tqdm.tqdm(self.config["depvar"], desc="Generating forecast maps"):
                 report_manager.add_heading(f"Forecast for {target}", level=3)
-                # report_manager.add_map(target=f"pred_{target}", interactive=True)
-                report_manager.add_map(
-                    map_html=mapping_manager.plot_map(
+                report_manager.add_html(
+                    html=mapping_manager.plot_map(
                         mapping_dataframe=subset_dataframe,
                         target=f"pred_{target}",
                         interactive=True,
                         as_html=True,
                     )
                 )
-
+            if isinstance(forecast_dataset, CMDataset):
+                logger.info("Generating historical vs forecast graphs for CM dataset")
+                report_manager.add_heading("Historical vs Forecasted", level=2)
+                historical_dataset = dataset_cls(
+                    historical_dataframe, targets=self.config["depvar"]
+                )
+                historical_line_graph = HistoricalLineGraph(
+                    historical_dataset=historical_dataset,
+                    forecast_dataset=forecast_dataset,
+                )
+                report_manager.add_html(
+                    html=historical_line_graph.plot_predictions_vs_historical(
+                        entity_ids=None,
+                        interactive=True,
+                        alpha=0.9,
+                        targets=None,
+                        as_html=True,
+                    )
+                )
             # Generate report path
             report_path = (
                 self._model_path.reports
@@ -1706,7 +1725,7 @@ class ModelManager:
             raise ValueError(f"Invalid level: {self.config['level']}")
 
         # Create and export report
-        report_path = _create_report(dataset_cls, forecast_dataframe)
+        report_path = _create_report()
 
         # Send WandB alert
         self._wandb_alert(
