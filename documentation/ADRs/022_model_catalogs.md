@@ -29,7 +29,7 @@ Configs used to create the catalog:
 Columns:
 - **Model Name**: name of the model, always in a form of `adjective_noun`
 - **Algorithm**: "algorithm" from `config_meta.py`
-- **Target**: "depvar" from `config_meta.py` (it will be changed to "target(s)")
+- **Target**: "targets" from `config_meta.py`
 - **Input Features**: "queryset" from `config_meta.py` that points to the `config_queryset.py` file in the corresponding model directory
 - **Non-default Hyperparameters**: "hyperparameters model_name" that points to `config_hyperparameters.py`
 - **Forecasting Type**: TBD

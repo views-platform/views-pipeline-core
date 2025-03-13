@@ -916,9 +916,9 @@ class ModelManager:
             raise ValueError("Model is deprecated and cannot be used.")
 
         # Check if target is a list. If not, convert it to a list. Otherwise raise an error.
-        if isinstance(config["depvar"], str):
-            config["depvar"] = [config["depvar"]]
-        if not isinstance(config["depvar"], list):
+        if isinstance(config["targets"], str):
+            config["targets"] = [config["targets"]]
+        if not isinstance(config["targets"], list):
             logger.error("Target must be a string or a list of strings.")
             raise ValueError("Target must be a string or a list of strings.")
 
@@ -943,9 +943,9 @@ class ModelManager:
         config["sweep"] = self._args.sweep
 
         # Check if target is a list. If not, convert it to a list. Otherwise raise an error.
-        if isinstance(config["depvar"], str):
-            config["depvar"] = [config["depvar"]]
-        if not isinstance(config["depvar"], list):
+        if isinstance(config["targets"], str):
+            config["targets"] = [config["targets"]]
+        if not isinstance(config["targets"], list):
             raise ValueError("Target must be a string or a list of strings.")
 
         return config
@@ -1267,8 +1267,8 @@ class ModelManager:
 
         logger.info(f"df_viewser read from {df_path}")
         # Multiple targets
-        df_actual = df_viewser[self.config["depvar"]]
-        for target in self.config["depvar"]:
+        df_actual = df_viewser[self.config["targets"]]
+        for target in self.config["targets"]:
             logger.info(f"Calculating evaluation metrics for {target}")
             conflict_type = ModelManager._get_conflict_type(target)
 
@@ -1598,7 +1598,7 @@ class ModelManager:
         print_status("DataFrame contains data", True)
 
         # target validation
-        target = self.config["depvar"]
+        target = self.config["targets"]
         if not isinstance(target, (str, list)):
             print_status("Valid target type", False)
             raise ValueError(f"Invalid target type: {type(target)}")
@@ -1679,7 +1679,7 @@ class ModelManager:
                 entity_ids=None, time_ids=None
             )
 
-            for target in tqdm.tqdm(self.config["depvar"], desc="Generating forecast maps"):
+            for target in tqdm.tqdm(self.config["targets"], desc="Generating forecast maps"):
                 report_manager.add_heading(f"Forecast for {target}", level=3)
                 report_manager.add_html(
                     html=mapping_manager.plot_map(
@@ -1693,7 +1693,7 @@ class ModelManager:
                 logger.info("Generating historical vs forecast graphs for CM dataset")
                 report_manager.add_heading("Historical vs Forecasted", level=2)
                 historical_dataset = dataset_cls(
-                    historical_dataframe, targets=self.config["depvar"]
+                    historical_dataframe, targets=self.config["targets"]
                 )
                 historical_line_graph = HistoricalLineGraph(
                     historical_dataset=historical_dataset,
