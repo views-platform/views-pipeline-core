@@ -31,7 +31,7 @@ class HistoricalLineGraph:
 
     def plot_predictions_vs_historical(
         self,
-        entity_ids: Union[int, List[int]],
+        entity_ids: Union[int, List[int]] = None,
         interactive: bool = True,
         alpha: float = 0.9,
         targets: Optional[List[str]] = None,
@@ -192,7 +192,7 @@ class HistoricalLineGraph:
             x=hist_df[self.historical_dataset._time_id],
             y=hist_df[target],
             mode="lines+markers",
-            name=f"Historical ({label})",
+            name=f"{label}",
             line=dict(color="grey", width=1.5),
             marker=dict(size=4),
             visible=idx == 0,
@@ -205,7 +205,7 @@ class HistoricalLineGraph:
             x=pred_df[self.forecast_dataset._time_id],
             y=pred_df[f"pred_{target}"],
             mode="lines+markers",
-            name=f"Forecast ({label})",
+            name=f"{label}",
             line=dict(color=color, width=1.5),
             marker=dict(size=4),
             visible=idx == 0,
@@ -291,21 +291,74 @@ class HistoricalLineGraph:
             annotation_position="top right",
         )
 
+    # def _format_interactive_plot(self, fig: go.Figure, target: str):
+    #     fig.update_layout(
+    #         title=f"{target} - Historical vs Forecast",
+    #         xaxis_title=f"Time Period ({self.historical_dataset._time_id})",
+    #         yaxis_title="Value",
+    #         legend_title="Series",
+    #         hovermode="x unified",
+    #         template="plotly_white",
+    #         height=600,
+    #         margin=dict(t=80, b=80),
+    #         xaxis=dict(
+    #             showgrid=True,
+    #             gridcolor="lightgray",
+    #             tickangle=-45,
+    #             rangeslider=dict(visible=True),
+    #         ),
+    #         yaxis=dict(showgrid=True, gridcolor="lightgray"),
+    #     )
+
     def _format_interactive_plot(self, fig: go.Figure, target: str):
         fig.update_layout(
-            title=f"{target} - Historical vs Forecast",
+            title=dict(
+                text=f"",
+                x=0.05,
+                xanchor='left',
+                font=dict(size=24, color='#2c3e50')
+            ),
             xaxis_title=f"Time Period ({self.historical_dataset._time_id})",
-            yaxis_title="Value",
-            legend_title="Series",
+            yaxis_title=f"{target}",
+            annotations=[
+                dict(
+                    text="",
+                    x=1,
+                    y=1.02,
+                    xref="paper",
+                    yref="paper",
+                    showarrow=False,
+                    font=dict(size=12, color="#7f8c8d")
+                )
+            ],
+            legend_title=f"",
             hovermode="x unified",
             template="plotly_white",
-            height=600,
-            margin=dict(t=80, b=80),
+            height=650,
+            margin=dict(t=100, b=100, l=80, r=150),
             xaxis=dict(
                 showgrid=True,
-                gridcolor="lightgray",
+                gridcolor="#ecf0f1",
                 tickangle=-45,
                 rangeslider=dict(visible=True),
+                title_font=dict(size=14)
             ),
-            yaxis=dict(showgrid=True, gridcolor="lightgray"),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor="#ecf0f1",
+                title_font=dict(size=14)
+            ),
+            legend=dict(
+                title_font=dict(size=12),
+                font=dict(size=12),
+                bgcolor='rgba(255,255,255,0.8)'
+            )
+        )
+        # Add direct target annotation
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=0.05, y=0.95,
+            text=f"",
+            showarrow=False,
+            font=dict(size=14, color="#34495e")
         )

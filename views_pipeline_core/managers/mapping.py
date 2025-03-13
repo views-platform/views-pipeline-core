@@ -17,7 +17,15 @@ logger = logging.getLogger(__name__)
 
 class MappingManager:
     def __init__(self, views_dataset: Union[PGMDataset, CMDataset]):
-        self._dataset = views_dataset
+        if views_dataset.sample_size > 1:
+            logger.info(
+                f"Calculating MAP for dataset. Found sample size of {views_dataset.sample_size}"
+            )
+            self._dataset = type(views_dataset)(
+                views_dataset.calculate_map(features=None)
+            )
+        else:
+            self._dataset = views_dataset
         self._dataframe = self._dataset.dataframe
         self._entity_id = self._dataset._entity_id
         self._time_id = self._dataset._time_id
@@ -318,30 +326,45 @@ class MappingManager:
     def _plot_static_map(
         self, mapping_dataframe: gpd.GeoDataFrame, target: str, time_unit: int
     ):
-        fig, ax = plt.subplots(1, 1, figsize=(15, 10))
-        mapping_dataframe.boundary.plot(ax=ax, linewidth=0.3, color="black")
-        # ax.set_axis_off()
+        # Validation checks
+        if target not in mapping_dataframe.columns:
+            raise ValueError(f"Target column '{target}' not found in mapping dataframe")
 
-        # Plot the data
-        mapping_dataframe.plot(
-            column=f"{target}",
+        if mapping_dataframe[target].isnull().all():
+            raise ValueError(f"No valid values found for target '{target}'")
+
+        fig, ax = plt.subplots(1, 1, figsize=(15, 10))
+
+        # Plot boundaries
+        mapping_dataframe.boundary.plot(ax=ax, linewidth=0.3, color="black")
+
+        # Plot data values
+        plot = mapping_dataframe.plot(
+            column=target,
             ax=ax,
-            legend=False,
-            legend_kwds={"label": f"{target}", "orientation": "horizontal"},
+            legend=True,
+            # legend_kwds={
+            #     "label": f"",
+            #     "orientation": "horizontal",
+            #     "pad": 0.01,
+            #     "aspect": 40,
+            # },
             cmap="OrRd",
             vmin=mapping_dataframe[target].quantile(0.05),
             vmax=mapping_dataframe[target].quantile(0.95),
             linewidth=0.1,
-            color="#404040",  # Darker gray instead of black
-            alpha=0.5,  # Add transparency
+            edgecolor="#404040",
+            alpha=0.9,
         )
 
-        # Add title and labels
-        plt.title(f"{target} for {self._time_id} {int(time_unit)}", fontsize=15)
+        # Add metadata
+        plt.title(
+            f"{target} for {self._time_id} {int(time_unit)}",
+            fontsize=15,
+        )
         plt.xlabel("Longitude", fontsize=12)
         plt.ylabel("Latitude", fontsize=12)
 
-        # Add a color bar
         sm = plt.cm.ScalarMappable(
             cmap="OrRd",
             norm=plt.Normalize(
@@ -350,7 +373,11 @@ class MappingManager:
             ),
         )
         sm._A = []
-        fig.colorbar(sm, ax=ax, orientation="horizontal", fraction=0.036, pad=0.1)
+
+        cbar = fig.colorbar(
+            sm, ax=ax, orientation="horizontal", fraction=0.036, pad=0.1
+        )
+        cbar.set_label(f"{target}", fontsize=12)
 
         return fig
 
