@@ -48,6 +48,11 @@ The development of the VIEWS pipeline is driven by several core objectives.
 - **Testing** – Automated tests ensure the pipeline's accuracy and reliability over time, making it easier to identify and resolve issues.
 
 ---
+
+## Installation
+
+**Views-pipeline-core** can easily be installed using the pip package manager. Set up a conda environment with Python version 3.11, activate it and run `pip install views-pipeline-core`.
+
 ## views-pipeline-core Contents:
 ## CLI
 
