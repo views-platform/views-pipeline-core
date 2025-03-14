@@ -4,7 +4,6 @@ from views_pipeline_core.models.check import ensemble_model_check
 from views_pipeline_core.files.utils import read_log_file, create_log_file
 from views_pipeline_core.files.utils import save_dataframe, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_evaluation.evaluation.metrics import MetricsManager
 
 # from views_forecasts.extensions import *
 from typing import Union, Optional, List, Dict

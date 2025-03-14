@@ -8,7 +8,7 @@ from views_pipeline_core.wandb.utils import (
     log_wandb_log_dict,
     calculate_mean_evaluation_metrics
 )
-from views_evaluation.evaluation.metrics import EvaluationMetrics
+from views_evaluation.evaluation.metrics import PointEvaluationMetrics
 
 @pytest.fixture
 def mock_wandb():
@@ -17,7 +17,7 @@ def mock_wandb():
 
 @pytest.fixture
 def eval_metrics():
-    return EvaluationMetrics(RMSLE=0.1, CRPS=0.2)
+    return PointEvaluationMetrics(RMSLE=0.1, CRPS=0.2)
 
 def test_add_wandb_metrics(mock_wandb):
     add_wandb_metrics()
@@ -82,8 +82,8 @@ def test_log_wandb_log_dict(mock_wandb, eval_metrics):
     })
 
 def test_calculate_mean_evaluation_metrics():
-    eval_metrics1 = EvaluationMetrics(RMSLE=0.1, CRPS=0.2)
-    eval_metrics2 = EvaluationMetrics(RMSLE=0.2, CRPS=0.3)
+    eval_metrics1 = PointEvaluationMetrics(RMSLE=0.1, CRPS=0.2)
+    eval_metrics2 = PointEvaluationMetrics(RMSLE=0.2, CRPS=0.3)
     evaluation_dict = {'ts01': eval_metrics1, 'ts02': eval_metrics2}
     result = calculate_mean_evaluation_metrics(evaluation_dict)
     assert result == pytest.approx({

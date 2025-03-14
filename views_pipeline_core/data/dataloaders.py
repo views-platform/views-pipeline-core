@@ -300,5 +300,10 @@ class ViewsDataLoader:
             if "offender" in alert:
                 logger.warning({f"{partition} data alert {ialert}": str(alert)})
 
+        # df = df.reset_index()
+        # if "priogrid_gid" in df.columns():
+        #     df = df.rename(columns={"priogrid_gid": "priogrid_id"})
+        #     df = df.set_index(["month_id", "priogrid_id"])
+
         return df, alerts
     

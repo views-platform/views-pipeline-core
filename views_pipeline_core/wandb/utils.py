@@ -3,7 +3,6 @@ from statistics import mean
 import re
 from dataclasses import asdict
 import wandb
-from views_evaluation.evaluation.metrics import EvaluationMetrics
 
 
 def add_wandb_metrics():
@@ -43,7 +42,7 @@ def add_wandb_metrics():
 
 def generate_wandb_step_wise_log_dict(
     log_dict: dict, 
-    dict_of_eval_dicts: Dict[str, EvaluationMetrics], 
+    dict_of_eval_dicts: dict, 
     step: str,
     conflict_type: str
 ) -> dict:
@@ -52,7 +51,7 @@ def generate_wandb_step_wise_log_dict(
 
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
-        dict_of_eval_dicts (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
+        dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
             where the keys are steps and values are `EvaluationMetrics` instances.
         step (str): The specific time step (month forecasted) for which metrics are logged (e.g., 'step01').
         conflict_type (str): The type of conflict for which the evaluation metrics are logged.
@@ -69,7 +68,7 @@ def generate_wandb_step_wise_log_dict(
 
 def generate_wandb_month_wise_log_dict(
     log_dict: dict, 
-    dict_of_eval_dicts: Dict[str, EvaluationMetrics], 
+    dict_of_eval_dicts: dict, 
     month: str,
     conflict_type: str
 ) -> dict:
@@ -78,7 +77,7 @@ def generate_wandb_month_wise_log_dict(
 
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
-        dict_of_eval_dicts (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
+        dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
             where the keys are months and values are `EvaluationMetrics` instances.
         month (str): The specific month for which metrics are logged (e.g., 'month501').
         conflict_type (str): The type of conflict for which the evaluation metrics are logged.
@@ -95,7 +94,7 @@ def generate_wandb_month_wise_log_dict(
 
 def generate_wandb_time_series_wise_log_dict(
     log_dict: dict, 
-    dict_of_eval_dicts: Dict[str, EvaluationMetrics], 
+    dict_of_eval_dicts: dict, 
     time_series: str,
     conflict_type: str
 ) -> dict:
@@ -104,7 +103,7 @@ def generate_wandb_time_series_wise_log_dict(
 
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
-        dict_of_eval_dicts (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
+        dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
             where the keys are time series and values are `EvaluationMetrics` instances.
         time_series (str): The specific time series for which metrics are logged (e.g., 'ts01').
         conflict_type (str): The type of conflict for which the evaluation metrics are logged.
@@ -124,7 +123,7 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
     Calculate the mean evaluation metrics for a dictionary of evaluation metrics.
 
     Args:
-        evaluation_dict (Dict[str, EvaluationMetrics]): A dictionary of evaluation metrics,
+        evaluation_dict (dict): A dictionary of evaluation metrics,
             where the keys are time steps, months, or time series, and values are `EvaluationMetrics` instances.
 
     Returns:
