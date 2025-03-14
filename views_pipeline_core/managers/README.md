@@ -440,7 +440,7 @@ Must contain **a list prediction dataframes**. The list is of the same length as
 
 | Column Pattern       | Data Type       | Description                      |
 |----------------------|-----------------|----------------------------------|
-| `pred_{depvar}`      | list/np.ndarray/float | Prediction samples (N samples)   |
+| `pred_{target}`      | list/np.ndarray/float | Prediction samples (N samples)   |
 
 **Example Structures:**
 ```python
@@ -465,7 +465,7 @@ Contains only prediction columns:
 
 | Column Pattern       | Data Type       | Description                    |
 |----------------------|-----------------|--------------------------------|
-| `pred_{depvar}`      | list/np.ndarray/float | Prediction samples (N samples) |
+| `pred_{target}`      | list/np.ndarray/float | Prediction samples (N samples) |
 
 **Example Structures:**
 ```python
