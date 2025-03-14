@@ -1579,10 +1579,6 @@ class ModelManager:
                         )
                         raise
                 if report:
-                    # historical_dataframe=read_dataframe(
-                    #         self._model_path.data_raw
-                    #         / f"{self.config['run_type']}_viewser_df{PipelineConfig.dataframe_format}"
-                    #     ),
                     try:
                         logger.info(
                             f"Generating forecast report for {self._model_path.target} {self.config['name']}..."
@@ -1783,10 +1779,7 @@ class ModelManager:
                     )
                 )
             # Generate report path
-            report_path = (
-                self._model_path.reports
-                / f"report_{self._predictions_name.replace(PipelineConfig().dataframe_format, '.html')}"
-            )
+            report_path = self._model_path.reports / f"report_{self.generate_model_file_name(run_type=self._args.run_type, file_extension='')}.html"
 
             # Export report
             report_manager.export_as_html(report_path)
