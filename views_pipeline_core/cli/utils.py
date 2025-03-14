@@ -91,10 +91,20 @@ def parse_args():
         help="Type of evaluation to be performed"
     )
 
+    parser.add_argument(
+        "-re", "--report", action="store_true", help="Generate forecast report."
+    )
+
     return parser.parse_args()
 
 
 def validate_arguments(args):
+    if args.report and args.run_type != "forecasting" and args.forecast:
+        print(
+            "Error: --report flag can only be used with --run_type forecasting. Exiting."
+        )
+        sys.exit(1)
+
     if args.sweep and args.run_type != "calibration":
         print("Error: Sweep runs must have --run_type set to 'calibration'. Exiting.")
         print("To fix: Use --run_type calibration when --sweep is flagged.")
@@ -125,6 +135,7 @@ def validate_arguments(args):
         and not args.evaluate
         and not args.forecast
         and not args.sweep
+        and not args.report
     ):
         print(
             f"Error: Run type is {args.run_type} but neither --train, --evaluate, nor --sweep flag is set. Nothing to do... Exiting."

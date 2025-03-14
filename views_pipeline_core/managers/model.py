@@ -8,11 +8,14 @@ import importlib
 from abc import abstractmethod
 import hashlib
 from datetime import datetime
+import traceback
 import wandb
 import pandas as pd
 from pathlib import Path
+import numpy as np
+import tqdm
 from views_pipeline_core.wandb.utils import (
-    add_wandb_metrics, 
+    add_wandb_metrics,
     log_wandb_log_dict,
 )
 from views_pipeline_core.files.utils import (
@@ -22,11 +25,12 @@ from views_pipeline_core.files.utils import (
     read_log_file,
 )
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_evaluation.evaluation.metrics import MetricsManager
-# from views_forecasts.extensions import *
-import traceback
-import numpy as np
-import tqdm
+from views_evaluation.evaluation.evaluation_manager import EvaluationManager
+from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+from views_pipeline_core.managers.mapping import MappingManager
+from views_pipeline_core.managers.report import ReportManager
+from views_pipeline_core.visualizations.historical import HistoricalLineGraph
+
 logger = logging.getLogger(__name__)
 
 
@@ -277,8 +281,10 @@ class ModelPathManager:
                         f"Invalid {self.target} name. Please provide a valid {self.target} name that follows the lowercase 'adjective_noun' format."
                     )
             except Exception as e:
-                logger.error(f"Error extracting model name from path: {e}", exc_info=True)
-                raise 
+                logger.error(
+                    f"Error extracting model name from path: {e}", exc_info=True
+                )
+                raise
         else:
             if not self.validate_model_name(model_path):
                 raise ValueError(
@@ -401,6 +407,26 @@ class ModelPathManager:
             and f.suffix in common_extensions
         ]
         return artifact_files
+
+    def _get_raw_data_file_paths(self, run_type: str) -> List[Path]:
+        paths = [
+            f
+            for f in self.data_raw.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"{run_type}_viewser_df")
+            and f.suffix == PipelineConfig.dataframe_format
+        ]
+        return sorted(paths, reverse=True)
+
+    def _get_generated_predictions_data_file_paths(self, run_type: str) -> List[Path]:
+        paths = [
+            f
+            for f in self.data_generated.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"predictions_{run_type}")
+            and f.suffix == PipelineConfig.dataframe_format
+        ]
+        return sorted(paths, reverse=True)
 
     def get_latest_model_artifact_path(self, run_type: str) -> Path:
         """
@@ -643,7 +669,10 @@ class ModelManager:
     """
 
     def __init__(
-        self, model_path: ModelPathManager, wandb_notifications: bool = True, use_prediction_store: bool = True
+        self,
+        model_path: ModelPathManager,
+        wandb_notifications: bool = True,
+        use_prediction_store: bool = True,
     ) -> None:
         """
         Initializes the ModelManager with the given model path.
@@ -669,17 +698,16 @@ class ModelManager:
             )
         self.set_dataframe_format(format=".parquet")
         logger.debug(f"Dataframe format: {PipelineConfig().dataframe_format}")
-        
+
         if self._model_path.target == "model":
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
-            self._data_loader = ViewsDataLoader(
-                model_path=self._model_path
-            )
+            self._data_loader = ViewsDataLoader(model_path=self._model_path)
         self._wandb_notifications = wandb_notifications
         self._sweep = False
         if self._use_prediction_store:
             from views_forecasts.extensions import ForecastsStore, ViewsMetadata
+
             self._pred_store_name = self.__get_pred_store_name()
 
     def set_dataframe_format(self, format: str) -> None:
@@ -712,6 +740,27 @@ class ModelManager:
             return 12
         else:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
+
+    @staticmethod
+    def _get_conflict_type(target: str) -> str:
+        """Determine conflict type from dependent variable by checking split parts.
+
+        Args:
+            target: Dependent variable string containing conflict type (e.g., 'var_sb').
+
+        Returns:
+            One of 'sb', 'os', or 'ns' based on the first found in target parts.
+
+        Raises:
+            ValueError: If none of the valid conflict types are found.
+        """
+        parts = target.split("_")
+        for conflict in ("sb", "os", "ns"):
+            if conflict in parts:
+                return conflict
+        raise ValueError(
+            f"Conflict type not found in '{target}'. Valid types: 'sb', 'os', 'ns'."
+        )
 
     @staticmethod
     def generate_model_file_name(run_type: str, file_extension: str) -> str:
@@ -758,6 +807,7 @@ class ModelManager:
     @staticmethod
     def _generate_evaluation_file_name(
         evaluation_type: str,
+        conflict_type: str,
         run_type: str,
         timestamp: str,
         file_extension: str,
@@ -767,6 +817,7 @@ class ModelManager:
 
         Args:
             evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
+            conflict_type (str): The type of conflict (e.g., sb, os, ns).
             run_type (str): The type of run (e.g., calibration, validation).
             timestamp (str): The timestamp of the generated file.
             file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
@@ -775,7 +826,7 @@ class ModelManager:
             str: The generated prediction file name.
         """
         # logger.info(f"sequence_number: {sequence_number}")
-        return f"eval_{evaluation_type}_{run_type}_{timestamp}{file_extension}"
+        return f"eval_{evaluation_type}_{conflict_type}_{run_type}_{timestamp}{file_extension}"
 
     def __get_pred_store_name(self) -> str:
         """
@@ -791,6 +842,7 @@ class ModelManager:
         if self._use_prediction_store:
             from views_pipeline_core.managers.package import PackageManager
             from views_forecasts.extensions import ViewsMetadata
+
             version = PackageManager.get_latest_release_version_from_github(
                 repository_name=self._model_repo
             )
@@ -807,7 +859,9 @@ class ModelManager:
                     + f"_{year}_{month}"
                 )
             except Exception as e:
-                logger.error(f"Error generating prediction store name: {e}", exc_info=True)
+                logger.error(
+                    f"Error generating prediction store name: {e}", exc_info=True
+                )
                 raise
 
             if pred_store_name not in ViewsMetadata().get_runs().name.tolist():
@@ -849,7 +903,9 @@ class ModelManager:
                 if hasattr(config_module, config_method):
                     return getattr(config_module, config_method)()
             except (AttributeError, ImportError) as e:
-                logger.error(f"Error loading config from {script_name}: {e}", exc_info=True)
+                logger.error(
+                    f"Error loading config from {script_name}: {e}", exc_info=True
+                )
                 raise
 
         return None
@@ -872,6 +928,20 @@ class ModelManager:
         config["run_type"] = args.run_type
         config["sweep"] = args.sweep
 
+        # Check if deployment status is deprecated. If so, raise an error.
+        if config["deployment_status"] == "deprecated":
+            logger.error(
+                f"Model {self._model_path.model_name} has been deprecated. Please use a different model."
+            )
+            raise ValueError("Model is deprecated and cannot be used.")
+
+        # Check if target is a list. If not, convert it to a list. Otherwise raise an error.
+        if isinstance(config["targets"], str):
+            config["targets"] = [config["targets"]]
+        if not isinstance(config["targets"], list):
+            logger.error("Target must be a string or a list of strings.")
+            raise ValueError("Target must be a string or a list of strings.")
+
         return config
 
     def _update_sweep_config(self, wandb_config) -> Dict:
@@ -891,6 +961,12 @@ class ModelManager:
         }
         config["run_type"] = self._args.run_type
         config["sweep"] = self._args.sweep
+
+        # Check if target is a list. If not, convert it to a list. Otherwise raise an error.
+        if isinstance(config["targets"], str):
+            config["targets"] = [config["targets"]]
+        if not isinstance(config["targets"], list):
+            raise ValueError("Target must be a string or a list of strings.")
 
         return config
 
@@ -919,7 +995,7 @@ class ModelManager:
         if self._wandb_notifications and wandb.run:
             try:
                 # Replace the user's home directory with '[USER_HOME]' in the alert text
-                text = str(text).replace(str(Path.home()), "[USER_HOME]")
+                text = str(text).replace(str(self._model_path.models), "[REDACTED]")
                 wandb.alert(
                     title=title,
                     text=text,
@@ -943,6 +1019,7 @@ class ModelManager:
             str: A formatted string representing the evaluation table.
         """
         from tabulate import tabulate
+
         # create an empty dataframe with columns 'Metric' and 'Value'
         metric_df = pd.DataFrame(columns=["Metric", "Value"])
         for key, value in metric_dict.items():
@@ -950,10 +1027,12 @@ class ModelManager:
                 if not str(key).startswith("_"):
                     value = float(value)
                     # add metric and value to the dataframe
-                    metric_df = metric_df.append({"Metric": key, "Value": value}, ignore_index=True)
+                    metric_df = metric_df.append(
+                        {"Metric": key, "Value": value}, ignore_index=True
+                    )
             except:
                 continue
-        result = tabulate(metric_df, headers='keys', tablefmt='grid')
+        result = tabulate(metric_df, headers="keys", tablefmt="grid")
         print(result)
         return f"```\n{result}\n```"
 
@@ -1004,6 +1083,7 @@ class ModelManager:
         df_time_series_wise_evaluation: pd.DataFrame,
         df_month_wise_evaluation: pd.DataFrame,
         path_generated: Union[str, Path],
+        conflict_type: str,
     ) -> None:
         """
         Save the model evaluation metrics to the specified path and log them to WandB.
@@ -1013,6 +1093,7 @@ class ModelManager:
             df_time_series_wise_evaluation (pd.DataFrame): DataFrame containing time series-wise evaluation metrics.
             df_month_wise_evaluation (pd.DataFrame): DataFrame containing month-wise evaluation metrics.
             path_generated (str or Path): The path where the outputs should be saved.
+            conflict_type (str): The conflict type (e.g., 'sb', 'os', 'ns').
         """
         try:
             path_generated = Path(path_generated)
@@ -1020,6 +1101,7 @@ class ModelManager:
 
             eval_step_path = ModelManager._generate_evaluation_file_name(
                 "step",
+                conflict_type,
                 self.config["run_type"],
                 self.config["timestamp"],
                 file_extension=PipelineConfig().dataframe_format,
@@ -1027,6 +1109,7 @@ class ModelManager:
 
             eval_ts_path = ModelManager._generate_evaluation_file_name(
                 "ts",
+                conflict_type,
                 self.config["run_type"],
                 self.config["timestamp"],
                 file_extension=PipelineConfig().dataframe_format,
@@ -1034,6 +1117,7 @@ class ModelManager:
 
             eval_month_path = ModelManager._generate_evaluation_file_name(
                 "month",
+                conflict_type,
                 self.config["run_type"],
                 self.config["timestamp"],
                 file_extension=PipelineConfig().dataframe_format,
@@ -1096,25 +1180,27 @@ class ModelManager:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
-            predictions_name = ModelManager._generate_output_file_name(
+            self._predictions_name = ModelManager._generate_output_file_name(
                 "predictions",
                 self.config["run_type"],
                 self.config["timestamp"],
                 sequence_number,
                 file_extension=PipelineConfig().dataframe_format,
             )
-            save_dataframe(df_predictions, path_generated / predictions_name)
+            save_dataframe(df_predictions, path_generated / self._predictions_name)
 
             # Save to prediction store
             if self._use_prediction_store:
                 name = (
-                    self._model_path.model_name + "_" + predictions_name.split(".")[0]
+                    self._model_path.model_name
+                    + "_"
+                    + self._predictions_name.split(".")[0]
                 )  # remove extension
                 df_predictions.forecasts.set_run(self._pred_store_name)
                 df_predictions.forecasts.to_store(name=name, overwrite=True)
 
             # Log predictions to WandB
-            wandb.save(str(path_generated / predictions_name))
+            wandb.save(str(path_generated / self._predictions_name))
             wandb.log({"predictions": wandb.Table(dataframe=df_predictions)})
 
             self._wandb_alert(
@@ -1183,59 +1269,60 @@ class ModelManager:
         Raises:
             None
         """
-        metrics_manager = MetricsManager(self.config["metrics"])
+        # metrics_manager = MetricsManager(self.config["metrics"])
+        evaluation_manager = EvaluationManager(self.config["metrics"])
         if not ensemble:
-            df_path = self._model_path.data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+            # df_path = (
+            #     self._model_path.data_raw
+            #     / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+            # )
+            df_path = self._model_path._get_raw_data_file_paths(
+                run_type=self._args.run_type
+            )[
+                0
+            ]  # get the latest i.e first file
             df_viewser = read_dataframe(df_path)
         else:
             # If the predictions are from an ensemble model, the actual values are not available in the forecast store
             # So we use the actual values from one of the single models
-            df_path = ModelPathManager(self.config["models"][0]).data_raw / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+            df_path = (
+                ModelPathManager(self.config["models"][0]).data_raw
+                / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+            )
             df_viewser = read_dataframe(df_path)
 
         logger.info(f"df_viewser read from {df_path}")
-        df_actual = df_viewser[[self.config["depvar"]]]
-        step_wise_evaluation, df_step_wise_evaluation = (
-            metrics_manager.step_wise_evaluation(
-                df_actual,
-                df_predictions,
-                self.config["depvar"],
-                self.config["steps"],
-            )
-        )
-        time_series_wise_evaluation, df_time_series_wise_evaluation = (
-            metrics_manager.time_series_wise_evaluation(
-                df_actual, df_predictions, self.config["depvar"]
-            )
-        )
-        month_wise_evaluation, df_month_wise_evaluation = (
-            metrics_manager.month_wise_evaluation(
-                df_actual, df_predictions, self.config["depvar"]
-            )
-        )
-        
-        log_wandb_log_dict(
-            step_wise_evaluation, 
-            time_series_wise_evaluation, 
-            month_wise_evaluation
-        )
+        # Multiple targets
+        df_actual = df_viewser[self.config["targets"]]
+        for target in self.config["targets"]:
+            logger.info(f"Calculating evaluation metrics for {target}")
+            conflict_type = ModelManager._get_conflict_type(target)
 
-        if not self.config["sweep"]:
-            # Save evaluation metrics and predictions
-            self._save_evaluations(
-                df_step_wise_evaluation,
-                df_time_series_wise_evaluation,
-                df_month_wise_evaluation,
-                self._model_path.data_generated,
+            eval_result_dict = evaluation_manager.evaluate(
+                df_actual, df_predictions, target, steps=self.config["steps"]
+            )
+            step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
+            time_series_wise_evaluation, df_time_series_wise_evaluation = (
+                eval_result_dict["time_series"]
+            )
+            month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
+
+            log_wandb_log_dict(
+                step_wise_evaluation,
+                time_series_wise_evaluation,
+                month_wise_evaluation,
+                conflict_type,
             )
 
-            for i, df in enumerate(df_predictions):
-                self._save_predictions(df, self._model_path.data_generated, i)
-
-        self._wandb_alert(
-            title=f"Evaluation Complete for {self._model_path.target} {self.config['name']}",
-            text=f"{self._generate_evaluation_table(metric_dict=wandb.run.summary._as_dict())}",
-        )
+            if not self.config["sweep"]:
+                # Save evaluation metrics and predictions
+                self._save_evaluations(
+                    df_step_wise_evaluation,
+                    df_time_series_wise_evaluation,
+                    df_month_wise_evaluation,
+                    self._model_path.data_generated,
+                    conflict_type,
+                )
 
     def execute_single_run(self, args) -> None:
         """
@@ -1259,7 +1346,7 @@ class ModelManager:
                 )
                 self._wandb_alert(
                     title=f"Queryset Fetch Complete ({str(args.run_type)})",
-                    text=f"Queryset for {self._model_path.target} {self.config['name']} with depvar {self.config['depvar']} and LoA of {self.config['level']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
+                    text=f"Queryset for {self._model_path.target} {self.config['name']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
                     level=wandb.AlertLevel.INFO,
                 )
             wandb.finish()
@@ -1270,6 +1357,7 @@ class ModelManager:
                 eval=args.evaluate,
                 forecast=args.forecast,
                 artifact_name=args.artifact_name,
+                report=args.report,
             )
         except Exception as e:
             logger.error(f"Error during single run execution: {e}", exc_info=True)
@@ -1295,7 +1383,7 @@ class ModelManager:
         self._eval_type = args.eval_type
         self._args = args
         self._sweep = True
-        
+
         try:
             with wandb.init(project=f"{self._project}_fetch", entity=self._entity):
                 self._data_loader.get_data(
@@ -1306,7 +1394,7 @@ class ModelManager:
                 )
                 self._wandb_alert(
                     title=f"Queryset Fetch Complete ({str(args.run_type)})",
-                    text=f"Queryset for {self._model_path.target} {self._model_path.model_name} with depvar {self._config_meta['depvar']} and LoA of {self._config_meta['level']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
+                    text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
                     level=wandb.AlertLevel.INFO,
                 )
             wandb.finish()
@@ -1331,6 +1419,7 @@ class ModelManager:
         eval: Optional[bool] = None,
         forecast: Optional[bool] = None,
         artifact_name: Optional[str] = None,
+        report: Optional[bool] = None,
     ) -> None:
         """
         Executes various model-related tasks including training, evaluation, and forecasting.
@@ -1349,30 +1438,33 @@ class ModelManager:
                 # self.config = wandb.config
                 if self._sweep:
                     self.config = self._update_sweep_config(wandb.config)
-                    # print(f"Config: {self.config}")
-                    # print(f"Wandb Config: {wandb.config}")
+
                     logger.info(
                         f"Sweeping {self._model_path.target} {self.config['name']}..."
                     )
                     model = self._train_model_artifact()
                     self._wandb_alert(
-                            title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
-                            text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```" if self._sweep else "",
-                            level=wandb.AlertLevel.INFO,
-                        )
+                        title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
+                        text=(
+                            f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```"
+                            if self._sweep
+                            else ""
+                        ),
+                        level=wandb.AlertLevel.INFO,
+                    )
                     logger.info(
                         f"Evaluating {self._model_path.target} {self.config['name']}..."
                     )
                     df_predictions = self._evaluate_sweep(self._eval_type, model)
 
                     for i, df in enumerate(df_predictions):
-                            print(f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}")
-                            self._validate_prediction_dataframe(dataframe=df)
-                            
+                        print(
+                            f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
+                        )
+                        self._validate_prediction_dataframe(dataframe=df)
+
                     if self.config["metrics"]:
-                        self._evaluate_prediction_dataframe(
-                            df_predictions
-                        )  
+                        self._evaluate_prediction_dataframe(df_predictions)
                     else:
                         raise ValueError(
                             'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
@@ -1390,12 +1482,17 @@ class ModelManager:
                             )
                         self._wandb_alert(
                             title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
-                            text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{self._config_hyperparameters}\n```" if not self._sweep else "",
+                            text=(
+                                f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{self._config_hyperparameters}\n```"
+                                if not self._sweep
+                                else ""
+                            ),
                             level=wandb.AlertLevel.INFO,
                         )
                     except Exception as e:
                         logger.error(
-                            f"{self._model_path.target.title()} training model: {e}", exc_info=True
+                            f"{self._model_path.target.title()} training model: {e}",
+                            exc_info=True,
                         )
                         self._wandb_alert(
                             title=f"{self._model_path.target.title()} Training Error",
@@ -1415,20 +1512,22 @@ class ModelManager:
 
                         # Add df validation logic
                         for i, df in enumerate(df_predictions):
-                            print(f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}")
+                            print(
+                                f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
+                            )
                             self._validate_prediction_dataframe(dataframe=df)
-                            
-
-
-                        # for i, df in enumerate(tqdm.tqdm(df_predictions, desc="Validating evaluation dataframes", total=len(df_predictions))):
-                        #     tqdm.tqdm.write(f"Validating evaluation dataframe of sequence {i}/{len(df_predictions)}")
-                        #     self._validate_prediction_dataframe(dataframe=df)
+                            self._save_predictions(
+                                df, self._model_path.data_generated, i
+                            )
 
                         self._handle_log_creation(
                             train=train, eval=eval, forecast=forecast
                         )
                         # Evaluate the model
-                        if self.config["metrics"]:
+                        if (
+                            self.config["metrics"]
+                            and self.config["algorithm"] != "SHURF"
+                        ):
                             self._evaluate_prediction_dataframe(
                                 df_predictions
                             )  # Calculate evaluation metrics with the views-evaluation package
@@ -1463,20 +1562,68 @@ class ModelManager:
                         self._handle_log_creation(
                             train=train, eval=eval, forecast=forecast
                         )
+
                         self._save_predictions(
                             df_predictions, self._model_path.data_generated
                         )
+
                     except Exception as e:
-                        logger.error(f"Error forecasting {self._model_path.target}: {e}", exc_info=True)
+                        logger.error(
+                            f"Error forecasting {self._model_path.target}: {e}",
+                            exc_info=True,
+                        )
                         self._wandb_alert(
                             title="Model Forecasting Error",
                             text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                             level=wandb.AlertLevel.ERROR,
                         )
                         raise
+                if report:
+                    try:
+                        logger.info(
+                            f"Generating forecast report for {self._model_path.target} {self.config['name']}..."
+                        )
+                        historical_df_path = read_dataframe(
+                            self._model_path._get_raw_data_file_paths(
+                                run_type=self._args.run_type
+                            )[0]
+                        )
+                        try:
+                            forecast_df_path = read_dataframe(
+                                self._model_path._get_generated_predictions_data_file_paths(
+                                    run_type=self._args.run_type
+                                )[
+                                    0
+                                ]
+                            )
+                            logger.info(
+                                f"Using latest forecast dataframe found at {forecast_df_path}"
+                            )
+                        except Exception as e:
+                            raise FileNotFoundError(
+                                f"Forecast dataframe was probably not found at {forecast_df_path}. Please run the pipeline in forecasting mode with '--run_type forecasting -f' to generate the forecast dataframe. More info: {e}"
+                            )
+
+                        self._generate_forecast_report(
+                            forecast_dataframe=forecast_df_path,
+                            historical_dataframe=historical_df_path,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Error generating forecast report: {e}", exc_info=True
+                        )
+                        self._wandb_alert(
+                            title="Forecast Report Generation Error",
+                            text=f"An error occurred during the generation of the forecast report for {self.config['name']}: {e}",
+                            level=wandb.AlertLevel.ERROR,
+                        )
+                        raise
             wandb.finish()
         except Exception as e:
-            logger.error(f"Error during {self._model_path.target} tasks execution: {e}", exc_info=True)
+            logger.error(
+                f"Error during {self._model_path.target} tasks execution: {e}",
+                exc_info=True,
+            )
             self._wandb_alert(
                 title=f"{self._model_path.target.title()} Task Execution Error",
                 text=f"An error occurred during the execution of {self._model_path.target} tasks for {self.config['name']}: {e}",
@@ -1488,98 +1635,171 @@ class ModelManager:
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
 
-    def _validate_prediction_dataframe(self, dataframe: pd.DataFrame):
-        """
-        Validates the prediction DataFrame against the actual values.
+    def _validate_prediction_dataframe(self, dataframe: pd.DataFrame) -> None:
+        """Validate prediction dataframe structure and required components."""
 
-        Args:
-            df_predictions (pd.DataFrame): The DataFrame containing the prediction results.
+        # Table formatting helpers
+        def print_status(message: str, passed: bool) -> None:
+            color = "92" if passed else "91"
+            status = "✓ PASS" if passed else "✗ FAIL"
+            print(f"\033[{color}m{status:<8} | {message}\033[0m")
 
-        Returns:
-            None
+        # Print table header
+        print("\n\033[1mVALIDATION REPORT\033[0m")
+        print("\033[94mStatus   | Check\033[0m")
+        print("---------|----------------------------------------")
 
-        Raises:
-            ValueError: If the prediction DataFrame is empty or does not contain the expected columns.
-        """
-        pgm_indices = {0: ["month_id"],
-                        1: ["priogrid_id", "priogrid_gid"]}
-        cm_indices = {0: ["month_id"],
-                        1: ["country_id"]}
-        
-
-        # if not isinstance(dataframe, pd.DataFrame) or isinstance(dataframe, pd.MultiIndex):
-        #     raise ValueError(f"Invalid dataframe type: {type(dataframe)}. Expected pd.DataFrame or pd.MultiIndex.")
-
+        # Base validation
         if dataframe.empty:
-            print("\033[91mPrediction DataFrame is empty.\033[0m")  # Red text
-            raise ValueError("Prediction DataFrame is empty.")
-        else:
-            print("\033[92mPrediction DataFrame is not empty.\033[0m")  # Green text
+            print_status("DataFrame contains data", False)
+            raise ValueError("Prediction DataFrame is empty")
+        print_status("DataFrame contains data", True)
 
-        if isinstance(self.config["depvar"], list):
-            for depvar in self.config["depvar"]:
-                if depvar in dataframe.columns.to_list():
-                    print(f"\033[92m{depvar} found in dataframe columns.\033[0m")  # Green text
-                else:
-                    # print(f"\033[91m{depvar} not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                    raise ValueError(f"{depvar} not found in dataframe columns. Found {dataframe.columns.to_list()} instead.")
-        elif isinstance(self.config["depvar"], str):
-            if self.config["depvar"] in dataframe.columns.to_list() or "step_combined" in dataframe.columns.to_list():
-                print(f"\033[92m{self.config['depvar']} or step_combined found in dataframe columns.\033[0m")  # Green text
-            else:
-                # print(f"\033[91m{self.config['depvar']} not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                raise ValueError(f"{self.config['depvar']} not found in dataframe columns. Found {dataframe.columns.to_list()} instead.")
-        else:
-            # print(f"\033[91mInvalid depvar type: {type(self.config['depvar'])}. Expected str or list.\033[0m")  # Red text
-            raise ValueError(f"Invalid depvar type: {type(self.config['depvar'])}. Expected str or list. Check your model's meta_config.py.")
-            
+        # target validation
+        target = self.config["targets"]
+        if not isinstance(target, (str, list)):
+            print_status("Valid target type", False)
+            raise ValueError(f"Invalid target type: {type(target)}")
+        print_status("Valid target type format", True)
+
+        required_columns = {
+            f"pred_{dv}" for dv in ([target] if isinstance(target, str) else target)
+        }
+        missing = [col for col in required_columns if col not in dataframe.columns]
+
+        if missing:
+            print_status("Required prediction columns present", False)
+            raise ValueError(
+                f"Missing columns: {missing}. Found: {list(dataframe.columns)}"
+            )
+        print_status("All required prediction columns present", True)
+
+        # Structural validation
+        model_config = {
+            "pgm": {"indices": ["priogrid_id", "priogrid_gid"], "columns": []},
+            "cm": {"indices": ["country_id"], "columns": ["country_id", "month_id"]},
+        }
+        found_model = None
+        index_names = (
+            dataframe.index.names if isinstance(dataframe.index, pd.MultiIndex) else []
+        )
+
         if isinstance(dataframe.index, pd.MultiIndex):
-            # check for the expected columns in the MultiIndex
-            if dataframe.index.names[1] in pgm_indices[1]:
-                print(f"\033[92mPrediction DataFrame is a MultiIndex for PGM. Found {dataframe.index.names[1]} at index 1.\033[0m")  # Green text
-                if dataframe.index.names[0] in pgm_indices[0]:
-                    print(f"\033[92m{pgm_indices[0]} found in dataframe indices at index 0.\033[0m")  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe indices. Found {dataframe.index.names[0]} instead.\033[0m")  # Red text
-                    raise ValueError(f"Month ID not found in dataframe indices. Found {dataframe.index.names[0]} instead.")
-            elif dataframe.index.names[1] in cm_indices[1]:
-                print(f"\033[92mPrediction DataFrame is a MultiIndex for CM. Found {dataframe.index.names[1]} at index 1.\033[0m")  # Green text
-                if dataframe.index.names[0] in cm_indices[0]:
-                    print(f"\033[92m{cm_indices[0]} found in dataframe indices at index 0.\033[0m")  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe indices. Found {dataframe.index.names[0]} instead.\033[0m")  # Red text
-                    raise ValueError(f"Month ID not found in dataframe indices. Found {dataframe.index.names[0]} instead.")
-            else:
-                # print(f"\033[91mValid indices for pgm or cm not found in prediction DataFrame. Found {dataframe.index.names}.\033[0m")  # Red text
-                raise ValueError(f"Valid indices for pgm or cm not found in prediction DataFrame. Found {dataframe.index.names}.")
-        elif isinstance(dataframe.index, pd.Index):
-            # check for the expected columns in the DataFrame
-            if cm_indices[1][0] in dataframe.columns.to_list():
-                print("\033[92mPrediction DataFrame is a DataFrame for CM.\033[0m")  # Green text
-                if cm_indices[0][0] in dataframe.columns.to_list():
-                    print("\033[92mMonth ID found in dataframe columns.\033[0m")  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                    raise ValueError(f"Month ID not found in dataframe columns. Found {dataframe.columns.to_list()} instead.")
-            elif pgm_indices[1][0] in dataframe.columns.to_list():
-                print("\033[92mPrediction DataFrame is a DataFrame for PGM.\033[0m")  # Green text
-                if pgm_indices[0][0] in dataframe.columns.to_list():
-                    print("\033[92mMonth ID found in dataframe columns.\033[0m")  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                    raise ValueError(f"Month ID not found in dataframe columns. Found {dataframe.columns.to_list()} instead.")
-            elif pgm_indices[1][1] in dataframe.columns.to_list():
-                print("\033[92mPrediction DataFrame is a DataFrame for PGM.\033[0m")  # Green text
-                if pgm_indices[0][0] in dataframe.columns.to_list():
-                    print("\033[92mMonth ID found in dataframe columns.\033[0m")  # Green text
-                else:
-                    # print(f"\033[91mMonth ID not found in dataframe columns. Found {dataframe.columns} instead.\033[0m")  # Red text
-                    raise ValueError(f"Month ID not found in dataframe columns. Found {dataframe.columns.to_list()} instead.")
-            else:
-                # print(f"\033[91mValid columns for pgm or cm not found in prediction DataFrame. Found {dataframe.columns}.\033[0m")  # Red text
-                raise ValueError(f"Valid columns for pgm or cm not found in prediction DataFrame. Found {dataframe.columns.to_list()}.")
+            for model, config in model_config.items():
+                if any(idx in config["indices"] for idx in index_names):
+                    found_model = model
+                    if "month_id" not in index_names:
+                        print_status(f"{model.upper()} month_id index present", False)
+                        raise ValueError(
+                            f"Missing month_id in index for {model.upper()}"
+                        )
+                    print_status(f"{model.upper()} index structure valid", True)
+                    break
         else:
-            raise ValueError(f"Invalid dataframe type: {type(dataframe)}. Expected pd.DataFrame or pd.MultiIndex.")
+            for model, config in model_config.items():
+                if any(col in dataframe.columns for col in config["columns"]):
+                    found_model = model
+                    if "month_id" not in dataframe.columns:
+                        print_status(f"{model.upper()} month_id column present", False)
+                        raise ValueError(f"Missing month_id column for {model.upper()}")
+                    print_status(f"{model.upper()} column structure valid", True)
+                    break
+
+        if not found_model:
+            print_status("Data structure recognized", False)
+            raise ValueError(
+                f"Unrecognized structure. Index: {index_names}, Columns: {list(dataframe.columns)}"
+            )
+
+        print("--------------------------------------------------\n")
+
+    def _generate_forecast_report(
+        self,
+        forecast_dataframe: pd.DataFrame,
+        historical_dataframe: pd.DataFrame = None,
+    ) -> None:
+        """Generate a forecast report based on the prediction DataFrame."""
+        dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
+
+        def _create_report() -> Path:
+            """Helper function to create and export report."""
+            forecast_dataset = dataset_cls(forecast_dataframe)
+
+            report_manager = ReportManager()
+            # Build report content
+            report_manager.add_heading(
+                f"Forecast Report for {self._model_path.model_name}", level=1
+            )
+            report_manager.add_heading("Maps", level=2)
+
+            for target in tqdm.tqdm(
+                self.config["targets"], desc="Generating forecast maps"
+            ):
+                # Handle uncertainty
+                if forecast_dataset.sample_size > 1:
+                    logger.info(
+                        f"Sample size of {forecast_dataset.sample_size} for target {target} found. Calculating MAP..."
+                    )
+                    forecast_dataset = type(forecast_dataset)(
+                        forecast_dataset.calculate_map(features=[f"pred_{target}"])
+                    )
+                    target = f"{target}_map"
+
+                # Common steps
+                mapping_manager = MappingManager(forecast_dataset)
+                subset_dataframe = mapping_manager.get_subset_mapping_dataframe(
+                    entity_ids=None, time_ids=None
+                )
+                report_manager.add_heading(f"Forecast for {target}", level=3)
+                report_manager.add_html(
+                    html=mapping_manager.plot_map(
+                        mapping_dataframe=subset_dataframe,
+                        target=f"pred_{target}",
+                        interactive=True,
+                        as_html=True,
+                    )
+                )
+            if isinstance(forecast_dataset, CMDataset):
+                logger.info("Generating historical vs forecast graphs for CM dataset")
+                report_manager.add_heading("Historical vs Forecasted", level=2)
+                historical_dataset = dataset_cls(
+                    historical_dataframe, targets=self.config["targets"]
+                )
+                historical_line_graph = HistoricalLineGraph(
+                    historical_dataset=historical_dataset,
+                    forecast_dataset=forecast_dataset,
+                )
+                report_manager.add_html(
+                    html=historical_line_graph.plot_predictions_vs_historical(
+                        entity_ids=None,
+                        interactive=True,
+                        alpha=0.9,
+                        targets=None,  # loop through targets
+                        as_html=True,
+                    )
+                )
+            # Generate report path
+            report_path = self._model_path.reports / f"report_{self.generate_model_file_name(run_type=self._args.run_type, file_extension='')}.html"
+
+            # Export report
+            report_manager.export_as_html(report_path)
+            return report_path
+
+        try:
+            # Get appropriate dataset class
+            dataset_cls = dataset_classes[self.config["level"]]
+        except KeyError:
+            raise ValueError(f"Invalid level: {self.config['level']}")
+
+        # Create and export report
+        report_path = _create_report()
+
+        # Send WandB alert
+        self._wandb_alert(
+            title="Forecast Report Generated",
+            text=f"Forecast report for {self._model_path.model_name} has been successfully "
+            f"generated and saved locally at {report_path}.",
+        )
 
     @abstractmethod
     def _train_model_artifact(self) -> any:

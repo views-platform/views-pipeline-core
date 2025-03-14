@@ -23,16 +23,6 @@ def mock_model_path():
     mock_path.model_dir = "/path/to/models/test_model"
     return mock_path
 
-
-
-
-
-
-
-
-
-
-
 @pytest.mark.parametrize(
     "args, expected_command, expected_methods_called",
     [

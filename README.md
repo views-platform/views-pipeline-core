@@ -98,7 +98,7 @@ To be able to handle and manage all the input data, the VIEWS pipeline relies on
 ## Managers
 
 
-The VIEWS pipeline includes several management classs in order for the pipeline execution to be as automated as possible, while aslo maintaining and ensuring consistency and accuracy in the forecasting processes. The pipeline management classes include `ModelPathManager`, `EnsamblePathManager`, `ModelManager`, `EnsembleManager`, and `PackageManager`.
+The VIEWS pipeline includes several management classs in order for the pipeline execution to be as automated as possible, while aslo maintaining and ensuring consistency and accuracy in the forecasting processes. The pipeline management classes include `ModelPathManager`, `EnsemblePathManager`, `ModelManager`, `EnsembleManager`, and `PackageManager`.
 
 
 ### ModelPathManager
@@ -112,9 +112,9 @@ The `ModelPathManager` class manages the paths and the directories associated wi
 ### EnsemblePathManager
 
 
-Similarly to the `ModelPathManager`, the  `EnsamblePathManager` class manages the paths and directories associated with the VIEWS ensemble models. The class entails the same functionality as the `ModelPathManager`, adapted to the VIEWS ensembles. 
+Similarly to the `ModelPathManager`, the  `EnsemblePathManager` class manages the paths and directories associated with the VIEWS ensemble models. The class entails the same functionality as the `ModelPathManager`, adapted to the VIEWS ensembles. 
 
-1. **Initialization and Directory Management** – The `EnsamblePathManager` class manages and validates and tracks various
+1. **Initialization and Directory Management** – The `EnsemblePathManager` class manages and validates and tracks various
 directories for the ensemble, including configurations, data, artifacts, and scripts.   
 2. **Script Management** – The class also defines methods for initializing and managing script paths required by the ensemble. This includes configuration scripts, main scripts, querysets and various utility scripts. 
 3. **Artifact Management** – The class provides methods for managing ensemble artifacts, including retrieving the latest path and handling artifact files. 
@@ -143,14 +143,14 @@ forecasting progress, while providing insights for potential debugging and monit
 
 The views-pipeline-core relies extensively on the `EnsembleManager` class, which can be found in the `ensemble.py` file located in the managers directory. Mirroring the functionality of the `ModelManager` class, the `EnsembleManager` is tasked with managing the lifecycles of all ensemble models, including configuration loading, training, evaluation, and forecasting.
 
-1. **Initialization** - The `EnsembleManager` class is initialized with a `EnsamblePathManager` instance and optional Weights&Biases  notifications flag. It allows for configurationg of various attributes related to ensemble and data loading.
+1. **Initialization** - The `EnsembleManager` class is initialized with a `EnsemblePathManager` instance and optional Weights&Biases  notifications flag. It allows for configurationg of various attributes related to ensemble and data loading.
 2. **Configuration Loading** - Additionally, the class also offers methods for loading ensemble-specific configurations, including deployment, hyperparameters, metadata, and sweeps.
 3. **Model Lifecycle Management** - The `EnsembleManager` class oversees the entire lifecycle of a machine learning ensemble, including training, evaluation, and forecasting. The class ensures that these processes are followed through with consistency and accuracy.
 
 ### How EnsembleManager Fits Into The Pipeline
 
 1. **Model Lifecycle Management** - The main task of the `EnsembleManager` class is to manage the entire lifecycle of machine learning ensembles, including configuration loading, training, evaluation, and forecasting. The `EnsembleManager` ensures that model ensembles are managed consistently and efficiently across the entire pipeline. Additipnally, this removes any risk of faulty modelling procedures. 
-2. **Integration with Other Components** - Apart from managing the models themselves, the `EnsembleManager` class works with other pipeline components, including `EnsamblePathManager` which directly deals with paths, as well as the `ViewsDataLoader` for any data related tasks. This integration allows for, and ensures that the models are trained and evaluated with the proper parameters and data.
+2. **Integration with Other Components** - Apart from managing the models themselves, the `EnsembleManager` class works with other pipeline components, including `EnsemblePathManager` which directly deals with paths, as well as the `ViewsDataLoader` for any data related tasks. This integration allows for, and ensures that the models are trained and evaluated with the proper parameters and data.
 3. **Configuration Management** -  The `EnsembleManager` class also deals with any model ensemble configurations such as loading deployment, hyperparameters, metadata, and sweep configurations to ensure proper ensemble setup. This is crucial in keeping the pipeline reproducible.
 4. **Logging and Debugging** - The class is also relies on logging in order to be able to track training, evaluation, and
 forecasting progress, while providing insights for potential debugging and monitoring the pipeline behavior.
