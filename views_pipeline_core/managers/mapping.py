@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from views_pipeline_core.data.handlers import PGMDataset, CMDataset, _CDataset
+from views_pipeline_core.data.handlers import PGMDataset, CMDataset, _CDataset, _PGDataset
 import logging
 from typing import Union, Optional, List
 from pathlib import Path
@@ -17,24 +17,16 @@ logger = logging.getLogger(__name__)
 
 class MappingManager:
     def __init__(self, views_dataset: Union[PGMDataset, CMDataset]):
-        if views_dataset.sample_size > 1:
-            logger.info(
-                f"Calculating MAP for dataset. Found sample size of {views_dataset.sample_size}"
-            )
-            self._dataset = type(views_dataset)(
-                views_dataset.calculate_map(features=None)
-            )
-        else:
-            self._dataset = views_dataset
+        self._dataset = views_dataset
         self._dataframe = self._dataset.dataframe
         self._entity_id = self._dataset._entity_id
         self._time_id = self._dataset._time_id
-        if isinstance(views_dataset, PGMDataset):
+        if isinstance(views_dataset, _PGDataset):
             from ingester3.extensions import PgAccessor
 
             self._world = self.__get_priogrid_shapefile()
 
-        elif isinstance(views_dataset, CMDataset):
+        elif isinstance(views_dataset, _CDataset):
             from ingester3.extensions import CAccessor
 
             self._world = self.__get_country_shapefile()

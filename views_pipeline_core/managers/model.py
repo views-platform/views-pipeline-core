@@ -408,6 +408,26 @@ class ModelPathManager:
         ]
         return artifact_files
 
+    def _get_raw_data_file_paths(self, run_type: str) -> List[Path]:
+        paths = [
+            f
+            for f in self.data_raw.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"{run_type}_viewser_df")
+            and f.suffix == PipelineConfig.dataframe_format
+        ]
+        return sorted(paths, reverse=True)
+
+    def _get_generated_predictions_data_file_paths(self, run_type: str) -> List[Path]:
+        paths = [
+            f
+            for f in self.data_generated.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"predictions_{run_type}")
+            and f.suffix == PipelineConfig.dataframe_format
+        ]
+        return sorted(paths, reverse=True)
+
     def get_latest_model_artifact_path(self, run_type: str) -> Path:
         """
         Retrieve the path (pathlib path object) latest model artifact for a given run type based on the modification time.
@@ -999,6 +1019,7 @@ class ModelManager:
             str: A formatted string representing the evaluation table.
         """
         from tabulate import tabulate
+
         # create an empty dataframe with columns 'Metric' and 'Value'
         metric_df = pd.DataFrame(columns=["Metric", "Value"])
         for key, value in metric_dict.items():
@@ -1251,10 +1272,15 @@ class ModelManager:
         # metrics_manager = MetricsManager(self.config["metrics"])
         evaluation_manager = EvaluationManager(self.config["metrics"])
         if not ensemble:
-            df_path = (
-                self._model_path.data_raw
-                / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
-            )
+            # df_path = (
+            #     self._model_path.data_raw
+            #     / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+            # )
+            df_path = self._model_path._get_raw_data_file_paths(
+                run_type=self._args.run_type
+            )[
+                0
+            ]  # get the latest i.e first file
             df_viewser = read_dataframe(df_path)
         else:
             # If the predictions are from an ensemble model, the actual values are not available in the forecast store
@@ -1541,14 +1567,6 @@ class ModelManager:
                             df_predictions, self._model_path.data_generated
                         )
 
-                        if report:
-                            self._generate_forecast_report(
-                                forecast_dataframe=df_predictions,
-                                historical_dataframe=read_dataframe(
-                                    self._model_path.data_raw
-                                    / f"{self.config['run_type']}_viewser_df{PipelineConfig.dataframe_format}"
-                                ),
-                            )
                     except Exception as e:
                         logger.error(
                             f"Error forecasting {self._model_path.target}: {e}",
@@ -1557,6 +1575,50 @@ class ModelManager:
                         self._wandb_alert(
                             title="Model Forecasting Error",
                             text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
+                            level=wandb.AlertLevel.ERROR,
+                        )
+                        raise
+                if report:
+                    # historical_dataframe=read_dataframe(
+                    #         self._model_path.data_raw
+                    #         / f"{self.config['run_type']}_viewser_df{PipelineConfig.dataframe_format}"
+                    #     ),
+                    try:
+                        logger.info(
+                            f"Generating forecast report for {self._model_path.target} {self.config['name']}..."
+                        )
+                        historical_df_path = read_dataframe(
+                            self._model_path._get_raw_data_file_paths(
+                                run_type=self._args.run_type
+                            )[0]
+                        )
+                        try:
+                            forecast_df_path = read_dataframe(
+                                self._model_path._get_generated_predictions_data_file_paths(
+                                    run_type=self._args.run_type
+                                )[
+                                    0
+                                ]
+                            )
+                            logger.info(
+                                f"Using latest forecast dataframe found at {forecast_df_path}"
+                            )
+                        except Exception as e:
+                            raise FileNotFoundError(
+                                f"Forecast dataframe was probably not found at {forecast_df_path}. Please run the pipeline in forecasting mode with '--run_type forecasting -f' to generate the forecast dataframe. More info: {e}"
+                            )
+
+                        self._generate_forecast_report(
+                            forecast_dataframe=forecast_df_path,
+                            historical_dataframe=historical_df_path,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Error generating forecast report: {e}", exc_info=True
+                        )
+                        self._wandb_alert(
+                            title="Forecast Report Generation Error",
+                            text=f"An error occurred during the generation of the forecast report for {self.config['name']}: {e}",
                             level=wandb.AlertLevel.ERROR,
                         )
                         raise
@@ -1668,18 +1730,30 @@ class ModelManager:
             forecast_dataset = dataset_cls(forecast_dataframe)
 
             report_manager = ReportManager()
-            mapping_manager = MappingManager(forecast_dataset)
             # Build report content
             report_manager.add_heading(
                 f"Forecast Report for {self._model_path.model_name}", level=1
             )
             report_manager.add_heading("Maps", level=2)
 
-            subset_dataframe = mapping_manager.get_subset_mapping_dataframe(
-                entity_ids=None, time_ids=None
-            )
+            for target in tqdm.tqdm(
+                self.config["depvar"], desc="Generating forecast maps"
+            ):
+                # Handle uncertainty
+                if forecast_dataset.sample_size > 1:
+                    logger.info(
+                        f"Sample size of {forecast_dataset.sample_size} for target {target} found. Calculating MAP..."
+                    )
+                    forecast_dataset = type(forecast_dataset)(
+                        forecast_dataset.calculate_map(features=[f"pred_{target}"])
+                    )
+                    target = f"{target}_map"
 
-            for target in tqdm.tqdm(self.config["depvar"], desc="Generating forecast maps"):
+                # Common steps
+                mapping_manager = MappingManager(forecast_dataset)
+                subset_dataframe = mapping_manager.get_subset_mapping_dataframe(
+                    entity_ids=None, time_ids=None
+                )
                 report_manager.add_heading(f"Forecast for {target}", level=3)
                 report_manager.add_html(
                     html=mapping_manager.plot_map(
@@ -1704,7 +1778,7 @@ class ModelManager:
                         entity_ids=None,
                         interactive=True,
                         alpha=0.9,
-                        targets=None,
+                        targets=None,  # loop through targets
                         as_html=True,
                     )
                 )
