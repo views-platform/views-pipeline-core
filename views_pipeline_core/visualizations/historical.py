@@ -53,7 +53,7 @@ class HistoricalLineGraph:
             entity_ids = self._validate_entity_ids(entity_ids)
 
         for target in targets:
-            sample_size = len(self.forecast_dataset.dataframe["pred_" + target].iloc[0])
+            # sample_size = len(self.forecast_dataset.dataframe["pred_" + target].iloc[0])
             if not interactive:
                 raise NotImplementedError("Static plots are not supported")
             plot_result = self._plot_interactive(
@@ -61,7 +61,7 @@ class HistoricalLineGraph:
                 target=target,
                 alpha=alpha,
                 vline=vline,
-                hdi=sample_size > 1,
+                hdi=self.forecast_dataset.sample_size > 1,
                 as_html=as_html,
             )
             if as_html:
@@ -168,6 +168,7 @@ class HistoricalLineGraph:
         hist_df = self.historical_dataset.get_subset_dataframe(entity_ids=entity_ids)[
             target
         ].reset_index()
+        print(self.forecast_dataset.targets)
         pred_df = self.forecast_dataset.get_subset_dataframe(entity_ids=entity_ids)[
             "pred_" + target
         ].reset_index()

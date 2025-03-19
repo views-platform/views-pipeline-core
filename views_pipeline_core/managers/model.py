@@ -1583,13 +1583,13 @@ class ModelManager:
                         logger.info(
                             f"Generating forecast report for {self._model_path.target} {self.config['name']}..."
                         )
-                        historical_df_path = read_dataframe(
+                        historical_df = read_dataframe(
                             self._model_path._get_raw_data_file_paths(
                                 run_type=self._args.run_type
                             )[0]
                         )
                         try:
-                            forecast_df_path = read_dataframe(
+                            forecast_df = read_dataframe(
                                 self._model_path._get_generated_predictions_data_file_paths(
                                     run_type=self._args.run_type
                                 )[
@@ -1597,16 +1597,16 @@ class ModelManager:
                                 ]
                             )
                             logger.info(
-                                f"Using latest forecast dataframe found at {forecast_df_path}"
+                                f"Using latest forecast dataframe"
                             )
                         except Exception as e:
                             raise FileNotFoundError(
-                                f"Forecast dataframe was probably not found at {forecast_df_path}. Please run the pipeline in forecasting mode with '--run_type forecasting -f' to generate the forecast dataframe. More info: {e}"
+                                f"Forecast dataframe was probably not found. Please run the pipeline in forecasting mode with '--run_type forecasting -f' to generate the forecast dataframe. More info: {e}"
                             )
 
                         self._generate_forecast_report(
-                            forecast_dataframe=forecast_df_path,
-                            historical_dataframe=historical_df_path,
+                            forecast_dataframe=forecast_df,
+                            historical_dataframe=historical_df,
                         )
                     except Exception as e:
                         logger.error(
@@ -1740,13 +1740,13 @@ class ModelManager:
                     logger.info(
                         f"Sample size of {forecast_dataset.sample_size} for target {target} found. Calculating MAP..."
                     )
-                    forecast_dataset = type(forecast_dataset)(
+                    forecast_dataset_map = type(forecast_dataset)(
                         forecast_dataset.calculate_map(features=[f"pred_{target}"])
                     )
                     target = f"{target}_map"
 
                 # Common steps
-                mapping_manager = MappingManager(forecast_dataset)
+                mapping_manager = MappingManager(forecast_dataset_map)
                 subset_dataframe = mapping_manager.get_subset_mapping_dataframe(
                     entity_ids=None, time_ids=None
                 )
@@ -1771,10 +1771,6 @@ class ModelManager:
                 )
                 report_manager.add_html(
                     html=historical_line_graph.plot_predictions_vs_historical(
-                        entity_ids=None,
-                        interactive=True,
-                        alpha=0.9,
-                        targets=None,  # loop through targets
                         as_html=True,
                     )
                 )
