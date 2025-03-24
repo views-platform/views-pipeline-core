@@ -115,41 +115,87 @@ class ModelPathManager:
         """
         return hashlib.sha256(str((model_name, validate, target)).encode()).hexdigest()
 
+    # @staticmethod
+    # def get_model_name_from_path(path: Union[Path, str]) -> str:
+    #     """
+    #     Returns the model name based on the provided path.
+
+    #     Args:
+    #         PATH (Path): The base path, typically the path of the script invoking this function (e.g., `Path(__file__)`).
+
+    #     Returns:
+    #         str: The model name extracted from the provided path.
+
+    #     Raises:
+    #         ValueError: If the model name is not found in the provided path.
+    #     """
+    #     path = Path(path)
+    #     logger.debug(f"Extracting model name from Path: {path}")
+    #     if "models" in path.parts and "ensembles" not in path.parts:
+    #         model_idx = path.parts.index("models")
+    #         model_name = path.parts[model_idx + 1]
+    #         if ModelPathManager.validate_model_name(model_name):
+    #             logger.debug(f"Valid model name {model_name} found in path {path}")
+    #             return str(model_name)
+    #         else:
+    #             logger.debug(f"No valid model name found in path {path}")
+    #             return None
+    #     if "ensembles" in path.parts and "models" not in path.parts:
+    #         model_idx = path.parts.index("ensembles")
+    #         model_name = path.parts[model_idx + 1]
+    #         if ModelPathManager.validate_model_name(model_name):
+    #             logger.debug(f"Valid ensemble name {model_name} found in path {path}")
+    #             return str(model_name)
+    #         else:
+    #             logger.debug(f"No valid ensemble name found in path {path}")
+    #             return None
+    #     return None
+
     @staticmethod
     def get_model_name_from_path(path: Union[Path, str]) -> str:
         """
-        Returns the model name based on the provided path.
+        Extracts the model or ensemble name from a path containing exactly one of 'models' or 'ensembles'.
 
         Args:
-            PATH (Path): The base path, typically the path of the script invoking this function (e.g., `Path(__file__)`).
+            path (Union[Path, str]): The path to analyze (typically from `Path(__file__)`).
 
         Returns:
-            str: The model name extracted from the provided path.
+            str: The validated model/ensemble name if found, otherwise None.
 
-        Raises:
-            ValueError: If the model name is not found in the provided path.
+        Example:
+            >>> get_model_name_from_path("project/models/my_model/script.py")
+            "my_model"
         """
         path = Path(path)
-        logger.debug(f"Extracting model name from Path: {path}")
-        if "models" in path.parts and "ensembles" not in path.parts:
-            model_idx = path.parts.index("models")
-            model_name = path.parts[model_idx + 1]
-            if ModelPathManager.validate_model_name(model_name):
-                logger.debug(f"Valid model name {model_name} found in path {path}")
-                return str(model_name)
-            else:
-                logger.debug(f"No valid model name found in path {path}")
-                return None
-        if "ensembles" in path.parts and "models" not in path.parts:
-            model_idx = path.parts.index("ensembles")
-            model_name = path.parts[model_idx + 1]
-            if ModelPathManager.validate_model_name(model_name):
-                logger.debug(f"Valid ensemble name {model_name} found in path {path}")
-                return str(model_name)
-            else:
-                logger.debug(f"No valid ensemble name found in path {path}")
-                return None
-        return None
+        logger.debug(f"Extracting model name from path: {path}")
+
+        # Define valid parent directories and check for exactly one occurrence
+        valid_parents = {"models", "ensembles", "preprocessors"}
+        found_parents = [parent for parent in valid_parents if parent in path.parts]
+        
+        if len(found_parents) != 1:
+            logger.debug(f"Path must contain exactly one of {valid_parents}. Found: {found_parents}")
+            return None
+
+        parent_dir = found_parents[0]
+        parent_idx = path.parts.index(parent_dir)
+
+        # Check if there's a subdirectory after the parent directory
+        if parent_idx + 1 >= len(path.parts):
+            logger.debug(f"No name found after '{parent_dir}' directory in path: {path}")
+            return None
+
+        model_name = path.parts[parent_idx + 1]
+
+        # Validate and return the extracted name
+        if ModelPathManager.validate_model_name(model_name):
+            logger.debug(f"Valid {parent_dir[:-1]} name '{model_name}' found in path: {path}")
+            return model_name
+        else:
+            logger.debug(f"Invalid name '{model_name}' after '{parent_dir}' directory in path: {path}")
+            return None
+
+
 
     @staticmethod
     def validate_model_name(name: str) -> bool:
@@ -269,10 +315,10 @@ class ModelPathManager:
             'my_model'
         """
         # Should fail as violently as possible if the model name is invalid.
-        if ModelPathManager._is_path(model_path, validate=self._validate):
+        if self._is_path(model_path, validate=self._validate):
             logger.debug(f"Path input detected: {model_path}")
             try:
-                result = ModelPathManager.get_model_name_from_path(model_path)
+                result = self.get_model_name_from_path(model_path)
                 if result:
                     logger.debug(f"Model name extracted from path: {result}")
                     return result
