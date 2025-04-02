@@ -1818,7 +1818,7 @@ class ModelManager:
                     target = f"{target}_map"
 
                 # Common steps
-                mapping_manager = MappingManager(forecast_dataset_map)
+                mapping_manager = MappingManager(forecast_dataset_map if forecast_dataset.sample_size > 1 else forecast_dataset)
                 subset_dataframe = mapping_manager.get_subset_mapping_dataframe(
                     entity_ids=None, time_ids=None
                 )

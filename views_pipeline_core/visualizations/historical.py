@@ -168,7 +168,7 @@ class HistoricalLineGraph:
         hist_df = self.historical_dataset.get_subset_dataframe(entity_ids=entity_ids)[
             target
         ].reset_index()
-        print(self.forecast_dataset.targets)
+        # print(self.forecast_dataset.targets)
         pred_df = self.forecast_dataset.get_subset_dataframe(entity_ids=entity_ids)[
             "pred_" + target
         ].reset_index()
