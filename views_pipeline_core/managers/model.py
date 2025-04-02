@@ -12,7 +12,7 @@ import traceback
 import wandb
 import pandas as pd
 from pathlib import Path
-import os
+import numpy as np
 import tqdm
 from views_pipeline_core.wandb.utils import (
     add_wandb_metrics,
@@ -1223,6 +1223,11 @@ class ModelManager:
             sequence_number (int): The sequence number.
         """
         try:
+            import numpy as np
+            # if "pred_sb_best" in df_predictions.columns:
+            #     df_predictions["pred_sb_best"] = df_predictions["pred_sb_best"].apply(
+            #         lambda lst: [float(0.0) if np.isnan(x) else float(x) for x in lst]
+            #     )
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
@@ -1458,6 +1463,27 @@ class ModelManager:
             )
             raise
 
+    def _replace_nan_values(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Replace NaN values in the DataFrame with 0.0.
+
+        Args:
+            df (pd.DataFrame): The DataFrame to process.
+
+        Returns:
+            pd.DataFrame: The DataFrame with NaN values replaced by 0.0.
+        """
+        for column in df.columns:
+            if df[column].dtype == "object":
+                df[column] = df[column].apply(
+                    lambda x: [float(0.0) if np.isnan(i) else float(i) for i in x]
+                )
+            else:
+                df[column] = df[column].apply(
+                    lambda x: float(0.0) if np.isnan(x) else float(x)
+                )
+        return df
+
     def _execute_model_tasks(
         self,
         config: Optional[Dict] = None,
@@ -1552,9 +1578,9 @@ class ModelManager:
                         logger.info(
                             f"Evaluating {self._model_path.target} {self.config['name']}..."
                         )
-                        df_predictions = self._evaluate_model_artifact(
+                        df_predictions = self._replace_nan_values(self._evaluate_model_artifact(
                             self._eval_type, artifact_name
-                        )
+                        ))
 
                         # Add df validation logic
                         for i, df in enumerate(df_predictions):
@@ -1595,9 +1621,9 @@ class ModelManager:
                         logger.info(
                             f"Forecasting {self._model_path.target} {self.config['name']}..."
                         )
-                        df_predictions = self._forecast_model_artifact(
+                        df_predictions = self._replace_nan_values(self._forecast_model_artifact(
                             artifact_name
-                        )  # Forecast the model
+                        ))  # Forecast the model
                         self._validate_prediction_dataframe(dataframe=df_predictions)
 
                         self._wandb_alert(
