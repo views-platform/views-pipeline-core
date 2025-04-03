@@ -1473,16 +1473,26 @@ class ModelManager:
         Returns:
             pd.DataFrame: The DataFrame with NaN values replaced by 0.0.
         """
-        for column in df.columns:
-            if df[column].dtype == "object":
-                df[column] = df[column].apply(
-                    lambda x: [float(0.0) if np.isnan(i) else float(i) for i in x]
-                )
-            else:
-                df[column] = df[column].apply(
-                    lambda x: float(0.0) if np.isnan(x) else float(x)
-                )
-        return df
+        def _replace_nan(d):
+            for column in d.columns:
+                if d[column].dtype == "object":
+                    d[column] = d[column].apply(
+                        lambda x: [float(0.0) if np.isnan(i) else float(i) for i in x]
+                    )
+                else:
+                    d[column] = d[column].apply(
+                        lambda x: float(0.0) if np.isnan(x) else float(x)
+                    )
+            return d
+        if isinstance(df, list):
+            for i, d in enumerate(df):
+                df[i] = _replace_nan(d)
+            return df
+        elif isinstance(df, pd.DataFrame):
+            df = _replace_nan(df)
+            return df
+        else:
+            raise ValueError(f"Input should be a DataFrame or a list of DataFrames. Found {type(df)}")
 
     def _execute_model_tasks(
         self,
@@ -1578,14 +1588,14 @@ class ModelManager:
                         logger.info(
                             f"Evaluating {self._model_path.target} {self.config['name']}..."
                         )
-                        df_predictions = self._replace_nan_values(self._evaluate_model_artifact(
+                        list_df_predictions = self._replace_nan_values(self._evaluate_model_artifact(
                             self._eval_type, artifact_name
                         ))
 
                         # Add df validation logic
-                        for i, df in enumerate(df_predictions):
+                        for i, df in enumerate(list_df_predictions):
                             print(
-                                f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
+                                f"\nValidating evaluation dataframe of sequence {i+1}/{len(list_df_predictions)}"
                             )
                             self._validate_prediction_dataframe(dataframe=df)
                             self._save_predictions(
@@ -1598,10 +1608,9 @@ class ModelManager:
                         # Evaluate the model
                         if (
                             self.config["metrics"]
-                            and self.config["algorithm"] != "SHURF"
                         ):
                             self._evaluate_prediction_dataframe(
-                                df_predictions
+                                list_df_predictions
                             )  # Calculate evaluation metrics with the views-evaluation package
                         else:
                             raise ValueError(
