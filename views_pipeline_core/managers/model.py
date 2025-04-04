@@ -29,6 +29,7 @@ from views_pipeline_core.files.utils import (
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.evaluation_manager import EvaluationManager
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+from views_pipeline_core.data.utils import replace_nan_values
 from views_pipeline_core.managers.mapping import MappingManager
 from views_pipeline_core.managers.report import ReportManager
 from views_pipeline_core.visualizations.historical import HistoricalLineGraph
@@ -116,43 +117,7 @@ class ModelPathManager:
             str: The SHA-256 hash of the model name, validation flag, and target.
         """
         return hashlib.sha256(str((model_name, validate, target)).encode()).hexdigest()
-
-    # @staticmethod
-    # def get_model_name_from_path(path: Union[Path, str]) -> str:
-    #     """
-    #     Returns the model name based on the provided path.
-
-    #     Args:
-    #         PATH (Path): The base path, typically the path of the script invoking this function (e.g., `Path(__file__)`).
-
-    #     Returns:
-    #         str: The model name extracted from the provided path.
-
-    #     Raises:
-    #         ValueError: If the model name is not found in the provided path.
-    #     """
-    #     path = Path(path)
-    #     logger.debug(f"Extracting model name from Path: {path}")
-    #     if "models" in path.parts and "ensembles" not in path.parts:
-    #         model_idx = path.parts.index("models")
-    #         model_name = path.parts[model_idx + 1]
-    #         if ModelPathManager.validate_model_name(model_name):
-    #             logger.debug(f"Valid model name {model_name} found in path {path}")
-    #             return str(model_name)
-    #         else:
-    #             logger.debug(f"No valid model name found in path {path}")
-    #             return None
-    #     if "ensembles" in path.parts and "models" not in path.parts:
-    #         model_idx = path.parts.index("ensembles")
-    #         model_name = path.parts[model_idx + 1]
-    #         if ModelPathManager.validate_model_name(model_name):
-    #             logger.debug(f"Valid ensemble name {model_name} found in path {path}")
-    #             return str(model_name)
-    #         else:
-    #             logger.debug(f"No valid ensemble name found in path {path}")
-    #             return None
-    #     return None
-
+    
     @staticmethod
     def get_model_name_from_path(path: Union[Path, str]) -> str:
         """
@@ -1472,37 +1437,6 @@ class ModelManager:
             )
             raise
 
-    def _replace_nan_values(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Replace NaN values in the DataFrame with 0.0.
-
-        Args:
-            df (pd.DataFrame): The DataFrame to process.
-
-        Returns:
-            pd.DataFrame: The DataFrame with NaN values replaced by 0.0.git
-        """
-        def _replace_nan(d):
-            for column in d.columns:
-                if d[column].dtype == "object":
-                    d[column] = d[column].apply(
-                        lambda x: [float(0.0) if np.isnan(i) else float(i) for i in x]
-                    )
-                else:
-                    d[column] = d[column].apply(
-                        lambda x: float(0.0) if np.isnan(x) else float(x)
-                    )
-            return d
-        if isinstance(df, list):
-            for i, d in enumerate(df):
-                df[i] = _replace_nan(d)
-            return df
-        elif isinstance(df, pd.DataFrame):
-            df = _replace_nan(df)
-            return df
-        else:
-            raise ValueError(f"Input should be a DataFrame or a list of DataFrames. Found {type(df)}")
-
     def _execute_model_tasks(
         self,
         config: Optional[Dict] = None,
@@ -1597,7 +1531,7 @@ class ModelManager:
                         logger.info(
                             f"Evaluating {self._model_path.target} {self.config['name']}..."
                         )
-                        list_df_predictions = self._replace_nan_values(self._evaluate_model_artifact(
+                        list_df_predictions = replace_nan_values(self._evaluate_model_artifact(
                             self._eval_type, artifact_name
                         ))
 
@@ -1639,7 +1573,7 @@ class ModelManager:
                         logger.info(
                             f"Forecasting {self._model_path.target} {self.config['name']}..."
                         )
-                        df_predictions = self._replace_nan_values(self._forecast_model_artifact(
+                        df_predictions = replace_nan_values(self._forecast_model_artifact(
                             artifact_name
                         ))  # Forecast the model
                         self._validate_prediction_dataframe(dataframe=df_predictions)
