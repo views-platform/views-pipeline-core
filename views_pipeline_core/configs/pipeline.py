@@ -9,6 +9,7 @@ class PipelineConfig:
         self._model_format = '.pkl'
         self._organization_name = 'views'
         # self._version_range = ">=0.2.0,<1.0.0"
+        self._package_name = 'views-pipeline-core'
 
     @property
     def dataframe_format(self) -> str:
@@ -23,6 +24,10 @@ class PipelineConfig:
     @property
     def organization_name(self) -> str:
         return self._organization_name
+    
+    @property
+    def package_name(self) -> str:
+        return self._package_name
 
     @dataframe_format.setter
     def dataframe_format(self, format: str):

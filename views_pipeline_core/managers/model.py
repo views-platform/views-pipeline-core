@@ -14,6 +14,8 @@ import pandas as pd
 from pathlib import Path
 import numpy as np
 import tqdm
+import random
+
 from views_pipeline_core.wandb.utils import (
     add_wandb_metrics,
     log_wandb_log_dict,
@@ -755,6 +757,13 @@ class ModelManager:
             from views_forecasts.extensions import ForecastsStore, ViewsMetadata
 
             self._pred_store_name = self.__get_pred_store_name()
+        self.__ascii_splash()
+
+    def __ascii_splash(self) -> None:
+        from art import text2art
+        text = text2art(f"{PipelineConfig().package_name.replace('-', ' ')}", font="random-medium")
+        colored_text = ''.join([f"\033[{random.choice(range(31, 37))}m{char}\033[0m" for char in text])
+        print(colored_text)
 
     def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
         """
@@ -1471,7 +1480,7 @@ class ModelManager:
             df (pd.DataFrame): The DataFrame to process.
 
         Returns:
-            pd.DataFrame: The DataFrame with NaN values replaced by 0.0.
+            pd.DataFrame: The DataFrame with NaN values replaced by 0.0.git
         """
         def _replace_nan(d):
             for column in d.columns:
