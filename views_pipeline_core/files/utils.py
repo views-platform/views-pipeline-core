@@ -199,8 +199,8 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     
     try:
         logger.debug(f"Reading the DataFrame from {file_path} in {file_extension} format")
-        # if file_extension == ".csv":
-        #     return pd.read_csv(file_path, index_col=[0, 1])
+        if file_extension == ".csv":
+            return pd.read_csv(file_path)
         # elif file_extension == ".xlsx":
         #     return pd.read_excel(file_path)
         if file_extension == ".parquet":

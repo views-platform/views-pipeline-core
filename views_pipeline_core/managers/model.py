@@ -14,6 +14,8 @@ import pandas as pd
 from pathlib import Path
 import numpy as np
 import tqdm
+import random
+
 from views_pipeline_core.wandb.utils import (
     add_wandb_metrics,
     log_wandb_log_dict,
@@ -27,6 +29,7 @@ from views_pipeline_core.files.utils import (
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.evaluation_manager import EvaluationManager
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+from views_pipeline_core.data.utils import replace_nan_values
 from views_pipeline_core.managers.mapping import MappingManager
 from views_pipeline_core.managers.report import ReportManager
 from views_pipeline_core.visualizations.historical import HistoricalLineGraph
@@ -114,42 +117,52 @@ class ModelPathManager:
             str: The SHA-256 hash of the model name, validation flag, and target.
         """
         return hashlib.sha256(str((model_name, validate, target)).encode()).hexdigest()
-
+    
     @staticmethod
     def get_model_name_from_path(path: Union[Path, str]) -> str:
         """
-        Returns the model name based on the provided path.
+        Extracts the model or ensemble name from a path containing exactly one of 'models' or 'ensembles'.
 
         Args:
-            PATH (Path): The base path, typically the path of the script invoking this function (e.g., `Path(__file__)`).
+            path (Union[Path, str]): The path to analyze (typically from `Path(__file__)`).
 
         Returns:
-            str: The model name extracted from the provided path.
+            str: The validated model/ensemble name if found, otherwise None.
 
-        Raises:
-            ValueError: If the model name is not found in the provided path.
+        Example:
+            >>> get_model_name_from_path("project/models/my_model/script.py")
+            "my_model"
         """
         path = Path(path)
-        logger.debug(f"Extracting model name from Path: {path}")
-        if "models" in path.parts and "ensembles" not in path.parts:
-            model_idx = path.parts.index("models")
-            model_name = path.parts[model_idx + 1]
-            if ModelPathManager.validate_model_name(model_name):
-                logger.debug(f"Valid model name {model_name} found in path {path}")
-                return str(model_name)
-            else:
-                logger.debug(f"No valid model name found in path {path}")
-                return None
-        if "ensembles" in path.parts and "models" not in path.parts:
-            model_idx = path.parts.index("ensembles")
-            model_name = path.parts[model_idx + 1]
-            if ModelPathManager.validate_model_name(model_name):
-                logger.debug(f"Valid ensemble name {model_name} found in path {path}")
-                return str(model_name)
-            else:
-                logger.debug(f"No valid ensemble name found in path {path}")
-                return None
-        return None
+        logger.debug(f"Extracting model name from path: {path}")
+
+        # Define valid parent directories and check for exactly one occurrence
+        valid_parents = {"models", "ensembles", "preprocessors"}
+        found_parents = [parent for parent in valid_parents if parent in path.parts]
+        
+        if len(found_parents) != 1:
+            logger.debug(f"Path must contain exactly one of {valid_parents}. Found: {found_parents}")
+            return None
+
+        parent_dir = found_parents[0]
+        parent_idx = path.parts.index(parent_dir)
+
+        # Check if there's a subdirectory after the parent directory
+        if parent_idx + 1 >= len(path.parts):
+            logger.debug(f"No name found after '{parent_dir}' directory in path: {path}")
+            return None
+
+        model_name = path.parts[parent_idx + 1]
+
+        # Validate and return the extracted name
+        if ModelPathManager.validate_model_name(model_name):
+            logger.debug(f"Valid {parent_dir[:-1]} name '{model_name}' found in path: {path}")
+            return model_name
+        else:
+            logger.debug(f"Invalid name '{model_name}' after '{parent_dir}' directory in path: {path}")
+            return None
+
+
 
     @staticmethod
     def validate_model_name(name: str) -> bool:
@@ -269,10 +282,10 @@ class ModelPathManager:
             'my_model'
         """
         # Should fail as violently as possible if the model name is invalid.
-        if ModelPathManager._is_path(model_path, validate=self._validate):
+        if self._is_path(model_path, validate=self._validate):
             logger.debug(f"Path input detected: {model_path}")
             try:
-                result = ModelPathManager.get_model_name_from_path(model_path)
+                result = self.get_model_name_from_path(model_path)
                 if result:
                     logger.debug(f"Model name extracted from path: {result}")
                     return result
@@ -709,6 +722,45 @@ class ModelManager:
             from views_forecasts.extensions import ForecastsStore, ViewsMetadata
 
             self._pred_store_name = self.__get_pred_store_name()
+        self.__ascii_splash()
+
+    def __ascii_splash(self) -> None:
+        from art import text2art
+        text = text2art(f"{PipelineConfig().package_name.replace('-', ' ')}", font="random-medium")
+        colored_text = ''.join([f"\033[{random.choice(range(31, 37))}m{char}\033[0m" for char in text])
+        print(colored_text)
+
+    def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
+        """
+        Loads and executes a configuration method from a specified script.
+
+        Args:
+            script_name (str): The name of the script to load.
+            config_method (str): The name of the configuration method to execute.
+
+        Returns:
+            dict: The result of the configuration method if the script and method are found, otherwise None.
+
+        Raises:
+            AttributeError: If the specified configuration method does not exist in the script.
+            ImportError: If there is an error importing the script.
+        """
+        script_path = self._script_paths.get(script_name)
+        if script_path:
+            try:
+                spec = importlib.util.spec_from_file_location(script_name, script_path)
+                config_module = importlib.util.module_from_spec(spec)
+                sys.modules[script_name] = config_module
+                spec.loader.exec_module(config_module)
+                if hasattr(config_module, config_method):
+                    return getattr(config_module, config_method)()
+            except (AttributeError, ImportError) as e:
+                logger.error(
+                    f"Error loading config from {script_name}: {e}", exc_info=True
+                )
+                raise
+
+        return None
 
     def set_dataframe_format(self, format: str) -> None:
         """
@@ -876,38 +928,6 @@ class ModelManager:
                 )
 
             return pred_store_name
-        return None
-
-    def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
-        """
-        Loads and executes a configuration method from a specified script.
-
-        Args:
-            script_name (str): The name of the script to load.
-            config_method (str): The name of the configuration method to execute.
-
-        Returns:
-            dict: The result of the configuration method if the script and method are found, otherwise None.
-
-        Raises:
-            AttributeError: If the specified configuration method does not exist in the script.
-            ImportError: If there is an error importing the script.
-        """
-        script_path = self._script_paths.get(script_name)
-        if script_path:
-            try:
-                spec = importlib.util.spec_from_file_location(script_name, script_path)
-                config_module = importlib.util.module_from_spec(spec)
-                sys.modules[script_name] = config_module
-                spec.loader.exec_module(config_module)
-                if hasattr(config_module, config_method):
-                    return getattr(config_module, config_method)()
-            except (AttributeError, ImportError) as e:
-                logger.error(
-                    f"Error loading config from {script_name}: {e}", exc_info=True
-                )
-                raise
-
         return None
 
     def _update_single_config(self, args) -> Dict:
@@ -1177,6 +1197,11 @@ class ModelManager:
             sequence_number (int): The sequence number.
         """
         try:
+            import numpy as np
+            # if "pred_sb_best" in df_predictions.columns:
+            #     df_predictions["pred_sb_best"] = df_predictions["pred_sb_best"].apply(
+            #         lambda lst: [float(0.0) if np.isnan(x) else float(x) for x in lst]
+            #     )
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
@@ -1506,14 +1531,14 @@ class ModelManager:
                         logger.info(
                             f"Evaluating {self._model_path.target} {self.config['name']}..."
                         )
-                        df_predictions = self._evaluate_model_artifact(
+                        list_df_predictions = replace_nan_values(self._evaluate_model_artifact(
                             self._eval_type, artifact_name
-                        )
+                        ))
 
                         # Add df validation logic
-                        for i, df in enumerate(df_predictions):
+                        for i, df in enumerate(list_df_predictions):
                             print(
-                                f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
+                                f"\nValidating evaluation dataframe of sequence {i+1}/{len(list_df_predictions)}"
                             )
                             self._validate_prediction_dataframe(dataframe=df)
                             self._save_predictions(
@@ -1526,10 +1551,9 @@ class ModelManager:
                         # Evaluate the model
                         if (
                             self.config["metrics"]
-                            and self.config["algorithm"] != "SHURF"
                         ):
                             self._evaluate_prediction_dataframe(
-                                df_predictions
+                                list_df_predictions
                             )  # Calculate evaluation metrics with the views-evaluation package
                         else:
                             raise ValueError(
@@ -1549,9 +1573,9 @@ class ModelManager:
                         logger.info(
                             f"Forecasting {self._model_path.target} {self.config['name']}..."
                         )
-                        df_predictions = self._forecast_model_artifact(
+                        df_predictions = replace_nan_values(self._forecast_model_artifact(
                             artifact_name
-                        )  # Forecast the model
+                        ))  # Forecast the model
                         self._validate_prediction_dataframe(dataframe=df_predictions)
 
                         self._wandb_alert(
@@ -1583,13 +1607,13 @@ class ModelManager:
                         logger.info(
                             f"Generating forecast report for {self._model_path.target} {self.config['name']}..."
                         )
-                        historical_df_path = read_dataframe(
+                        historical_df = read_dataframe(
                             self._model_path._get_raw_data_file_paths(
                                 run_type=self._args.run_type
                             )[0]
                         )
                         try:
-                            forecast_df_path = read_dataframe(
+                            forecast_df = read_dataframe(
                                 self._model_path._get_generated_predictions_data_file_paths(
                                     run_type=self._args.run_type
                                 )[
@@ -1597,16 +1621,16 @@ class ModelManager:
                                 ]
                             )
                             logger.info(
-                                f"Using latest forecast dataframe found at {forecast_df_path}"
+                                f"Using latest forecast dataframe"
                             )
                         except Exception as e:
                             raise FileNotFoundError(
-                                f"Forecast dataframe was probably not found at {forecast_df_path}. Please run the pipeline in forecasting mode with '--run_type forecasting -f' to generate the forecast dataframe. More info: {e}"
+                                f"Forecast dataframe was probably not found. Please run the pipeline in forecasting mode with '--run_type forecasting -f' to generate the forecast dataframe. More info: {e}"
                             )
 
                         self._generate_forecast_report(
-                            forecast_dataframe=forecast_df_path,
-                            historical_dataframe=historical_df_path,
+                            forecast_dataframe=forecast_df,
+                            historical_dataframe=historical_df,
                         )
                     except Exception as e:
                         logger.error(
@@ -1740,13 +1764,13 @@ class ModelManager:
                     logger.info(
                         f"Sample size of {forecast_dataset.sample_size} for target {target} found. Calculating MAP..."
                     )
-                    forecast_dataset = type(forecast_dataset)(
+                    forecast_dataset_map = type(forecast_dataset)(
                         forecast_dataset.calculate_map(features=[f"pred_{target}"])
                     )
                     target = f"{target}_map"
 
                 # Common steps
-                mapping_manager = MappingManager(forecast_dataset)
+                mapping_manager = MappingManager(forecast_dataset_map if forecast_dataset.sample_size > 1 else forecast_dataset)
                 subset_dataframe = mapping_manager.get_subset_mapping_dataframe(
                     entity_ids=None, time_ids=None
                 )
@@ -1771,10 +1795,6 @@ class ModelManager:
                 )
                 report_manager.add_html(
                     html=historical_line_graph.plot_predictions_vs_historical(
-                        entity_ids=None,
-                        interactive=True,
-                        alpha=0.9,
-                        targets=None,  # loop through targets
                         as_html=True,
                     )
                 )
