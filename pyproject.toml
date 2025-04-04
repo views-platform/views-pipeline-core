@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "views_pipeline_core"
-version = "1.1.0"
+version = "1.1.1"
 description = ""
 authors = [
     "Borbála Farkas <borbala.farkas@pcr.uu.se>",
@@ -24,6 +24,7 @@ seaborn = "^0.13.2"
 plotly = "^6.0.0"
 plotly-express = "^0.4.1"
 scipy = "^1.15.1"
+art = "^6.4"
 
 [build-system]
 requires = ["poetry-core"]
