@@ -166,8 +166,6 @@ class ModelPathManager:
             logger.debug(f"Invalid name '{model_name}' after '{parent_dir}' directory in path: {path}")
             return None
 
-
-
     @staticmethod
     def validate_model_name(name: str) -> bool:
         """
@@ -959,7 +957,7 @@ class ModelManager:
         
     def _execute_model_tasks(
         self,
-        config: Optional[Dict],
+        config: Optional[Dict] = None,
         train: Optional[bool] = None,
         eval: Optional[bool] = None,
         forecast: Optional[bool] = None,
@@ -1007,7 +1005,7 @@ class ModelManager:
 
             wandb_alert(
                 title=f"Queryset Fetch Complete ({str(args.run_type)})",
-                text=f"Queryset for {self._model_path.target} {self.config['name']} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
+                text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
                 wandb_notifications=self._wandb_notifications,
                 models_path=self._model_path.models
             )
@@ -1021,7 +1019,7 @@ class ModelManager:
                 artifact_raw_data = wandb.Artifact(
                     name=artifact_name,
                     type="raw_data",
-                    description=f"Raw data for {self._model_path.target} {self.config['name']} for {current_month}",
+                    description=f"Raw data for {self._model_path.target} {self._model_path.model_name} for {current_month}",
                     metadata={
                         "run_type": args.run_type,
                         "drift_self_test": args.drift_self_test,
