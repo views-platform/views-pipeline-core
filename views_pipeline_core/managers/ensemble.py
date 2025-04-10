@@ -1,6 +1,7 @@
 from views_pipeline_core.managers.model import ModelPathManager, ModelManager
 from views_pipeline_core.wandb.utils import add_wandb_metrics, log_wandb_log_dict
 from views_pipeline_core.models.check import ensemble_model_check
+from views_pipeline_core.ensembles import reconciliation
 from views_pipeline_core.files.utils import read_log_file, create_log_file
 from views_pipeline_core.files.utils import save_dataframe, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
@@ -9,6 +10,7 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from typing import Union, Optional, List, Dict
 import wandb
 import logging
+import importlib
 import time
 import pickle
 from pathlib import Path
@@ -17,6 +19,7 @@ from datetime import datetime
 import pandas as pd
 import traceback
 import tqdm
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +118,50 @@ class EnsembleManager(ModelManager):
             use_prediction_store (bool, optional): Flag to enable or disable the use of the prediction store. Defaults to True.
         """
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
+
+        if self._config_meta["reconciliation"] is not None:
+           if self._config_meta['reconciliation'] == 'pgm_cm_point':
+               self.__get_point_reconciliation_target()
+           else:
+               self.reconcile_with_target = None
+        else:
+            self.reconcile_with_target = None
+
+
+    def __get_point_reconciliation_target(self):
+        reconcile_with = self._config_meta['reconcile_with']
+        reconcile_with_path = EnsemblePathManager(reconcile_with)
+        reconcile_with_script_paths = reconcile_with_path.get_scripts()
+        script_name = 'config_meta.py'
+        script_path = reconcile_with_script_paths[script_name]
+
+        spec = importlib.util.spec_from_file_location(script_name, script_path)
+        config_module = importlib.util.module_from_spec(spec)
+
+        sys.modules[script_name] = config_module
+        spec.loader.exec_module(config_module)
+
+        reconcile_with_meta_config = getattr(config_module, 'get_meta_config')()
+
+        try:
+            _ = reconcile_with_meta_config['models']
+        except:
+            raise RuntimeError(f"Entity to reconcile with {self._config_meta['reconcile_with']}"
+                               f"does not appear to be an ensemble (no 'models' attribute)")
+
+        if self._config_meta['depvar'] != reconcile_with_meta_config['depvar']:
+            raise RuntimeError(f"Cannot reconcile ensembles with different target variables:"
+                               f" {self._config_meta['depvar']}, {reconcile_with_meta_config['models']}")
+
+        if self._config_meta['depvar'].startswith('ln_') or self._config_meta['depvar'].startswith('lx_'):
+            self.reconcile_logged = 'ln'
+        elif self._config_meta['depvar'].startswith('lr_'):
+            self.reconcile_logged = 'lr'
+        else:
+            raise RuntimeError(f"Point reconcilation can only be performed on logged ('ln_ or 'lx')"
+                               f"or linear ('lr_) targets, not {self.config['depvar']}")
+
+        self.reconcile_with_target = reconcile_with_meta_config['depvar']
 
     @staticmethod
     def _get_shell_command(
@@ -644,5 +691,39 @@ class EnsembleManager(ModelManager):
         df_prediction = EnsembleManager._get_aggregated_df(
             dfs, self.config["aggregation"]
         )
+
+        if self.config["reconciliation"] is not None:
+            if self.config["reconciliation"] == 'pgm_cm_point':
+
+                if self._use_prediction_store:
+                    logger.info(f"Performing point pgm-cm reconciliation")
+                    from views_forecasts.extensions import ForecastsStore, ViewsMetadata
+                else:
+                    raise RuntimeError(f'Cannot perform pgm_cm_point reconciliation without access to'
+                                       f'prediction store')
+
+                reconcile_with = self.config["reconcile_with"]
+                pred_store_name = self._pred_store_name
+
+                run_id = ViewsMetadata().get_run_id_from_name(pred_store_name)
+
+                all_runs = ViewsMetadata().with_name(reconcile_with).fetch()['name'].to_list()
+
+                # fetch latest forecast from ensemble to be reconciled with
+
+                reconcile_with_forecasts = [fc for fc in all_runs if reconcile_with in fc and 'forecasting' in fc]
+
+                reconcile_with_forecasts.sort()
+
+                reconcile_with_forecast = reconcile_with_forecasts[-1]
+
+                df_cm = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
+
+                reconciler = reconciliation.ReconcilePgmWithCmPoint(df_pgm=df_prediction,
+                                                                    df_cm=df_cm,
+                                                                    target='step_combined',
+                                                                    target_type=self.reconcile_logged)
+
+                df_prediction = reconciler.reconcile()
 
         return df_prediction
