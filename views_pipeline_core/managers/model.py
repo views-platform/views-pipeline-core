@@ -341,6 +341,7 @@ class ModelPathManager:
             self._build_absolute_directory(Path("configs/config_deployment.py")),
             self._build_absolute_directory(Path("configs/config_hyperparameters.py")),
             self._build_absolute_directory(Path("configs/config_meta.py")),
+            self._build_absolute_directory(Path("configs/config_postprocess.py")),
             self._build_absolute_directory(Path("main.py")),
             self._build_absolute_directory(Path("README.md")),
         ]
