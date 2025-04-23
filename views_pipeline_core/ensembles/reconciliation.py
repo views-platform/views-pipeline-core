@@ -78,12 +78,12 @@ class ReconcilePgmWithCmPoint():
             raise ValueError(f"Expected cm df to have one of country_id, c_id as 2nd index")
 
         try:
-            assert f"pred_{self.target}" in self.df_pgm.columns
+            assert self.target in self.df_pgm.columns
         except AssertionError:
-            raise ValueError(f"Specified column pred_{self.target} not in pgm df")
+            raise ValueError(f"Specified column not in pgm df")
 
         try:
-            assert f"pred_{self.target}" in self.df_cm.columns
+            assert self.target in self.df_cm.columns
         except AssertionError:
             raise ValueError(f"Specified column not in cm df")
 
@@ -217,7 +217,7 @@ class ReconcilePgmWithCmPoint():
                     normalised_month[mask] = values_month_pgm[mask] * normalisation
 
             if self.super_calibrate:
-                sum_month_cm = np.sum(df_data_month_cm[column])
+                sum_month_cm = np.sum(df_data_month_cm[column]) # D: column not defined
                 if np.sum(normalised_month) > 0:
                     normalisation = sum_month_cm / np.sum(normalised_month)
                     normalised_month *= normalisation

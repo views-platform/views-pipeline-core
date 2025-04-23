@@ -77,6 +77,14 @@ class EnsembleManager(ForecastingModelManager):
             self.reconcile_with_target = None
 
     def __get_point_reconciliation_target(self):
+
+        #########
+        # Changes to take note of:
+        # 1. depvar is now a list of targets or just a string. Both cases need to be handled
+        # 2. Some models may produce forecasts with multiple targets
+        # 3. A point prediction can look like this: [1.234] or just 1.234 in the prediction column. We need to handle both cases
+        #########
+        
         reconcile_with = self.configs["reconcile_with"]
         reconcile_with_path = EnsemblePathManager(reconcile_with)
 
@@ -90,35 +98,27 @@ class EnsembleManager(ForecastingModelManager):
         # sys.modules[script_name] = config_module
         # spec.loader.exec_module(config_module)
 
-        reconcile_with_meta_config = EnsembleManager(reconcile_with_path).configs
+        reconcile_with_meta_config = EnsembleManager(reconcile_with_path).configs # configs is a concat of all the config dicts.
 
         try:
-            _ = reconcile_with_meta_config["models"]
+            _ = reconcile_with_meta_config['models']
         except:
-            raise RuntimeError(
-                f"Entity to reconcile with {self.configs['reconcile_with']}"
-                f"does not appear to be an ensemble (no 'models' attribute)"
-            )
-        for target in self.configs["targets"]:
-            if self.configs["targets"] not in reconcile_with_meta_config["targets"]:
-                raise RuntimeError(
-                    f"Cannot reconcile ensembles with different target variables:"
-                    f" {self.configs['targets']}, {reconcile_with_meta_config['models']}"
-                )
+            raise RuntimeError(f"Entity to reconcile with {self._config_meta['reconcile_with']}"
+                               f"does not appear to be an ensemble (no 'models' attribute)")
 
-            if self.configs["targets"].startswith("ln_") or self.configs[
-                "targets"
-            ].startswith("lx_"):
-                self.reconcile_logged = "ln"
-            elif self.configs["targets"].startswith("lr_"):
-                self.reconcile_logged = "lr"
-            else:
-                raise RuntimeError(
-                    f"Point reconcilation can only be performed on logged ('ln_ or 'lx')"
-                    f"or linear ('lr_) targets, not {self.config['targets']}"
-                )
+        if self._config_meta['depvar'] != reconcile_with_meta_config['depvar']:
+            raise RuntimeError(f"Cannot reconcile ensembles with different target variables:"
+                               f" {self._config_meta['depvar']}, {reconcile_with_meta_config['models']}")
 
-            self.reconcile_with_target = reconcile_with_meta_config["targets"]
+        if self._config_meta['depvar'].startswith('ln_') or self._config_meta['depvar'].startswith('lx_'):
+            self.reconcile_logged = 'ln'
+        elif self._config_meta['depvar'].startswith('lr_'):
+            self.reconcile_logged = 'lr'
+        else:
+            raise RuntimeError(f"Point reconcilation can only be performed on logged ('ln_ or 'lx')"
+                               f"or linear ('lr_) targets, not {self.config['depvar']}")
+
+        self.reconcile_with_target = reconcile_with_meta_config['depvar']
 
     @staticmethod
     def _get_shell_command(
