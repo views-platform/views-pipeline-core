@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
-from views_pipeline_core.managers.model import ModelManager
+from views_pipeline_core.managers.model import ModelManager, ForecastingModelManager
 import wandb
 import pandas as pd
 from pathlib import Path
@@ -178,7 +178,7 @@ def get_deployment_config():
 
 def test_update_single_config(mock_model_path):
     """
-    Test the _update_single_config method of the ModelManager class.
+    Test the _update_single_config method of the ForecastingModelManager class.
     
     Args:
         mock_model_path (MagicMock): The mock object for ModelPath.
@@ -200,7 +200,7 @@ def get_deployment_config():
     with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
         mock_spec.return_value.loader = MagicMock()
         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
-        manager = ModelManager(mock_model_instance, use_prediction_store=False)
+        manager = ForecastingModelManager(mock_model_instance, use_prediction_store=False)
         manager._config_hyperparameters = {"hp_key": "hp_value"}
         manager._config_meta = {"meta_key": "meta_value", "targets": "test_targets_dep"}
         manager._config_deployment = {"deployment_status": "deploy_value"}
@@ -269,7 +269,7 @@ def get_deployment_config():
 
 def test_update_sweep_config(mock_model_path):
     """
-    Test the _update_sweep_config method of the ModelManager class.
+    Test the _update_sweep_config method of the ForecastingModelManager class.
     
     Args:
         mock_model_path (MagicMock): The mock object for ModelPath.
@@ -325,7 +325,7 @@ def get_meta_config():
             }
         }
         mock_module.return_value.get_meta_config.return_value = {"name": "test_model", "targets": "test_target", "algorithm": "test_algorithm"}
-        manager = ModelManager(mock_model_instance, use_prediction_store=False)
+        manager = ForecastingModelManager(mock_model_instance, use_prediction_store=False)
         manager._config_sweep = {
             'method': 'grid',
             'name': 'test_model',
@@ -352,7 +352,7 @@ def get_meta_config():
 
 def test_execute_single_run(mock_model_path, mock_dataloader, mock_wandb):
     """
-    Test the execute_single_run method of the ModelManager class.
+    Test the execute_single_run method of the ForecastingModelManager class.
     
     Args:
         mock_model_path (MagicMock): The mock object for ModelPath.
@@ -376,7 +376,7 @@ def get_deployment_config():
     with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
         mock_spec.return_value.loader = MagicMock()
         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
-        manager = ModelManager(mock_model_instance, use_prediction_store=False)
+        manager = ForecastingModelManager(mock_model_instance, use_prediction_store=False)
         manager._update_single_config = MagicMock(return_value={"name": "test_model"})
         manager._execute_model_tasks = MagicMock()
         args = MagicMock(run_type="calibration", saved=False, drift_self_test=False, train=True, evaluate=True, forecast=True, artifact_name="test_artifact")
