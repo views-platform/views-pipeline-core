@@ -1583,6 +1583,7 @@ class _PGDataset(_ViewsDataset):
         self._country_id_cache = None
         self._country_to_grids_cache = None
         self.reconciled_dataframe = None
+        # self._country_ids = self.get_country_id().reset_index()["country_id"].unique()
     
     def validate_indices(self) -> None:
         super().validate_indices()
