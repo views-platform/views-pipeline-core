@@ -195,6 +195,7 @@ class EnsembleManager(ForecastingModelManager):
         self.config = self._update_single_config(args)
         self._project = f"{self.config['name']}_{args.run_type}"
         self._eval_type = args.eval_type
+        self._args = args
 
         if not args.train:
             validate_ensemble_model(self.config)
@@ -205,6 +206,7 @@ class EnsembleManager(ForecastingModelManager):
             eval=args.evaluate,
             forecast=args.forecast,
             use_saved=args.saved,
+            report=args.report
         )
 
     def _execute_model_tasks(
@@ -214,6 +216,7 @@ class EnsembleManager(ForecastingModelManager):
         eval: bool,
         forecast: bool,
         use_saved: bool,
+        report: bool,
     ) -> None:
         """
         Executes various model-related tasks including training, evaluation, and forecasting.
@@ -240,6 +243,8 @@ class EnsembleManager(ForecastingModelManager):
             self._execute_model_evaluation(config)
         if forecast:
             self._execute_model_forecasting(config)
+        if report:
+            self._execute_reporting(config)
 
         end_t = time.time()
         minutes = (end_t - start_t) / 60

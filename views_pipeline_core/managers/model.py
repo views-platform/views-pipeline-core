@@ -1303,11 +1303,39 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Generating forecast report for {self._model_path.target} {self.config['name']}..."
                 )
-                historical_df = read_dataframe(
-                    self._model_path._get_raw_data_file_paths(
-                        run_type=self._args.run_type
-                    )[0]
-                )
+                if self._model_path._target == "ensemble":
+                    models = self.configs.get("models")
+                    reference_index = None
+                    historical_df = None
+                    for model in models:
+                        mp = ModelPathManager(model_path=model, validate=True)
+                        config = ModelManager(model_path=mp, wandb_notifications=False, use_prediction_store=False).configs
+                        df = read_dataframe(file_path=mp._get_raw_data_file_paths(run_type=self._args.run_type)[0])
+                        # print(f"Columns for model {mp.model_name}: {df.columns}")
+                        if reference_index is None or historical_df is None:
+                            reference_index = df.index
+                            historical_df = pd.DataFrame(index=reference_index)
+                        targets = config.get("targets")
+                        targets = targets if isinstance(targets, list) else [targets]
+                        for target in targets:
+                            if target not in historical_df.columns:
+                                if df.index.equals(reference_index):
+                                    historical_df[target] = df[target]
+                                else:
+                                    logger.warning(
+                                        f"Index mismatch for target {target} in model {model}. Skipping this target."
+                                    )
+                                    continue
+                elif self._model_path._target == "model":
+                    historical_df = read_dataframe(
+                        self._model_path._get_raw_data_file_paths(
+                            run_type=self._args.run_type
+                        )[0]
+                    )
+                else:
+                    raise ValueError(
+                        f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
+                    )
                 try:
                     forecast_df = read_dataframe(
                         self._model_path._get_generated_predictions_data_file_paths(
