@@ -1599,22 +1599,32 @@ class _PGDataset(_ViewsDataset):
         return getattr(temp_df.pg, attr)
 
     def get_country_id(self) -> pd.DataFrame:
-        """Get country ID for each priogrid"""
-        # return self._get_entity_attr("c_id").to_frame(name="country_id")
+        """Get country ID for each priogrid-month combination."""
         if self._country_id_cache is None:
-            # Compute the country_id for each entity_id once
-            country_series = self._get_entity_attr("c_id")
-            self._country_id_cache = country_series.groupby(level=self._entity_id).first()
-        # Map each entity_id in the current index to its cached country_id
-        entity_ids = self.dataframe.index.get_level_values(self._entity_id)
-        country_ids = entity_ids.map(self._country_id_cache)
-        return pd.DataFrame(country_ids, index=self.dataframe.index, columns=['country_id'])
-    
+            from viewser import Queryset, Column
+            # Fetch the country_series data using the specified Queryset
+            country_series = (
+                Queryset("jed_pgm_cm", "priogrid_month")
+                .with_column(Column("country_id", from_loa="country_month", from_column="country_id"))
+                .fetch()
+            ).reset_index()
+            # Rename 'priogrid_gid' to match the entity_id name used in the dataset (likely 'priogrid_id')
+            country_series = country_series.rename(columns={"priogrid_gid": self._entity_id})
+            # Set the index to month_id and priogrid_id (entity_id) for proper alignment
+            country_series = country_series.set_index([self._time_id, self._entity_id])
+            self._country_id_cache = country_series
+
+        # Align the cached country_series with the current dataframe's index to get country_id
+        # This ensures we get the correct country_id for each (month_id, priogrid_id) pair
+        aligned_country_ids = self._country_id_cache['country_id'].reindex(self.dataframe.index)
+        return aligned_country_ids.to_frame(name='country_id')
+
     def _build_country_to_grids_cache(self):
-        """Build a cache mapping country_ids to lists of grid_ids (entity_ids)."""
+        """Build a cache mapping country_ids to lists of grid_ids (entity_ids) using first occurrence per grid."""
         if self._country_to_grids_cache is not None:
             return
-        # Get the country_id for each entity_id
+        # Get country_id for each entity_id (priogrid), using the first occurrence in the dataset
+        # Assumes country_id per priogrid is static over time
         country_series = self.get_country_id().groupby(level=self._entity_id)['country_id'].first()
         self._country_to_grids_cache = {}
         for entity_id, country_id in country_series.items():
@@ -1622,7 +1632,7 @@ class _PGDataset(_ViewsDataset):
                 self._country_to_grids_cache[country_id] = []
             self._country_to_grids_cache[country_id].append(entity_id)
 
-    def get_subset_by_country_id(self, country_ids: List[int], time_ids: List[int]) -> pd.DataFrame:
+    def get_subset_by_country_id(self, country_ids: List[int] = None, time_ids: List[int] = None) -> pd.DataFrame:
         """
         Extract a subset of the dataset for specific country IDs and time IDs.
         
