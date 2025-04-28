@@ -144,12 +144,9 @@ class ModelPathManager:
         logger.debug(f"Extracting model name from path: {path}")
 
         # Define valid parent directories and check for exactly one occurrence
-        valid_parents = {
-            "models",
-            "ensembles",
-            "preprocessors",
-            "postprocessors",
-        }  # Must be plural
+
+        valid_parents = {"models", "ensembles", "preprocessors", "postprocessors"}
+
         found_parents = [parent for parent in valid_parents if parent in path.parts]
 
         if len(found_parents) != 1:
