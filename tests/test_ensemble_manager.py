@@ -149,7 +149,7 @@ class TestParametrized():
             patch("views_pipeline_core.managers.package.PackageManager"), \
             patch('views_pipeline_core.managers.ensemble.EnsembleManager._execute_model_tasks') as mock_execute_model_tasks, \
             patch('views_pipeline_core.managers.model.ModelManager._update_single_config'), \
-            patch('views_pipeline_core.managers.ensemble.ensemble_model_check') as mock_ensemble_model_check:
+            patch('views_pipeline_core.models.check.validate_ensemble_model') as mock_validate_ensemble_model:
         
             # Creating EnsembleManager object with the necessary configs
             manager = mock_ensemble_manager
@@ -161,11 +161,11 @@ class TestParametrized():
             assert manager._project == f"{manager.config['name']}_{args.run_type}"
             assert manager._eval_type == args.eval_type
 
-            # Asserting that ensemble_model_check was called appropriately 
+            # Asserting that validate_ensemble_model was called appropriately 
             if not args.train:
-                mock_ensemble_model_check.assert_called_once_with(manager.config)
+                mock_validate_ensemble_model.assert_called_once_with(manager.config)
             else:
-                mock_ensemble_model_check.assert_not_called()
+                mock_validate_ensemble_model.assert_not_called()
 
             # Asserting that _execute_model_tasks was called appropriately 
             mock_execute_model_tasks.assert_called_once_with(
@@ -187,13 +187,6 @@ class TestParametrized():
 
             # Asserting that the error message was called appropriately
             mock_logger.error.assert_any_call(f"Error during single run execution: {mock_execute_model_tasks.side_effect}", exc_info=True)
-            
-
-
-
-
-
-
 
     def test_execute_model_tasks(
         self,
@@ -209,13 +202,13 @@ class TestParametrized():
             patch("wandb.AlertLevel") as mock_alert_level, \
             patch("views_pipeline_core.managers.ensemble.add_wandb_metrics") as mock_add_wandb_metrics, \
             patch("wandb.config") as mock_config, \
-            patch("views_pipeline_core.managers.ensemble.EnsembleManager._wandb_alert") as mock_wandb_alert, \
+            patch("views_pipeline_core.wandb.utils.wandb_alert") as mock_wandb_alert, \
             patch("views_pipeline_core.managers.package.PackageManager"), \
             patch("views_pipeline_core.managers.ensemble.logger") as mock_logger, \
             patch("views_pipeline_core.managers.ensemble.EnsembleManager._train_ensemble") as mock_train_ensemble, \
             patch("views_pipeline_core.managers.ensemble.EnsembleManager._evaluate_ensemble") as mock_evaluate_ensemble, \
             patch("views_pipeline_core.managers.ensemble.EnsembleManager._forecast_ensemble") as mock_forecast_ensemble, \
-            patch("views_pipeline_core.managers.ensemble.EnsembleManager._handle_log_creation") as mock_handle_log_creation, \
+            patch("views_pipeline_core.files.utils.handle_ensemble_log_creation") as mock_handle_ensemble_log_creation, \
             patch("views_pipeline_core.managers.ensemble.EnsembleManager._evaluate_prediction_dataframe") as mock_evaluate_prediction_dataframe, \
             patch("views_pipeline_core.managers.ensemble.EnsembleManager._save_predictions") as mock_save_predictions, \
             patch("traceback.format_exc") as mock_format_exc:            
@@ -246,7 +239,7 @@ class TestParametrized():
             if args.evaluate:
                 mock_logger.info.assert_any_call(f"Evaluating model {manager.config['name']}...")
                 mock_evaluate_ensemble.assert_called_once_with(manager._eval_type)
-                mock_handle_log_creation.assert_called_once
+                mock_handle_ensemble_log_creation.assert_called_once
 
                 mock_evaluate_prediction_dataframe.assert_called_once_with(manager._evaluate_ensemble(manager._eval_type), ensemble=True)
 
@@ -257,7 +250,7 @@ class TestParametrized():
                     call(title="Running Ensemble", text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}", level=mock_alert_level.INFO,),
                     call(title=f"Forecasting for ensemble {manager.config['name']} completed successfully.", level=mock_alert_level.INFO,),
                 ], any_order=False)
-                mock_handle_log_creation.assert_called_once
+                mock_handle_ensemble_log_creation.assert_called_once
                 mock_save_predictions.assert_called_once_with(manager._forecast_ensemble(), manager._model_path.data_generated)
 
             minutes = 5.222956339518229e-05 # random number
@@ -269,7 +262,7 @@ class TestParametrized():
             mock_train_ensemble.reset_mock()
             mock_evaluate_ensemble.reset_mock()
             mock_forecast_ensemble.reset_mock()
-            mock_handle_log_creation.reset_mock()
+            mock_handle_ensemble_log_creation.reset_mock()
             mock_evaluate_prediction_dataframe
             mock_save_predictions.reset_mock()
             mock_wandb_alert.reset_mock()
