@@ -3,19 +3,20 @@ import unittest
 import pickle
 from unittest.mock import patch, MagicMock, ANY, PropertyMock, mock_open, call
 from views_pipeline_core.managers.ensemble import EnsembleManager
-from views_pipeline_core.managers.model import ModelPathManager, ModelManager
+from views_pipeline_core.managers.model import ModelPathManager, ModelManager, ForecastingModelManager
 import pandas as pd
 import wandb
 import subprocess
 
 class MockArgs:
-    def __init__(self, train, evaluate, forecast, saved, run_type, eval_type):
+    def __init__(self, train, evaluate, forecast, saved, run_type, eval_type, report):
         self.train = train
         self.evaluate = evaluate
         self.forecast = forecast
         self.saved = saved
         self.run_type = run_type
         self.eval_type = eval_type
+        self.report = report
 
 @pytest.fixture
 def mock_model_path():
@@ -33,7 +34,8 @@ def mock_model_path():
                 forecast=False,  # Simulate no forecasting
                 saved=False,  # Simulate using used_saved data
                 run_type="test",  # Example run type
-                eval_type="standard"  # Example eval type
+                eval_type="standard",  # Example eval type
+                report=False
             ),
             [
                 "/path/to/models/test_model/run.sh",
@@ -50,7 +52,8 @@ def mock_model_path():
                 forecast=True,  # Simulate forecasting
                 saved=False,  # Simulate not using used_saved data
                 run_type="forecast",  # Example run type
-                eval_type="detailed"  # Example eval type
+                eval_type="detailed",  # Example eval type
+                report=False
             ),
             [
                 "/path/to/models/test_model/run.sh",
@@ -68,7 +71,8 @@ def mock_model_path():
                 forecast=True,  # Simulate forecasting
                 saved=True,  # Simulate using saved data
                 run_type="calibration",  # Example run type
-                eval_type="minimal"  # Example eval type
+                eval_type="minimal",  # Example eval type
+                report=False
             ),
             [
                 "/path/to/models/test_model/run.sh",
@@ -86,7 +90,7 @@ class TestParametrized():
 
     @pytest.fixture
     def mock_config(self, args):
-        with patch("views_pipeline_core.managers.model.ModelManager._update_single_config") as mock_update_single_config:
+        with patch("views_pipeline_core.managers.model.ForecastingModelManager._update_single_config") as mock_update_single_config:
             print(mock_update_single_config(args))
             return {
             "name": "test_model",
@@ -96,7 +100,7 @@ class TestParametrized():
     
     @pytest.fixture
     def mock_ensemble_manager(self, mock_model_path, args):
-        with patch.object(ModelManager, '_ModelManager__load_config'), \
+        with patch.object(ForecastingModelManager, '_ModelManager__load_config'), \
             patch("views_pipeline_core.managers.package.PackageManager"):
 
             manager = EnsembleManager(ensemble_path=mock_model_path, use_prediction_store=False)
@@ -148,7 +152,7 @@ class TestParametrized():
         with patch("views_pipeline_core.managers.ensemble.logger") as mock_logger, \
             patch("views_pipeline_core.managers.package.PackageManager"), \
             patch('views_pipeline_core.managers.ensemble.EnsembleManager._execute_model_tasks') as mock_execute_model_tasks, \
-            patch('views_pipeline_core.managers.model.ModelManager._update_single_config'), \
+            patch('views_pipeline_core.managers.model.ForecastingModelManager._update_single_config'), \
             patch('views_pipeline_core.models.check.validate_ensemble_model') as mock_validate_ensemble_model:
         
             # Creating EnsembleManager object with the necessary configs
@@ -173,7 +177,8 @@ class TestParametrized():
                 train=args.train, 
                 eval=args.evaluate, 
                 forecast=args.forecast, 
-                use_saved=args.saved
+                use_saved=args.saved,
+                report=args.report
             )
         
             # Testing the function in the Except block
@@ -222,7 +227,8 @@ class TestParametrized():
                 train=args.train,
                 eval=args.evaluate,
                 forecast=args.forecast,
-                use_saved=args.saved
+                use_saved=args.saved,
+                report=args.report
             )
        
             mock_add_wandb_metrics.assert_called_once
@@ -282,7 +288,8 @@ class TestParametrized():
                     train=args.train,
                     eval=args.evaluate,
                     forecast=args.forecast,
-                    use_saved=args.saved
+                    use_saved=args.saved,
+                    report=args.report
                 )
             assert str(exc_info.value) in ["Train ensemble failed", "Evaluate ensemble failed", "Forecast ensemble failed"]
             
