@@ -106,19 +106,19 @@ class EnsembleManager(ForecastingModelManager):
             raise RuntimeError(f"Entity to reconcile with {self._config_meta['reconcile_with']}"
                                f"does not appear to be an ensemble (no 'models' attribute)")
 
-        if self._config_meta['depvar'] != reconcile_with_meta_config['depvar']:
+        if self._config_meta['targets'] != reconcile_with_meta_config['targets']:
             raise RuntimeError(f"Cannot reconcile ensembles with different target variables:"
-                               f" {self._config_meta['depvar']}, {reconcile_with_meta_config['models']}")
+                               f" {self._config_meta['targets']}, {reconcile_with_meta_config['models']}")
 
-        if self._config_meta['depvar'].startswith('ln_') or self._config_meta['depvar'].startswith('lx_'):
+        if self._config_meta['targets'].startswith('ln_') or self._config_meta['targets'].startswith('lx_'):
             self.reconcile_logged = 'ln'
-        elif self._config_meta['depvar'].startswith('lr_'):
+        elif self._config_meta['targets'].startswith('lr_'):
             self.reconcile_logged = 'lr'
         else:
             raise RuntimeError(f"Point reconcilation can only be performed on logged ('ln_ or 'lx')"
-                               f"or linear ('lr_) targets, not {self.config['depvar']}")
+                               f"or linear ('lr_) targets, not {self.config['targets']}")
 
-        self.reconcile_with_target = reconcile_with_meta_config['depvar']
+        self.reconcile_with_target = reconcile_with_meta_config['targets']
 
     @staticmethod
     def _get_shell_command(
@@ -455,7 +455,7 @@ class EnsembleManager(ForecastingModelManager):
                     raise RuntimeError(f'Cannot perform pgm_cm_point reconciliation without access to'
                                        f'prediction store')
 
-                reconcile_with = self.configs["reconcile_with"]
+                reconcile_with = self.configs["reconcile_with"]+'_predictions_forecasting'
                 pred_store_name = self._pred_store_name
 
                 run_id = ViewsMetadata().get_run_id_from_name(pred_store_name)
@@ -472,7 +472,12 @@ class EnsembleManager(ForecastingModelManager):
 
                 df_cm = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
 
-                for target in self.configs["targets"]:
+                target_list = self.configs["targets"]
+
+                if type(target_list) != 'list':
+                    target_list = [target_list]
+
+                for target in target_list:
                     try:
                         reconciler = reconciliation.ReconcilePgmWithCmPoint(df_pgm=df_prediction,
                                                                             df_cm=df_cm,
