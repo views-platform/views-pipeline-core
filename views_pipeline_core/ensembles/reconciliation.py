@@ -178,6 +178,14 @@ class ReconcilePgmWithCmPoint():
         df_calib_from = pd.DataFrame(index=self.df_cm.index, columns=[self.target, ],
                                      data=to_linear(self.df_cm[self.target].values))
 
+        df_to_calib[self.target] = df_to_calib[target].apply(
+            lambda x: x[0] if isinstance(x, np.ndarray) and len(x) == 1 else x
+        )
+
+        df_calib_from[self.target] = df_calib_from[target].apply(
+            lambda x: x[0] if isinstance(x, np.ndarray) and len(x) == 1 else x
+        )
+
         for imonth, month in enumerate(self.input_months_pgm):
 
             istart = imonth * pg_size
