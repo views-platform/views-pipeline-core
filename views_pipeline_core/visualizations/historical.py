@@ -22,10 +22,19 @@ class HistoricalLineGraph:
         historical_dataset: Union[CMDataset, PGMDataset, CYDataset, PGYDataset],
         forecast_dataset: Union[CMDataset, PGMDataset, CYDataset, PGYDataset],
     ):
-        if not isinstance(historical_dataset, _CDataset) or not isinstance(
-            forecast_dataset, _CDataset
-        ):
-            raise ValueError("Only CDatasets are supported")
+        """
+        Initializes the visualization with historical and forecast datasets.
+
+        Args:
+            historical_dataset (Union[CMDataset, PGMDataset, CYDataset, PGYDataset]):
+                The dataset containing historical data.
+            forecast_dataset (Union[CMDataset, PGMDataset, CYDataset, PGYDataset]):
+                The dataset containing forecast data.
+        """
+        # if not isinstance(historical_dataset, _CDataset) or not isinstance(
+        #     forecast_dataset, _CDataset
+        # ):
+        #     raise ValueError("Only CMs are supported")
         self.historical_dataset = historical_dataset
         self.forecast_dataset = forecast_dataset
 
@@ -37,6 +46,40 @@ class HistoricalLineGraph:
         targets: Optional[List[str]] = None,
         as_html: bool = False,
     ):
+        """
+        Plots predictions versus historical data for specified entities and targets.
+
+        This method generates interactive plots comparing forecasted predictions 
+        with historical data for the specified entity IDs and targets. The plots 
+        can be returned as HTML or displayed directly.
+
+        Args:
+            entity_ids (Union[int, List[int]], optional): 
+                A single entity ID or a list of entity IDs to include in the plot. 
+                If None, the intersection of entity IDs from the historical and 
+                forecast datasets will be used. Defaults to None.
+            interactive (bool, optional): 
+                Whether to generate interactive plots. Static plots are not 
+                supported and will raise a NotImplementedError if set to False. 
+                Defaults to True.
+            alpha (float, optional): 
+                Transparency level for the plot lines. Defaults to 0.9.
+            targets (Optional[List[str]], optional): 
+                A list of target variable names to plot. If None, the targets 
+                from the historical dataset will be used. Defaults to None.
+            as_html (bool, optional): 
+                Whether to return the plots as HTML strings. If False, the plots 
+                will be displayed immediately. Defaults to False.
+
+        Returns:
+            Optional[str]: 
+                A concatenated string of HTML plots if `as_html` is True. 
+                Otherwise, returns None.
+
+        Raises:
+            NotImplementedError: 
+                If `interactive` is set to False, as static plots are not supported.
+        """
         targets = targets or self.historical_dataset.targets
         vline = self.historical_dataset._time_values.sort_values(ascending=False)[0]
 

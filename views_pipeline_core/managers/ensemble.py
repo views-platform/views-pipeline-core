@@ -8,11 +8,12 @@ import pandas as pd
 import traceback
 import tqdm
 
-from views_pipeline_core.managers.model import ModelPathManager, ModelManager
+from views_pipeline_core.managers.model import ModelPathManager, ModelManager, ForecastingModelManager
 from views_pipeline_core.wandb.utils import add_wandb_metrics, wandb_alert
 from views_pipeline_core.models.check import validate_ensemble_model
-from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe 
+from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
+from views_pipeline_core.ensembles import reconciliation
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class EnsemblePathManager(ModelPathManager):
 # ============================================================ Model Manager ============================================================
 
 
-class EnsembleManager(ModelManager):
+class EnsembleManager(ForecastingModelManager):
     def __init__(
         self,
         ensemble_path: EnsemblePathManager,
@@ -67,6 +68,57 @@ class EnsembleManager(ModelManager):
             use_prediction_store (bool, optional): Flag to enable or disable the use of the prediction store. Defaults to True.
         """
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
+        if self.configs.get("reconciliation", None) is not None:
+            if self.configs.get("reconciliation") == "pgm_cm_point":
+                self.__get_point_reconciliation_target()
+            else:
+                self.reconcile_with_target = None
+        else:
+            self.reconcile_with_target = None
+
+    def __get_point_reconciliation_target(self):
+
+        #########
+        # Changes to take note of:
+        # 1. depvar is now a list of targets or just a string. Both cases need to be handled
+        # 2. Some models may produce forecasts with multiple targets
+        # 3. A point prediction can look like this: [1.234] or just 1.234 in the prediction column. We need to handle both cases
+        #########
+        
+        reconcile_with = self.configs["reconcile_with"]
+        reconcile_with_path = EnsemblePathManager(reconcile_with)
+
+        # reconcile_with_script_paths = reconcile_with_path.get_scripts()
+        # script_name = 'config_meta.py'
+        # script_path = reconcile_with_script_paths[script_name]
+
+        # spec = importlib.util.spec_from_file_location(script_name, script_path)
+        # config_module = importlib.util.module_from_spec(spec)
+
+        # sys.modules[script_name] = config_module
+        # spec.loader.exec_module(config_module)
+
+        reconcile_with_meta_config = EnsembleManager(reconcile_with_path).configs # configs is a concat of all the config dicts.
+
+        try:
+            _ = reconcile_with_meta_config['models']
+        except:
+            raise RuntimeError(f"Entity to reconcile with {self._config_meta['reconcile_with']}"
+                               f"does not appear to be an ensemble (no 'models' attribute)")
+
+        if self._config_meta['targets'] != reconcile_with_meta_config['targets']:
+            raise RuntimeError(f"Cannot reconcile ensembles with different target variables:"
+                               f" {self._config_meta['targets']}, {reconcile_with_meta_config['models']}")
+
+        if self._config_meta['targets'].startswith('ln_') or self._config_meta['targets'].startswith('lx_'):
+            self.reconcile_logged = 'ln'
+        elif self._config_meta['targets'].startswith('lr_'):
+            self.reconcile_logged = 'lr'
+        else:
+            raise RuntimeError(f"Point reconcilation can only be performed on logged ('ln_ or 'lx')"
+                               f"or linear ('lr_) targets, not {self.config['targets']}")
+
+        self.reconcile_with_target = reconcile_with_meta_config['targets']
 
     @staticmethod
     def _get_shell_command(
@@ -143,6 +195,7 @@ class EnsembleManager(ModelManager):
         self.config = self._update_single_config(args)
         self._project = f"{self.config['name']}_{args.run_type}"
         self._eval_type = args.eval_type
+        self._args = args
 
         if not args.train:
             validate_ensemble_model(self.config)
@@ -153,6 +206,7 @@ class EnsembleManager(ModelManager):
             eval=args.evaluate,
             forecast=args.forecast,
             use_saved=args.saved,
+            report=args.report
         )
 
     def _execute_model_tasks(
@@ -162,6 +216,7 @@ class EnsembleManager(ModelManager):
         eval: bool,
         forecast: bool,
         use_saved: bool,
+        report: bool,
     ) -> None:
         """
         Executes various model-related tasks including training, evaluation, and forecasting.
@@ -188,11 +243,13 @@ class EnsembleManager(ModelManager):
             self._execute_model_evaluation(config)
         if forecast:
             self._execute_model_forecasting(config)
+        if report:
+            self._execute_reporting(config)
 
         end_t = time.time()
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
-    
+
     def _execute_model_training(self, config: dict, use_saved: bool) -> None:
         """
         Executes the model training process.
@@ -204,7 +261,9 @@ class EnsembleManager(ModelManager):
         Returns:
             None
         """
-        with wandb.init(project=self._project, entity=self._entity, config=config, job_type="train"):
+        with wandb.init(
+            project=self._project, entity=self._entity, config=config, job_type="train"
+        ):
             add_wandb_metrics()
             try:
                 logger.info(f"Training model {self.config['name']}...")
@@ -213,7 +272,7 @@ class EnsembleManager(ModelManager):
                 wandb_alert(
                     title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
                     wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models
+                    models_path=self._model_path.models,
                 )
 
             except Exception as e:
@@ -226,10 +285,10 @@ class EnsembleManager(ModelManager):
                     text=f"An error occurred during training of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                     level=wandb.AlertLevel.ERROR,
                     wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models
+                    models_path=self._model_path.models,
                 )
                 raise
-    
+
     def _execute_model_evaluation(self, config: dict) -> None:
         """
         Executes the model evaluation process.
@@ -240,20 +299,25 @@ class EnsembleManager(ModelManager):
         Returns:
             None
         """
-        with wandb.init(project=self._project, entity=self._entity, config=config, job_type="evaluate"):
+        with wandb.init(
+            project=self._project,
+            entity=self._entity,
+            config=config,
+            job_type="evaluate",
+        ):
             add_wandb_metrics()
             try:
                 logger.info(f"Evaluating model {self.config['name']}...")
                 df_predictions = self._evaluate_ensemble(self._eval_type)
-                handle_ensemble_log_creation(model_path=self._model_path, config=self.config)
-                self._evaluate_prediction_dataframe(
-                    df_predictions, ensemble=True
-                )  
+                handle_ensemble_log_creation(
+                    model_path=self._model_path, config=self.config
+                )
+                self._evaluate_prediction_dataframe(df_predictions, ensemble=True)
 
                 wandb_alert(
                     title=f"Evaluation for {self._model_path.target} {self.config['name']} completed successfully.",
                     wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models
+                    models_path=self._model_path.models,
                 )
 
             except Exception as e:
@@ -263,10 +327,10 @@ class EnsembleManager(ModelManager):
                     text=f"An error occurred during evaluation of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                     level=wandb.AlertLevel.ERROR,
                     wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models
+                    models_path=self._model_path.models,
                 )
                 raise
-    
+
     def _execute_model_forecasting(self, config: dict) -> None:
         """
         Executes the model forecasting process.
@@ -277,7 +341,12 @@ class EnsembleManager(ModelManager):
         Returns:
             None
         """
-        with wandb.init(project=self._project, entity=self._entity, config=config, job_type="forecast"):
+        with wandb.init(
+            project=self._project,
+            entity=self._entity,
+            config=config,
+            job_type="forecast",
+        ):
             add_wandb_metrics()
             try:
                 logger.info(f"Forecasting model {self.config['name']}...")
@@ -286,12 +355,12 @@ class EnsembleManager(ModelManager):
                 wandb_alert(
                     title=f"Forecasting for {self._model_path.target} {self.config['name']} completed successfully.",
                     wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models
+                    models_path=self._model_path.models,
                 )
-                handle_ensemble_log_creation(model_path=self._model_path, config=self.config)
-                self._save_predictions(
-                    df_prediction, self._model_path.data_generated
+                handle_ensemble_log_creation(
+                    model_path=self._model_path, config=self.config
                 )
+                self._save_predictions(df_prediction, self._model_path.data_generated)
 
             except Exception as e:
                 logger.error(
@@ -303,7 +372,7 @@ class EnsembleManager(ModelManager):
                     text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
                     level=wandb.AlertLevel.ERROR,
                     wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models
+                    models_path=self._model_path.models,
                 )
                 raise
 
@@ -368,13 +437,60 @@ class EnsembleManager(ModelManager):
         run_type = self.config["run_type"]
         dfs = []
 
-        for model_name in tqdm.tqdm(self.config["models"], desc="Forecasting ensemble"):
+        for model_name in tqdm.tqdm(self.configs["models"], desc="Forecasting ensemble"):
             tqdm.tqdm.write(f"Current model: {model_name}")
             dfs.append(self._forecast_model_artifact(model_name, run_type))
 
         df_prediction = EnsembleManager._get_aggregated_df(
-            dfs, self.config["aggregation"]
+            dfs, self.configs["aggregation"]
         )
+
+        if self.configs["reconciliation"] is not None:
+            if self.configs["reconciliation"] == 'pgm_cm_point':
+
+                if self._use_prediction_store:
+                    logger.info(f"Performing point pgm-cm reconciliation")
+                    from views_forecasts.extensions import ForecastsStore, ViewsMetadata
+                else:
+                    raise RuntimeError(f'Cannot perform pgm_cm_point reconciliation without access to'
+                                       f'prediction store')
+
+                reconcile_with = self.configs["reconcile_with"]+'_predictions_forecasting'
+                pred_store_name = self._pred_store_name
+
+                run_id = ViewsMetadata().get_run_id_from_name(pred_store_name)
+
+                all_runs = ViewsMetadata().with_name(reconcile_with).fetch()['name'].to_list()
+
+                # fetch latest forecast from ensemble to be reconciled with
+
+                reconcile_with_forecasts = [fc for fc in all_runs if reconcile_with in fc and 'forecasting' in fc]
+
+                reconcile_with_forecasts.sort()
+
+                reconcile_with_forecast = reconcile_with_forecasts[-1]
+
+                df_cm = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
+
+                target_list = self.configs["targets"]
+
+                if type(target_list) != 'list':
+                    target_list = [target_list]
+
+                for target in target_list:
+                    try:
+                        reconciler = reconciliation.ReconcilePgmWithCmPoint(df_pgm=df_prediction,
+                                                                            df_cm=df_cm,
+                                                                            target=f"pred_{target}",
+                                                                            target_type=self.reconcile_logged)
+
+                        df_prediction = reconciler.reconcile()
+                    except Exception as e:
+                        logger.error(
+                            f"Error during reconciliation: {e}",
+                            exc_info=True,
+                        )
+                        continue
 
         return df_prediction
 
@@ -451,11 +567,7 @@ class EnsembleManager(ModelManager):
 
         model_path = ModelPathManager(model_name)
         self._execute_shell_script(
-            run_type, 
-            model_path, 
-            model_name, 
-            train=True, 
-            use_saved=use_saved
+            run_type, model_path, model_name, train=True, use_saved=use_saved
         )
 
     def _evaluate_model_artifact(
@@ -488,11 +600,11 @@ class EnsembleManager(ModelManager):
         preds = []
 
         for sequence_number in range(
-            ModelManager._resolve_evaluation_sequence_number(eval_type)
+            ForecastingModelManager._resolve_evaluation_sequence_number(eval_type)
         ):
             name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
 
-            if self._use_prediction_store:   
+            if self._use_prediction_store:
                 try:
                     pred = pd.DataFrame.forecasts.read_store(
                         run=self._pred_store_name, name=name
@@ -605,4 +717,3 @@ class EnsembleManager(ModelManager):
                 )
 
         return pred
-
