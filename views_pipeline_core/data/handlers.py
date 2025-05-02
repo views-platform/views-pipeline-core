@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
+from views_pipeline_core.data.statistics import PosteriorAnalyzer
 
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -46,6 +47,7 @@ class _ViewsDataset:
             self._init_dataframe(read_dataframe(source), targets)
         else:
             raise ValueError("Invalid input type for ViewsDataset")
+        self._posterior_distribution_analyser = PosteriorAnalyzer()
         
     def _preprocess_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
             """
@@ -536,75 +538,6 @@ class _ViewsDataset:
 
         return df.loc[self.original_index]
 
-    def calculate_map(
-        self, enforce_non_negative: bool = False, features: Optional[List[str]] = None
-    ) -> pd.DataFrame:
-        """
-        Calculate Maximum A Posteriori (MAP) estimates for prediction distributions.
-
-        Parameters:
-        enforce_non_negative (bool): If True, forces MAP estimates to be non-negative
-        features (List[str]): List of features to calculate MAP for. If None, uses all prediction targets.
-
-        Returns:
-        pd.DataFrame: DataFrame with MAP estimates (time × entity × targets)
-        """
-
-        if not self.is_prediction:
-            raise ValueError("MAP calculation only valid for prediction dataframes")
-
-        # Validate features parameter
-        if features is not None:
-            invalid = set(features) - set(self.targets)
-            if invalid:
-                raise ValueError(f"Invalid features specified: {invalid}")
-            selected_vars = features
-        else:
-            selected_vars = self.targets
-
-        tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
-        map_results = []
-
-        # Pre-sort entire tensor once for all variables
-        sorted_tensor = np.sort(tensor, axis=2)
-
-        for var_name in tqdm(selected_vars, desc="Processing features"):
-            var_idx = self.targets.index(var_name)
-            var_tensor = sorted_tensor[..., var_idx]
-            orig_shape = var_tensor.shape[:2]
-
-            # Flatten for parallel processing
-            flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
-            n_samples = len(flat_tensor)
-
-            # Batch processing parameters
-            batch_size = 1000  # Optimal for memory/cache balance
-            batches = [
-                flat_tensor[i : i + batch_size] for i in range(0, n_samples, batch_size)
-            ]
-
-            # Process in batches to optimize memory usage
-            map_flat = []
-            with self.tqdm_joblib(
-                tqdm(total=len(batches), desc=f"{var_name} batches")
-            ) as progress_bar:
-                with Parallel(n_jobs=-1, prefer="threads") as parallel:
-                    for batch in batches:
-                        batch_results = parallel(
-                            delayed(self._compute_single_map_with_checks)(
-                                samples, enforce_non_negative
-                            )
-                            for samples in batch
-                        )
-                        map_flat.extend(batch_results)
-                        progress_bar.update(1)
-
-            map_estimates = np.array(map_flat).reshape(orig_shape)
-            df = self._create_map_dataframe(var_name, map_estimates)
-            map_results.append(df)
-
-        return pd.concat(map_results, axis=1)
-
     def _compute_single_map_with_checks(self, samples, enforce_non_negative):
         """Wrapper with NaN handling and input validation"""
         if np.all(np.isnan(samples)):
@@ -612,7 +545,7 @@ class _ViewsDataset:
         return self._simon_compute_single_map(
             samples[~np.isnan(samples)], enforce_non_negative
         )
-
+    
     def _simon_compute_single_map(self, samples, enforce_non_negative=False):
         """
         Compute the Maximum A Posteriori (MAP) estimate using an HDI-based histogram and KDE refinement.
@@ -638,104 +571,137 @@ class _ViewsDataset:
             logger.error("❌ No valid samples. Returning MAP = 0.0")
             return 0.0
 
-        # **Compute HDI**
-        credible_mass = (
-            0.05 if stats.skew(samples) > 5 else (0.10 if len(samples) > 5000 else 0.25)
-        )
-        hdi_min, hdi_max = self._calculate_single_hdi(data=samples, alpha=credible_mass)
-        # print(hdi_min, hdi_max)
-
-        # **If HDI Contains Only One Value, Return That as MAP**
-        if hdi_min == hdi_max:
-            logger.info(
-                f"✅ HDI contains only one value ({hdi_min}). Setting MAP = {hdi_min}"
-            )
-            return float(hdi_min)
-
-        # **Select Only the HDI Region**
-        subset = samples[(samples >= hdi_min) & (samples <= hdi_max)]
-
-        # **Adaptive Histogram Binning (Freedman–Diaconis rule)**
-        # iqr_value = stats.iqr(subset)
-        # bin_width = 2 * iqr_value / (len(subset) ** (1/3))
-        # num_bins = max(20 if stats.skew(samples) > 5 else 10, int((subset.max() - subset.min()) / bin_width))
-        # hist, bin_edges = np.histogram(subset, bins=num_bins, density=True)
-        # bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        try:
-            data_range = subset.max() - subset.min()
-
-            # Handle zero-range case first
-            if data_range == 0:
-                logger.info("📊 Zero data range detected. Using single bin.")
-                return float(subset[0])
-
-            iqr_value = stats.iqr(subset)
-            bin_width = (
-                2 * iqr_value / (len(subset) ** (1 / 3))
-                if iqr_value > 0
-                else data_range / 10
-            )
-
-            # Prevent division by zero and invalid bins
-            if bin_width <= 0:
-                bin_width = data_range / 10
-                logger.warning(f"⚠️  Invalid bin width {bin_width}. Using data_range/10")
-
-            num_bins = max(
-                20 if stats.skew(samples) > 5 else 10, int(data_range / bin_width)
-            )
-            num_bins = max(1, min(100, num_bins))  # Ensure 1-100 bins
-
-        except Exception as e:
-            logger.error(f"📊 Bin calculation failed: {str(e)}. Using fallback bins")
-            num_bins = 20
-
-        hist, bin_edges = np.histogram(subset, bins=num_bins, density=True)
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-        # **Find Histogram Mode**
-        mode_estimate = bin_centers[np.argmax(hist)]
-
-        # **Enforce Non-Negativity if Requested**
-        if enforce_non_negative and mode_estimate < 0:
+        map = self._posterior_distribution_analyser.analyze(samples=samples).get("map")
+        if enforce_non_negative and map < 0:
             logger.warning(
-                f"📢  Negative MAP estimate detected ({mode_estimate:.5f}). Setting to 0."
+                f"📢  Negative MAP estimate detected ({map:.5f}). Setting to 0."
             )
-            mode_estimate = max(0, mode_estimate)
+            map = max(0, map)
+        return float(map)
 
-        return float(mode_estimate)
+    # def _simon_compute_single_map(self, samples, enforce_non_negative=False):
+    #     """
+    #     Compute the Maximum A Posteriori (MAP) estimate using an HDI-based histogram and KDE refinement.
 
-    def _determine_credible_mass(self, samples: np.ndarray) -> float:
-        """Determine optimal credible mass for HDI calculation"""
-        if len(samples) < 2:
-            return 0.25
+    #     Parameters:
+    #     ----------
+    #     samples : array-like
+    #         Posterior samples.
+    #     enforce_non_negative : bool
+    #         If True, forces MAP estimate to be non-negative.
 
-        try:
-            skewness = stats.skew(samples)
-        except:
-            skewness = 0
+    #     Returns:
+    #     -------
+    #     float
+    #         The estimated MAP.
+    #     """
 
-        if skewness > 5:
-            return 0.05
-        elif len(samples) > 5000:
-            return 0.10
-        return 0.25
+    #     samples = np.asarray(samples)
+    #     if np.all(np.isnan(samples)):
+    #         return np.nan
 
-    def _create_adaptive_histogram(
-        self, subset: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Create histogram with adaptive binning using Freedman-Diaconis rule"""
-        iqr_value = stats.iqr(subset)
-        if iqr_value == 0:  # Fallback for uniform distributions
-            bin_width = (subset.max() - subset.min()) / 10
-        else:
-            bin_width = 2 * iqr_value / (len(subset) ** (1 / 3))
+    #     if len(samples) == 0:
+    #         logger.error("❌ No valid samples. Returning MAP = 0.0")
+    #         return 0.0
 
-        if bin_width == 0:
-            return np.histogram(subset, bins=1)
+    #     # **Compute HDI**
+    #     credible_mass = (
+    #         0.05 if stats.skew(samples) > 5 else (0.10 if len(samples) > 5000 else 0.25)
+    #     )
+    #     hdi_min, hdi_max = self._calculate_single_hdi(data=samples, alpha=credible_mass)
+    #     # print(hdi_min, hdi_max)
 
-        num_bins = max(10, int((subset.max() - subset.min()) / bin_width))
-        return np.histogram(subset, bins=num_bins, density=True)
+    #     # **If HDI Contains Only One Value, Return That as MAP**
+    #     if hdi_min == hdi_max:
+    #         logger.info(
+    #             f"✅ HDI contains only one value ({hdi_min}). Setting MAP = {hdi_min}"
+    #         )
+    #         return float(hdi_min)
+
+    #     # **Select Only the HDI Region**
+    #     subset = samples[(samples >= hdi_min) & (samples <= hdi_max)]
+
+    #     # **Adaptive Histogram Binning (Freedman–Diaconis rule)**
+    #     # iqr_value = stats.iqr(subset)
+    #     # bin_width = 2 * iqr_value / (len(subset) ** (1/3))
+    #     # num_bins = max(20 if stats.skew(samples) > 5 else 10, int((subset.max() - subset.min()) / bin_width))
+    #     # hist, bin_edges = np.histogram(subset, bins=num_bins, density=True)
+    #     # bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    #     try:
+    #         data_range = subset.max() - subset.min()
+
+    #         # Handle zero-range case first
+    #         if data_range == 0:
+    #             logger.info("📊 Zero data range detected. Using single bin.")
+    #             return float(subset[0])
+
+    #         iqr_value = stats.iqr(subset)
+    #         bin_width = (
+    #             2 * iqr_value / (len(subset) ** (1 / 3))
+    #             if iqr_value > 0
+    #             else data_range / 10
+    #         )
+
+    #         # Prevent division by zero and invalid bins
+    #         if bin_width <= 0:
+    #             bin_width = data_range / 10
+    #             logger.warning(f"⚠️  Invalid bin width {bin_width}. Using data_range/10")
+
+    #         num_bins = max(
+    #             20 if stats.skew(samples) > 5 else 10, int(data_range / bin_width)
+    #         )
+    #         num_bins = max(1, min(100, num_bins))  # Ensure 1-100 bins
+
+    #     except Exception as e:
+    #         logger.error(f"📊 Bin calculation failed: {str(e)}. Using fallback bins")
+    #         num_bins = 20
+
+    #     hist, bin_edges = np.histogram(subset, bins=num_bins, density=True)
+    #     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    #     # **Find Histogram Mode**
+    #     mode_estimate = bin_centers[np.argmax(hist)]
+
+    #     # **Enforce Non-Negativity if Requested**
+    #     if enforce_non_negative and mode_estimate < 0:
+    #         logger.warning(
+    #             f"📢  Negative MAP estimate detected ({mode_estimate:.5f}). Setting to 0."
+    #         )
+    #         mode_estimate = max(0, mode_estimate)
+
+    #     return float(mode_estimate)
+
+    # def _determine_credible_mass(self, samples: np.ndarray) -> float:
+    #     """Determine optimal credible mass for HDI calculation"""
+    #     if len(samples) < 2:
+    #         return 0.25
+
+    #     try:
+    #         skewness = stats.skew(samples)
+    #     except:
+    #         skewness = 0
+
+    #     if skewness > 5:
+    #         return 0.05
+    #     elif len(samples) > 5000:
+    #         return 0.10
+    #     return 0.25
+
+    # def _create_adaptive_histogram(
+    #     self, subset: np.ndarray
+    # ) -> Tuple[np.ndarray, np.ndarray]:
+    #     """Create histogram with adaptive binning using Freedman-Diaconis rule"""
+    #     iqr_value = stats.iqr(subset)
+    #     if iqr_value == 0:  # Fallback for uniform distributions
+    #         bin_width = (subset.max() - subset.min()) / 10
+    #     else:
+    #         bin_width = 2 * iqr_value / (len(subset) ** (1 / 3))
+
+    #     if bin_width == 0:
+    #         return np.histogram(subset, bins=1)
+
+    #     num_bins = max(10, int((subset.max() - subset.min()) / bin_width))
+    #     return np.histogram(subset, bins=num_bins, density=True)
 
     def _create_map_dataframe(self, var_name: str, values: np.ndarray) -> pd.DataFrame:
         """Helper to format statistic results into DataFrame"""
@@ -1275,7 +1241,7 @@ class _ViewsDataset:
 
     def calculate_hdi(self, alpha: float = 0.9) -> pd.DataFrame:
         """
-        Calculate Highest Density Intervals (HDIs) for prediction distributions.
+        Calculate Highest Density Intervals (HDIs) for prediction distributions using PosteriorAnalyzer.
 
         Parameters:
         alpha (float): Credibility level for HDI (e.g., 0.9 for 90% HDI).
@@ -1301,42 +1267,19 @@ class _ViewsDataset:
 
         for var_idx, var_name in enumerate(self.targets):
             var_tensor = tensor[..., var_idx]  # Shape: (time, entity, samples)
-            sorted_data = np.sort(var_tensor, axis=2)
-            n_samples = sorted_data.shape[2]
-
-            # Calculate number of samples to include in HDI
-            h = max(1, int(np.ceil(alpha * n_samples)))
-            window_size = h
-
-            # Validate window size
-            if window_size > n_samples:
-                raise ValueError(
-                    f"Window size ({window_size}) exceeds sample count ({n_samples}) "
-                    f"for variable {var_name}"
-                )
-
-            # Skip calculation if only 1 sample (width = 0)
-            if window_size == 1:
-                hdi_lower = sorted_data[..., 0]
-                hdi_upper = sorted_data[..., -1]
-            else:
-                # Generate sliding windows for upper bounds
-                windows = np.lib.stride_tricks.sliding_window_view(
-                    sorted_data, window_shape=window_size, axis=2
-                )
-                upper = windows[..., -1]  # Last element of each window (maximum)
-                lower = windows[..., 0]  # First element of each window (minimum)
-
-                # Find narrowest interval
-                widths = upper - lower
-                min_indices = np.nanargmin(widths, axis=2)
-
-                # Extract bounds using indexing
-                time_idx, entity_idx = np.indices(min_indices.shape)
-                hdi_lower = lower[time_idx, entity_idx, min_indices]
-                hdi_upper = upper[time_idx, entity_idx, min_indices]
-
-            # Handle NaN values (missing predictions)
+            # Reshape to (time*entity, samples) for vectorized processing
+            flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
+            # Compute HDI for each (time, entity) pair
+            hdi_pairs = np.apply_along_axis(
+                lambda x: self._calculate_single_hdi(x, alpha),
+                axis=1,
+                arr=flat_tensor
+            )
+            # Reshape back to (time, entity)
+            hdi_lower = hdi_pairs[:, 0].reshape(var_tensor.shape[:2])
+            hdi_upper = hdi_pairs[:, 1].reshape(var_tensor.shape[:2])
+            
+            # Handle NaN samples (if any)
             nan_mask = np.isnan(var_tensor).all(axis=2)
             hdi_lower[nan_mask] = np.nan
             hdi_upper[nan_mask] = np.nan
@@ -1344,6 +1287,7 @@ class _ViewsDataset:
             # Create DataFrame for this variable
             df = self._create_hdi_dataframe(var_name, hdi_lower, hdi_upper)
             hdi_results.append(df)
+
         return pd.concat(hdi_results, axis=1)
 
     def _create_hdi_dataframe(
@@ -1466,43 +1410,83 @@ class _ViewsDataset:
         ax.legend()
 
         return ax
+    
+    def calculate_map(
+        self, enforce_non_negative: bool = False, features: Optional[List[str]] = None
+    ) -> pd.DataFrame:
+        """
+        Calculate Maximum A Posteriori (MAP) estimates for prediction distributions.
 
+        Parameters:
+        enforce_non_negative (bool): If True, forces MAP estimates to be non-negative
+        features (List[str]): List of features to calculate MAP for. If None, uses all prediction targets.
+
+        Returns:
+        pd.DataFrame: DataFrame with MAP estimates (time × entity × targets)
+        """
+
+        if not self.is_prediction:
+            raise ValueError("MAP calculation only valid for prediction dataframes")
+
+        # Validate features parameter
+        if features is not None:
+            invalid = set(features) - set(self.targets)
+            if invalid:
+                raise ValueError(f"Invalid features specified: {invalid}")
+            selected_vars = features
+        else:
+            selected_vars = self.targets
+
+        tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
+        map_results = []
+
+        # Pre-sort entire tensor once for all variables
+        sorted_tensor = np.sort(tensor, axis=2)
+
+        for var_name in tqdm(selected_vars, desc="Processing features"):
+            var_idx = self.targets.index(var_name)
+            var_tensor = sorted_tensor[..., var_idx]
+            orig_shape = var_tensor.shape[:2]
+
+            # Flatten for parallel processing
+            flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
+            n_samples = len(flat_tensor)
+
+            # Batch processing parameters
+            batch_size = 1000  # Optimal for memory/cache balance
+            batches = [
+                flat_tensor[i : i + batch_size] for i in range(0, n_samples, batch_size)
+            ]
+
+            # Process in batches to optimize memory usage
+            map_flat = []
+            with self.tqdm_joblib(
+                tqdm(total=len(batches), desc=f"{var_name} batches")
+            ) as progress_bar:
+                with Parallel(n_jobs=-1, prefer="threads") as parallel:
+                    for batch in batches:
+                        batch_results = parallel(
+                            delayed(self._compute_single_map_with_checks)(
+                                samples, enforce_non_negative
+                            )
+                            for samples in batch
+                        )
+                        map_flat.extend(batch_results)
+                        progress_bar.update(1)
+
+            map_estimates = np.array(map_flat).reshape(orig_shape)
+            df = self._create_map_dataframe(var_name, map_estimates)
+            map_results.append(df)
+
+        return pd.concat(map_results, axis=1)
+        
     def _calculate_single_hdi(
         self, data: np.ndarray, alpha: float
     ) -> Tuple[float, float]:
         """Calculate HDI for a 1D array"""
         if np.all(np.isnan(data)):
             return (np.nan, np.nan)
-
-        sorted_data = np.sort(data)
-        n_samples = len(sorted_data)
-
-        # Calculate number of samples to include in HDI
-        h = max(1, int(np.ceil(alpha * n_samples)))
-        window_size = h
-
-        # Validate window size
-        if window_size > n_samples:
-            raise ValueError(
-                f"Window size ({window_size}) exceeds sample count ({n_samples})"
-            )
-
-        # Skip calculation if only 1 sample (width = 0)
-        if window_size == 1:
-            return (sorted_data[0], sorted_data[-1])
-        else:
-            # Generate sliding windows for upper bounds
-            windows = np.lib.stride_tricks.sliding_window_view(
-                sorted_data, window_shape=window_size
-            )
-            upper = windows[..., -1]  # Last element of each window (maximum)
-            lower = windows[..., 0]  # First element of each window (minimum)
-
-            # Find narrowest interval
-            widths = upper - lower
-            min_idx = np.nanargmin(widths)
-
-            return (lower[min_idx], upper[min_idx])
+        return self._posterior_distribution_analyser.analyze(samples=data, credible_masses=(alpha,)).get("hdis")[0]
 
     def report_hdi(self, alphas: Tuple[float, ...] = (0.5, 0.9, 0.95)) -> pd.DataFrame:
         """
