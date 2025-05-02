@@ -1098,6 +1098,8 @@ class ForecastingModelManager(ModelManager):
         Args:
             config (dict): Configuration object containing parameters and settings.
         """
+        # if config is None:
+        #     config = self.config
         with wandb.init(
             project=self._project, entity=self._entity, config=config, job_type="train"
         ):

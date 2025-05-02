@@ -194,20 +194,35 @@ class EnsembleManager(ForecastingModelManager):
         """
         self.config = self._update_single_config(args)
         self._project = f"{self.config['name']}_{args.run_type}"
+        print("SEEEEEELF CONFIG", self.config)
         self._eval_type = args.eval_type
         self._args = args
 
-        if not args.train:
-            validate_ensemble_model(self.config)
+        try:
+            if not args.train:
+                validate_ensemble_model(self.config)
 
-        self._execute_model_tasks(
-            config=self.config,
-            train=args.train,
-            eval=args.evaluate,
-            forecast=args.forecast,
-            use_saved=args.saved,
-            report=args.report
-        )
+            self._execute_model_tasks(
+                config=self.config,
+                train=args.train,
+                eval=args.evaluate,
+                forecast=args.forecast,
+                use_saved=args.saved,
+                report=args.report
+            )
+        except Exception as e:
+            logger.error(
+                f"Error during {self._model_path.target} execution: {e}",
+                exc_info=True,
+            )
+            wandb_alert(
+                title=f"{self._model_path.target.title()} Execution Error",
+                text=f"An error occurred during {self._model_path.target} execution: {traceback.format_exc()}",
+                level=wandb.AlertLevel.ERROR,
+                wandb_notifications=self._wandb_notifications,
+                models_path=self._model_path.models,
+            )
+            raise
 
     def _execute_model_tasks(
         self,
@@ -277,7 +292,7 @@ class EnsembleManager(ForecastingModelManager):
 
             except Exception as e:
                 logger.error(
-                    f"{self._model_path.target.title()} training model: {e}",
+                    f"{self._model_path.target.title()} training: {e}",
                     exc_info=True,
                 )
                 wandb_alert(
