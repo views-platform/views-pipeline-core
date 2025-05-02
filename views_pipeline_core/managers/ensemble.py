@@ -194,7 +194,6 @@ class EnsembleManager(ForecastingModelManager):
         """
         self.config = self._update_single_config(args)
         self._project = f"{self.config['name']}_{args.run_type}"
-        print("SEEEEEELF CONFIG", self.config)
         self._eval_type = args.eval_type
         self._args = args
 
