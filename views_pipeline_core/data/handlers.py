@@ -540,15 +540,15 @@ class _ViewsDataset:
 
         return df.loc[self.original_index]
 
-    def _compute_single_map_with_checks(self, samples, enforce_non_negative):
+    def _compute_single_map_with_checks(self, samples, enforce_non_negative, alpha=0.9):
         """Wrapper with NaN handling and input validation"""
         if np.all(np.isnan(samples)):
             return np.nan
         return self._simon_compute_single_map(
-            samples[~np.isnan(samples)], enforce_non_negative
+            samples=samples[~np.isnan(samples)], enforce_non_negative=enforce_non_negative, alpha=alpha
         )
 
-    def _simon_compute_single_map(self, samples, enforce_non_negative=False):
+    def _simon_compute_single_map(self, samples, enforce_non_negative=False, alpha=0.9):
         """
         Compute the Maximum A Posteriori (MAP) estimate using an HDI-based histogram and KDE refinement.
 
@@ -573,7 +573,7 @@ class _ViewsDataset:
             logger.error("❌ No valid samples. Returning MAP = 0.0")
             return 0.0
 
-        map = self._posterior_distribution_analyser.analyze(samples=samples).get("map")
+        map = self._posterior_distribution_analyser.analyze(samples=samples, credible_masses=(alpha,)).get("map")
         if enforce_non_negative and map < 0:
             logger.warning(
                 f"📢  Negative MAP estimate detected ({map:.5f}). Setting to 0."
@@ -1412,7 +1412,7 @@ class _ViewsDataset:
         return ax
 
     def calculate_map(
-        self, enforce_non_negative: bool = False, features: Optional[List[str]] = None
+        self, enforce_non_negative: bool = False, features: Optional[List[str]] = None, alpha: float = 0.9
     ) -> pd.DataFrame:
         """
         Calculate Maximum A Posteriori (MAP) estimates for prediction distributions.
@@ -1467,7 +1467,7 @@ class _ViewsDataset:
                     for batch in batches:
                         batch_results = parallel(
                             delayed(self._compute_single_map_with_checks)(
-                                samples, enforce_non_negative
+                                samples, enforce_non_negative, alpha
                             )
                             for samples in batch
                         )

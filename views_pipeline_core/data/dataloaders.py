@@ -140,7 +140,7 @@ class ViewsDataLoader:
             df = ensure_float64(df)
             return df, alerts
         except KeyError as e:
-            logger.error(f"Error fetching data from viewser: {e}. Trying to fetch without drift detection.")
+            logger.error(f"\033[91mError fetching data from viewser: {e}. Trying to fetch without drift detection.\033[0m", exc_info=True)
             df = queryset_base.publish().fetch(
                 start_date=self.month_first,
                 end_date=self.month_last - 1,
@@ -148,7 +148,7 @@ class ViewsDataLoader:
             df = ensure_float64(df)
             return df, None
         except Exception as e:
-            logger.error(f"Error fetching data from viewser: {e}")
+            logger.error(f"Error fetching data from viewser: {e}", exc_info=True)
             raise RuntimeError(
                 f"Error fetching data from viewser: {e}"
             )

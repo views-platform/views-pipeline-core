@@ -1764,6 +1764,7 @@ class ForecastingModelManager(ModelManager):
                 report_manager.add_html(
                     html=historical_line_graph.plot_predictions_vs_historical(
                         as_html=True,
+                        alpha=0.9
                     )
                 )
             # Generate report path
