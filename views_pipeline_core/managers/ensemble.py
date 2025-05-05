@@ -445,52 +445,52 @@ class EnsembleManager(ForecastingModelManager):
             dfs, self.configs["aggregation"]
         )
 
-        if self.configs["reconciliation"] is not None:
-            if self.configs["reconciliation"] == 'pgm_cm_point':
+        # if self.configs["reconciliation"] is not None:
+        #     if self.configs["reconciliation"] == 'pgm_cm_point':
 
-                if self._use_prediction_store:
-                    logger.info(f"Performing point pgm-cm reconciliation")
-                    from views_forecasts.extensions import ForecastsStore, ViewsMetadata
-                else:
-                    raise RuntimeError(f'Cannot perform pgm_cm_point reconciliation without access to'
-                                       f'prediction store')
+                # if self._use_prediction_store:
+                #     logger.info(f"Performing point pgm-cm reconciliation")
+                #     from views_forecasts.extensions import ForecastsStore, ViewsMetadata
+                # else:
+                #     raise RuntimeError(f'Cannot perform pgm_cm_point reconciliation without access to'
+                #                        f'prediction store')
 
-                reconcile_with = self.configs["reconcile_with"]+'_predictions_forecasting'
-                pred_store_name = self._pred_store_name
+                # reconcile_with = self.configs["reconcile_with"]+'_predictions_forecasting'
+                # pred_store_name = self._pred_store_name
 
-                run_id = ViewsMetadata().get_run_id_from_name(pred_store_name)
+                # run_id = ViewsMetadata().get_run_id_from_name(pred_store_name)
 
-                all_runs = ViewsMetadata().with_name(reconcile_with).fetch()['name'].to_list()
+                # all_runs = ViewsMetadata().with_name(reconcile_with).fetch()['name'].to_list()
 
-                # fetch latest forecast from ensemble to be reconciled with
+                # # fetch latest forecast from ensemble to be reconciled with
 
-                reconcile_with_forecasts = [fc for fc in all_runs if reconcile_with in fc and 'forecasting' in fc]
+                # reconcile_with_forecasts = [fc for fc in all_runs if reconcile_with in fc and 'forecasting' in fc]
 
-                reconcile_with_forecasts.sort()
+                # reconcile_with_forecasts.sort()
 
-                reconcile_with_forecast = reconcile_with_forecasts[-1]
+                # reconcile_with_forecast = reconcile_with_forecasts[-1]
 
-                df_cm = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
+                # df_cm = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
 
-                target_list = self.configs["targets"]
+                # target_list = self.configs["targets"]
 
-                if type(target_list) != 'list':
-                    target_list = [target_list]
+                # if type(target_list) != 'list':
+                #     target_list = [target_list]
 
-                for target in target_list:
-                    try:
-                        reconciler = reconciliation.ReconcilePgmWithCmPoint(df_pgm=df_prediction,
-                                                                            df_cm=df_cm,
-                                                                            target=f"pred_{target}",
-                                                                            target_type=self.reconcile_logged)
+                # for target in target_list:
+                #     try:
+                #         reconciler = reconciliation.ReconcilePgmWithCmPoint(df_pgm=df_prediction,
+                #                                                             df_cm=df_cm,
+                #                                                             target=f"pred_{target}",
+                #                                                             target_type=self.reconcile_logged)
 
-                        df_prediction = reconciler.reconcile()
-                    except Exception as e:
-                        logger.error(
-                            f"Error during reconciliation: {e}",
-                            exc_info=True,
-                        )
-                        continue
+                #         df_prediction = reconciler.reconcile()
+                #     except Exception as e:
+                #         logger.error(
+                #             f"Error during reconciliation: {e}",
+                #             exc_info=True,
+                #         )
+                #         continue
 
         return df_prediction
 
