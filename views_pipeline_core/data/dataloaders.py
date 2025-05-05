@@ -124,24 +124,35 @@ class ViewsDataLoader:
         else:
             logger.info(f"Found queryset for {self._model_name}")
 
-        df, alerts = queryset_base.publish().fetch_with_drift_detection(
-            start_date=self.month_first,
-            end_date=self.month_last - 1,
-            drift_config_dict=self.drift_config_dict,
-            self_test=self_test,
-        )
+        try:
+            df, alerts = queryset_base.publish().fetch_with_drift_detection(
+                start_date=self.month_first,
+                end_date=self.month_last - 1,
+                drift_config_dict=self.drift_config_dict,
+                self_test=self_test,
+            )
+            for ialert, alert in enumerate(
+            str(alerts).strip("[").strip("]").split("Input")):
+                if "offender" in alert:
+                    logger.warning(
+                        {f"{self._model_path.model_name} data alert {ialert}": str(alert)}
+                    )
+            df = ensure_float64(df)
+            return df, alerts
+        except KeyError as e:
+            logger.error(f"Error fetching data from viewser: {e}. Trying to fetch without drift detection.")
+            df = queryset_base.publish().fetch(
+                start_date=self.month_first,
+                end_date=self.month_last - 1,
+            )
+            df = ensure_float64(df)
+            return df, None
+        except Exception as e:
+            logger.error(f"Error fetching data from viewser: {e}")
+            raise RuntimeError(
+                f"Error fetching data from viewser: {e}"
+            )
 
-        df = ensure_float64(df)  # The dataframe must contain only np.float64 floats
-        #    with wandb.init(project=f'{model_path.model_name}', entity="views_pipeline"):
-        for ialert, alert in enumerate(
-            str(alerts).strip("[").strip("]").split("Input")
-        ):
-            if "offender" in alert:
-                logger.warning(
-                    {f"{self._model_path.model_name} data alert {ialert}": str(alert)}
-                )
-
-        return df, alerts
 
     def _get_month_range(self) -> tuple[int, int]:
         """

@@ -3,6 +3,7 @@ import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
 from views_pipeline_core.data.statistics import PosteriorAnalyzer
+from viewser import Queryset, Column
 
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -40,6 +41,7 @@ class _ViewsDataset:
         """
         self.__preprocess_input_dataframe = True
         from views_pipeline_core.managers.model import ModelPathManager
+
         self.broadcast_features = broadcast_features
         if isinstance(source, pd.DataFrame):
             self._init_dataframe(source, targets)
@@ -48,38 +50,37 @@ class _ViewsDataset:
         else:
             raise ValueError("Invalid input type for ViewsDataset")
         self._posterior_distribution_analyser = PosteriorAnalyzer()
-        
+
     def _preprocess_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-            """
-            Preprocesses a pandas DataFrame by ensuring all combinations of time values and entity IDs
-            are present in the index, filling missing combinations with default values.
+        """
+        Preprocesses a pandas DataFrame by ensuring all combinations of time values and entity IDs
+        are present in the index, filling missing combinations with default values.
 
-            This method performs the following steps:
-            1. Identifies the last month's entity IDs from the DataFrame.
-            2. Filters the DataFrame to include only rows with entity IDs that exist in the last month.
-            3. Creates a MultiIndex of all possible combinations of time values and entity IDs.
-            4. Identifies missing combinations in the DataFrame's index.
-            5. Creates a DataFrame with the missing combinations, filled with default values (0).
-            6. Concatenates the original DataFrame with the missing combinations DataFrame and sorts the index.
+        This method performs the following steps:
+        1. Identifies the last month's entity IDs from the DataFrame.
+        2. Filters the DataFrame to include only rows with entity IDs that exist in the last month.
+        3. Creates a MultiIndex of all possible combinations of time values and entity IDs.
+        4. Identifies missing combinations in the DataFrame's index.
+        5. Creates a DataFrame with the missing combinations, filled with default values (0).
+        6. Concatenates the original DataFrame with the missing combinations DataFrame and sorts the index.
 
-            Args:
-                df (pd.DataFrame): The input DataFrame with a MultiIndex containing time and entity IDs.
+        Args:
+            df (pd.DataFrame): The input DataFrame with a MultiIndex containing time and entity IDs.
 
-            Returns:
-                pd.DataFrame: A DataFrame with all combinations of time values and entity IDs, 
-                              including rows for missing combinations filled with default values.
-            """
-            last_month_id = self._time_values.max()
-            existing_entity_ids = df.loc[last_month_id].index.unique()
-            df =  df[df.index.get_level_values(self._entity_id).isin(existing_entity_ids)]
-            all_months = self._time_values
-            all_combinations = pd.MultiIndex.from_product(
-                        [all_months, existing_entity_ids], names=[self._time_id, self._entity_id]
-                    )
-            missing_combinations = all_combinations.difference(df.index)
-            missing_df = pd.DataFrame(0, index=missing_combinations, columns=df.columns)
-            return pd.concat([df, missing_df]).sort_index()
-
+        Returns:
+            pd.DataFrame: A DataFrame with all combinations of time values and entity IDs,
+                          including rows for missing combinations filled with default values.
+        """
+        last_month_id = self._time_values.max()
+        existing_entity_ids = df.loc[last_month_id].index.unique()
+        df = df[df.index.get_level_values(self._entity_id).isin(existing_entity_ids)]
+        all_months = self._time_values
+        all_combinations = pd.MultiIndex.from_product(
+            [all_months, existing_entity_ids], names=[self._time_id, self._entity_id]
+        )
+        missing_combinations = all_combinations.difference(df.index)
+        missing_df = pd.DataFrame(0, index=missing_combinations, columns=df.columns)
+        return pd.concat([df, missing_df]).sort_index()
 
     def _init_dataframe(
         self, dataframe: pd.DataFrame, targets: Optional[List[str]] = None
@@ -145,6 +146,7 @@ class _ViewsDataset:
                 self.sample_size = None
         self._split_tensor_cache = {}
         self._max_tensor_cache_size = 128  # Set a maximum cache size
+        self._entity_metadata_cache = None
 
     def _clear_tensor_cache_if_needed(self):
         if len(self._split_tensor_cache) > self._max_tensor_cache_size:
@@ -345,7 +347,7 @@ class _ViewsDataset:
         """
         if self.is_prediction:
             return [col for col in self.dataframe.columns if col not in self.pred_vars]
-        
+
         try:
             return [col for col in self.dataframe.columns if col not in self.targets]
         except TypeError:
@@ -545,7 +547,7 @@ class _ViewsDataset:
         return self._simon_compute_single_map(
             samples[~np.isnan(samples)], enforce_non_negative
         )
-    
+
     def _simon_compute_single_map(self, samples, enforce_non_negative=False):
         """
         Compute the Maximum A Posteriori (MAP) estimate using an HDI-based histogram and KDE refinement.
@@ -1271,14 +1273,12 @@ class _ViewsDataset:
             flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
             # Compute HDI for each (time, entity) pair
             hdi_pairs = np.apply_along_axis(
-                lambda x: self._calculate_single_hdi(x, alpha),
-                axis=1,
-                arr=flat_tensor
+                lambda x: self._calculate_single_hdi(x, alpha), axis=1, arr=flat_tensor
             )
             # Reshape back to (time, entity)
             hdi_lower = hdi_pairs[:, 0].reshape(var_tensor.shape[:2])
             hdi_upper = hdi_pairs[:, 1].reshape(var_tensor.shape[:2])
-            
+
             # Handle NaN samples (if any)
             nan_mask = np.isnan(var_tensor).all(axis=2)
             hdi_lower[nan_mask] = np.nan
@@ -1410,7 +1410,7 @@ class _ViewsDataset:
         ax.legend()
 
         return ax
-    
+
     def calculate_map(
         self, enforce_non_negative: bool = False, features: Optional[List[str]] = None
     ) -> pd.DataFrame:
@@ -1479,14 +1479,16 @@ class _ViewsDataset:
             map_results.append(df)
 
         return pd.concat(map_results, axis=1)
-        
+
     def _calculate_single_hdi(
         self, data: np.ndarray, alpha: float
     ) -> Tuple[float, float]:
         """Calculate HDI for a 1D array"""
         if np.all(np.isnan(data)):
             return (np.nan, np.nan)
-        return self._posterior_distribution_analyser.analyze(samples=data, credible_masses=(alpha,)).get("hdis")[0]
+        return self._posterior_distribution_analyser.analyze(
+            samples=data, credible_masses=(alpha,)
+        ).get("hdis")[0]
 
     def report_hdi(self, alphas: Tuple[float, ...] = (0.5, 0.9, 0.95)) -> pd.DataFrame:
         """
@@ -1518,22 +1520,22 @@ class _ViewsDataset:
                 )
 
         return pd.DataFrame(reports)
-    
+
     def to_reconciler(self, feature: str, time_id: int) -> torch.Tensor:
         """
         Extracts a tensor compatible with ForecastReconciler for a specified feature and time_id.
-        
-        The tensor is extracted for the specified time step, formatted as 
+
+        The tensor is extracted for the specified time step, formatted as
         (num_samples, num_entities) for probabilistic reconciliation.
-        
+
         Args:
             feature (str): Name of the prediction target variable to reconcile.
             time_id (int): The time ID (e.g., month_id) for which to extract the tensor.
-            
+
         Returns:
             torch.Tensor: Tensor of shape (samples, entities) for the specified feature
                         at the given time_id.
-                        
+
         Raises:
             ValueError: If dataset is not in prediction mode, feature not found,
                         or time_id is invalid.
@@ -1544,17 +1546,17 @@ class _ViewsDataset:
             raise ValueError(f"Feature '{feature}' not found in targets {self.targets}")
         if time_id not in self._time_values:
             raise ValueError(f"Time ID {time_id} not found in dataset's time values.")
-        
+
         var_idx = self.targets.index(feature)
         pred_tensor = self.to_tensor()  # Shape (time, entity, samples, vars)
-        
+
         # Get the time index using the provided time_id
         time_idx = self._get_time_index(time_id)
         # latest_time_idx = len(self._time_values) - 1
-        
+
         # Extract data for all entities, samples, at the specified time for the feature
         data = pred_tensor[time_idx, :, :, var_idx]  # Shape (entity, samples)
-        
+
         # Transpose to (samples, entity) and convert to torch tensor
         return torch.from_numpy(data.transpose(1, 0))
 
@@ -1568,41 +1570,102 @@ class _PGDataset(_ViewsDataset):
         self._country_to_grids_cache = None
         self.reconciled_dataframe = None
         # self._country_ids = self.get_country_id().reset_index()["country_id"].unique()
-    
+
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names[1] != "priogrid_id" and self.dataframe.index.names[1] != "priogrid_gid":
+        if self.dataframe.index.names[1] == "priogrid_gid":
+            logger.warning(
+                "PGDataset index 1 is 'priogrid_gid', renaming to 'priogrid_id'"
+            )
+            self.dataframe.index = self.dataframe.index.rename(
+                ["month_id", "priogrid_id"]
+            )
+        elif self.dataframe.index.names[1] != "priogrid_id":
             raise ValueError(
                 f"PGDataset requires index 1 to be 'priogrid_id', found {self.dataframe.index.names}"
             )
 
+    def _build_entity_metadata_cache(self):
+        """Build a cache mapping country_ids to metadata using the CAccessor"""
+        if self._entity_metadata_cache is not None:
+            return
+        else:
+            self._entity_metadata_cache = (
+                (
+                    Queryset("pg_metadata", "priogrid_month")
+                    .with_column(
+                        Column("lat", from_loa="priogrid", from_column="latitude")
+                    )
+                    .with_column(
+                        Column("long", from_loa="priogrid", from_column="longitude")
+                    )
+                    .with_column(Column("row", from_loa="priogrid", from_column="row"))
+                    .with_column(Column("col", from_loa="priogrid", from_column="col"))
+                    .with_column(
+                        Column("isoab", from_loa="country", from_column="isoab")
+                    )
+                    .with_column(Column("name", from_loa="country", from_column="name"))
+                    .with_column(
+                        Column(
+                            "country_id",
+                            from_loa="country_month",
+                            from_column="country_id",
+                        )
+                    )
+                )
+                .publish()
+                .fetch()
+                .reset_index()
+            )
+            if "priogrid_gid" in self._entity_metadata_cache.columns:
+                self._entity_metadata_cache.rename(
+                    columns={"priogrid_gid": self._entity_id}, inplace=True
+                )
+            self._entity_metadata_cache.set_index([self._time_id, self._entity_id], inplace=True)
+
     def _get_entity_attr(self, attr: str) -> pd.Series:
         """Helper method to get entity attributes using accessor"""
         from ingester3.extensions import PgAccessor
+
         entity_ids = self.dataframe.index.get_level_values(self._entity_id)
         temp_df = pd.DataFrame({"pg_id": entity_ids}, index=self.dataframe.index)
         return getattr(temp_df.pg, attr)
 
     def get_country_id(self) -> pd.DataFrame:
         """Get country ID for each priogrid-month combination."""
-        if self._country_id_cache is None:
-            from viewser import Queryset, Column
-            # Fetch the country_series data using the specified Queryset
-            country_series = (
-                Queryset("jed_pgm_cm", "priogrid_month")
-                .with_column(Column("country_id", from_loa="country_month", from_column="country_id"))
-                .fetch()
-            ).reset_index()
-            # Rename 'priogrid_gid' to match the entity_id name used in the dataset (likely 'priogrid_id')
-            country_series = country_series.rename(columns={"priogrid_gid": self._entity_id})
-            # Set the index to month_id and priogrid_id (entity_id) for proper alignment
-            country_series = country_series.set_index([self._time_id, self._entity_id])
-            self._country_id_cache = country_series
+        # if self._country_id_cache is None:
+        #     from viewser import Queryset, Column
 
-        # Align the cached country_series with the current dataframe's index to get country_id
-        # This ensures we get the correct country_id for each (month_id, priogrid_id) pair
-        aligned_country_ids = self._country_id_cache['country_id'].reindex(self.dataframe.index)
-        return aligned_country_ids.to_frame(name='country_id')
+        #     # Fetch the country_series data using the specified Queryset
+        #     country_series = (
+        #         Queryset("jed_pgm_cm", "priogrid_month")
+        #         .with_column(
+        #             Column(
+        #                 "country_id", from_loa="country_month", from_column="country_id"
+        #             )
+        #         )
+        #         .fetch()
+        #     ).reset_index()
+        #     # Rename 'priogrid_gid' to match the entity_id name used in the dataset (likely 'priogrid_id')
+        #     country_series = country_series.rename(
+        #         columns={"priogrid_gid": self._entity_id}
+        #     )
+        #     # Set the index to month_id and priogrid_id (entity_id) for proper alignment
+        #     country_series = country_series.set_index([self._time_id, self._entity_id])
+        #     self._country_id_cache = country_series
+
+        # # Align the cached country_series with the current dataframe's index to get country_id
+        # # This ensures we get the correct country_id for each (month_id, priogrid_id) pair
+        # aligned_country_ids = self._country_id_cache["country_id"].reindex(
+        #     self.dataframe.index
+        # )
+        # return aligned_country_ids.to_frame(name="country_id")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["country_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="country_id")
+        )
 
     def _build_country_to_grids_cache(self):
         """Build a cache mapping country_ids to lists of grid_ids (entity_ids) using first occurrence per grid."""
@@ -1610,21 +1673,25 @@ class _PGDataset(_ViewsDataset):
             return
         # Get country_id for each entity_id (priogrid), using the first occurrence in the dataset
         # Assumes country_id per priogrid is static over time
-        country_series = self.get_country_id().groupby(level=self._entity_id)['country_id'].first()
+        country_series = (
+            self.get_country_id().groupby(level=self._entity_id)["country_id"].first()
+        )
         self._country_to_grids_cache = {}
         for entity_id, country_id in country_series.items():
             if country_id not in self._country_to_grids_cache:
                 self._country_to_grids_cache[country_id] = []
             self._country_to_grids_cache[country_id].append(entity_id)
 
-    def get_subset_by_country_id(self, country_ids: List[int] = None, time_ids: List[int] = None) -> pd.DataFrame:
+    def get_subset_by_country_id(
+        self, country_ids: List[int] = None, time_ids: List[int] = None
+    ) -> pd.DataFrame:
         """
         Extract a subset of the dataset for specific country IDs and time IDs.
-        
+
         Args:
             country_ids: List of country IDs to include.
             time_ids: List of time IDs to include.
-            
+
         Returns:
             pd.DataFrame: Subset of the dataset filtered by the specified country and time IDs.
         """
@@ -1638,50 +1705,60 @@ class _PGDataset(_ViewsDataset):
         entity_ids = list(set(entity_ids))
         # Get the subset dataframe
         return self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
-    
-    def reconcile(self, country_id: int, feature: str, reconciled_tensor: torch.Tensor, time_id: int) -> None:
+
+    def reconcile(
+        self,
+        country_id: int,
+        feature: str,
+        reconciled_tensor: torch.Tensor,
+        time_id: int,
+    ) -> None:
         """
         Updates the reconciled dataframe with reconciled values for a specific country's grid cells at a specified time_id.
-        
+
         Args:
             country_id (int): The country ID whose grid cells will be updated.
             feature (str): The prediction feature/target variable to update.
             reconciled_tensor (torch.Tensor): Tensor containing reconciled values (shape: samples x num_grid_cells).
             time_id (int): The time ID (e.g., month_id) for which to update the reconciliation.
-            
+
         Raises:
-            ValueError: If dataset isn't in prediction mode, feature is invalid, 
+            ValueError: If dataset isn't in prediction mode, feature is invalid,
                         tensor shape mismatches the country's grid cell count,
                         or time_id is invalid.
         """
         if not self.is_prediction:
-            raise ValueError("Reconciliation can only be applied to prediction datasets")
+            raise ValueError(
+                "Reconciliation can only be applied to prediction datasets"
+            )
         if feature not in self.targets:
             raise ValueError(f"Feature '{feature}' not found in dataset targets")
         if time_id not in self._time_values:
-            raise ValueError(f"Time ID {time_id} not found in the dataset's time values.")
+            raise ValueError(
+                f"Time ID {time_id} not found in the dataset's time values."
+            )
 
         # Initialize reconciled dataframe if not exists
         if self.reconciled_dataframe is None:
             self.reconciled_dataframe = self.dataframe.copy()
-        
+
         # Get grid cell IDs for the country
         if self._country_to_grids_cache is None:
             self._build_country_to_grids_cache()
         entity_ids = self._country_to_grids_cache.get(country_id, [])
         if not entity_ids:
             raise ValueError(f"No grid cells found for country_id {country_id}")
-        
+
         # Validate tensor dimensions
         if reconciled_tensor.shape[1] != len(entity_ids):
             raise ValueError(
                 f"Tensor shape {reconciled_tensor.shape} doesn't match "
                 f"{len(entity_ids)} grid cells in country {country_id}"
             )
-        
+
         # Convert tensor to numpy array (handle device tensors)
         reconciled_np = reconciled_tensor.cpu().numpy()
-        
+
         # Update each grid cell's data
         for idx, entity_id in enumerate(entity_ids):
             # Get the new samples for this grid cell
@@ -1692,31 +1769,51 @@ class _PGDataset(_ViewsDataset):
     def get_lat_lon(self) -> pd.DataFrame:
         """Get latitude and longitude for each priogrid"""
         return pd.DataFrame(
-            {"lat": self._get_entity_attr("lat"), "lon": self._get_entity_attr("lon")}
+            {
+                "lat": self._entity_metadata_cache["lat"].reindex(self.dataframe.index),
+                "lon": self._entity_metadata_cache["long"].reindex(
+                    self.dataframe.index
+                ),
+            }
         )
 
     def get_row_col(self) -> pd.DataFrame:
         """Get row and column indices for each priogrid"""
         return pd.DataFrame(
-            {"row": self._get_entity_attr("row"), "col": self._get_entity_attr("col")}
+            {
+                "row": self._entity_metadata_cache["row"].reindex(self.dataframe.index),
+                "col": self._entity_metadata_cache["col"].reindex(self.dataframe.index),
+            }
         )
 
     def get_country_iso(self) -> pd.DataFrame:
         """Get ISO code for the country of each priogrid"""
-        country_ids = self._get_entity_attr("c_id")
-        temp_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
-        return temp_df.c.isoab.to_frame(name="country_iso")
+        # country_ids = self._get_entity_attr("c_id")
+        # temp_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
+        # return temp_df.c.isoab.to_frame(name="country_iso")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["isoab"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="isoab")
+        )
 
     def get_name(self) -> pd.DataFrame:
         """Get country names for each priogrid"""
-        # Get country IDs from priogrids
-        country_ids = self._get_entity_attr("c_id")
+        # # Get country IDs from priogrids
+        # country_ids = self._get_entity_attr("c_id")
 
-        # Create temporary DataFrame with country IDs
-        country_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
+        # # Create temporary DataFrame with country IDs
+        # country_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
 
-        # Use c accessor to get country names
-        return country_df.c.name.to_frame(name="country_name")
+        # # Use c accessor to get country names
+        # return country_df.c.name.to_frame(name="country_name")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["name"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="name")
+        )
 
     # def get_continent(self) -> pd.DataFrame:
     #     """Get continent for priogrids through country mapping"""
@@ -1743,20 +1840,24 @@ class PGMDataset(_PGDataset):
     def _get_time_attr(self, attr: str) -> pd.Series:
         """Helper method to get temporal attributes using accessor"""
         from ingester3.extensions import PGMAccessor
+
         time_ids = self.dataframe.index.get_level_values(self._time_id)
         temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
         return getattr(temp_df.m, attr)
 
     def get_year(self) -> pd.DataFrame:
         from ingester3.extensions import PGMAccessor
+
         return self._get_time_attr("year").to_frame(name="year")
 
     def get_month(self) -> pd.DataFrame:
         from ingester3.extensions import PGMAccessor
+
         return self._get_time_attr("month").to_frame(name="month")
 
     def get_date(self) -> pd.DataFrame:
         from ingester3.extensions import PGMAccessor
+
         """Get first day of month as datetime"""
         years = self.get_year()["year"]
         months = self.get_month()["month"]
@@ -1786,73 +1887,149 @@ class _CDataset(_ViewsDataset):
                 f"CDataset requires index 1 to be 'country_id', found {self.dataframe.index.names}"
             )
 
+    def _build_entity_metadata_cache(self):
+        """Build a cache mapping country_ids to metadata using the CAccessor"""
+        if self._entity_metadata_cache is not None:
+            return
+        else:
+            self._entity_metadata_cache = (
+                (
+                    Queryset("country_metadata", "country_month")
+                    .with_column(
+                        Column("isoab", from_loa="country", from_column="isoab")
+                    )
+                    .with_column(Column("name", from_loa="country", from_column="name"))
+                    .with_column(
+                        Column("gwcode", from_loa="country", from_column="gwcode")
+                    )
+                    .with_column(
+                        Column("isonum", from_loa="country", from_column="isonum")
+                    )
+                    .with_column(
+                        Column("capname", from_loa="country", from_column="capname")
+                    )
+                    .with_column(
+                        Column("caplat", from_loa="country", from_column="caplat")
+                    )
+                    .with_column(
+                        Column("caplong", from_loa="country", from_column="caplong")
+                    )
+                    .with_column(
+                        Column("in_africa", from_loa="country", from_column="in_africa")
+                    )
+                    .with_column(
+                        Column("in_me", from_loa="country", from_column="in_me")
+                    )
+                )
+                .publish()
+                .fetch()
+                .reset_index()
+                .set_index([self._time_id, self._entity_id])
+            )
+
     def _get_entity_attr(self, attr: str) -> pd.Series:
         """Helper method to get country attributes using accessor"""
         from ingester3.extensions import CAccessor
+
         entity_ids = self.dataframe.index.get_level_values(self._entity_id)
         temp_df = pd.DataFrame({"c_id": entity_ids}, index=self.dataframe.index)
         return getattr(temp_df.c, attr)
 
     def get_isoab(self) -> pd.DataFrame:
-        return self._get_entity_attr("isoab").to_frame(name="isoab")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["isoab"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="isoab")
+        )
 
     def get_name(self) -> pd.DataFrame:
-        return self._get_entity_attr("name").to_frame(name="name")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["name"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="name")
+        )
 
     def get_gwcode(self) -> pd.DataFrame:
-        return self._get_entity_attr("gwcode").to_frame(name="gwcode")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["gwcode"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="gwcode")
+        )
 
     def get_isonum(self) -> pd.DataFrame:
-        return self._get_entity_attr("isonum").to_frame(name="isonum")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["isonum"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="isonum")
+        )
 
     def get_capname(self) -> pd.DataFrame:
-        return self._get_entity_attr("capname").to_frame(name="capname")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["capname"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="capname")
+        )
 
     def get_cap_lat_lon(self) -> pd.DataFrame:
+        self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
-                "cap_lat": self._get_entity_attr("caplat"),
-                "cap_lon": self._get_entity_attr("caplong"),
+                "cap_lat": self._entity_metadata_cache["caplat"].reindex(
+                    self.dataframe.index
+                ),
+                "cap_lon": self._entity_metadata_cache["caplong"].reindex(
+                    self.dataframe.index
+                ),
             }
         )
 
     def get_region(self) -> pd.DataFrame:
         """Get combined region information"""
+        self._build_country_metadata_cache()
         return pd.DataFrame(
             {
-                "in_africa": self._get_entity_attr("in_africa"),
-                "in_me": self._get_entity_attr("in_me"),
+                "in_africa": self._entity_metadata_cache["in_africa"].reindex(
+                    self.dataframe.index
+                ),
+                "in_me": self._entity_metadata_cache["in_me"].reindex(
+                    self.dataframe.index
+                ),
             }
         )
 
-    def get_continent(self) -> pd.DataFrame:
-        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
-        # Get GW codes
-        gwcode = self._get_entity_attr("gwcode")
+    # def get_continent(self) -> pd.DataFrame:
+    #     """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+    #     # Get GW codes
+    #     gwcode = self._get_entity_attr("gwcode")
 
-        # Define continent mapping based on GW code ranges (Gleditsch & Ward system)
-        continent_rules = [
-            (gwcode.between(400, 625), "Africa"),  # African states
-            (gwcode.between(630, 698), "Middle East"),  # Middle East
-            (gwcode.between(200, 395), "Europe"),  # Western Europe
-            (gwcode.between(2, 165), "Americas"),  # Americas
-            (gwcode.between(700, 990), "Asia"),  # Asia/Pacific
-            (gwcode == 999, "International"),  # Special codes
-        ]
+    #     # Define continent mapping based on GW code ranges (Gleditsch & Ward system)
+    #     continent_rules = [
+    #         (gwcode.between(400, 625), "Africa"),  # African states
+    #         (gwcode.between(630, 698), "Middle East"),  # Middle East
+    #         (gwcode.between(200, 395), "Europe"),  # Western Europe
+    #         (gwcode.between(2, 165), "Americas"),  # Americas
+    #         (gwcode.between(700, 990), "Asia"),  # Asia/Pacific
+    #         (gwcode == 999, "International"),  # Special codes
+    #     ]
 
-        # Create default 'Other' category
-        continent = pd.Series("Other", index=gwcode.index)
+    #     # Create default 'Other' category
+    #     continent = pd.Series("Other", index=gwcode.index)
 
-        # Apply mapping rules
-        for condition, name in continent_rules:
-            continent = continent.where(~condition, name)
+    #     # Apply mapping rules
+    #     for condition, name in continent_rules:
+    #         continent = continent.where(~condition, name)
 
-        # Use with existing regional flags. Does not really work well.
-        # region = self.get_region()
-        # continent = continent.where(~region['in_africa'], 'Africa')
-        # continent = continent.where(~region['in_me'], 'Middle East')
+    #     # Use with existing regional flags. Does not really work well.
+    #     # region = self.get_region()
+    #     # continent = continent.where(~region['in_africa'], 'Africa')
+    #     # continent = continent.where(~region['in_me'], 'Middle East')
 
-        return continent.to_frame(name="continent")
+    #     return continent.to_frame(name="continent")
 
 
 class CMDataset(_CDataset):
@@ -1867,6 +2044,7 @@ class CMDataset(_CDataset):
     def _get_time_attr(self, attr: str) -> pd.Series:
         """Helper method to get temporal attributes using accessor"""
         from ingester3.extensions import CMAccessor
+
         time_ids = self.dataframe.index.get_level_values(self._time_id)
         temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
         return getattr(temp_df.m, attr)
