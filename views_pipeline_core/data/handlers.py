@@ -545,7 +545,9 @@ class _ViewsDataset:
         if np.all(np.isnan(samples)):
             return np.nan
         return self._simon_compute_single_map(
-            samples=samples[~np.isnan(samples)], enforce_non_negative=enforce_non_negative, alpha=alpha
+            samples=samples[~np.isnan(samples)],
+            enforce_non_negative=enforce_non_negative,
+            alpha=alpha,
         )
 
     def _simon_compute_single_map(self, samples, enforce_non_negative=False, alpha=0.9):
@@ -573,7 +575,9 @@ class _ViewsDataset:
             logger.error("❌ No valid samples. Returning MAP = 0.0")
             return 0.0
 
-        map = self._posterior_distribution_analyser.analyze(samples=samples, credible_masses=(alpha,)).get("map")
+        map = self._posterior_distribution_analyser.analyze(
+            samples=samples, credible_masses=(alpha,)
+        ).get("map")
         if enforce_non_negative and map < 0:
             logger.warning(
                 f"📢  Negative MAP estimate detected ({map:.5f}). Setting to 0."
@@ -1412,7 +1416,10 @@ class _ViewsDataset:
         return ax
 
     def calculate_map(
-        self, enforce_non_negative: bool = False, features: Optional[List[str]] = None, alpha: float = 0.9
+        self,
+        enforce_non_negative: bool = False,
+        features: Optional[List[str]] = None,
+        alpha: float = 0.9,
     ) -> pd.DataFrame:
         """
         Calculate Maximum A Posteriori (MAP) estimates for prediction distributions.
@@ -1586,7 +1593,7 @@ class _PGDataset(_ViewsDataset):
             )
 
     def _build_entity_metadata_cache(self):
-        """Build a cache mapping country_ids to metadata using the CAccessor"""
+        """Build a cache mapping country_ids to metadata using the QS"""
         if self._entity_metadata_cache is not None:
             return
         else:
@@ -1621,7 +1628,17 @@ class _PGDataset(_ViewsDataset):
                 self._entity_metadata_cache.rename(
                     columns={"priogrid_gid": self._entity_id}, inplace=True
                 )
-            self._entity_metadata_cache.set_index([self._time_id, self._entity_id], inplace=True)
+            self._entity_metadata_cache.set_index(
+                [self._time_id, self._entity_id], inplace=True
+            )
+
+            # Extend metadata to cover all time_ids in the dataset, forward-filled per entity. EXPERIMENTAL AND UNNECESSARY. DO NOT UNCOMMENT!!!!!!!!
+            # full_idx = pd.MultiIndex.from_product(
+            #     [self._time_values, self._entity_values],
+            #     names=[self._time_id, self._entity_id]
+            # )
+            # self._entity_metadata_cache = self._entity_metadata_cache.reindex(full_idx)
+            # self._entity_metadata_cache = self._entity_metadata_cache.groupby(self._entity_id, group_keys=False).ffill()
 
     def _get_entity_attr(self, attr: str) -> pd.Series:
         """Helper method to get entity attributes using accessor"""
@@ -1682,6 +1699,31 @@ class _PGDataset(_ViewsDataset):
                 self._country_to_grids_cache[country_id] = []
             self._country_to_grids_cache[country_id].append(entity_id)
 
+    # def get_subset_by_country_id(
+    #     self, country_ids: List[int] = None, time_ids: List[int] = None
+    # ) -> pd.DataFrame:
+    #     """
+    #     Extract a subset of the dataset for specific country IDs and time IDs.
+
+    #     Args:
+    #         country_ids: List of country IDs to include.
+    #         time_ids: List of time IDs to include.
+
+    #     Returns:
+    #         pd.DataFrame: Subset of the dataset filtered by the specified country and time IDs.
+    #     """
+    #     if self._country_to_grids_cache is None:
+    #         self._build_country_to_grids_cache()
+    #     # Collect all grid_ids for the given country_ids
+    #     entity_ids = []
+    #     for cid in country_ids:
+    #         entity_ids.extend(self._country_to_grids_cache.get(cid, []))
+    #     # Remove duplicates
+    #     entity_ids = list(set(entity_ids))
+    #     # Get the subset dataframe
+    #     return self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
+
+    # SUPPORT FOR DYNAMIC PG CELLS FOR COUNTRIES ACROSS TIME
     def get_subset_by_country_id(
         self, country_ids: List[int] = None, time_ids: List[int] = None
     ) -> pd.DataFrame:
@@ -1693,18 +1735,24 @@ class _PGDataset(_ViewsDataset):
             time_ids: List of time IDs to include.
 
         Returns:
-            pd.DataFrame: Subset of the dataset filtered by the specified country and time IDs.
+            pd.DataFrame: Subset filtered by the specified country and time IDs.
         """
-        if self._country_to_grids_cache is None:
-            self._build_country_to_grids_cache()
-        # Collect all grid_ids for the given country_ids
-        entity_ids = []
-        for cid in country_ids:
-            entity_ids.extend(self._country_to_grids_cache.get(cid, []))
-        # Remove duplicates
-        entity_ids = list(set(entity_ids))
-        # Get the subset dataframe
-        return self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
+        # Get country IDs for each (time_id, entity_id) pair
+        country_df = self.get_country_id()
+
+        # Create mask for selected country_ids
+        mask = country_df["country_id"].isin(country_ids)
+
+        # Apply time filter if specified
+        if time_ids is not None:
+            time_mask = country_df.index.get_level_values(self._time_id).isin(time_ids)
+            mask &= time_mask
+
+        # Get matching (time_id, entity_id) indices
+        matching_indices = country_df[mask].index
+
+        # Return subset dataframe
+        return self.dataframe.loc[matching_indices]
 
     def reconcile(
         self,
