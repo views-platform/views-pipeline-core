@@ -85,6 +85,15 @@ class _ViewsDataset:
     def _init_dataframe(
         self, dataframe: pd.DataFrame, targets: Optional[List[str]] = None
     ) -> None:
+        
+        # This is a hack and should be removed in the future when Viewser is updated to get rid of priogrid_gid.
+        if dataframe.index.names[1] == "priogrid_gid":
+            logger.warning(
+                "_PGDataset index 1 is 'priogrid_gid', renaming to 'priogrid_id'"
+            )
+            dataframe.index = dataframe.index.rename(
+                [dataframe.index.names[0], "priogrid_id"]
+            )
         self.original_columns = dataframe.columns.tolist()
 
         # Convert and sort FIRST before saving original index
@@ -1580,17 +1589,6 @@ class _PGDataset(_ViewsDataset):
 
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names[1] == "priogrid_gid":
-            logger.warning(
-                "PGDataset index 1 is 'priogrid_gid', renaming to 'priogrid_id'"
-            )
-            self.dataframe.index = self.dataframe.index.rename(
-                ["month_id", "priogrid_id"]
-            )
-        elif self.dataframe.index.names[1] != "priogrid_id":
-            raise ValueError(
-                f"PGDataset requires index 1 to be 'priogrid_id', found {self.dataframe.index.names}"
-            )
 
     def _build_entity_metadata_cache(self):
         """Build a cache mapping country_ids to metadata using the QS"""
