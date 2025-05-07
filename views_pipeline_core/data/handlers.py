@@ -1638,6 +1638,95 @@ class _PGDataset(_ViewsDataset):
             # self._entity_metadata_cache = self._entity_metadata_cache.reindex(full_idx)
             # self._entity_metadata_cache = self._entity_metadata_cache.groupby(self._entity_id, group_keys=False).ffill()
 
+    # def detect_country_changes(self) -> pd.DataFrame:
+    #     """
+    #     Identify country ownership changes for priogrid cells over time.
+        
+    #     Returns:
+    #         pd.DataFrame: Contains 'previous_country_id' column showing:
+    #             - Previous country ID if ownership changed
+    #             - NaN if no change or no previous value
+    #         Index matches original dataset's (time_id, entity_id)
+    #     """
+    #     # Get current country IDs with full temporal alignment
+    #     country_df = self.get_country_id()
+        
+    #     # 1. Get previous period's country ID using temporal alignment
+    #     previous_country = (country_df
+    #                         .groupby(level=self._entity_id, group_keys=False)
+    #                         .shift(1)
+    #                         .rename(columns={'country_id': 'previous_country_id'}))
+        
+    #     # 2. Detect actual changes while handling missing values
+    #     changed = (country_df['country_id'] != previous_country['previous_country_id'])
+        
+    #     # 3. Clear previous IDs where no change occurred
+    #     previous_country = previous_country.where(changed)
+        
+    #     # 4. Maintain original dataframe structure
+    #     return previous_country.reindex(self.dataframe.index)
+
+    def detect_country_changes(self, include_previous_name: bool = False) -> pd.DataFrame:
+        """
+        Track country ownership history with robust temporal handling.
+        
+        Parameters:
+            include_owner_name (bool): Whether to include country name column
+        
+        Returns:
+            pd.DataFrame: Contains columns:
+                - previous_country_id: Country ID (current ID if previous missing)
+                - previous_owner_name: Time-accurate country name
+        """
+        # Get base country information
+        country_df = self.get_country_id()
+        
+        # Calculate previous country IDs with temporal alignment
+        previous_country = (country_df
+                            .groupby(level=self._entity_id, group_keys=False)
+                            .shift(1)
+                            .rename(columns={'country_id': 'previous_country_id'}))
+        
+        # Handle missing previous country IDs using current information
+        current_country_ids = country_df['country_id']
+        missing_mask = previous_country['previous_country_id'].isna()
+        previous_country['previous_country_id'] = previous_country['previous_country_id'].fillna(current_country_ids)
+
+        if include_previous_name:
+            self._build_entity_metadata_cache()
+            
+            # Create optimized name lookup structure
+            time_country_names = (
+                self._entity_metadata_cache
+                .reset_index()[[self._time_id, 'country_id', 'name']]
+                .drop_duplicates([self._time_id, 'country_id'])
+                .set_index([self._time_id, 'country_id'])['name']
+            )
+
+            # Prepare temporal lookup coordinates
+            time_index = previous_country.index.get_level_values(self._time_id)
+            country_ids = previous_country['previous_country_id'].to_numpy()
+            
+            # Calculate temporal offsets (T-1 for original values, T for filled values)
+            time_offsets = time_index.to_numpy() - np.where(missing_mask, 0, 1)
+            
+            # Create MultiIndex for efficient reindexing
+            lookup_index = pd.MultiIndex.from_arrays(
+                [time_offsets, country_ids],
+                names=[self._time_id, 'country_id']
+            )
+            
+            # Perform safe name lookup with forward fill
+            previous_country['previous_name'] = (
+                time_country_names
+                .reindex(lookup_index)
+                .groupby('country_id')
+                .ffill()  # Handle missing historical names
+                .values
+            )
+
+        return previous_country.reindex(self.dataframe.index)
+
     def _get_entity_attr(self, attr: str) -> pd.Series:
         """Helper method to get entity attributes using accessor"""
         from ingester3.extensions import PgAccessor
