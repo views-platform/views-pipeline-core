@@ -32,6 +32,7 @@ class _ViewsDataset:
         source (Union[pd.DataFrame, str, Path]): The source can be a pandas DataFrame,
                                                  a string representing a file path,
                                                  or a Path object.
+        targets (Optional[List[str]]): List of target variable names.
         broadcast_features (bool): If True, broadcast scalar features to match sample size.
                                    If False, treat features as scalars stored in size-1 arrays
                                    and disable tensor operations.
@@ -85,7 +86,8 @@ class _ViewsDataset:
     def _init_dataframe(
         self, dataframe: pd.DataFrame, targets: Optional[List[str]] = None
     ) -> None:
-        
+        if not isinstance(dataframe, pd.DataFrame) or dataframe.empty:
+            raise ValueError("Dataframe is empty or not a valid DataFrame")
         # This is a hack and should be removed in the future when Viewser is updated to get rid of priogrid_gid.
         if dataframe.index.names[1] == "priogrid_gid":
             logger.warning(
@@ -359,9 +361,9 @@ class _ViewsDataset:
 
         try:
             return [col for col in self.dataframe.columns if col not in self.targets]
-        except TypeError:
+        except TypeError as e:
             raise TypeError(
-                f"Invalid type for targets: {type(self.targets)}. Expected list of strings like ['ln_sb_best']"
+                f"{e}: Probable cause: Invalid type for targets: {type(self.targets)}. Expected list of strings like ['ln_sb_best']"
             )
 
     def to_tensor(
