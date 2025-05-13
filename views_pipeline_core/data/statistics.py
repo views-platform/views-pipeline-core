@@ -154,8 +154,11 @@ class PosteriorAnalyzer:
                 )
 
             adjusted.append((new_low, new_high))
-
-        return adjusted
+        if len(adjusted) > 1:
+            self._compute_summary()
+            logger.debug(f"Adjusted HDIs: {adjusted}")
+        else:
+            return adjusted
 
 
     def summary_dict(self) -> Optional[Dict]:
