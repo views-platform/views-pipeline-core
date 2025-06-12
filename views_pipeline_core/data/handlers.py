@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
-from views_pipeline_core.data.statistics import PosteriorAnalyzer
+from views_pipeline_core.data.statistics import PosteriorDistributionAnalyzer
 from viewser import Queryset, Column
 
 from pathlib import Path
@@ -50,7 +50,7 @@ class _ViewsDataset:
             self._init_dataframe(read_dataframe(source), targets)
         else:
             raise ValueError("Invalid input type for ViewsDataset")
-        self._posterior_distribution_analyser = PosteriorAnalyzer()
+        self._posterior_distribution_analyser = PosteriorDistributionAnalyzer()
 
     def _preprocess_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -1258,7 +1258,7 @@ class _ViewsDataset:
 
     def calculate_hdi(self, alpha: float = 0.9) -> pd.DataFrame:
         """
-        Calculate Highest Density Intervals (HDIs) for prediction distributions using PosteriorAnalyzer.
+        Calculate Highest Density Intervals (HDIs) for prediction distributions using PosteriorDistributionAnalyzer.
 
         Parameters:
         alpha (float): Credibility level for HDI (e.g., 0.9 for 90% HDI).
@@ -2064,13 +2064,13 @@ class _CDataset(_ViewsDataset):
                 .set_index([self._time_id, self._entity_id])
             )
 
-    def _get_entity_attr(self, attr: str) -> pd.Series:
-        """Helper method to get country attributes using accessor"""
-        from ingester3.extensions import CAccessor
+    # def _get_entity_attr(self, attr: str) -> pd.Series:
+    #     """Helper method to get country attributes using accessor"""
+    #     from ingester3.extensions import CAccessor
 
-        entity_ids = self.dataframe.index.get_level_values(self._entity_id)
-        temp_df = pd.DataFrame({"c_id": entity_ids}, index=self.dataframe.index)
-        return getattr(temp_df.c, attr)
+    #     entity_ids = self.dataframe.index.get_level_values(self._entity_id)
+    #     temp_df = pd.DataFrame({"c_id": entity_ids}, index=self.dataframe.index)
+    #     return getattr(temp_df.c, attr)
 
     def get_isoab(self) -> pd.DataFrame:
         self._build_entity_metadata_cache()
@@ -2178,31 +2178,31 @@ class CMDataset(_CDataset):
                 f"CMDataset requires index 0 to be 'month_id', found {self.dataframe.index.names}"
             )
 
-    def _get_time_attr(self, attr: str) -> pd.Series:
-        """Helper method to get temporal attributes using accessor"""
-        from ingester3.extensions import CMAccessor
+    # def _get_time_attr(self, attr: str) -> pd.Series:
+    #     """Helper method to get temporal attributes using accessor"""
+    #     from ingester3.extensions import CMAccessor
 
-        time_ids = self.dataframe.index.get_level_values(self._time_id)
-        temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
-        return getattr(temp_df.m, attr)
+    #     time_ids = self.dataframe.index.get_level_values(self._time_id)
+    #     temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
+    #     return getattr(temp_df.m, attr)
 
-    def get_year(self) -> pd.DataFrame:
-        return self._get_time_attr("year").to_frame(name="year")
+    # def get_year(self) -> pd.DataFrame:
+    #     return self._get_time_attr("year").to_frame(name="year")
 
-    def get_month(self) -> pd.DataFrame:
-        return self._get_time_attr("month").to_frame(name="month")
+    # def get_month(self) -> pd.DataFrame:
+    #     return self._get_time_attr("month").to_frame(name="month")
 
-    def get_date(self) -> pd.DataFrame:
-        """Get first day of month as datetime"""
-        years = self.get_year()["year"]
-        months = self.get_month()["month"]
-        dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
-        return dates.to_frame(name="date")
+    # def get_date(self) -> pd.DataFrame:
+    #     """Get first day of month as datetime"""
+    #     years = self.get_year()["year"]
+    #     months = self.get_month()["month"]
+    #     dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
+    #     return dates.to_frame(name="date")
 
-    def get_quarter(self) -> pd.DataFrame:
-        """Get fiscal quarter from month"""
-        months = self.get_month()["month"]
-        return ((months - 1) // 3 + 1).to_frame(name="quarter")
+    # def get_quarter(self) -> pd.DataFrame:
+    #     """Get fiscal quarter from month"""
+    #     months = self.get_month()["month"]
+    #     return ((months - 1) // 3 + 1).to_frame(name="quarter")
 
 
 class CYDataset(_CDataset):

@@ -708,6 +708,8 @@ class ModelManager:
         Args:
             model_path (ModelPathManager): The path manager for the model.
         """
+        from views_pipeline_core.managers.log import LoggingManager
+        self._logger = LoggingManager(model_path=model_path).get_logger()
         self._model_repo = "views-models"
         self._entity = "views_pipeline"
 

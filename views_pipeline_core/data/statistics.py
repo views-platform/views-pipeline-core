@@ -8,7 +8,7 @@ from typing import Union, List, Tuple, Optional, Dict, TextIO
 
 logger = logging.getLogger(__name__)
 
-class PosteriorAnalyzer:
+class PosteriorDistributionAnalyzer:
     """
     A lightweight, fast posterior analyzer using empirical summaries:
     - MAP detection with optional zero-dominance logic

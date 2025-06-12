@@ -235,22 +235,22 @@ class HistoricalLineGraph:
         self._format_interactive_plot(fig, target)
         return fig.to_html(full_html=False) if as_html else fig
 
-        def _validate_entity_ids(self, entity_ids: Union[int, List[int]]) -> List[int]:
-            if isinstance(entity_ids, int):
-                entity_ids = [entity_ids]
-            valid_entities = []
-            for eid in entity_ids:
-                try:
-                    self.historical_dataset._get_entity_index(eid)
-                    self.forecast_dataset._get_entity_index(eid)
-                    valid_entities.append(eid)
-                except KeyError:
-                    logger.warning(f"Entity {eid} not found in datasets, skipping")
-            return valid_entities or list(
-                set(self.historical_dataset._entity_values).intersection(
-                    self.forecast_dataset._entity_values
-                )
-            )
+        # def _validate_entity_ids(self, entity_ids: Union[int, List[int]]) -> List[int]:
+        #     if isinstance(entity_ids, int):
+        #         entity_ids = [entity_ids]
+        #     valid_entities = []
+        #     for eid in entity_ids:
+        #         try:
+        #             self.historical_dataset._get_entity_index(eid)
+        #             self.forecast_dataset._get_entity_index(eid)
+        #             valid_entities.append(eid)
+        #         except KeyError:
+        #             logger.warning(f"Entity {eid} not found in datasets, skipping")
+        #     return valid_entities or list(
+        #         set(self.historical_dataset._entity_values).intersection(
+        #             self.forecast_dataset._entity_values
+        #         )
+        #     )
 
     # def _plot_interactive(
     #     self,
