@@ -4,7 +4,6 @@ import logging.config
 import yaml
 import importlib.resources
 import os
-from views_pipeline_core.managers.model import ModelPathManager
 
 
 class LoggingManager:
@@ -25,9 +24,8 @@ class LoggingManager:
         get_logger() -> logging.Logger:
             Returns the logger instance, setting it up if it hasn't been already.
     """
-
-    def __init__(self, model_path: ModelPathManager):
-        self.model_path = model_path
+    def __init__(self, model_path):
+        self._model_path = model_path
         self._default_level: int = logging.INFO
         self._logging_is_active = True
         self._logging_path = model_path.logging
@@ -76,7 +74,8 @@ class LoggingManager:
             logging.getLogger("azure").setLevel(logging.WARNING)
             
             return logging.getLogger()
-        return None
+        # Return a default logger if logging is not active
+        return logging.getLogger()
 
     def _load_logging_config(self) -> dict:
         """

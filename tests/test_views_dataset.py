@@ -2,7 +2,7 @@ import pytest
 import pandas as pd
 import numpy as np
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
-from views_pipeline_core.data.statistics import PosteriorAnalyzer
+from views_pipeline_core.data.statistics import PosteriorDistributionAnalyzer
 import scipy.stats as stats
 
 # Fixtures for test data
@@ -126,8 +126,8 @@ class TestStatisticalMethods:
             assert (lower <= upper).all()
     
     def test_posterior_analyzer(self):
-        """Test PosteriorAnalyzer's MAP containment and HDI nesting across distributions."""
-        failed_map, failed_nesting = PosteriorAnalyzer.test_posterior_analyzer(verbose=False)
+        """Test PosteriorDistributionAnalyzer's MAP containment and HDI nesting across distributions."""
+        failed_map, failed_nesting = PosteriorDistributionAnalyzer.test_posterior_analyzer(verbose=False)
         
         # Assert no MAP containment failures
         assert not failed_map, (

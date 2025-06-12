@@ -212,15 +212,10 @@ class TestParametrized:
 
         with patch("wandb.init"), patch("wandb.AlertLevel") as mock_alert_level, patch(
             "views_pipeline_core.managers.ensemble.add_wandb_metrics"
-        ) as mock_add_wandb_metrics, patch("wandb.config") as mock_config, patch(
-            "views_pipeline_core.wandb.utils.wandb_alert"
-        ) as mock_wandb_alert, patch(
-            "views_pipeline_core.managers.package.PackageManager"
-        ), patch(
-            "views_pipeline_core.managers.ensemble.logger"
-        ) as mock_logger, patch(
-            "views_pipeline_core.managers.ensemble.EnsembleManager._train_ensemble"
-        ) as mock_train_ensemble, patch(
+        ) as mock_add_wandb_metrics, \
+            patch("views_pipeline_core.managers.package.PackageManager"), \
+            patch("views_pipeline_core.managers.ensemble.logger") as mock_logger, \
+            patch("views_pipeline_core.managers.ensemble.EnsembleManager._train_ensemble") as mock_train_ensemble, patch(
             "views_pipeline_core.managers.ensemble.EnsembleManager._evaluate_ensemble"
         ) as mock_evaluate_ensemble, patch(
             "views_pipeline_core.managers.ensemble.EnsembleManager._forecast_ensemble"
@@ -254,21 +249,21 @@ class TestParametrized:
                     f"Training model {manager.config['name']}..."
                 )
                 mock_train_ensemble.assert_called_once_with(args.saved)
-                mock_wandb_alert.assert_has_calls(
-                    [
-                        call(
-                            title="Running Ensemble",
-                            text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
-                            level=mock_alert_level.INFO,
-                        ),
-                        call(
-                            title=f"Training for {manager._model_path.target} {manager.config['name']} completed successfully.",
-                            text=f"",
-                            level=mock_alert_level.INFO,
-                        ),
-                    ],
-                    any_order=False,
-                )
+                # mock_wandb_alert.assert_has_calls(
+                #     [
+                #         call(
+                #             title="Running Ensemble",
+                #             text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
+                #             level=mock_alert_level.INFO,
+                #         ),
+                #         call(
+                #             title=f"Training for {manager._model_path.target} {manager.config['name']} completed successfully.",
+                #             text=f"",
+                #             level=mock_alert_level.INFO,
+                #         ),
+                #     ],
+                #     any_order=False,
+                # )
 
             if args.evaluate:
                 mock_logger.info.assert_any_call(
@@ -286,20 +281,20 @@ class TestParametrized:
                     f"Forecasting model {manager.config['name']}..."
                 )
                 mock_forecast_ensemble.assert_called_once
-                mock_wandb_alert.assert_has_calls(
-                    [
-                        call(
-                            title="Running Ensemble",
-                            text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
-                            level=mock_alert_level.INFO,
-                        ),
-                        call(
-                            title=f"Forecasting for ensemble {manager.config['name']} completed successfully.",
-                            level=mock_alert_level.INFO,
-                        ),
-                    ],
-                    any_order=False,
-                )
+                # mock_wandb_alert.assert_has_calls(
+                #     [
+                #         call(
+                #             title="Running Ensemble",
+                #             text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
+                #             level=mock_alert_level.INFO,
+                #         ),
+                #         call(
+                #             title=f"Forecasting for ensemble {manager.config['name']} completed successfully.",
+                #             level=mock_alert_level.INFO,
+                #         ),
+                #     ],
+                #     any_order=False,
+                # )
                 mock_handle_ensemble_log_creation.assert_called_once
                 mock_save_predictions.assert_called_once_with(
                     manager._forecast_ensemble(), manager._model_path.data_generated
@@ -317,7 +312,7 @@ class TestParametrized:
             mock_handle_ensemble_log_creation.reset_mock()
             mock_evaluate_prediction_dataframe
             mock_save_predictions.reset_mock()
-            mock_wandb_alert.reset_mock()
+            # mock_wandb_alert.reset_mock()
 
             mock_train_ensemble.side_effect = Exception("Train ensemble failed")
             mock_evaluate_ensemble.side_effect = Exception("Evaluate ensemble failed")
@@ -353,25 +348,25 @@ class TestParametrized:
                         ),
                     ]
                 )
-                mock_wandb_alert.assert_has_calls(
-                    [
-                        call(
-                            title="Running Ensemble",
-                            text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
-                            level=mock_alert_level.INFO,
-                        ),
-                        call(
-                            title=f"{manager._model_path.target.title()} Training Error",
-                            text=f"An error occurred during training of {manager._model_path.target} {manager.config['name']}: {mock_format_exc()}",
-                            level=mock_alert_level.ERROR,
-                        ),
-                        call(
-                            title=f"{manager._model_path.target.title()} Task Execution Error",
-                            text=f"An error occurred during the execution of {manager._model_path.target} tasks for {manager.config['name']}: {mock_train_ensemble.side_effect}",
-                            level=mock_alert_level.ERROR,
-                        ),
-                    ]
-                )
+                # mock_wandb_alert.assert_has_calls(
+                #     [
+                #         call(
+                #             title="Running Ensemble",
+                #             text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
+                #             level=mock_alert_level.INFO,
+                #         ),
+                #         call(
+                #             title=f"{manager._model_path.target.title()} Training Error",
+                #             text=f"An error occurred during training of {manager._model_path.target} {manager.config['name']}: {mock_format_exc()}",
+                #             level=mock_alert_level.ERROR,
+                #         ),
+                #         call(
+                #             title=f"{manager._model_path.target.title()} Task Execution Error",
+                #             text=f"An error occurred during the execution of {manager._model_path.target} tasks for {manager.config['name']}: {mock_train_ensemble.side_effect}",
+                #             level=mock_alert_level.ERROR,
+                #         ),
+                #     ]
+                # )
 
             elif args.evaluate:  # elif, since we can use the flags together
                 mock_logger.error.assert_has_calls(
@@ -386,25 +381,25 @@ class TestParametrized:
                         ),
                     ]
                 )
-                mock_wandb_alert.assert_has_calls(
-                    [
-                        call(
-                            title="Running Ensemble",
-                            text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
-                            level=mock_alert_level.INFO,
-                        ),
-                        call(
-                            title=f"{manager._model_path.target.title()} Evaluation Error",
-                            text=f"An error occurred during evaluation of {manager._model_path.target} {manager.config['name']}: {mock_format_exc()}",
-                            level=mock_alert_level.ERROR,
-                        ),
-                        call(
-                            title=f"{manager._model_path.target.title()} Task Execution Error",
-                            text=f"An error occurred during the execution of {manager._model_path.target} tasks for {manager.config['name']}: {mock_evaluate_ensemble.side_effect}",
-                            level=mock_alert_level.ERROR,
-                        ),
-                    ]
-                )
+                # mock_wandb_alert.assert_has_calls(
+                #     [
+                #         call(
+                #             title="Running Ensemble",
+                #             text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
+                #             level=mock_alert_level.INFO,
+                #         ),
+                #         call(
+                #             title=f"{manager._model_path.target.title()} Evaluation Error",
+                #             text=f"An error occurred during evaluation of {manager._model_path.target} {manager.config['name']}: {mock_format_exc()}",
+                #             level=mock_alert_level.ERROR,
+                #         ),
+                #         call(
+                #             title=f"{manager._model_path.target.title()} Task Execution Error",
+                #             text=f"An error occurred during the execution of {manager._model_path.target} tasks for {manager.config['name']}: {mock_evaluate_ensemble.side_effect}",
+                #             level=mock_alert_level.ERROR,
+                #         ),
+                #     ]
+                # )
 
             elif args.forecast:
                 mock_logger.error.assert_has_calls(
@@ -419,26 +414,26 @@ class TestParametrized:
                         ),
                     ]
                 )
-                mock_wandb_alert.assert_has_calls(
-                    [
-                        call(
-                            title="Running Ensemble",
-                            text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
-                            level=mock_alert_level.INFO,
-                        ),
-                        call(
-                            title="Model Forecasting Error",
-                            text=f"An error occurred during forecasting of {manager._model_path.target} {manager.config['name']}: {mock_format_exc()}",
-                            level=mock_alert_level.ERROR,
-                        ),
-                        call(
-                            title=f"{manager._model_path.target.title()} Task Execution Error",
-                            text=f"An error occurred during the execution of {manager._model_path.target} tasks for {manager.config['name']}: {mock_forecast_ensemble.side_effect}",
-                            level=mock_alert_level.ERROR,
-                        ),
-                    ],
-                    any_order=True,
-                )
+                # mock_wandb_alert.assert_has_calls(
+                #     [
+                #         call(
+                #             title="Running Ensemble",
+                #             text=f"Ensemble Name: {str(manager.config['name'])}\nConstituent Models: {str(manager.config['models'])}",
+                #             level=mock_alert_level.INFO,
+                #         ),
+                #         call(
+                #             title="Model Forecasting Error",
+                #             text=f"An error occurred during forecasting of {manager._model_path.target} {manager.config['name']}: {mock_format_exc()}",
+                #             level=mock_alert_level.ERROR,
+                #         ),
+                #         call(
+                #             title=f"{manager._model_path.target.title()} Task Execution Error",
+                #             text=f"An error occurred during the execution of {manager._model_path.target} tasks for {manager.config['name']}: {mock_forecast_ensemble.side_effect}",
+                #             level=mock_alert_level.ERROR,
+                #         ),
+                #     ],
+                #     any_order=True,
+                # )
 
                 # TODO: assert call counts
 

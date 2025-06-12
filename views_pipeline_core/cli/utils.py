@@ -98,7 +98,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def validate_arguments(args):
+from argparse import Namespace
+
+def validate_arguments(args: Namespace):
     if args.report and args.run_type != "forecasting" and args.forecast:
         print(
             "Error: --report flag can only be used with --run_type forecasting. Exiting."

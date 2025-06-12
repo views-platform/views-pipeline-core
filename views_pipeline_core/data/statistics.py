@@ -74,7 +74,7 @@ class PosteriorDistributionAnalyzer:
         # Mass at (near) zero
         mass_at_zero = np.mean(np.isclose(self.samples, 0.0, atol=1e-8))
         if mass_at_zero >= self.zero_mass_threshold:
-            logger.info(f"MAP forced to 0.0 due to high zero-mass ({mass_at_zero:.3f} >= {self.zero_mass_threshold})")
+            #logger.info(f"MAP forced to 0.0 due to high zero-mass ({mass_at_zero:.3f} >= {self.zero_mass_threshold})")
             map_val = 0.0
         else:
             hist, bin_edges = np.histogram(self.samples, bins=self.bins, density=True)
@@ -128,12 +128,12 @@ class PosteriorDistributionAnalyzer:
         low, high = hdis[0]
         if map_val < low:
             shift = low - map_val
-            logger.info(f"Shifting narrowest HDI left by {shift:.4f} to include MAP={map_val:.4f}")
+            #logger.info(f"Shifting narrowest HDI left by {shift:.4f} to include MAP={map_val:.4f}")
             low -= shift
             high -= shift
         elif map_val > high:
             shift = map_val - high
-            logger.info(f"Shifting narrowest HDI right by {shift:.4f} to include MAP={map_val:.4f}")
+            #logger.info(f"Shifting narrowest HDI right by {shift:.4f} to include MAP={map_val:.4f}")
             low += shift
             high += shift
         adjusted.append((low, high))
@@ -241,7 +241,7 @@ class PosteriorDistributionAnalyzer:
     @staticmethod
     def test_posterior_analyzer(verbose: bool = True) -> Tuple[List[str], List[str]]:
         """
-        Run validation tests on PosteriorAnalyzer for various distribution types.
+        Run validation tests on PosteriorDistributionAnalyzer for various distribution types.
 
         Verifies:
         - MAP is within all HDIs
@@ -283,7 +283,7 @@ class PosteriorDistributionAnalyzer:
 
         for name, samples in test_cases.items():
             try:
-                analyzer = PosteriorAnalyzer()
+                analyzer = PosteriorDistributionAnalyzer()
                 result = analyzer.analyze(samples=samples, credible_masses=(0.5, 0.95, 0.99))
                 hdis = result['hdis']
                 map_val = result['map']
