@@ -154,11 +154,12 @@ class PosteriorDistributionAnalyzer:
                 )
 
             adjusted.append((new_low, new_high))
-        if len(adjusted) > 1:
-            self._compute_summary()
-            logger.debug(f"Adjusted HDIs: {adjusted}")
-        else:
-            return adjusted
+        # if len(adjusted) > 1:
+        #     self._compute_summary()
+        #     # logger.debug(f"Adjusted HDIs: {adjusted}")
+        # else:
+        #     return adjusted
+        return adjusted
 
 
     def summary_dict(self) -> Optional[Dict]:
@@ -241,7 +242,7 @@ class PosteriorDistributionAnalyzer:
     @staticmethod
     def test_posterior_analyzer(verbose: bool = True) -> Tuple[List[str], List[str]]:
         """
-        Run validation tests on PosteriorAnalyzer for various distribution types.
+        Run validation tests on PosteriorDistributionAnalyzer for various distribution types.
 
         Verifies:
         - MAP is within all HDIs
@@ -283,7 +284,7 @@ class PosteriorDistributionAnalyzer:
 
         for name, samples in test_cases.items():
             try:
-                analyzer = PosteriorAnalyzer()
+                analyzer = PosteriorDistributionAnalyzer()
                 result = analyzer.analyze(samples=samples, credible_masses=(0.5, 0.95, 0.99))
                 hdis = result['hdis']
                 map_val = result['map']

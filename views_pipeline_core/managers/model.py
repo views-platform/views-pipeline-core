@@ -709,7 +709,6 @@ class ModelManager:
             model_path (ModelPathManager): The path manager for the model.
         """
         from views_pipeline_core.managers.log import LoggingManager
-        self._logger = LoggingManager(model_path=model_path).get_logger()
         self._model_repo = "views-models"
         self._entity = "views_pipeline"
 
@@ -717,6 +716,7 @@ class ModelManager:
         self._wandb_notifications = wandb_notifications
         self._use_prediction_store = use_prediction_store
         self._sweep = False
+        self._logger = LoggingManager(model_path=self._model_path).get_logger()
 
         self._script_paths = self._model_path.get_scripts()
         self._config_deployment = self.__load_config(

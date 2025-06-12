@@ -56,7 +56,7 @@ class EnsembleManager(ForecastingModelManager):
     def __init__(
         self,
         ensemble_path: EnsemblePathManager,
-        wandb_notifications: bool = False,
+        wandb_notifications: bool = True,
         use_prediction_store: bool = True,
     ) -> None:
         """
@@ -68,6 +68,7 @@ class EnsembleManager(ForecastingModelManager):
             use_prediction_store (bool, optional): Flag to enable or disable the use of the prediction store. Defaults to True.
         """
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
+        self.config = {}
         if self.configs.get("reconciliation", None) is not None:
             if self.configs.get("reconciliation") == "pgm_cm_point":
                 self.__get_point_reconciliation_target()
@@ -280,11 +281,11 @@ class EnsembleManager(ForecastingModelManager):
         ):
             add_wandb_metrics()
             try:
-                logger.info(f"Training model {self.config['name']}...")
+                logger.info(f"Training model {config['name']}...")
                 self._train_ensemble(use_saved)
 
                 wandb_alert(
-                    title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
+                    title=f"Training for {self._model_path.target} {config['name']} completed successfully.",
                     wandb_notifications=self._wandb_notifications,
                     models_path=self._model_path.models,
                 )
@@ -296,7 +297,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 wandb_alert(
                     title=f"{self._model_path.target.title()} Training Error",
-                    text=f"An error occurred during training of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
+                    text=f"An error occurred during training of {self._model_path.target} {config['name']}: {traceback.format_exc()}",
                     level=wandb.AlertLevel.ERROR,
                     wandb_notifications=self._wandb_notifications,
                     models_path=self._model_path.models,
@@ -321,15 +322,15 @@ class EnsembleManager(ForecastingModelManager):
         ):
             add_wandb_metrics()
             try:
-                logger.info(f"Evaluating model {self.config['name']}...")
+                logger.info(f"Evaluating model {config['name']}...")
                 df_predictions = self._evaluate_ensemble(self._eval_type)
                 handle_ensemble_log_creation(
-                    model_path=self._model_path, config=self.config
+                    model_path=self._model_path, config=config
                 )
                 self._evaluate_prediction_dataframe(df_predictions, ensemble=True)
 
                 wandb_alert(
-                    title=f"Evaluation for {self._model_path.target} {self.config['name']} completed successfully.",
+                    title=f"Evaluation for {self._model_path.target} {config['name']} completed successfully.",
                     wandb_notifications=self._wandb_notifications,
                     models_path=self._model_path.models,
                 )
@@ -338,7 +339,7 @@ class EnsembleManager(ForecastingModelManager):
                 logger.error(f"Error evaluating model: {e}", exc_info=True)
                 wandb_alert(
                     title=f"{self._model_path.target.title()} Evaluation Error",
-                    text=f"An error occurred during evaluation of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
+                    text=f"An error occurred during evaluation of {self._model_path.target} {config['name']}: {traceback.format_exc()}",
                     level=wandb.AlertLevel.ERROR,
                     wandb_notifications=self._wandb_notifications,
                     models_path=self._model_path.models,
@@ -363,16 +364,16 @@ class EnsembleManager(ForecastingModelManager):
         ):
             add_wandb_metrics()
             try:
-                logger.info(f"Forecasting model {self.config['name']}...")
+                logger.info(f"Forecasting model {config['name']}...")
                 df_prediction = self._forecast_ensemble()
 
                 wandb_alert(
-                    title=f"Forecasting for {self._model_path.target} {self.config['name']} completed successfully.",
+                    title=f"Forecasting for {self._model_path.target} {config['name']} completed successfully.",
                     wandb_notifications=self._wandb_notifications,
                     models_path=self._model_path.models,
                 )
                 handle_ensemble_log_creation(
-                    model_path=self._model_path, config=self.config
+                    model_path=self._model_path, config=config
                 )
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
@@ -383,7 +384,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 wandb_alert(
                     title="Model Forecasting Error",
-                    text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
+                    text=f"An error occurred during forecasting of {self._model_path.target} {config['name']}: {traceback.format_exc()}",
                     level=wandb.AlertLevel.ERROR,
                     wandb_notifications=self._wandb_notifications,
                     models_path=self._model_path.models,
