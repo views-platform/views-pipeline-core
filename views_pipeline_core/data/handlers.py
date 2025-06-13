@@ -1923,7 +1923,7 @@ class _PGDataset(_ViewsDataset):
             }
         )
 
-    def get_country_iso(self) -> pd.DataFrame:
+    def get_isoab(self) -> pd.DataFrame:
         """Get ISO code for the country of each priogrid"""
         # country_ids = self._get_entity_attr("c_id")
         # temp_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)

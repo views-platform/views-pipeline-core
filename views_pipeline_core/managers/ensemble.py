@@ -14,6 +14,8 @@ from views_pipeline_core.models.check import validate_ensemble_model
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.ensembles import reconciliation
+from views_pipeline_core.managers.reconciliation import ReconciliationManager
+from views_pipeline_core.data.handlers import _PGDataset, _CDataset
 
 logger = logging.getLogger(__name__)
 
@@ -69,57 +71,85 @@ class EnsembleManager(ForecastingModelManager):
         """
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
         self.config = {}
-        if self.configs.get("reconciliation", None) is not None:
-            if self.configs.get("reconciliation") == "pgm_cm_point":
-                self.__get_point_reconciliation_target()
-            else:
-                self.reconcile_with_target = None
-        else:
-            self.reconcile_with_target = None
+        self.__activate_reconciliation = False
+        # if self.configs.get("reconciliation", None) is not None:
+        #     if self.configs.get("reconciliation") == "pgm_cm_point":
+        #         self.__get_point_reconciliation_target()
+        #     else:
+        #         self.reconcile_with_target = None
+        # else:
+        #     self.reconcile_with_target = None
 
-    def __get_point_reconciliation_target(self):
+    # def __get_point_reconciliation_target(self):
 
-        #########
-        # Changes to take note of:
-        # 1. depvar is now a list of targets or just a string. Both cases need to be handled
-        # 2. Some models may produce forecasts with multiple targets
-        # 3. A point prediction can look like this: [1.234] or just 1.234 in the prediction column. We need to handle both cases
-        #########
+    #     #########
+    #     # Changes to take note of:
+    #     # 1. depvar is now a list of targets or just a string. Both cases need to be handled
+    #     # 2. Some models may produce forecasts with multiple targets
+    #     # 3. A point prediction can look like this: [1.234] or just 1.234 in the prediction column. We need to handle both cases
+    #     #########
         
-        reconcile_with = self.configs["reconcile_with"]
-        reconcile_with_path = EnsemblePathManager(reconcile_with)
+    #     reconcile_with = self.configs["reconcile_with"]
+    #     reconcile_with_path = EnsemblePathManager(reconcile_with)
 
-        # reconcile_with_script_paths = reconcile_with_path.get_scripts()
-        # script_name = 'config_meta.py'
-        # script_path = reconcile_with_script_paths[script_name]
+    #     # reconcile_with_script_paths = reconcile_with_path.get_scripts()
+    #     # script_name = 'config_meta.py'
+    #     # script_path = reconcile_with_script_paths[script_name]
 
-        # spec = importlib.util.spec_from_file_location(script_name, script_path)
-        # config_module = importlib.util.module_from_spec(spec)
+    #     # spec = importlib.util.spec_from_file_location(script_name, script_path)
+    #     # config_module = importlib.util.module_from_spec(spec)
 
-        # sys.modules[script_name] = config_module
-        # spec.loader.exec_module(config_module)
+    #     # sys.modules[script_name] = config_module
+    #     # spec.loader.exec_module(config_module)
 
-        reconcile_with_meta_config = EnsembleManager(reconcile_with_path).configs # configs is a concat of all the config dicts.
+    #     reconcile_with_meta_config = EnsembleManager(reconcile_with_path).configs # configs is a concat of all the config dicts.
 
-        try:
-            _ = reconcile_with_meta_config['models']
-        except:
-            raise RuntimeError(f"Entity to reconcile with {self._config_meta['reconcile_with']}"
-                               f"does not appear to be an ensemble (no 'models' attribute)")
+    #     try:
+    #         _ = reconcile_with_meta_config['models']
+    #     except:
+    #         raise RuntimeError(f"Entity to reconcile with {self._config_meta['reconcile_with']}"
+    #                            f"does not appear to be an ensemble (no 'models' attribute)")
 
-        if self._config_meta['targets'] != reconcile_with_meta_config['targets']:
-            raise RuntimeError(f"Cannot reconcile ensembles with different target variables:"
-                               f" {self._config_meta['targets']}, {reconcile_with_meta_config['models']}")
+    #     if self._config_meta['targets'] != reconcile_with_meta_config['targets']:
+    #         raise RuntimeError(f"Cannot reconcile ensembles with different target variables:"
+    #                            f" {self._config_meta['targets']}, {reconcile_with_meta_config['models']}")
 
-        if self._config_meta['targets'].startswith('ln_') or self._config_meta['targets'].startswith('lx_'):
-            self.reconcile_logged = 'ln'
-        elif self._config_meta['targets'].startswith('lr_'):
-            self.reconcile_logged = 'lr'
-        else:
-            raise RuntimeError(f"Point reconcilation can only be performed on logged ('ln_ or 'lx')"
-                               f"or linear ('lr_) targets, not {self.config['targets']}")
+    #     if self._config_meta['targets'].startswith('ln_') or self._config_meta['targets'].startswith('lx_'):
+    #         self.reconcile_logged = 'ln'
+    #     elif self._config_meta['targets'].startswith('lr_'):
+    #         self.reconcile_logged = 'lr'
+    #     else:
+    #         raise RuntimeError(f"Point reconcilation can only be performed on logged ('ln_ or 'lx')"
+    #                            f"or linear ('lr_) targets, not {self.config['targets']}")
 
-        self.reconcile_with_target = reconcile_with_meta_config['targets']
+    #     self.reconcile_with_target = reconcile_with_meta_config['targets']
+
+    def __reconcile_pg_with_c(self, pg_dataframe: pd.DataFrame = None) -> Optional[pd.DataFrame]:
+        """
+        Perform reconciliation using PGM with CM.
+        This method is a placeholder for the actual reconciliation logic.
+        """
+        # Placeholder for reconciliation logic
+        cm_model = self.configs.get("reconcile_with", None)
+        if cm_model is None:
+            logger.info('No reconciliation model specified. Skipping reconciliation.')
+            return None
+        
+        latest_c_dataset = _CDataset(source=EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0])
+
+        if latest_c_dataset is None:
+            logger.error(f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed.")
+            return None
+        
+        latest_pg_dataset = _PGDataset(source=self._model_path._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0]) if pg_dataframe is None else _PGDataset(source=pg_dataframe)
+
+        if latest_pg_dataset is None:
+            logger.error(f"Could not find latest PG dataset for model {self._model_path.target}. Reconciliation cannot proceed.")
+            return None
+
+        reconciliation_manager = ReconciliationManager(c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset)
+        reconciled_pg = reconciliation_manager.reconcile(lr=0.01, max_iters=500, tol=1e-6)
+        return reconciled_pg
 
     @staticmethod
     def _get_shell_command(
@@ -460,52 +490,86 @@ class EnsembleManager(ForecastingModelManager):
             dfs, self.configs["aggregation"]
         )
 
-        if self.configs["reconciliation"] is not None:
-            if self.configs["reconciliation"] == 'pgm_cm_point':
+        # if self.configs["reconciliation"] is not None:
+        #     if self.configs["reconciliation"] == 'pgm_cm_point':
 
-                if self._use_prediction_store:
-                    logger.info(f"Performing point pgm-cm reconciliation")
-                    from views_forecasts.extensions import ForecastsStore, ViewsMetadata
-                else:
-                    raise RuntimeError(f'Cannot perform pgm_cm_point reconciliation without access to'
-                                       f'prediction store')
+        #         if self._use_prediction_store:
+        #             logger.info(f"Performing point pgm-cm reconciliation")
+        #             from views_forecasts.extensions import ForecastsStore, ViewsMetadata
+        #         else:
+        #             raise RuntimeError(f'Cannot perform pgm_cm_point reconciliation without access to'
+        #                                f'prediction store')
 
-                reconcile_with = self.configs["reconcile_with"]+'_predictions_forecasting'
-                pred_store_name = self._pred_store_name
+        #         reconcile_with = self.configs["reconcile_with"]+'_predictions_forecasting'
+        #         pred_store_name = self._pred_store_name
 
-                run_id = ViewsMetadata().get_run_id_from_name(pred_store_name)
+        #         run_id = ViewsMetadata().get_run_id_from_name(pred_store_name)
 
-                all_runs = ViewsMetadata().with_name(reconcile_with).fetch()['name'].to_list()
+        #         all_runs = ViewsMetadata().with_name(reconcile_with).fetch()['name'].to_list()
 
-                # fetch latest forecast from ensemble to be reconciled with
+        #         # fetch latest forecast from ensemble to be reconciled with
 
-                reconcile_with_forecasts = [fc for fc in all_runs if reconcile_with in fc and 'forecasting' in fc]
+        #         reconcile_with_forecasts = [fc for fc in all_runs if reconcile_with in fc and 'forecasting' in fc]
 
-                reconcile_with_forecasts.sort()
+        #         reconcile_with_forecasts.sort()
 
-                reconcile_with_forecast = reconcile_with_forecasts[-1]
+        #         reconcile_with_forecast = reconcile_with_forecasts[-1]
 
-                df_cm = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
+        #         df_cm = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
 
-                target_list = self.configs["targets"]
+        #         target_list = self.configs["targets"]
 
-                if type(target_list) != 'list':
-                    target_list = [target_list]
+        #         if type(target_list) != 'list':
+        #             target_list = [target_list]
 
-                for target in target_list:
-                    try:
-                        reconciler = reconciliation.ReconcilePgmWithCmPoint(df_pgm=df_prediction,
-                                                                            df_cm=df_cm,
-                                                                            target=f"pred_{target}",
-                                                                            target_type=self.reconcile_logged)
+        #         for target in target_list:
+        #             try:
+        #                 reconciler = reconciliation.ReconcilePgmWithCmPoint(df_pgm=df_prediction,
+        #                                                                     df_cm=df_cm,
+        #                                                                     target=f"pred_{target}",
+        #                                                                     target_type=self.reconcile_logged)
 
-                        df_prediction = reconciler.reconcile()
-                    except Exception as e:
-                        logger.error(
-                            f"Error during reconciliation: {e}",
-                            exc_info=True,
+        #                 df_prediction = reconciler.reconcile()
+        #             except Exception as e:
+        #                 logger.error(
+        #                     f"Error during reconciliation: {e}",
+        #                     exc_info=True,
+        #                 )
+        #                 continue
+        if self.__activate_reconciliation:
+            try:
+                reconciliation_type = self.configs.get("reconciliation", None)
+                if reconciliation_type == "pgm_cm_point":
+                    # If reconciliation is specified, reconcile the predictions
+                    pred = self.__reconcile_pg_with_c(pg_dataframe=df_prediction)
+                    wandb_alert(
+                            title=f"{self._model_path.target.title()} reconciliation complete",
+                            text=f"",
+                            level=wandb.AlertLevel.INFO,
+                            wandb_notifications=self._wandb_notifications,
+                            models_path=self._model_path.models,
                         )
-                        continue
+                else:
+                    logger.info(
+                        f"No valid reconciliation type specified. Returning predictions without reconciliation."
+                    )
+                if not isinstance(pred, pd.DataFrame):
+                    raise TypeError(
+                        f"Expected predictions to be a DataFrame, got {type(pred)} instead."
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Error during reconciliation: {e}",
+                    exc_info=True,
+                )
+                wandb_alert(
+                    title=f"{self._model_path.target.title()} Reconciliation Error",
+                    text=f"An error occurred during reconciliation of {self._model_path.target} {model_name}: {traceback.format_exc()}",
+                    level=wandb.AlertLevel.ERROR,
+                    wandb_notifications=self._wandb_notifications,
+                    models_path=self._model_path.models,
+                )
+                raise
 
         return df_prediction
 
@@ -730,5 +794,4 @@ class EnsembleManager(ForecastingModelManager):
                 pred = read_dataframe(
                     f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}"
                 )
-
         return pred

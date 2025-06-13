@@ -696,6 +696,8 @@ class ModelManager:
         _data_loader (ViewsDataLoader): Data loader for fetching and preprocessing data.
     """
 
+    __instances__ = 0
+
     def __init__(
         self,
         model_path: ModelPathManager,
@@ -708,6 +710,7 @@ class ModelManager:
         Args:
             model_path (ModelPathManager): The path manager for the model.
         """
+        self.__class__.__instances__ += 1
         from views_pipeline_core.managers.log import LoggingManager
         self._model_repo = "views-models"
         self._entity = "views_pipeline"
@@ -741,7 +744,8 @@ class ModelManager:
             self._pred_store_name = self.__get_pred_store_name()
 
         self.set_dataframe_format(format=".parquet")
-        self.__ascii_splash()
+        if self.__class__.__instances__ == 1:
+            self.__ascii_splash()
 
     def __ascii_splash(self) -> None:
         from art import text2art
