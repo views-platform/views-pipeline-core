@@ -124,7 +124,7 @@ class EnsembleManager(ForecastingModelManager):
 
     #     self.reconcile_with_target = reconcile_with_meta_config['targets']
 
-    def __reconcile_pg_with_c(self, pg_dataframe: pd.DataFrame = None) -> Optional[pd.DataFrame]:
+    def __reconcile_pg_with_c(self, pg_dataframe: pd.DataFrame = None, c_dataframe: pd.DataFrame = None) -> Optional[pd.DataFrame]:
         """
         Perform reconciliation using PGM with CM.
         This method is a placeholder for the actual reconciliation logic.
@@ -135,13 +135,26 @@ class EnsembleManager(ForecastingModelManager):
             logger.info('No reconciliation model specified. Skipping reconciliation.')
             return None
         
-        latest_c_dataset = _CDataset(source=EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0])
+        latest_c_dataset = _CDataset(source=EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0]) if c_dataframe is None else _CDataset(source=c_dataframe)
 
         if latest_c_dataset is None:
-            logger.error(f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed.")
-            return None
+            try:
+                if self._use_prediction_store:
+                    from views_forecasts.extensions import ForecastsStore, ViewsMetadata
+                    logger.info(f"Fetching latest C dataset for model {cm_model} from prediction store.")
+                    run_id = ViewsMetadata().get_run_id_from_name(self._pred_store_name)
+                    all_runs = ViewsMetadata().with_name(cm_model).fetch()['name'].to_list()
+                    # fetch latest forecast from ensemble to be reconciled with
+                    reconcile_with_forecasts = [fc for fc in all_runs if cm_model in fc and 'forecasting' in fc]
+                    reconcile_with_forecasts.sort()
+                    reconcile_with_forecast = reconcile_with_forecasts[-1]
+                    latest_c_dataset = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
+            except Exception as e:
+                logger.error(f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed.")
+                return None
         
         latest_pg_dataset = _PGDataset(source=self._model_path._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0]) if pg_dataframe is None else _PGDataset(source=pg_dataframe)
+
 
         if latest_pg_dataset is None:
             logger.error(f"Could not find latest PG dataset for model {self._model_path.target}. Reconciliation cannot proceed.")
@@ -541,7 +554,7 @@ class EnsembleManager(ForecastingModelManager):
                 reconciliation_type = self.configs.get("reconciliation", None)
                 if reconciliation_type == "pgm_cm_point":
                     # If reconciliation is specified, reconcile the predictions
-                    pred = self.__reconcile_pg_with_c(pg_dataframe=df_prediction)
+                    df_prediction = self.__reconcile_pg_with_c(pg_dataframe=df_prediction)
                     wandb_alert(
                             title=f"{self._model_path.target.title()} reconciliation complete",
                             text=f"",
@@ -553,9 +566,9 @@ class EnsembleManager(ForecastingModelManager):
                     logger.info(
                         f"No valid reconciliation type specified. Returning predictions without reconciliation."
                     )
-                if not isinstance(pred, pd.DataFrame):
+                if not isinstance(df_prediction, pd.DataFrame):
                     raise TypeError(
-                        f"Expected predictions to be a DataFrame, got {type(pred)} instead."
+                        f"Expected predictions to be a DataFrame, got {type(df_prediction)} instead."
                     )
             except Exception as e:
                 logger.error(
