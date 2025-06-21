@@ -3,6 +3,7 @@ import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
 from views_pipeline_core.data.statistics import PosteriorDistributionAnalyzer
+from views_pipeline_core.visualizations.distributions import PlotDistribution
 from viewser import Queryset, Column
 
 from pathlib import Path
@@ -596,130 +597,6 @@ class _ViewsDataset:
             map = max(0, map)
         return float(map)
 
-    # def _simon_compute_single_map(self, samples, enforce_non_negative=False):
-    #     """
-    #     Compute the Maximum A Posteriori (MAP) estimate using an HDI-based histogram and KDE refinement.
-
-    #     Parameters:
-    #     ----------
-    #     samples : array-like
-    #         Posterior samples.
-    #     enforce_non_negative : bool
-    #         If True, forces MAP estimate to be non-negative.
-
-    #     Returns:
-    #     -------
-    #     float
-    #         The estimated MAP.
-    #     """
-
-    #     samples = np.asarray(samples)
-    #     if np.all(np.isnan(samples)):
-    #         return np.nan
-
-    #     if len(samples) == 0:
-    #         logger.error("❌ No valid samples. Returning MAP = 0.0")
-    #         return 0.0
-
-    #     # **Compute HDI**
-    #     credible_mass = (
-    #         0.05 if stats.skew(samples) > 5 else (0.10 if len(samples) > 5000 else 0.25)
-    #     )
-    #     hdi_min, hdi_max = self._calculate_single_hdi(data=samples, alpha=credible_mass)
-    #     # print(hdi_min, hdi_max)
-
-    #     # **If HDI Contains Only One Value, Return That as MAP**
-    #     if hdi_min == hdi_max:
-    #         logger.info(
-    #             f"✅ HDI contains only one value ({hdi_min}). Setting MAP = {hdi_min}"
-    #         )
-    #         return float(hdi_min)
-
-    #     # **Select Only the HDI Region**
-    #     subset = samples[(samples >= hdi_min) & (samples <= hdi_max)]
-
-    #     # **Adaptive Histogram Binning (Freedman–Diaconis rule)**
-    #     # iqr_value = stats.iqr(subset)
-    #     # bin_width = 2 * iqr_value / (len(subset) ** (1/3))
-    #     # num_bins = max(20 if stats.skew(samples) > 5 else 10, int((subset.max() - subset.min()) / bin_width))
-    #     # hist, bin_edges = np.histogram(subset, bins=num_bins, density=True)
-    #     # bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-    #     try:
-    #         data_range = subset.max() - subset.min()
-
-    #         # Handle zero-range case first
-    #         if data_range == 0:
-    #             logger.info("📊 Zero data range detected. Using single bin.")
-    #             return float(subset[0])
-
-    #         iqr_value = stats.iqr(subset)
-    #         bin_width = (
-    #             2 * iqr_value / (len(subset) ** (1 / 3))
-    #             if iqr_value > 0
-    #             else data_range / 10
-    #         )
-
-    #         # Prevent division by zero and invalid bins
-    #         if bin_width <= 0:
-    #             bin_width = data_range / 10
-    #             logger.warning(f"⚠️  Invalid bin width {bin_width}. Using data_range/10")
-
-    #         num_bins = max(
-    #             20 if stats.skew(samples) > 5 else 10, int(data_range / bin_width)
-    #         )
-    #         num_bins = max(1, min(100, num_bins))  # Ensure 1-100 bins
-
-    #     except Exception as e:
-    #         logger.error(f"📊 Bin calculation failed: {str(e)}. Using fallback bins")
-    #         num_bins = 20
-
-    #     hist, bin_edges = np.histogram(subset, bins=num_bins, density=True)
-    #     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-    #     # **Find Histogram Mode**
-    #     mode_estimate = bin_centers[np.argmax(hist)]
-
-    #     # **Enforce Non-Negativity if Requested**
-    #     if enforce_non_negative and mode_estimate < 0:
-    #         logger.warning(
-    #             f"📢  Negative MAP estimate detected ({mode_estimate:.5f}). Setting to 0."
-    #         )
-    #         mode_estimate = max(0, mode_estimate)
-
-    #     return float(mode_estimate)
-
-    # def _determine_credible_mass(self, samples: np.ndarray) -> float:
-    #     """Determine optimal credible mass for HDI calculation"""
-    #     if len(samples) < 2:
-    #         return 0.25
-
-    #     try:
-    #         skewness = stats.skew(samples)
-    #     except:
-    #         skewness = 0
-
-    #     if skewness > 5:
-    #         return 0.05
-    #     elif len(samples) > 5000:
-    #         return 0.10
-    #     return 0.25
-
-    # def _create_adaptive_histogram(
-    #     self, subset: np.ndarray
-    # ) -> Tuple[np.ndarray, np.ndarray]:
-    #     """Create histogram with adaptive binning using Freedman-Diaconis rule"""
-    #     iqr_value = stats.iqr(subset)
-    #     if iqr_value == 0:  # Fallback for uniform distributions
-    #         bin_width = (subset.max() - subset.min()) / 10
-    #     else:
-    #         bin_width = 2 * iqr_value / (len(subset) ** (1 / 3))
-
-    #     if bin_width == 0:
-    #         return np.histogram(subset, bins=1)
-
-    #     num_bins = max(10, int((subset.max() - subset.min()) / bin_width))
-    #     return np.histogram(subset, bins=num_bins, density=True)
-
     def _create_map_dataframe(self, var_name: str, values: np.ndarray) -> pd.DataFrame:
         """Helper to format statistic results into DataFrame"""
         time_steps = self.dataframe.index.get_level_values(self._time_id).unique()
@@ -756,100 +633,21 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes
         """
-        # Create axis if not provided
-        ax = ax or plt.gca()
-
-        # Validate inputs
-        if var_name is None or var_name not in self.targets:
-            raise ValueError(f"Invalid variable {var_name}. Choose from {self.targets}")
-
-        # Get relevant data slice
-        tensor = self.to_tensor()
-        var_idx = self.targets.index(var_name)
-        data = tensor[..., var_idx]
-
-        # Slice data based on selections
-        if entity_id is not None:
-            entity_idx = self._get_entity_index(entity_id)
-            data = data[:, entity_idx : entity_idx + 1, ...]
-        if time_id is not None:
-            time_idx = self._get_time_index(time_id)
-            data = data[time_idx : time_idx + 1, ...]
-
-        # Flatten to 1D array of samples, handling NaNs
-        flat_data = data.flatten()
-        valid_samples = flat_data[~np.isnan(flat_data)]
-
-        # Handle empty data case
-        if len(valid_samples) == 0:
-            ax.text(0.5, 0.5, "No valid samples", ha="center", va="center")
-            return ax
-
-        # Calculate HDI and MAP simultaneously
-        hdi_min, hdi_max = self._calculate_single_hdi(valid_samples, hdi_alpha)
-        map_value = self._simon_compute_single_map(valid_samples)
-
-        # Adaptive histogram binning
-        data_range = valid_samples.max() - valid_samples.min()
-        bin_width = data_range / min(max_bins, len(valid_samples) // 10)
-        bins = min(max_bins, max(10, int(data_range / bin_width)))
-
-        # Plotting
-        sns.histplot(
-            valid_samples,
-            bins=bins,
-            kde=plot_kde,
+        self._distribution_plotter = (
+            PlotDistribution(dataset=self)
+            if not hasattr(self, "_distribution_plotter")
+            else self._distribution_plotter
+        )
+        self._distribution_plotter.plot_maximum_a_posteriori(
+            entity_id=entity_id,
+            time_id=time_id,
+            var_name=var_name,
+            hdi_alpha=hdi_alpha,
             ax=ax,
-            color="#3498DB",
-            alpha=0.6,
-            edgecolor="none",
-            label="Distribution",
+            colors=colors,
+            plot_kde=plot_kde,
+            max_bins=max_bins,
         )
-
-        # sns.histplot(valid_samples, bins=bins, kde=plot_kde, ax=ax,
-        #             color='#3498DB', alpha=0.6, edgecolor='none',
-        #             label='Distribution', bins=50)
-
-        if colors is None:
-            colors = sns.color_palette("colorblind", 1)
-
-        # Plot HDI
-        hdi_color = colors[0] if colors else "#2ECC71"
-        ax.axvspan(
-            hdi_min,
-            hdi_max,
-            color=hdi_color,
-            alpha=0.3,
-            label=f"{hdi_alpha*100:.0f}% HDI",
-        )
-
-        # Plot MAP
-        map_color = colors[1] if colors and len(colors) > 1 else "#E74C3C"
-        ax.axvline(
-            map_value,
-            color=map_color,
-            linestyle="--",
-            linewidth=2,
-            label=f"MAP Estimate: {map_value:.2f}",
-        )
-
-        # Dynamic title
-        title_parts = []
-        if entity_id is not None:
-            title_parts.append(f"Entity {entity_id}")
-        if time_id is not None:
-            title_parts.append(f"Time {time_id}")
-
-        title = f"{var_name} Distribution"
-        if title_parts:
-            title += f" ({' - '.join(title_parts)})"
-
-        ax.set_title(title)
-        ax.set_xlabel("Value")
-        ax.set_ylabel("Density")
-        ax.legend()
-
-        return ax
 
     def _prediction_to_dataframe(self, tensor: np.ndarray) -> pd.DataFrame:
         """
@@ -1348,83 +1146,19 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes: The plot axes
         """
-        if not self.is_prediction:
-            raise ValueError("HDI plotting only available for prediction dataframes")
-        if var_name not in self.targets or var_name is None:
-            raise ValueError(f"Invalid variable {var_name}. Choose from {self.targets}")
-        if not isinstance(alphas, tuple):
-            alphas = (alphas,)
-        if not all(0 < a < 1 for a in alphas):
-            raise ValueError("All alpha values must be between 0 and 1")
-
-        # Get relevant data
-        tensor = self.to_tensor()
-        var_idx = self.targets.index(var_name)
-        data = tensor[..., var_idx]
-
-        # Slice data based on selections
-        if entity_id is not None:
-            entity_idx = self._get_entity_index(entity_id)
-            data = data[:, entity_idx : entity_idx + 1, ...]
-        if time_id is not None:
-            time_idx = self._get_time_index(time_id)
-            data = data[time_idx : time_idx + 1, ...]
-
-        # Flatten to 1D array of samples
-        flat_data = data.flatten()
-        flat_data = flat_data[~np.isnan(flat_data)]  # Remove NaNs
-
-        # Create plot
-        ax = ax or plt.gca()
-        sns.histplot(
-            flat_data,
-            bins=50,
-            kde=True,
-            ax=ax,
-            color="blue",
-            alpha=0.6,
-            label="Distribution",
+        self._distribution_plotter = (
+            PlotDistribution(dataset=self)
+            if not hasattr(self, "_distribution_plotter")
+            else self._distribution_plotter
         )
-
-        # Create color map if not provided
-        if colors is None:
-            # Use a colorblind-friendly color palette
-            colors = sns.color_palette("colorblind", len(alphas))
-        elif len(colors) != len(alphas):
-            raise ValueError("Number of colors must match number of alpha levels")
-
-        # Sort alphas for intuitive color progression
-        sorted_alphas = sorted(alphas, reverse=True)
-
-        # Plot each HDI with distinct color
-        for alpha, color in zip(sorted_alphas, colors):
-            hdi_min, hdi_max = self._calculate_single_hdi(flat_data, alpha)
-
-            ax.fill_betweenx(
-                y=[0, ax.get_ylim()[1]],
-                x1=hdi_min,
-                x2=hdi_max,
-                color=color,
-                alpha=0.3,
-                label=f"{alpha*100:.0f}% HDI",
-            )
-
-        # Add annotations
-        title_parts = []
-        if entity_id is not None:
-            title_parts.append(f"Entity {entity_id}")
-        if time_id is not None:
-            title_parts.append(f"Time {time_id}")
-        title = f"{var_name} Posterior Distribution"
-        if title_parts:
-            title += f" ({' - '.join(title_parts)})"
-
-        ax.set_title(title)
-        ax.set_xlabel("Value")
-        ax.set_ylabel("Density")
-        ax.legend()
-
-        return ax
+        self._distribution_plotter.plot_highest_density_intervals(
+            entity_id=entity_id,
+            time_id=time_id,
+            var_name=var_name,
+            alphas=alphas,
+            colors=colors,
+            ax=ax,
+        )
 
     def calculate_map(
         self,
@@ -1587,7 +1321,6 @@ class _PGDataset(_ViewsDataset):
         self._country_id_cache = None
         self._country_to_grids_cache = None
         self.reconciled_dataframe = None
-        # self._country_ids = self.get_country_id().reset_index()["country_id"].unique()
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -1606,8 +1339,16 @@ class _PGDataset(_ViewsDataset):
                     .with_column(
                         Column("long", from_loa="priogrid", from_column="longitude")
                     )
+                    .with_column(
+                        Column("gwcode", from_loa="country", from_column="gwcode")
+                    )
                     .with_column(Column("row", from_loa="priogrid", from_column="row"))
                     .with_column(Column("col", from_loa="priogrid", from_column="col"))
+                    .with_column(
+                        Column(
+                            "year_id", from_loa="priogrid_year", from_column="year_id"
+                        )
+                    )
                     .with_column(
                         Column("isoab", from_loa="country", from_column="isoab")
                     )
@@ -1629,52 +1370,18 @@ class _PGDataset(_ViewsDataset):
                     columns={"priogrid_gid": self._entity_id}, inplace=True
                 )
             self._entity_metadata_cache.set_index(
-                [self._time_id, self._entity_id], inplace=True
+                [self._time_id, self._entity_id], inplace=True, drop=False
             )
 
-            # Extend metadata to cover all time_ids in the dataset, forward-filled per entity. EXPERIMENTAL AND UNNECESSARY. DO NOT UNCOMMENT!!!!!!!!
-            # full_idx = pd.MultiIndex.from_product(
-            #     [self._time_values, self._entity_values],
-            #     names=[self._time_id, self._entity_id]
-            # )
-            # self._entity_metadata_cache = self._entity_metadata_cache.reindex(full_idx)
-            # self._entity_metadata_cache = self._entity_metadata_cache.groupby(self._entity_id, group_keys=False).ffill()
-
-    # def detect_country_changes(self) -> pd.DataFrame:
-    #     """
-    #     Identify country ownership changes for priogrid cells over time.
-        
-    #     Returns:
-    #         pd.DataFrame: Contains 'previous_country_id' column showing:
-    #             - Previous country ID if ownership changed
-    #             - NaN if no change or no previous value
-    #         Index matches original dataset's (time_id, entity_id)
-    #     """
-    #     # Get current country IDs with full temporal alignment
-    #     country_df = self.get_country_id()
-        
-    #     # 1. Get previous period's country ID using temporal alignment
-    #     previous_country = (country_df
-    #                         .groupby(level=self._entity_id, group_keys=False)
-    #                         .shift(1)
-    #                         .rename(columns={'country_id': 'previous_country_id'}))
-        
-    #     # 2. Detect actual changes while handling missing values
-    #     changed = (country_df['country_id'] != previous_country['previous_country_id'])
-        
-    #     # 3. Clear previous IDs where no change occurred
-    #     previous_country = previous_country.where(changed)
-        
-    #     # 4. Maintain original dataframe structure
-    #     return previous_country.reindex(self.dataframe.index)
-
-    def detect_country_changes(self, include_previous_name: bool = False) -> pd.DataFrame:
+    def detect_country_changes(
+        self, include_previous_name: bool = False
+    ) -> pd.DataFrame:
         """
         Track country ownership history with robust temporal handling.
-        
+
         Parameters:
             include_owner_name (bool): Whether to include country name column
-        
+
         Returns:
             pd.DataFrame: Contains columns:
                 - previous_country_id: Country ID (current ID if previous missing)
@@ -1682,90 +1389,57 @@ class _PGDataset(_ViewsDataset):
         """
         # Get base country information
         country_df = self.get_country_id()
-        
+
         # Calculate previous country IDs with temporal alignment
-        previous_country = (country_df
-                            .groupby(level=self._entity_id, group_keys=False)
-                            .shift(1)
-                            .rename(columns={'country_id': 'previous_country_id'}))
-        
+        previous_country = (
+            country_df.groupby(level=self._entity_id, group_keys=False)
+            .shift(1)
+            .rename(columns={"country_id": "previous_country_id"})
+        )
+
         # Handle missing previous country IDs using current information
-        current_country_ids = country_df['country_id']
-        missing_mask = previous_country['previous_country_id'].isna()
-        previous_country['previous_country_id'] = previous_country['previous_country_id'].fillna(current_country_ids)
+        current_country_ids = country_df["country_id"]
+        missing_mask = previous_country["previous_country_id"].isna()
+        previous_country["previous_country_id"] = previous_country[
+            "previous_country_id"
+        ].fillna(current_country_ids)
 
         if include_previous_name:
             self._build_entity_metadata_cache()
-            
+
             # Create optimized name lookup structure
             time_country_names = (
-                self._entity_metadata_cache
-                .reset_index()[[self._time_id, 'country_id', 'name']]
-                .drop_duplicates([self._time_id, 'country_id'])
-                .set_index([self._time_id, 'country_id'])['name']
+                self._entity_metadata_cache.reset_index()[
+                    [self._time_id, "country_id", "name"]
+                ]
+                .drop_duplicates([self._time_id, "country_id"])
+                .set_index([self._time_id, "country_id"])["name"]
             )
 
             # Prepare temporal lookup coordinates
             time_index = previous_country.index.get_level_values(self._time_id)
-            country_ids = previous_country['previous_country_id'].to_numpy()
-            
+            country_ids = previous_country["previous_country_id"].to_numpy()
+
             # Calculate temporal offsets (T-1 for original values, T for filled values)
             time_offsets = time_index.to_numpy() - np.where(missing_mask, 0, 1)
-            
+
             # Create MultiIndex for efficient reindexing
             lookup_index = pd.MultiIndex.from_arrays(
-                [time_offsets, country_ids],
-                names=[self._time_id, 'country_id']
+                [time_offsets, country_ids], names=[self._time_id, "country_id"]
             )
-            
+
             # Perform safe name lookup with forward fill
-            previous_country['previous_name'] = (
-                time_country_names
-                .reindex(lookup_index)
-                .groupby('country_id')
+            previous_country["previous_name"] = (
+                time_country_names.reindex(lookup_index)
+                .groupby("country_id")
                 .ffill()  # Handle missing historical names
                 .values
             )
 
         return previous_country.reindex(self.dataframe.index)
 
-    def _get_entity_attr(self, attr: str) -> pd.Series:
-        """Helper method to get entity attributes using accessor"""
-        from ingester3.extensions import PgAccessor
-
-        entity_ids = self.dataframe.index.get_level_values(self._entity_id)
-        temp_df = pd.DataFrame({"pg_id": entity_ids}, index=self.dataframe.index)
-        return getattr(temp_df.pg, attr)
-
     def get_country_id(self) -> pd.DataFrame:
         """Get country ID for each priogrid-month combination."""
-        # if self._country_id_cache is None:
-        #     from viewser import Queryset, Column
-
-        #     # Fetch the country_series data using the specified Queryset
-        #     country_series = (
-        #         Queryset("jed_pgm_cm", "priogrid_month")
-        #         .with_column(
-        #             Column(
-        #                 "country_id", from_loa="country_month", from_column="country_id"
-        #             )
-        #         )
-        #         .fetch()
-        #     ).reset_index()
-        #     # Rename 'priogrid_gid' to match the entity_id name used in the dataset (likely 'priogrid_id')
-        #     country_series = country_series.rename(
-        #         columns={"priogrid_gid": self._entity_id}
-        #     )
-        #     # Set the index to month_id and priogrid_id (entity_id) for proper alignment
-        #     country_series = country_series.set_index([self._time_id, self._entity_id])
-        #     self._country_id_cache = country_series
-
-        # # Align the cached country_series with the current dataframe's index to get country_id
-        # # This ensures we get the correct country_id for each (month_id, priogrid_id) pair
-        # aligned_country_ids = self._country_id_cache["country_id"].reindex(
-        #     self.dataframe.index
-        # )
-        # return aligned_country_ids.to_frame(name="country_id")
         self._build_entity_metadata_cache()
         return (
             self._entity_metadata_cache["country_id"]
@@ -1788,31 +1462,6 @@ class _PGDataset(_ViewsDataset):
                 self._country_to_grids_cache[country_id] = []
             self._country_to_grids_cache[country_id].append(entity_id)
 
-    # def get_subset_by_country_id(
-    #     self, country_ids: List[int] = None, time_ids: List[int] = None
-    # ) -> pd.DataFrame:
-    #     """
-    #     Extract a subset of the dataset for specific country IDs and time IDs.
-
-    #     Args:
-    #         country_ids: List of country IDs to include.
-    #         time_ids: List of time IDs to include.
-
-    #     Returns:
-    #         pd.DataFrame: Subset of the dataset filtered by the specified country and time IDs.
-    #     """
-    #     if self._country_to_grids_cache is None:
-    #         self._build_country_to_grids_cache()
-    #     # Collect all grid_ids for the given country_ids
-    #     entity_ids = []
-    #     for cid in country_ids:
-    #         entity_ids.extend(self._country_to_grids_cache.get(cid, []))
-    #     # Remove duplicates
-    #     entity_ids = list(set(entity_ids))
-    #     # Get the subset dataframe
-    #     return self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
-
-    # SUPPORT FOR DYNAMIC PG CELLS FOR COUNTRIES ACROSS TIME
     def get_subset_by_country_id(
         self, country_ids: List[int] = None, time_ids: List[int] = None
     ) -> pd.DataFrame:
@@ -1925,9 +1574,6 @@ class _PGDataset(_ViewsDataset):
 
     def get_isoab(self) -> pd.DataFrame:
         """Get ISO code for the country of each priogrid"""
-        # country_ids = self._get_entity_attr("c_id")
-        # temp_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
-        # return temp_df.c.isoab.to_frame(name="country_iso")
         self._build_entity_metadata_cache()
         return (
             self._entity_metadata_cache["isoab"]
@@ -1952,21 +1598,35 @@ class _PGDataset(_ViewsDataset):
             .to_frame(name="name")
         )
 
-    # def get_continent(self) -> pd.DataFrame:
-    #     """Get continent for priogrids through country mapping"""
-    #     # Get country IDs from priogrids
-    #     country_ids = self._get_entity_attr('c_id')
+    def get_region(self) -> pd.DataFrame:
+        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        self._build_entity_metadata_cache()
+        gwcode = self._entity_metadata_cache["gwcode"].reindex(self.dataframe.index)
 
-    #     # Create temporary DataFrame with country IDs
-    #     country_df = pd.DataFrame({'c_id': country_ids}, index=self.dataframe.index)
+        # Define continent mapping based on GW code ranges (Gleditsch & Ward system)
+        # GW code continent mapping based on Gleditsch & Ward (standard GW codes)
+        # Reference: https://correlatesofwar.org/data-sets/cow-country-codes/
+        continent_rules = [
+            (gwcode.between(2, 165), "Americas"),  # Americas (North, Central, South)
+            (gwcode.between(200, 399), "Europe"),  # Europe
+            (gwcode.between(400, 626), "Africa"),  # Africa
+            (gwcode.between(630, 698), "Middle East"),  # Middle East
+            (gwcode.between(700, 899), "Asia"),  # Asia (excluding Middle East)
+            (gwcode.between(900, 990), "Oceania"),  # Oceania/Pacific
+            (gwcode == 999, "International"),  # Special/International
+        ]
 
-    #     # Get continent using country dataset logic
-    #     return country_df.c.get_continent()
+        # Create default 'Other' category
+        continent = pd.Series("Other", index=gwcode.index)
+
+        # Apply mapping rules
+        for condition, name in continent_rules:
+            continent = continent.where(~condition, name)
+
+        return continent.to_frame(name="continent")
 
 
 class PGMDataset(_PGDataset):
-    # from ingester3.extensions import PGMAccessor
-
     def validate_indices(self) -> None:
         super().validate_indices()
         if self.dataframe.index.names[0] != "month_id":
@@ -1974,36 +1634,37 @@ class PGMDataset(_PGDataset):
                 f"PGMDataset requires index 0 to be 'month_id', found {self.dataframe.index.names}"
             )
 
-    def _get_time_attr(self, attr: str) -> pd.Series:
-        """Helper method to get temporal attributes using accessor"""
-        from ingester3.extensions import PGMAccessor
-
-        time_ids = self.dataframe.index.get_level_values(self._time_id)
-        temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
-        return getattr(temp_df.m, attr)
-
     def get_year(self) -> pd.DataFrame:
-        from ingester3.extensions import PGMAccessor
-
-        return self._get_time_attr("year").to_frame(name="year")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["year_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="year_id")
+        )
 
     def get_month(self) -> pd.DataFrame:
-        from ingester3.extensions import PGMAccessor
-
-        return self._get_time_attr("month").to_frame(name="month")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["month_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="month_id")
+        )
 
     def get_date(self) -> pd.DataFrame:
-        from ingester3.extensions import PGMAccessor
-
         """Get first day of month as datetime"""
-        years = self.get_year()["year"]
-        months = self.get_month()["month"]
+        years = self.get_year()["year_id"]
+        months = self.get_month()["month_id"]
+
+        def wrap_month(month_id: int) -> int:
+            """Wraps any integer to the 1-12 month range."""
+            return (month_id - 1) % 12 + 1
+
+        months = months.apply(wrap_month)
         dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
         return dates.to_frame(name="date")
 
 
 class PGYDataset(_ViewsDataset):
-    # from ingester3.extensions import PGYAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -2014,8 +1675,6 @@ class PGYDataset(_ViewsDataset):
 
 
 class _CDataset(_ViewsDataset):
-    # from ingester3.extensions import CAccessor
-    _accessor_name = "c"
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -2057,20 +1716,17 @@ class _CDataset(_ViewsDataset):
                     .with_column(
                         Column("in_me", from_loa="country", from_column="in_me")
                     )
+                    .with_column(
+                        Column(
+                            "year_id", from_loa="country_year", from_column="year_id"
+                        )
+                    )
                 )
                 .publish()
                 .fetch()
                 .reset_index()
-                .set_index([self._time_id, self._entity_id])
+                .set_index([self._time_id, self._entity_id], drop=False)
             )
-
-    # def _get_entity_attr(self, attr: str) -> pd.Series:
-    #     """Helper method to get country attributes using accessor"""
-    #     from ingester3.extensions import CAccessor
-
-    #     entity_ids = self.dataframe.index.get_level_values(self._entity_id)
-    #     temp_df = pd.DataFrame({"c_id": entity_ids}, index=self.dataframe.index)
-    #     return getattr(temp_df.c, attr)
 
     def get_isoab(self) -> pd.DataFrame:
         self._build_entity_metadata_cache()
@@ -2127,7 +1783,7 @@ class _CDataset(_ViewsDataset):
 
     def get_region(self) -> pd.DataFrame:
         """Get combined region information"""
-        self._build_country_metadata_cache()
+        self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
                 "in_africa": self._entity_metadata_cache["in_africa"].reindex(
@@ -2139,34 +1795,31 @@ class _CDataset(_ViewsDataset):
             }
         )
 
-    # def get_continent(self) -> pd.DataFrame:
-    #     """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
-    #     # Get GW codes
-    #     gwcode = self._get_entity_attr("gwcode")
+    def get_region(self) -> pd.DataFrame:
+        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        self._build_entity_metadata_cache()
+        gwcode = self._entity_metadata_cache["gwcode"].reindex(self.dataframe.index)
 
-    #     # Define continent mapping based on GW code ranges (Gleditsch & Ward system)
-    #     continent_rules = [
-    #         (gwcode.between(400, 625), "Africa"),  # African states
-    #         (gwcode.between(630, 698), "Middle East"),  # Middle East
-    #         (gwcode.between(200, 395), "Europe"),  # Western Europe
-    #         (gwcode.between(2, 165), "Americas"),  # Americas
-    #         (gwcode.between(700, 990), "Asia"),  # Asia/Pacific
-    #         (gwcode == 999, "International"),  # Special codes
-    #     ]
+        # Define continent mapping based on GW code ranges (Gleditsch & Ward system)
+        # GW code continent mapping based on Gleditsch & Ward (standard GW codes)
+        # Reference: https://correlatesofwar.org/data-sets/cow-country-codes/
+        continent_rules = [
+            (gwcode.between(2, 165), "Americas"),  # Americas (North, Central, South)
+            (gwcode.between(200, 399), "Europe"),  # Europe
+            (gwcode.between(400, 626), "Africa"),  # Africa
+            (gwcode.between(630, 698), "Middle East"),  # Middle East
+            (gwcode.between(700, 899), "Asia"),  # Asia (excluding Middle East)
+            (gwcode.between(900, 990), "Oceania"),  # Oceania/Pacific
+            (gwcode == 999, "International"),  # Special/International
+        ]
 
-    #     # Create default 'Other' category
-    #     continent = pd.Series("Other", index=gwcode.index)
+        # Create default 'Other' category
+        continent = pd.Series("Other", index=gwcode.index)
 
-    #     # Apply mapping rules
-    #     for condition, name in continent_rules:
-    #         continent = continent.where(~condition, name)
-
-    #     # Use with existing regional flags. Does not really work well.
-    #     # region = self.get_region()
-    #     # continent = continent.where(~region['in_africa'], 'Africa')
-    #     # continent = continent.where(~region['in_me'], 'Middle East')
-
-    #     return continent.to_frame(name="continent")
+        # Apply mapping rules
+        for condition, name in continent_rules:
+            continent = continent.where(~condition, name)
+        return continent.to_frame(name="continent")
 
 
 class CMDataset(_CDataset):
@@ -2178,35 +1831,43 @@ class CMDataset(_CDataset):
                 f"CMDataset requires index 0 to be 'month_id', found {self.dataframe.index.names}"
             )
 
-    # def _get_time_attr(self, attr: str) -> pd.Series:
-    #     """Helper method to get temporal attributes using accessor"""
-    #     from ingester3.extensions import CMAccessor
+    def get_year(self) -> pd.DataFrame:
+        # return self._get_time_attr("year").to_frame(name="year")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["year_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="year_id")
+        )
 
-    #     time_ids = self.dataframe.index.get_level_values(self._time_id)
-    #     temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
-    #     return getattr(temp_df.m, attr)
+    def get_month(self) -> pd.DataFrame:
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["month_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="month_id")
+        )
 
-    # def get_year(self) -> pd.DataFrame:
-    #     return self._get_time_attr("year").to_frame(name="year")
+    def get_date(self) -> pd.DataFrame:
+        """Get first day of month as datetime"""
+        years = self.get_year()["year_id"]
+        months = self.get_month()["month_id"]
 
-    # def get_month(self) -> pd.DataFrame:
-    #     return self._get_time_attr("month").to_frame(name="month")
+        def wrap_month(month_id: int) -> int:
+            """Wraps any integer to the 1-12 month range."""
+            return (month_id - 1) % 12 + 1
 
-    # def get_date(self) -> pd.DataFrame:
-    #     """Get first day of month as datetime"""
-    #     years = self.get_year()["year"]
-    #     months = self.get_month()["month"]
-    #     dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
-    #     return dates.to_frame(name="date")
+        months = months.apply(wrap_month)
+        dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
+        return dates.to_frame(name="date")
 
-    # def get_quarter(self) -> pd.DataFrame:
-    #     """Get fiscal quarter from month"""
-    #     months = self.get_month()["month"]
-    #     return ((months - 1) // 3 + 1).to_frame(name="quarter")
+    def get_quarter(self) -> pd.DataFrame:
+        """Get fiscal quarter from month"""
+        months = self.get_month()["month"]
+        return ((months - 1) // 3 + 1).to_frame(name="quarter")
 
 
 class CYDataset(_CDataset):
-    # from ingester3.extensions import CYAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()

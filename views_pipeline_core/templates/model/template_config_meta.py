@@ -35,10 +35,10 @@ def generate(script_path: Path, model_name: str, model_algorithm: str) -> bool:
         "name": "{model_name}", 
         "algorithm": "{model_algorithm}",
         # Uncomment and modify the following lines as needed for additional metadata:
-        # "targets": "ln_ged_sb_dep",
+        # "targets": ["ln_ged_sb_dep"],
         # "queryset": "escwa001_cflong",
         # "level": "pgm",
-        # "creator": "Your name here"
+        # "creator": "Your name here",
         "metrics": ["RMSLE", "CRPS"],
     }}
     return meta_config

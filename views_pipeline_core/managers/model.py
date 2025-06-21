@@ -354,6 +354,7 @@ class ModelPathManager:
             self._build_absolute_directory(Path("configs/config_deployment.py")),
             self._build_absolute_directory(Path("configs/config_hyperparameters.py")),
             self._build_absolute_directory(Path("configs/config_meta.py")),
+            self._build_absolute_directory(Path("configs/config_partitions.py")),
             self._build_absolute_directory(Path("main.py")),
             self._build_absolute_directory(Path("README.md")),
         ]
@@ -734,9 +735,14 @@ class ModelManager:
             self._config_sweep = self.__load_config(
                 "config_sweep.py", "get_sweep_config"
             )
+            self._partition_dict = self.__load_config(
+                "config_partitions.py", "generate"
+            )
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
-            self._data_loader = ViewsDataLoader(model_path=self._model_path)
+            self._data_loader = ViewsDataLoader(model_path=self._model_path, 
+                                                steps=len(self._config_hyperparameters.get("steps", 36)), 
+                                                partition_dict=self._partition_dict)
 
         if self._use_prediction_store:
             from views_forecasts.extensions import ForecastsStore, ViewsMetadata
@@ -1350,7 +1356,7 @@ class ForecastingModelManager(ModelManager):
                     logger.info(f"Using latest forecast dataframe")
                 except Exception as e:
                     raise FileNotFoundError(
-                        f"Forecast dataframe was probably not found. Please run the pipeline in forecasting mode with '--run_type forecasting -f' to generate the forecast dataframe. More info: {e}"
+                        f"Forecast dataframe was probably not found. Please run the pipeline in forecasting mode with '--run_type forecasting' to generate the forecast dataframe. More info: {e}"
                     )
 
                 self._generate_forecast_report(

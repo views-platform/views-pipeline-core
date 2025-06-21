@@ -75,7 +75,7 @@ class PosteriorDistributionAnalyzer:
         # Mass at (near) zero
         mass_at_zero = np.mean(np.isclose(self.samples, 0.0, atol=1e-8))
         if mass_at_zero >= self.zero_mass_threshold:
-            logger.info(f"MAP forced to 0.0 due to high zero-mass ({mass_at_zero:.3f} >= {self.zero_mass_threshold})")
+            logger.debug(f"MAP forced to 0.0 due to high zero-mass ({mass_at_zero:.3f} >= {self.zero_mass_threshold})")
             map_val = 0.0
         else:
             hist, bin_edges = np.histogram(self.samples, bins=self.bins, density=True)
@@ -129,12 +129,12 @@ class PosteriorDistributionAnalyzer:
         low, high = hdis[0]
         if map_val < low:
             shift = low - map_val
-            logger.info(f"Shifting narrowest HDI left by {shift:.4f} to include MAP={map_val:.4f}")
+            logger.debug(f"Shifting narrowest HDI left by {shift:.4f} to include MAP={map_val:.4f}")
             low -= shift
             high -= shift
         elif map_val > high:
             shift = map_val - high
-            logger.info(f"Shifting narrowest HDI right by {shift:.4f} to include MAP={map_val:.4f}")
+            logger.debug(f"Shifting narrowest HDI right by {shift:.4f} to include MAP={map_val:.4f}")
             low += shift
             high += shift
         adjusted.append((low, high))
@@ -530,10 +530,3 @@ class ForecastReconciler:
             self.logger.info(f"   🔍 Zeros Correctly Preserved: {zero_preserved}\n")
 
         self.logger.info("\n✅ All Point Forecast Tests Passed Successfully!")
-
-
-# if __name__ == "__main__":
-
-#     # Usage Example
-#     reconciler = ForecastReconciler()
-#     reconciler.run_tests()  # Run full test suite  

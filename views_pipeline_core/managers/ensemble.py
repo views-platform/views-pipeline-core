@@ -71,7 +71,7 @@ class EnsembleManager(ForecastingModelManager):
         """
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
         self.config = {}
-        self.__activate_reconciliation = False
+        self.__activate_reconciliation = True
         # if self.configs.get("reconciliation", None) is not None:
         #     if self.configs.get("reconciliation") == "pgm_cm_point":
         #         self.__get_point_reconciliation_target()
