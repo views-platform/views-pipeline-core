@@ -683,8 +683,7 @@ class ModelPathManager:
 
 class ModelManager:
     """
-    Manages the lifecycle of a machine learning model, including configuration loading,
-    training, evaluation, and forecasting.
+    Manages the basic initialization of a model, including configuration loading, format setting and storage settings.
 
     Attributes:
         _entity (str): The WandB entity name.
@@ -877,7 +876,7 @@ class ForecastingModelManager(ModelManager):
         use_prediction_store: bool = True,
     ) -> None:
         """
-        Initializes the ForecastingModelManager with the given model path.
+        Manages the lifecycle of a machine learning model, including training, evaluation, and forecasting.
 
         Args:
             model_path (ModelPathManager): The path manager for the model.
