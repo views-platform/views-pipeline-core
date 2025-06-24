@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
+from views_pipeline_core.data.statistics import PosteriorDistributionAnalyzer
+from views_pipeline_core.visualizations.distributions import PlotDistribution
+from viewser import Queryset, Column
 
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -11,7 +14,7 @@ import scipy.stats as stats
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 from contextlib import contextmanager
-
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,7 @@ class _ViewsDataset:
         source (Union[pd.DataFrame, str, Path]): The source can be a pandas DataFrame,
                                                  a string representing a file path,
                                                  or a Path object.
+        targets (Optional[List[str]]): List of target variable names.
         broadcast_features (bool): If True, broadcast scalar features to match sample size.
                                    If False, treat features as scalars stored in size-1 arrays
                                    and disable tensor operations.
@@ -37,7 +41,9 @@ class _ViewsDataset:
         Raises:
         ValueError: If the source is not a pandas DataFrame, string, or Path object.
         """
+        self.__preprocess_input_dataframe = True
         from views_pipeline_core.managers.model import ModelPathManager
+
         self.broadcast_features = broadcast_features
         if isinstance(source, pd.DataFrame):
             self._init_dataframe(source, targets)
@@ -45,18 +51,65 @@ class _ViewsDataset:
             self._init_dataframe(read_dataframe(source), targets)
         else:
             raise ValueError("Invalid input type for ViewsDataset")
+        self._posterior_distribution_analyser = PosteriorDistributionAnalyzer()
+
+    def _preprocess_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Preprocesses a pandas DataFrame by ensuring all combinations of time values and entity IDs
+        are present in the index, filling missing combinations with default values.
+
+        This method performs the following steps:
+        1. Identifies the last month's entity IDs from the DataFrame.
+        2. Filters the DataFrame to include only rows with entity IDs that exist in the last month.
+        3. Creates a MultiIndex of all possible combinations of time values and entity IDs.
+        4. Identifies missing combinations in the DataFrame's index.
+        5. Creates a DataFrame with the missing combinations, filled with default values (0).
+        6. Concatenates the original DataFrame with the missing combinations DataFrame and sorts the index.
+
+        Args:
+            df (pd.DataFrame): The input DataFrame with a MultiIndex containing time and entity IDs.
+
+        Returns:
+            pd.DataFrame: A DataFrame with all combinations of time values and entity IDs,
+                          including rows for missing combinations filled with default values.
+        """
+        last_month_id = self._time_values.max()
+        existing_entity_ids = df.loc[last_month_id].index.unique()
+        df = df[df.index.get_level_values(self._entity_id).isin(existing_entity_ids)]
+        all_months = self._time_values
+        all_combinations = pd.MultiIndex.from_product(
+            [all_months, existing_entity_ids], names=[self._time_id, self._entity_id]
+        )
+        missing_combinations = all_combinations.difference(df.index)
+        missing_df = pd.DataFrame(0, index=missing_combinations, columns=df.columns)
+        return pd.concat([df, missing_df]).sort_index()
 
     def _init_dataframe(
         self, dataframe: pd.DataFrame, targets: Optional[List[str]] = None
     ) -> None:
+        if not isinstance(dataframe, pd.DataFrame) or dataframe.empty:
+            raise ValueError("Dataframe is empty or not a valid DataFrame")
+        # This is a hack and should be removed in the future when Viewser is updated to get rid of priogrid_gid.
+        if dataframe.index.names[1] == "priogrid_gid":
+            logger.warning(
+                "_PGDataset index 1 is 'priogrid_gid', renaming to 'priogrid_id'"
+            )
+            dataframe.index = dataframe.index.rename(
+                [dataframe.index.names[0], "priogrid_id"]
+            )
         self.original_columns = dataframe.columns.tolist()
 
         # Convert and sort FIRST before saving original index
         self.dataframe = self._convert_to_arrays(dataframe).sort_index()  # Sort early
+
         self.original_index = self.dataframe.index.copy()  # Save sorted index
 
         self._time_id, self._entity_id = self.dataframe.index.names
         self._rebuild_index_mappings()
+
+        if self.__preprocess_input_dataframe:
+            self.dataframe = self._preprocess_dataframe(self.dataframe)
+            self._rebuild_index_mappings()
 
         self.validate_indices()
 
@@ -105,6 +158,7 @@ class _ViewsDataset:
                 self.sample_size = None
         self._split_tensor_cache = {}
         self._max_tensor_cache_size = 128  # Set a maximum cache size
+        self._entity_metadata_cache = None
 
     def _clear_tensor_cache_if_needed(self):
         if len(self._split_tensor_cache) > self._max_tensor_cache_size:
@@ -305,7 +359,13 @@ class _ViewsDataset:
         """
         if self.is_prediction:
             return [col for col in self.dataframe.columns if col not in self.pred_vars]
-        return [col for col in self.dataframe.columns if col not in self.targets]
+
+        try:
+            return [col for col in self.dataframe.columns if col not in self.targets]
+        except TypeError as e:
+            raise TypeError(
+                f"{e}: Probable cause: Invalid type for targets: {type(self.targets)}. Expected list of strings like ['ln_sb_best']"
+            )
 
     def to_tensor(
         self, include_targets: bool = True
@@ -492,84 +552,17 @@ class _ViewsDataset:
 
         return df.loc[self.original_index]
 
-    def calculate_map(
-        self, enforce_non_negative: bool = False, features: Optional[List[str]] = None
-    ) -> pd.DataFrame:
-        """
-        Calculate Maximum A Posteriori (MAP) estimates for prediction distributions.
-
-        Parameters:
-        enforce_non_negative (bool): If True, forces MAP estimates to be non-negative
-        features (List[str]): List of features to calculate MAP for. If None, uses all prediction targets.
-
-        Returns:
-        pd.DataFrame: DataFrame with MAP estimates (time × entity × targets)
-        """
-
-        if not self.is_prediction:
-            raise ValueError("MAP calculation only valid for prediction dataframes")
-
-        # Validate features parameter
-        if features is not None:
-            invalid = set(features) - set(self.targets)
-            if invalid:
-                raise ValueError(f"Invalid features specified: {invalid}")
-            selected_vars = features
-        else:
-            selected_vars = self.targets
-
-        tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
-        map_results = []
-
-        # Pre-sort entire tensor once for all variables
-        sorted_tensor = np.sort(tensor, axis=2)
-
-        for var_name in tqdm(selected_vars, desc="Processing features"):
-            var_idx = self.targets.index(var_name)
-            var_tensor = sorted_tensor[..., var_idx]
-            orig_shape = var_tensor.shape[:2]
-
-            # Flatten for parallel processing
-            flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
-            n_samples = len(flat_tensor)
-
-            # Batch processing parameters
-            batch_size = 1000  # Optimal for memory/cache balance
-            batches = [
-                flat_tensor[i : i + batch_size] for i in range(0, n_samples, batch_size)
-            ]
-
-            # Process in batches to optimize memory usage
-            map_flat = []
-            with self.tqdm_joblib(
-                tqdm(total=len(batches), desc=f"{var_name} batches")
-            ) as progress_bar:
-                with Parallel(n_jobs=-1, prefer="threads") as parallel:
-                    for batch in batches:
-                        batch_results = parallel(
-                            delayed(self._compute_single_map_with_checks)(
-                                samples, enforce_non_negative
-                            )
-                            for samples in batch
-                        )
-                        map_flat.extend(batch_results)
-                        progress_bar.update(1)
-
-            map_estimates = np.array(map_flat).reshape(orig_shape)
-            df = self._create_map_dataframe(var_name, map_estimates)
-            map_results.append(df)
-
-        return pd.concat(map_results, axis=1)
-
-    def _compute_single_map_with_checks(self, samples, enforce_non_negative):
+    def _compute_single_map_with_checks(self, samples, enforce_non_negative, alpha=0.9):
         """Wrapper with NaN handling and input validation"""
         if np.all(np.isnan(samples)):
             return np.nan
         return self._simon_compute_single_map(
-            samples[~np.isnan(samples)], enforce_non_negative
+            samples=samples[~np.isnan(samples)],
+            enforce_non_negative=enforce_non_negative,
+            alpha=alpha,
         )
 
-    def _simon_compute_single_map(self, samples, enforce_non_negative=False):
+    def _simon_compute_single_map(self, samples, enforce_non_negative=False, alpha=0.9):
         """
         Compute the Maximum A Posteriori (MAP) estimate using an HDI-based histogram and KDE refinement.
 
@@ -594,104 +587,15 @@ class _ViewsDataset:
             logger.error("❌ No valid samples. Returning MAP = 0.0")
             return 0.0
 
-        # **Compute HDI**
-        credible_mass = (
-            0.05 if stats.skew(samples) > 5 else (0.10 if len(samples) > 5000 else 0.25)
-        )
-        hdi_min, hdi_max = self._calculate_single_hdi(data=samples, alpha=credible_mass)
-        # print(hdi_min, hdi_max)
-
-        # **If HDI Contains Only One Value, Return That as MAP**
-        if hdi_min == hdi_max:
-            logger.info(
-                f"✅ HDI contains only one value ({hdi_min}). Setting MAP = {hdi_min}"
-            )
-            return float(hdi_min)
-
-        # **Select Only the HDI Region**
-        subset = samples[(samples >= hdi_min) & (samples <= hdi_max)]
-
-        # **Adaptive Histogram Binning (Freedman–Diaconis rule)**
-        # iqr_value = stats.iqr(subset)
-        # bin_width = 2 * iqr_value / (len(subset) ** (1/3))
-        # num_bins = max(20 if stats.skew(samples) > 5 else 10, int((subset.max() - subset.min()) / bin_width))
-        # hist, bin_edges = np.histogram(subset, bins=num_bins, density=True)
-        # bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        try:
-            data_range = subset.max() - subset.min()
-
-            # Handle zero-range case first
-            if data_range == 0:
-                logger.info("📊 Zero data range detected. Using single bin.")
-                return float(subset[0])
-
-            iqr_value = stats.iqr(subset)
-            bin_width = (
-                2 * iqr_value / (len(subset) ** (1 / 3))
-                if iqr_value > 0
-                else data_range / 10
-            )
-
-            # Prevent division by zero and invalid bins
-            if bin_width <= 0:
-                bin_width = data_range / 10
-                logger.warning(f"⚠️  Invalid bin width {bin_width}. Using data_range/10")
-
-            num_bins = max(
-                20 if stats.skew(samples) > 5 else 10, int(data_range / bin_width)
-            )
-            num_bins = max(1, min(100, num_bins))  # Ensure 1-100 bins
-
-        except Exception as e:
-            logger.error(f"📊 Bin calculation failed: {str(e)}. Using fallback bins")
-            num_bins = 20
-
-        hist, bin_edges = np.histogram(subset, bins=num_bins, density=True)
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-        # **Find Histogram Mode**
-        mode_estimate = bin_centers[np.argmax(hist)]
-
-        # **Enforce Non-Negativity if Requested**
-        if enforce_non_negative and mode_estimate < 0:
+        map = self._posterior_distribution_analyser.analyze(
+            samples=samples, credible_masses=(alpha,)
+        ).get("map")
+        if enforce_non_negative and map < 0:
             logger.warning(
-                f"📢  Negative MAP estimate detected ({mode_estimate:.5f}). Setting to 0."
+                f"📢  Negative MAP estimate detected ({map:.5f}). Setting to 0."
             )
-            mode_estimate = max(0, mode_estimate)
-
-        return float(mode_estimate)
-
-    def _determine_credible_mass(self, samples: np.ndarray) -> float:
-        """Determine optimal credible mass for HDI calculation"""
-        if len(samples) < 2:
-            return 0.25
-
-        try:
-            skewness = stats.skew(samples)
-        except:
-            skewness = 0
-
-        if skewness > 5:
-            return 0.05
-        elif len(samples) > 5000:
-            return 0.10
-        return 0.25
-
-    def _create_adaptive_histogram(
-        self, subset: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """Create histogram with adaptive binning using Freedman-Diaconis rule"""
-        iqr_value = stats.iqr(subset)
-        if iqr_value == 0:  # Fallback for uniform distributions
-            bin_width = (subset.max() - subset.min()) / 10
-        else:
-            bin_width = 2 * iqr_value / (len(subset) ** (1 / 3))
-
-        if bin_width == 0:
-            return np.histogram(subset, bins=1)
-
-        num_bins = max(10, int((subset.max() - subset.min()) / bin_width))
-        return np.histogram(subset, bins=num_bins, density=True)
+            map = max(0, map)
+        return float(map)
 
     def _create_map_dataframe(self, var_name: str, values: np.ndarray) -> pd.DataFrame:
         """Helper to format statistic results into DataFrame"""
@@ -729,100 +633,21 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes
         """
-        # Create axis if not provided
-        ax = ax or plt.gca()
-
-        # Validate inputs
-        if var_name is None or var_name not in self.targets:
-            raise ValueError(f"Invalid variable {var_name}. Choose from {self.targets}")
-
-        # Get relevant data slice
-        tensor = self.to_tensor()
-        var_idx = self.targets.index(var_name)
-        data = tensor[..., var_idx]
-
-        # Slice data based on selections
-        if entity_id is not None:
-            entity_idx = self._get_entity_index(entity_id)
-            data = data[:, entity_idx : entity_idx + 1, ...]
-        if time_id is not None:
-            time_idx = self._get_time_index(time_id)
-            data = data[time_idx : time_idx + 1, ...]
-
-        # Flatten to 1D array of samples, handling NaNs
-        flat_data = data.flatten()
-        valid_samples = flat_data[~np.isnan(flat_data)]
-
-        # Handle empty data case
-        if len(valid_samples) == 0:
-            ax.text(0.5, 0.5, "No valid samples", ha="center", va="center")
-            return ax
-
-        # Calculate HDI and MAP simultaneously
-        hdi_min, hdi_max = self._calculate_single_hdi(valid_samples, hdi_alpha)
-        map_value = self._simon_compute_single_map(valid_samples)
-
-        # Adaptive histogram binning
-        data_range = valid_samples.max() - valid_samples.min()
-        bin_width = data_range / min(max_bins, len(valid_samples) // 10)
-        bins = min(max_bins, max(10, int(data_range / bin_width)))
-
-        # Plotting
-        sns.histplot(
-            valid_samples,
-            bins=bins,
-            kde=plot_kde,
+        self._distribution_plotter = (
+            PlotDistribution(dataset=self)
+            if not hasattr(self, "_distribution_plotter")
+            else self._distribution_plotter
+        )
+        self._distribution_plotter.plot_maximum_a_posteriori(
+            entity_id=entity_id,
+            time_id=time_id,
+            var_name=var_name,
+            hdi_alpha=hdi_alpha,
             ax=ax,
-            color="#3498DB",
-            alpha=0.6,
-            edgecolor="none",
-            label="Distribution",
+            colors=colors,
+            plot_kde=plot_kde,
+            max_bins=max_bins,
         )
-
-        # sns.histplot(valid_samples, bins=bins, kde=plot_kde, ax=ax,
-        #             color='#3498DB', alpha=0.6, edgecolor='none',
-        #             label='Distribution', bins=50)
-
-        if colors is None:
-            colors = sns.color_palette("colorblind", 1)
-
-        # Plot HDI
-        hdi_color = colors[0] if colors else "#2ECC71"
-        ax.axvspan(
-            hdi_min,
-            hdi_max,
-            color=hdi_color,
-            alpha=0.3,
-            label=f"{hdi_alpha*100:.0f}% HDI",
-        )
-
-        # Plot MAP
-        map_color = colors[1] if colors and len(colors) > 1 else "#E74C3C"
-        ax.axvline(
-            map_value,
-            color=map_color,
-            linestyle="--",
-            linewidth=2,
-            label=f"MAP Estimate: {map_value:.2f}",
-        )
-
-        # Dynamic title
-        title_parts = []
-        if entity_id is not None:
-            title_parts.append(f"Entity {entity_id}")
-        if time_id is not None:
-            title_parts.append(f"Time {time_id}")
-
-        title = f"{var_name} Distribution"
-        if title_parts:
-            title += f" ({' - '.join(title_parts)})"
-
-        ax.set_title(title)
-        ax.set_xlabel("Value")
-        ax.set_ylabel("Density")
-        ax.legend()
-
-        return ax
 
     def _prediction_to_dataframe(self, tensor: np.ndarray) -> pd.DataFrame:
         """
@@ -1231,7 +1056,7 @@ class _ViewsDataset:
 
     def calculate_hdi(self, alpha: float = 0.9) -> pd.DataFrame:
         """
-        Calculate Highest Density Intervals (HDIs) for prediction distributions.
+        Calculate Highest Density Intervals (HDIs) for prediction distributions using PosteriorDistributionAnalyzer.
 
         Parameters:
         alpha (float): Credibility level for HDI (e.g., 0.9 for 90% HDI).
@@ -1257,42 +1082,17 @@ class _ViewsDataset:
 
         for var_idx, var_name in enumerate(self.targets):
             var_tensor = tensor[..., var_idx]  # Shape: (time, entity, samples)
-            sorted_data = np.sort(var_tensor, axis=2)
-            n_samples = sorted_data.shape[2]
+            # Reshape to (time*entity, samples) for vectorized processing
+            flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
+            # Compute HDI for each (time, entity) pair
+            hdi_pairs = np.apply_along_axis(
+                lambda x: self._calculate_single_hdi(x, alpha), axis=1, arr=flat_tensor
+            )
+            # Reshape back to (time, entity)
+            hdi_lower = hdi_pairs[:, 0].reshape(var_tensor.shape[:2])
+            hdi_upper = hdi_pairs[:, 1].reshape(var_tensor.shape[:2])
 
-            # Calculate number of samples to include in HDI
-            h = max(1, int(np.ceil(alpha * n_samples)))
-            window_size = h
-
-            # Validate window size
-            if window_size > n_samples:
-                raise ValueError(
-                    f"Window size ({window_size}) exceeds sample count ({n_samples}) "
-                    f"for variable {var_name}"
-                )
-
-            # Skip calculation if only 1 sample (width = 0)
-            if window_size == 1:
-                hdi_lower = sorted_data[..., 0]
-                hdi_upper = sorted_data[..., -1]
-            else:
-                # Generate sliding windows for upper bounds
-                windows = np.lib.stride_tricks.sliding_window_view(
-                    sorted_data, window_shape=window_size, axis=2
-                )
-                upper = windows[..., -1]  # Last element of each window (maximum)
-                lower = windows[..., 0]  # First element of each window (minimum)
-
-                # Find narrowest interval
-                widths = upper - lower
-                min_indices = np.nanargmin(widths, axis=2)
-
-                # Extract bounds using indexing
-                time_idx, entity_idx = np.indices(min_indices.shape)
-                hdi_lower = lower[time_idx, entity_idx, min_indices]
-                hdi_upper = upper[time_idx, entity_idx, min_indices]
-
-            # Handle NaN values (missing predictions)
+            # Handle NaN samples (if any)
             nan_mask = np.isnan(var_tensor).all(axis=2)
             hdi_lower[nan_mask] = np.nan
             hdi_upper[nan_mask] = np.nan
@@ -1300,6 +1100,7 @@ class _ViewsDataset:
             # Create DataFrame for this variable
             df = self._create_hdi_dataframe(var_name, hdi_lower, hdi_upper)
             hdi_results.append(df)
+
         return pd.concat(hdi_results, axis=1)
 
     def _create_hdi_dataframe(
@@ -1345,83 +1146,91 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes: The plot axes
         """
-        if not self.is_prediction:
-            raise ValueError("HDI plotting only available for prediction dataframes")
-        if var_name not in self.targets or var_name is None:
-            raise ValueError(f"Invalid variable {var_name}. Choose from {self.targets}")
-        if not isinstance(alphas, tuple):
-            alphas = (alphas,)
-        if not all(0 < a < 1 for a in alphas):
-            raise ValueError("All alpha values must be between 0 and 1")
-
-        # Get relevant data
-        tensor = self.to_tensor()
-        var_idx = self.targets.index(var_name)
-        data = tensor[..., var_idx]
-
-        # Slice data based on selections
-        if entity_id is not None:
-            entity_idx = self._get_entity_index(entity_id)
-            data = data[:, entity_idx : entity_idx + 1, ...]
-        if time_id is not None:
-            time_idx = self._get_time_index(time_id)
-            data = data[time_idx : time_idx + 1, ...]
-
-        # Flatten to 1D array of samples
-        flat_data = data.flatten()
-        flat_data = flat_data[~np.isnan(flat_data)]  # Remove NaNs
-
-        # Create plot
-        ax = ax or plt.gca()
-        sns.histplot(
-            flat_data,
-            bins=50,
-            kde=True,
+        self._distribution_plotter = (
+            PlotDistribution(dataset=self)
+            if not hasattr(self, "_distribution_plotter")
+            else self._distribution_plotter
+        )
+        self._distribution_plotter.plot_highest_density_intervals(
+            entity_id=entity_id,
+            time_id=time_id,
+            var_name=var_name,
+            alphas=alphas,
+            colors=colors,
             ax=ax,
-            color="blue",
-            alpha=0.6,
-            label="Distribution",
         )
 
-        # Create color map if not provided
-        if colors is None:
-            # Use a colorblind-friendly color palette
-            colors = sns.color_palette("colorblind", len(alphas))
-        elif len(colors) != len(alphas):
-            raise ValueError("Number of colors must match number of alpha levels")
+    def calculate_map(
+        self,
+        enforce_non_negative: bool = False,
+        features: Optional[List[str]] = None,
+        alpha: float = 0.9,
+    ) -> pd.DataFrame:
+        """
+        Calculate Maximum A Posteriori (MAP) estimates for prediction distributions.
 
-        # Sort alphas for intuitive color progression
-        sorted_alphas = sorted(alphas, reverse=True)
+        Parameters:
+        enforce_non_negative (bool): If True, forces MAP estimates to be non-negative
+        features (List[str]): List of features to calculate MAP for. If None, uses all prediction targets.
 
-        # Plot each HDI with distinct color
-        for alpha, color in zip(sorted_alphas, colors):
-            hdi_min, hdi_max = self._calculate_single_hdi(flat_data, alpha)
+        Returns:
+        pd.DataFrame: DataFrame with MAP estimates (time × entity × targets)
+        """
 
-            ax.fill_betweenx(
-                y=[0, ax.get_ylim()[1]],
-                x1=hdi_min,
-                x2=hdi_max,
-                color=color,
-                alpha=0.3,
-                label=f"{alpha*100:.0f}% HDI",
-            )
+        if not self.is_prediction:
+            raise ValueError("MAP calculation only valid for prediction dataframes")
 
-        # Add annotations
-        title_parts = []
-        if entity_id is not None:
-            title_parts.append(f"Entity {entity_id}")
-        if time_id is not None:
-            title_parts.append(f"Time {time_id}")
-        title = f"{var_name} Posterior Distribution"
-        if title_parts:
-            title += f" ({' - '.join(title_parts)})"
+        # Validate features parameter
+        if features is not None:
+            invalid = set(features) - set(self.targets)
+            if invalid:
+                raise ValueError(f"Invalid features specified: {invalid}")
+            selected_vars = features
+        else:
+            selected_vars = self.targets
 
-        ax.set_title(title)
-        ax.set_xlabel("Value")
-        ax.set_ylabel("Density")
-        ax.legend()
+        tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
+        map_results = []
 
-        return ax
+        # Pre-sort entire tensor once for all variables
+        sorted_tensor = np.sort(tensor, axis=2)
+
+        for var_name in tqdm(selected_vars, desc="Processing features"):
+            var_idx = self.targets.index(var_name)
+            var_tensor = sorted_tensor[..., var_idx]
+            orig_shape = var_tensor.shape[:2]
+
+            # Flatten for parallel processing
+            flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
+            n_samples = len(flat_tensor)
+
+            # Batch processing parameters
+            batch_size = 1000  # Optimal for memory/cache balance
+            batches = [
+                flat_tensor[i : i + batch_size] for i in range(0, n_samples, batch_size)
+            ]
+
+            # Process in batches to optimize memory usage
+            map_flat = []
+            with self.tqdm_joblib(
+                tqdm(total=len(batches), desc=f"{var_name} batches")
+            ) as progress_bar:
+                with Parallel(n_jobs=-1, prefer="threads") as parallel:
+                    for batch in batches:
+                        batch_results = parallel(
+                            delayed(self._compute_single_map_with_checks)(
+                                samples, enforce_non_negative, alpha
+                            )
+                            for samples in batch
+                        )
+                        map_flat.extend(batch_results)
+                        progress_bar.update(1)
+
+            map_estimates = np.array(map_flat).reshape(orig_shape)
+            df = self._create_map_dataframe(var_name, map_estimates)
+            map_results.append(df)
+
+        return pd.concat(map_results, axis=1)
 
     def _calculate_single_hdi(
         self, data: np.ndarray, alpha: float
@@ -1429,36 +1238,9 @@ class _ViewsDataset:
         """Calculate HDI for a 1D array"""
         if np.all(np.isnan(data)):
             return (np.nan, np.nan)
-
-        sorted_data = np.sort(data)
-        n_samples = len(sorted_data)
-
-        # Calculate number of samples to include in HDI
-        h = max(1, int(np.ceil(alpha * n_samples)))
-        window_size = h
-
-        # Validate window size
-        if window_size > n_samples:
-            raise ValueError(
-                f"Window size ({window_size}) exceeds sample count ({n_samples})"
-            )
-
-        # Skip calculation if only 1 sample (width = 0)
-        if window_size == 1:
-            return (sorted_data[0], sorted_data[-1])
-        else:
-            # Generate sliding windows for upper bounds
-            windows = np.lib.stride_tricks.sliding_window_view(
-                sorted_data, window_shape=window_size
-            )
-            upper = windows[..., -1]  # Last element of each window (maximum)
-            lower = windows[..., 0]  # First element of each window (minimum)
-
-            # Find narrowest interval
-            widths = upper - lower
-            min_idx = np.nanargmin(widths)
-
-            return (lower[min_idx], upper[min_idx])
+        return self._posterior_distribution_analyser.analyze(
+            samples=data, credible_masses=(alpha,)
+        ).get("hdis")[0]
 
     def report_hdi(self, alphas: Tuple[float, ...] = (0.5, 0.9, 0.95)) -> pd.DataFrame:
         """
@@ -1491,77 +1273,360 @@ class _ViewsDataset:
 
         return pd.DataFrame(reports)
 
+    def to_reconciler(self, feature: str, time_id: int) -> torch.Tensor:
+        """
+        Extracts a tensor compatible with ForecastReconciler for a specified feature and time_id.
+
+        The tensor is extracted for the specified time step, formatted as
+        (num_samples, num_entities) for probabilistic reconciliation.
+
+        Args:
+            feature (str): Name of the prediction target variable to reconcile.
+            time_id (int): The time ID (e.g., month_id) for which to extract the tensor.
+
+        Returns:
+            torch.Tensor: Tensor of shape (samples, entities) for the specified feature
+                        at the given time_id.
+
+        Raises:
+            ValueError: If dataset is not in prediction mode, feature not found,
+                        or time_id is invalid.
+        """
+        if not self.is_prediction:
+            raise ValueError("Dataset must be in prediction mode to use to_reconciler")
+        if feature not in self.targets:
+            raise ValueError(f"Feature '{feature}' not found in targets {self.targets}")
+        if time_id not in self._time_values:
+            raise ValueError(f"Time ID {time_id} not found in dataset's time values.")
+
+        var_idx = self.targets.index(feature)
+        pred_tensor = self.to_tensor()  # Shape (time, entity, samples, vars)
+
+        # Get the time index using the provided time_id
+        time_idx = self._get_time_index(time_id)
+        # latest_time_idx = len(self._time_values) - 1
+
+        # Extract data for all entities, samples, at the specified time for the feature
+        data = pred_tensor[time_idx, :, :, var_idx]  # Shape (entity, samples)
+
+        # Transpose to (samples, entity) and convert to torch tensor
+        return torch.from_numpy(data.transpose(1, 0))
+
 
 class _PGDataset(_ViewsDataset):
     _accessor_name = "pg"
-    
+
+    def __init__(self, source, targets=None, broadcast_features=False):
+        super().__init__(source, targets, broadcast_features)
+        self._country_id_cache = None
+        self._country_to_grids_cache = None
+        self.reconciled_dataframe = None
+
     def validate_indices(self) -> None:
         super().validate_indices()
-        if self.dataframe.index.names[1] != "priogrid_id" and self.dataframe.index.names[1] != "priogrid_gid":
-            raise ValueError(
-                f"PGDataset requires index 1 to be 'priogrid_id', found {self.dataframe.index.names}"
+
+    def _build_entity_metadata_cache(self):
+        """Build a cache mapping country_ids to metadata using the QS"""
+        if self._entity_metadata_cache is not None:
+            return
+        else:
+            self._entity_metadata_cache = (
+                (
+                    Queryset("pg_metadata", "priogrid_month")
+                    .with_column(
+                        Column("lat", from_loa="priogrid", from_column="latitude")
+                    )
+                    .with_column(
+                        Column("long", from_loa="priogrid", from_column="longitude")
+                    )
+                    .with_column(
+                        Column("gwcode", from_loa="country", from_column="gwcode")
+                    )
+                    .with_column(Column("row", from_loa="priogrid", from_column="row"))
+                    .with_column(Column("col", from_loa="priogrid", from_column="col"))
+                    .with_column(
+                        Column(
+                            "year_id", from_loa="priogrid_year", from_column="year_id"
+                        )
+                    )
+                    .with_column(
+                        Column("isoab", from_loa="country", from_column="isoab")
+                    )
+                    .with_column(Column("name", from_loa="country", from_column="name"))
+                    .with_column(
+                        Column(
+                            "country_id",
+                            from_loa="country_month",
+                            from_column="country_id",
+                        )
+                    )
+                )
+                .publish()
+                .fetch()
+                .reset_index()
+            )
+            if "priogrid_gid" in self._entity_metadata_cache.columns:
+                self._entity_metadata_cache.rename(
+                    columns={"priogrid_gid": self._entity_id}, inplace=True
+                )
+            self._entity_metadata_cache.set_index(
+                [self._time_id, self._entity_id], inplace=True, drop=False
             )
 
-    def _get_entity_attr(self, attr: str) -> pd.Series:
-        """Helper method to get entity attributes using accessor"""
-        from ingester3.extensions import PgAccessor
-        entity_ids = self.dataframe.index.get_level_values(self._entity_id)
-        temp_df = pd.DataFrame({"pg_id": entity_ids}, index=self.dataframe.index)
-        return getattr(temp_df.pg, attr)
+    def detect_country_changes(
+        self, include_previous_name: bool = False
+    ) -> pd.DataFrame:
+        """
+        Track country ownership history with robust temporal handling.
+
+        Parameters:
+            include_owner_name (bool): Whether to include country name column
+
+        Returns:
+            pd.DataFrame: Contains columns:
+                - previous_country_id: Country ID (current ID if previous missing)
+                - previous_owner_name: Time-accurate country name
+        """
+        # Get base country information
+        country_df = self.get_country_id()
+
+        # Calculate previous country IDs with temporal alignment
+        previous_country = (
+            country_df.groupby(level=self._entity_id, group_keys=False)
+            .shift(1)
+            .rename(columns={"country_id": "previous_country_id"})
+        )
+
+        # Handle missing previous country IDs using current information
+        current_country_ids = country_df["country_id"]
+        missing_mask = previous_country["previous_country_id"].isna()
+        previous_country["previous_country_id"] = previous_country[
+            "previous_country_id"
+        ].fillna(current_country_ids)
+
+        if include_previous_name:
+            self._build_entity_metadata_cache()
+
+            # Create optimized name lookup structure
+            time_country_names = (
+                self._entity_metadata_cache.reset_index()[
+                    [self._time_id, "country_id", "name"]
+                ]
+                .drop_duplicates([self._time_id, "country_id"])
+                .set_index([self._time_id, "country_id"])["name"]
+            )
+
+            # Prepare temporal lookup coordinates
+            time_index = previous_country.index.get_level_values(self._time_id)
+            country_ids = previous_country["previous_country_id"].to_numpy()
+
+            # Calculate temporal offsets (T-1 for original values, T for filled values)
+            time_offsets = time_index.to_numpy() - np.where(missing_mask, 0, 1)
+
+            # Create MultiIndex for efficient reindexing
+            lookup_index = pd.MultiIndex.from_arrays(
+                [time_offsets, country_ids], names=[self._time_id, "country_id"]
+            )
+
+            # Perform safe name lookup with forward fill
+            previous_country["previous_name"] = (
+                time_country_names.reindex(lookup_index)
+                .groupby("country_id")
+                .ffill()  # Handle missing historical names
+                .values
+            )
+
+        return previous_country.reindex(self.dataframe.index)
 
     def get_country_id(self) -> pd.DataFrame:
-        """Get country ID for each priogrid"""
-        from ingester3.extensions import PgAccessor
-        return self._get_entity_attr("c_id").to_frame(name="country_id")
+        """Get country ID for each priogrid-month combination."""
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["country_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="country_id")
+        )
+
+    def _build_country_to_grids_cache(self):
+        """Build a cache mapping country_ids to lists of grid_ids (entity_ids) using first occurrence per grid."""
+        if self._country_to_grids_cache is not None:
+            return
+        # Get country_id for each entity_id (priogrid), using the first occurrence in the dataset
+        # Assumes country_id per priogrid is static over time
+        country_series = (
+            self.get_country_id().groupby(level=self._entity_id)["country_id"].first()
+        )
+        self._country_to_grids_cache = {}
+        for entity_id, country_id in country_series.items():
+            if country_id not in self._country_to_grids_cache:
+                self._country_to_grids_cache[country_id] = []
+            self._country_to_grids_cache[country_id].append(entity_id)
+
+    def get_subset_by_country_id(
+        self, country_ids: List[int] = None, time_ids: List[int] = None
+    ) -> pd.DataFrame:
+        """
+        Extract a subset of the dataset for specific country IDs and time IDs.
+
+        Args:
+            country_ids: List of country IDs to include.
+            time_ids: List of time IDs to include.
+
+        Returns:
+            pd.DataFrame: Subset filtered by the specified country and time IDs.
+        """
+        # Get country IDs for each (time_id, entity_id) pair
+        country_df = self.get_country_id()
+
+        # Create mask for selected country_ids
+        mask = country_df["country_id"].isin(country_ids)
+
+        # Apply time filter if specified
+        if time_ids is not None:
+            time_mask = country_df.index.get_level_values(self._time_id).isin(time_ids)
+            mask &= time_mask
+
+        # Get matching (time_id, entity_id) indices
+        matching_indices = country_df[mask].index
+
+        # Return subset dataframe
+        return self.dataframe.loc[matching_indices]
+
+    def reconcile(
+        self,
+        country_id: int,
+        feature: str,
+        reconciled_tensor: torch.Tensor,
+        time_id: int,
+    ) -> None:
+        """
+        Updates the reconciled dataframe with reconciled values for a specific country's grid cells at a specified time_id.
+
+        Args:
+            country_id (int): The country ID whose grid cells will be updated.
+            feature (str): The prediction feature/target variable to update.
+            reconciled_tensor (torch.Tensor): Tensor containing reconciled values (shape: samples x num_grid_cells).
+            time_id (int): The time ID (e.g., month_id) for which to update the reconciliation.
+
+        Raises:
+            ValueError: If dataset isn't in prediction mode, feature is invalid,
+                        tensor shape mismatches the country's grid cell count,
+                        or time_id is invalid.
+        """
+        if not self.is_prediction:
+            raise ValueError(
+                "Reconciliation can only be applied to prediction datasets"
+            )
+        if feature not in self.targets:
+            raise ValueError(f"Feature '{feature}' not found in dataset targets")
+        if time_id not in self._time_values:
+            raise ValueError(
+                f"Time ID {time_id} not found in the dataset's time values."
+            )
+
+        # Initialize reconciled dataframe if not exists
+        if self.reconciled_dataframe is None:
+            self.reconciled_dataframe = self.dataframe.copy()
+
+        # Get grid cell IDs for the country
+        if self._country_to_grids_cache is None:
+            self._build_country_to_grids_cache()
+        entity_ids = self._country_to_grids_cache.get(country_id, [])
+        if not entity_ids:
+            raise ValueError(f"No grid cells found for country_id {country_id}")
+
+        # Validate tensor dimensions
+        if reconciled_tensor.shape[1] != len(entity_ids):
+            raise ValueError(
+                f"Tensor shape {reconciled_tensor.shape} doesn't match "
+                f"{len(entity_ids)} grid cells in country {country_id}"
+            )
+
+        # Convert tensor to numpy array (handle device tensors)
+        reconciled_np = reconciled_tensor.cpu().numpy()
+
+        # Update each grid cell's data
+        for idx, entity_id in enumerate(entity_ids):
+            # Get the new samples for this grid cell
+            new_samples = reconciled_np[:, idx]
+            # Update the reconciled dataframe
+            self.reconciled_dataframe.loc[(time_id, entity_id), feature] = new_samples
 
     def get_lat_lon(self) -> pd.DataFrame:
         """Get latitude and longitude for each priogrid"""
-        from ingester3.extensions import PgAccessor
         return pd.DataFrame(
-            {"lat": self._get_entity_attr("lat"), "lon": self._get_entity_attr("lon")}
+            {
+                "lat": self._entity_metadata_cache["lat"].reindex(self.dataframe.index),
+                "lon": self._entity_metadata_cache["long"].reindex(
+                    self.dataframe.index
+                ),
+            }
         )
 
     def get_row_col(self) -> pd.DataFrame:
         """Get row and column indices for each priogrid"""
-        from ingester3.extensions import PgAccessor
         return pd.DataFrame(
-            {"row": self._get_entity_attr("row"), "col": self._get_entity_attr("col")}
+            {
+                "row": self._entity_metadata_cache["row"].reindex(self.dataframe.index),
+                "col": self._entity_metadata_cache["col"].reindex(self.dataframe.index),
+            }
         )
 
-    def get_country_iso(self) -> pd.DataFrame:
+    def get_isoab(self) -> pd.DataFrame:
         """Get ISO code for the country of each priogrid"""
-        from ingester3.extensions import PgAccessor
-        country_ids = self._get_entity_attr("c_id")
-        temp_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
-        return temp_df.c.isoab.to_frame(name="country_iso")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["isoab"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="isoab")
+        )
 
     def get_name(self) -> pd.DataFrame:
         """Get country names for each priogrid"""
-        from ingester3.extensions import PgAccessor
-        # Get country IDs from priogrids
-        country_ids = self._get_entity_attr("c_id")
+        # # Get country IDs from priogrids
+        # country_ids = self._get_entity_attr("c_id")
 
-        # Create temporary DataFrame with country IDs
-        country_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
+        # # Create temporary DataFrame with country IDs
+        # country_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
 
-        # Use c accessor to get country names
-        return country_df.c.name.to_frame(name="country_name")
+        # # Use c accessor to get country names
+        # return country_df.c.name.to_frame(name="country_name")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["name"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="name")
+        )
 
-    # def get_continent(self) -> pd.DataFrame:
-    #     """Get continent for priogrids through country mapping"""
-    #     # Get country IDs from priogrids
-    #     country_ids = self._get_entity_attr('c_id')
+    def get_region(self) -> pd.DataFrame:
+        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        self._build_entity_metadata_cache()
+        gwcode = self._entity_metadata_cache["gwcode"].reindex(self.dataframe.index)
 
-    #     # Create temporary DataFrame with country IDs
-    #     country_df = pd.DataFrame({'c_id': country_ids}, index=self.dataframe.index)
+        # Define continent mapping based on GW code ranges (Gleditsch & Ward system)
+        # GW code continent mapping based on Gleditsch & Ward (standard GW codes)
+        # Reference: https://correlatesofwar.org/data-sets/cow-country-codes/
+        continent_rules = [
+            (gwcode.between(2, 165), "Americas"),  # Americas (North, Central, South)
+            (gwcode.between(200, 399), "Europe"),  # Europe
+            (gwcode.between(400, 626), "Africa"),  # Africa
+            (gwcode.between(630, 698), "Middle East"),  # Middle East
+            (gwcode.between(700, 899), "Asia"),  # Asia (excluding Middle East)
+            (gwcode.between(900, 990), "Oceania"),  # Oceania/Pacific
+            (gwcode == 999, "International"),  # Special/International
+        ]
 
-    #     # Get continent using country dataset logic
-    #     return country_df.c.get_continent()
+        # Create default 'Other' category
+        continent = pd.Series("Other", index=gwcode.index)
+
+        # Apply mapping rules
+        for condition, name in continent_rules:
+            continent = continent.where(~condition, name)
+
+        return continent.to_frame(name="continent")
 
 
 class PGMDataset(_PGDataset):
-    # from ingester3.extensions import PGMAccessor
-
     def validate_indices(self) -> None:
         super().validate_indices()
         if self.dataframe.index.names[0] != "month_id":
@@ -1569,32 +1634,37 @@ class PGMDataset(_PGDataset):
                 f"PGMDataset requires index 0 to be 'month_id', found {self.dataframe.index.names}"
             )
 
-    def _get_time_attr(self, attr: str) -> pd.Series:
-        """Helper method to get temporal attributes using accessor"""
-        from ingester3.extensions import PGMAccessor
-        time_ids = self.dataframe.index.get_level_values(self._time_id)
-        temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
-        return getattr(temp_df.m, attr)
-
     def get_year(self) -> pd.DataFrame:
-        from ingester3.extensions import PGMAccessor
-        return self._get_time_attr("year").to_frame(name="year")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["year_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="year_id")
+        )
 
     def get_month(self) -> pd.DataFrame:
-        from ingester3.extensions import PGMAccessor
-        return self._get_time_attr("month").to_frame(name="month")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["month_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="month_id")
+        )
 
     def get_date(self) -> pd.DataFrame:
-        from ingester3.extensions import PGMAccessor
         """Get first day of month as datetime"""
-        years = self.get_year()["year"]
-        months = self.get_month()["month"]
+        years = self.get_year()["year_id"]
+        months = self.get_month()["month_id"]
+
+        def wrap_month(month_id: int) -> int:
+            """Wraps any integer to the 1-12 month range."""
+            return (month_id - 1) % 12 + 1
+
+        months = months.apply(wrap_month)
         dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
         return dates.to_frame(name="date")
 
 
 class PGYDataset(_ViewsDataset):
-    # from ingester3.extensions import PGYAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -1605,8 +1675,6 @@ class PGYDataset(_ViewsDataset):
 
 
 class _CDataset(_ViewsDataset):
-    # from ingester3.extensions import CAccessor
-    _accessor_name = "c"
 
     def validate_indices(self) -> None:
         super().validate_indices()
@@ -1615,66 +1683,134 @@ class _CDataset(_ViewsDataset):
                 f"CDataset requires index 1 to be 'country_id', found {self.dataframe.index.names}"
             )
 
-    def _get_entity_attr(self, attr: str) -> pd.Series:
-        """Helper method to get country attributes using accessor"""
-        from ingester3.extensions import CAccessor
-        entity_ids = self.dataframe.index.get_level_values(self._entity_id)
-        temp_df = pd.DataFrame({"c_id": entity_ids}, index=self.dataframe.index)
-        return getattr(temp_df.c, attr)
+    def _build_entity_metadata_cache(self):
+        """Build a cache mapping country_ids to metadata using the CAccessor"""
+        if self._entity_metadata_cache is not None:
+            return
+        else:
+            self._entity_metadata_cache = (
+                (
+                    Queryset("country_metadata", "country_month")
+                    .with_column(
+                        Column("isoab", from_loa="country", from_column="isoab")
+                    )
+                    .with_column(Column("name", from_loa="country", from_column="name"))
+                    .with_column(
+                        Column("gwcode", from_loa="country", from_column="gwcode")
+                    )
+                    .with_column(
+                        Column("isonum", from_loa="country", from_column="isonum")
+                    )
+                    .with_column(
+                        Column("capname", from_loa="country", from_column="capname")
+                    )
+                    .with_column(
+                        Column("caplat", from_loa="country", from_column="caplat")
+                    )
+                    .with_column(
+                        Column("caplong", from_loa="country", from_column="caplong")
+                    )
+                    .with_column(
+                        Column("in_africa", from_loa="country", from_column="in_africa")
+                    )
+                    .with_column(
+                        Column("in_me", from_loa="country", from_column="in_me")
+                    )
+                    .with_column(
+                        Column(
+                            "year_id", from_loa="country_year", from_column="year_id"
+                        )
+                    )
+                )
+                .publish()
+                .fetch()
+                .reset_index()
+                .set_index([self._time_id, self._entity_id], drop=False)
+            )
 
     def get_isoab(self) -> pd.DataFrame:
-        from ingester3.extensions import CAccessor
-        return self._get_entity_attr("isoab").to_frame(name="isoab")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["isoab"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="isoab")
+        )
 
     def get_name(self) -> pd.DataFrame:
-        from ingester3.extensions import CAccessor
-        return self._get_entity_attr("name").to_frame(name="name")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["name"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="name")
+        )
 
     def get_gwcode(self) -> pd.DataFrame:
-        from ingester3.extensions import CAccessor
-        return self._get_entity_attr("gwcode").to_frame(name="gwcode")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["gwcode"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="gwcode")
+        )
 
     def get_isonum(self) -> pd.DataFrame:
-        from ingester3.extensions import CAccessor
-        return self._get_entity_attr("isonum").to_frame(name="isonum")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["isonum"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="isonum")
+        )
 
     def get_capname(self) -> pd.DataFrame:
-        from ingester3.extensions import CAccessor
-        return self._get_entity_attr("capname").to_frame(name="capname")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["capname"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="capname")
+        )
 
     def get_cap_lat_lon(self) -> pd.DataFrame:
-        from ingester3.extensions import CAccessor
+        self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
-                "cap_lat": self._get_entity_attr("caplat"),
-                "cap_lon": self._get_entity_attr("caplong"),
+                "cap_lat": self._entity_metadata_cache["caplat"].reindex(
+                    self.dataframe.index
+                ),
+                "cap_lon": self._entity_metadata_cache["caplong"].reindex(
+                    self.dataframe.index
+                ),
             }
         )
 
     def get_region(self) -> pd.DataFrame:
         """Get combined region information"""
-        from ingester3.extensions import CAccessor
+        self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
-                "in_africa": self._get_entity_attr("in_africa"),
-                "in_me": self._get_entity_attr("in_me"),
+                "in_africa": self._entity_metadata_cache["in_africa"].reindex(
+                    self.dataframe.index
+                ),
+                "in_me": self._entity_metadata_cache["in_me"].reindex(
+                    self.dataframe.index
+                ),
             }
         )
 
-    def get_continent(self) -> pd.DataFrame:
+    def get_region(self) -> pd.DataFrame:
         """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
-        from ingester3.extensions import CAccessor
-        # Get GW codes
-        gwcode = self._get_entity_attr("gwcode")
+        self._build_entity_metadata_cache()
+        gwcode = self._entity_metadata_cache["gwcode"].reindex(self.dataframe.index)
 
         # Define continent mapping based on GW code ranges (Gleditsch & Ward system)
+        # GW code continent mapping based on Gleditsch & Ward (standard GW codes)
+        # Reference: https://correlatesofwar.org/data-sets/cow-country-codes/
         continent_rules = [
-            (gwcode.between(400, 625), "Africa"),  # African states
+            (gwcode.between(2, 165), "Americas"),  # Americas (North, Central, South)
+            (gwcode.between(200, 399), "Europe"),  # Europe
+            (gwcode.between(400, 626), "Africa"),  # Africa
             (gwcode.between(630, 698), "Middle East"),  # Middle East
-            (gwcode.between(200, 395), "Europe"),  # Western Europe
-            (gwcode.between(2, 165), "Americas"),  # Americas
-            (gwcode.between(700, 990), "Asia"),  # Asia/Pacific
-            (gwcode == 999, "International"),  # Special codes
+            (gwcode.between(700, 899), "Asia"),  # Asia (excluding Middle East)
+            (gwcode.between(900, 990), "Oceania"),  # Oceania/Pacific
+            (gwcode == 999, "International"),  # Special/International
         ]
 
         # Create default 'Other' category
@@ -1683,12 +1819,6 @@ class _CDataset(_ViewsDataset):
         # Apply mapping rules
         for condition, name in continent_rules:
             continent = continent.where(~condition, name)
-
-        # Use with existing regional flags. Does not really work well.
-        # region = self.get_region()
-        # continent = continent.where(~region['in_africa'], 'Africa')
-        # continent = continent.where(~region['in_me'], 'Middle East')
-
         return continent.to_frame(name="continent")
 
 
@@ -1701,38 +1831,43 @@ class CMDataset(_CDataset):
                 f"CMDataset requires index 0 to be 'month_id', found {self.dataframe.index.names}"
             )
 
-    def _get_time_attr(self, attr: str) -> pd.Series:
-        """Helper method to get temporal attributes using accessor"""
-        from ingester3.extensions import CMAccessor
-        time_ids = self.dataframe.index.get_level_values(self._time_id)
-        temp_df = pd.DataFrame({"month_id": time_ids}, index=self.dataframe.index)
-        return getattr(temp_df.m, attr)
-
     def get_year(self) -> pd.DataFrame:
-        from ingester3.extensions import CMAccessor
-        return self._get_time_attr("year").to_frame(name="year")
+        # return self._get_time_attr("year").to_frame(name="year")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["year_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="year_id")
+        )
 
     def get_month(self) -> pd.DataFrame:
-        from ingester3.extensions import CMAccessor
-        return self._get_time_attr("month").to_frame(name="month")
+        self._build_entity_metadata_cache()
+        return (
+            self._entity_metadata_cache["month_id"]
+            .reindex(self.dataframe.index)
+            .to_frame(name="month_id")
+        )
 
     def get_date(self) -> pd.DataFrame:
         """Get first day of month as datetime"""
-        from ingester3.extensions import CMAccessor
-        years = self.get_year()["year"]
-        months = self.get_month()["month"]
+        years = self.get_year()["year_id"]
+        months = self.get_month()["month_id"]
+
+        def wrap_month(month_id: int) -> int:
+            """Wraps any integer to the 1-12 month range."""
+            return (month_id - 1) % 12 + 1
+
+        months = months.apply(wrap_month)
         dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
         return dates.to_frame(name="date")
 
     def get_quarter(self) -> pd.DataFrame:
         """Get fiscal quarter from month"""
-        from ingester3.extensions import CMAccessor
         months = self.get_month()["month"]
         return ((months - 1) // 3 + 1).to_frame(name="quarter")
 
 
 class CYDataset(_CDataset):
-    # from ingester3.extensions import CYAccessor
 
     def validate_indices(self) -> None:
         super().validate_indices()

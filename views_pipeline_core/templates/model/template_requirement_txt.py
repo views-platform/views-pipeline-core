@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def generate(script_path: Path, package_name:str, package_version_range: str = "=0.1.0") -> bool:
+def generate(script_path: Path, package_name:str, package_version_range: str = None) -> bool:
     """
     Generates a requirements text file with the specified package name and version range.
 
@@ -18,7 +18,7 @@ def generate(script_path: Path, package_name:str, package_version_range: str = "
             bool: True if the file was successfully saved, False otherwise.
     """
     if package_version_range is None:
-        package_version_range = "=0.1.0"
+        package_version_range = "0.1.0"
     code = f"""{package_name}=={package_version_range}
 """
     return save_text_file(script_path, code)

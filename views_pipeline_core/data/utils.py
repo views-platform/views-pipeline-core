@@ -107,9 +107,15 @@ def replace_nan_values(df: pd.DataFrame, value: Union[int, float] = 0.0) -> pd.D
                     d[column] = d[column].apply(
                         lambda x: [np.float64(value) if np.isnan(i) else float(i) for i in x]
                     )
+                    d[column] = d[column].apply(
+                        lambda x: [0.0 if i < 0 else float(i) for i in x]
+                    )
                 else:
                     d[column] = d[column].apply(
                         lambda x: np.float64(value) if np.isnan(x) else float(x)
+                    )
+                    d[column] = d[column].apply(
+                        lambda x: 0.0 if x < 0 else float(x)
                     )
             return d
         if isinstance(df, list):

@@ -163,23 +163,29 @@ class PackageManager:
                 logging.error(
                     f"API rate limit exceeded. Retry after {reset_time - int(time.time())} seconds.", exc_info=False
                 )
-                exit(1)
+                return None
 
             else:
                 logging.error(
                     f"Failed to get latest version from GitHub: {response.status_code}",
                     f"Response: {response.text}",
-                    exc_info=True,
+                    exc_info=False,
                 )
-                exit(1)
+                return None
                 
         except requests.exceptions.RequestException as e:
             logging.error(
                 f"An error occurred while getting the latest version from GitHub: {e}",
-                exc_info=True,
+                exc_info=False,
             )
             raise
-        return None
+
+        except Exception as e:
+            logging.error(
+                f"An unexpected error occurred while getting the latest version from GitHub: {type(e).__name__} - {e}",
+                exc_info=True,
+            )
+            return None
 
     @staticmethod
     def validate_package_name(name: str) -> bool:

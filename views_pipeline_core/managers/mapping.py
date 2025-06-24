@@ -22,12 +22,12 @@ class MappingManager:
         self._entity_id = self._dataset._entity_id
         self._time_id = self._dataset._time_id
         if isinstance(views_dataset, _PGDataset):
-            from ingester3.extensions import PgAccessor
+            # from ingester3.extensions import PgAccessor
 
             self._world = self.__get_priogrid_shapefile()
 
         elif isinstance(views_dataset, _CDataset):
-            from ingester3.extensions import CAccessor
+            # from ingester3.extensions import CAccessor
 
             self._world = self.__get_country_shapefile()
         else:
@@ -92,7 +92,7 @@ class MappingManager:
         numeric_cols = _dataframe.select_dtypes(include=np.number).columns
         _dataframe[numeric_cols] = _dataframe[numeric_cols].astype(np.float32)
 
-        if isinstance(self._dataset, CMDataset):
+        if isinstance(self._dataset, _CDataset):
             # Add ISO codes to the dataframe
             _dataframe = self.__add_isoab(dataframe=_dataframe)
 
@@ -113,7 +113,7 @@ class MappingManager:
 
             return self.__check_missing_geometries(merged_gdf)
 
-        elif isinstance(self._dataset, PGMDataset):
+        elif isinstance(self._dataset, _PGDataset):
             # _dataframe = self.__add_cid(dataframe=_dataframe)
             # Merge priogrid geometries
             _dataframe = _dataframe.merge(
@@ -150,36 +150,6 @@ class MappingManager:
             how="left",
         )
         dataframe.rename(columns={"name": "country_name"}, inplace=True)
-
-        return dataframe
-
-    def __add_cid(self, dataframe: pd.DataFrame):
-        # if isinstance(self._dataset, PGMDataset):
-        #     dataframe.rename(columns={self._entity_id: "pg_id"}, inplace=True)
-        #     dataframe["c_id"] = dataframe.pg.c_id
-        #     dataframe["country_name"] = dataframe.pg.name
-        #     dataframe.rename(columns={"pg_id": self._entity_id}, inplace=True)
-        # return dataframe
-        if isinstance(self._dataset, PGMDataset):
-            # Get country IDs through dataset method
-            cid_df = self._dataset.get_country_id().reset_index()
-
-            # Get country names using CDataset
-            country_ids = cid_df["c_id"].unique()
-            temp_country_df = pd.DataFrame({"c_id": country_ids})
-            temp_cdataset = CMDataset(
-                temp_country_df, targets=[]
-            )  # Use CMDataset for month alignment
-
-            # Merge names
-            name_df = temp_cdataset.get_name().reset_index()
-            cid_df = cid_df.merge(name_df[["c_id", "name"]], on="c_id", how="left")
-
-            # Merge with main dataframe
-            dataframe = dataframe.merge(
-                cid_df, on=[self._time_id, self._entity_id], how="left"
-            )
-            dataframe.rename(columns={"name": "country_name"}, inplace=True)
 
         return dataframe
 
