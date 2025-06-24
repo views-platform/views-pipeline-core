@@ -12,7 +12,7 @@ class ReconciliationManager:
         self._pg_dataset = pg_dataset
         self._device = self.__detect_torch_device()
         print(f"Using device: {self._device}")
-        self._reconciler = ForecastReconciler(device="mps")
+        self._reconciler = ForecastReconciler(device=self._device)
         self._pg_dataset._build_country_to_grids_cache()
 
         if c_dataset.num_time_steps != pg_dataset.num_time_steps:
