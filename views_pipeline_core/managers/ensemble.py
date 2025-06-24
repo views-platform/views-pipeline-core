@@ -136,6 +136,10 @@ class EnsembleManager(ForecastingModelManager):
             return None
         
         try:
+            logger.info(f"Reconciliation with CM model: {cm_model}")
+            logger.info(f"Using run type: {self.config['run_type']}")
+            logger.info(f"{EnsemblePathManager(cm_model).data_generated}")
+            logger.info(f"PATHS ARE HERERERERERE {EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])}")
             latest_c_dataset = _CDataset(source=EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0]) if c_dataframe is None else _CDataset(source=c_dataframe)
             # logger.info(f"Using latest C dataset for model {cm_model} from local path.")
             # logger.info(f"{EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0]}")
