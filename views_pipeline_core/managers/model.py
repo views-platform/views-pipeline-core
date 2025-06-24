@@ -443,7 +443,7 @@ class ModelPathManager:
             for f in self.data_raw.iterdir()
             if f.is_file()
             and f.stem.startswith(f"{run_type}_viewser_df")
-            and f.suffix == PipelineConfig.dataframe_format
+            and f.suffix == PipelineConfig().dataframe_format
         ]
         return sorted(paths, reverse=True)
 
@@ -453,7 +453,7 @@ class ModelPathManager:
             for f in self.data_generated.iterdir()
             if f.is_file()
             and f.stem.startswith(f"predictions_{run_type}")
-            and f.suffix == PipelineConfig.dataframe_format
+            and f.suffix == PipelineConfig().dataframe_format
         ]
         return sorted(paths, reverse=True)
 
