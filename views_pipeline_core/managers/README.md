@@ -436,7 +436,7 @@ MultiIndex([(500, 4),
 
 #### 2.1 Evaluation DataFrames
 
-Must contain **a list prediction dataframes**. The list is of the same length as the number of sequences:
+Must contain a **list prediction dataframes**. The list is of the same length as the number of sequences:
 
 | Column Pattern       | Data Type       | Description                      |
 |----------------------|-----------------|----------------------------------|
