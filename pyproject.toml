@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "views_pipeline_core"
-version = "2.0.0"
+version = "2.0.1"
 description = ""
 authors = [
     "Borbála Farkas <borbala.farkas@pcr.uu.se>",
