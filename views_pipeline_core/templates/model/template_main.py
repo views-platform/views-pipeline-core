@@ -40,7 +40,6 @@ def generate(script_path: Path) -> bool:
 import warnings
 from pathlib import Path
 from views_pipeline_core.cli.utils import parse_args, validate_arguments
-from views_pipeline_core.managers.log import LoggingManager
 from views_pipeline_core.managers.model import ModelPathManager
 
 # Import your model manager class here
@@ -50,7 +49,6 @@ warnings.filterwarnings("ignore")
 
 try:
     model_path = ModelPathManager(Path(__file__))
-    logger = LoggingManager(model_path).get_logger()
 except FileNotFoundError as fnf_error:
     raise RuntimeError(
         f"File not found: {fnf_error}. Check the file path and try again."

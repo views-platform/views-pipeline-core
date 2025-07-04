@@ -30,7 +30,7 @@ class LoggingManager:
         self.model_path = model_path
         self._default_level: int = logging.INFO
         self._logging_is_active = True
-        self._logging_path = model_path.logging
+        self._logging_path = Path(self.model_path.logging)
         if not isinstance(self._logging_path, Path) and self._logging_is_active:
             raise ValueError("Logging path must be a valid Path object.")
         else:

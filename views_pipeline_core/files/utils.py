@@ -2,6 +2,8 @@ import logging
 import pandas as pd
 from pathlib import Path
 from typing import Union
+from datetime import datetime
+
 logger = logging.getLogger(__name__)
 
 
@@ -134,6 +136,62 @@ def create_log_file(path_generated,
                                      log_data["Single Model Timestamp"], log_data["Data Generation Timestamp"], log_data["Data Fetch Timestamp"], mode="a")
     
     logger.info(f"Log file created at {path_generated}/{run_type}_log.txt")
+
+
+def handle_single_log_creation(model_path, config: dict, train: bool) -> None:
+    """
+    Handles the creation of log files for different stages of the model pipeline.
+
+    Depending on the flags provided, this method creates log files for training,
+    evaluation, or forecasting stages of the model pipeline. It reads the data
+    fetch timestamp from an existing log file and includes it in the new log files.
+
+    Args:
+        model_path (ModelPathManager): The path manager for the model.
+        config (dict): The configuration dictionary for the model.
+        train (bool): Flag indicating whether the log is for the training stage.
+
+    Returns:
+        None
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    data_fetch_timestamp = read_log_file(
+        model_path.data_raw / f"{config['run_type']}_data_fetch_log.txt"
+    ).get("Data Fetch Timestamp", None)
+
+    create_log_file(
+        path_generated=model_path.data_generated,
+        model_config=config,
+        model_timestamp=timestamp if train else config["timestamp"],
+        data_generation_timestamp=None if train else timestamp,
+        data_fetch_timestamp=data_fetch_timestamp,
+    )
+
+
+def handle_ensemble_log_creation(model_path, config: dict) -> None:
+    """
+    This method generates a timestamp for data generation, updates the configuration
+    with this timestamp, and creates a log file for the ensemble model using the
+    provided configuration and paths.
+
+    Returns:
+        None
+    """
+    path_generated_e = model_path.data_generated
+    data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    config["timestamp"] = data_generation_timestamp
+
+    # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.
+    create_log_file(
+        path_generated_e,
+        config,
+        data_generation_timestamp,
+        data_generation_timestamp,
+        data_fetch_timestamp=None,
+        model_type="ensemble",
+        models=config["models"],
+    )
+
         
 def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     """
@@ -212,3 +270,69 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     except Exception as e:
         logger.exception(f"Error reading the DataFrame from {file_path}: {e}")
         raise
+
+
+def generate_model_file_name(run_type: str, file_extension: str) -> str:
+    """
+    Generates a model file name based on the run type, and timestamp.
+
+    Args:
+        run_type (str): The type of run (e.g., calibration, validation).
+        file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pt, .pkl, .h5
+
+    Returns:
+        str: The generated model file name.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{run_type}_model_{timestamp}{file_extension}"
+
+
+def generate_output_file_name(
+    generated_file_type: str,
+    run_type: str,
+    timestamp: str,
+    sequence_number: int,
+    file_extension: str,
+) -> str:
+    """
+    Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
+
+    Args:
+        generated_file_type (str): The type of generated file (e.g., predictions, output).
+        sequence_number (int): The sequence number.
+        run_type (str): The type of run (e.g., calibration, validation).
+        timestamp (str): The timestamp of the generated file.
+        file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
+
+    Returns:
+        str: The generated prediction file name.
+    """
+    # logger.info(f"sequence_number: {sequence_number}")
+    if sequence_number is not None:
+        return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}{file_extension}"
+    else:
+        return f"{generated_file_type}_{run_type}_{timestamp}{file_extension}"
+    
+
+def generate_evaluation_file_name(
+    evaluation_type: str,
+    conflict_type: str,
+    run_type: str,
+    timestamp: str,
+    file_extension: str,
+) -> str:
+    """
+    Generates an evaluation file name based on the run type, evaluation type, and timestamp.
+
+    Args:
+        evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
+        conflict_type (str): The type of conflict (e.g., sb, os, ns).
+        run_type (str): The type of run (e.g., calibration, validation).
+        timestamp (str): The timestamp of the generated file.
+        file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
+
+    Returns:
+        str: The generated prediction file name.
+    """
+    # logger.info(f"sequence_number: {sequence_number}")
+    return f"eval_{evaluation_type}_{conflict_type}_{run_type}_{timestamp}{file_extension}"

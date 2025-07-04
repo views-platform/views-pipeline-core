@@ -24,7 +24,7 @@ class ViewsDataLoader:
     create or load volumes, and handle drift detection configurations.
     """
 
-    def __init__(self, model_path: ModelPathManager, **kwargs):
+    def __init__(self, model_path: ModelPathManager, partition_dict: Dict = None, steps: int = 36, **kwargs):
         """
         Initializes the DataLoaders class with a ModelPathManager object and optional keyword arguments.
 
@@ -39,6 +39,7 @@ class ViewsDataLoader:
             override_month (str, optional): The override month. Defaults to None.
             month_first (str, optional): The first month in the range. Defaults to None.
             month_last (str, optional): The last month in the range. Defaults to None.
+            steps (int, optional): The step size for the forecasting partition. Defaults to 36.
         """
         self._model_path = model_path
         self._model_name = model_path.model_name
@@ -46,20 +47,21 @@ class ViewsDataLoader:
         self._path_raw = model_path.data_raw
         self._path_processed = model_path.data_processed
         self.partition = None
-        self.partition_dict = None
+        self.partition_dict = partition_dict
         self.drift_config_dict = None
         self.override_month = None
         self.month_first, self.month_last = None, None
+        self.steps = steps
 
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-    def _get_partition_dict(self, step=36) -> Dict:
+    def _get_partition_dict(self, steps) -> Dict:
         """
         Returns the partitioner dictionary for the given partition.
 
         Args:
-            step (int, optional): The step size for the forecasting partition. Defaults to 36.
+            steps (int, optional): The step size for the forecasting partition. Defaults to 36.
 
         Returns:
             dict: A dictionary containing the train and predict ranges for the specified partition.
@@ -73,6 +75,7 @@ class ViewsDataLoader:
             - For the "forecasting" partition, the train range starts at 121 and ends at the current month minus 2.
               The predict range starts at the current month minus 1 and extends by the step size.
         """
+        logger.warning("Did not use config_partitions.py, using default partition dictionary instead...")
         match self.partition:
             case "calibration":
                 return {
@@ -90,12 +93,13 @@ class ViewsDataLoader:
                 )  # minus 2 because the current month is not yet available. Verified but can be tested by changing this and running the check_data notebook.
                 return {
                     "train": (121, month_last),
-                    "test": (month_last + 1, month_last + 1 + step),
+                    "test": (month_last + 1, month_last + 1 + steps),
                 }  
             case _:
                 raise ValueError(
                     'partition should be either "calibration", "validation" or "forecasting"'
                 )
+        pass
 
     def _fetch_data_from_viewser(self, self_test: bool) -> tuple[pd.DataFrame, list]:
         """
@@ -124,24 +128,35 @@ class ViewsDataLoader:
         else:
             logger.info(f"Found queryset for {self._model_name}")
 
-        df, alerts = queryset_base.publish().fetch_with_drift_detection(
-            start_date=self.month_first,
-            end_date=self.month_last - 1,
-            drift_config_dict=self.drift_config_dict,
-            self_test=self_test,
-        )
+        try:
+            df, alerts = queryset_base.publish().fetch_with_drift_detection(
+                start_date=self.month_first,
+                end_date=self.month_last - 1,
+                drift_config_dict=self.drift_config_dict,
+                self_test=self_test,
+            )
+            for ialert, alert in enumerate(
+            str(alerts).strip("[").strip("]").split("Input")):
+                if "offender" in alert:
+                    logger.warning(
+                        {f"{self._model_path.model_name} data alert {ialert}": str(alert)}
+                    )
+            df = ensure_float64(df)
+            return df, alerts
+        except KeyError as e:
+            logger.error(f"\033[91mError fetching data from viewser: {e}. Trying to fetch without drift detection.\033[0m", exc_info=True)
+            df = queryset_base.publish().fetch(
+                start_date=self.month_first,
+                end_date=self.month_last - 1,
+            )
+            df = ensure_float64(df)
+            return df, None
+        except Exception as e:
+            logger.error(f"Error fetching data from viewser: {e}", exc_info=True)
+            raise RuntimeError(
+                f"Error fetching data from viewser: {e}"
+            )
 
-        df = ensure_float64(df)  # The dataframe must contain only np.float64 floats
-        #    with wandb.init(project=f'{model_path.model_name}', entity="views_pipeline"):
-        for ialert, alert in enumerate(
-            str(alerts).strip("[").strip("]").split("Input")
-        ):
-            if "offender" in alert:
-                logger.warning(
-                    {f"{self._model_path.model_name} data alert {ialert}": str(alert)}
-                )
-
-        return df, alerts
 
     def _get_month_range(self) -> tuple[int, int]:
         """
@@ -253,7 +268,7 @@ class ViewsDataLoader:
             RuntimeError: If the saved data file is not found or if the data is incompatible with the partition.
         """
         self.partition = partition #if self.partition is None else self.partition
-        self.partition_dict = self._get_partition_dict() #if self.partition_dict is None else self.partition_dict
+        self.partition_dict = self._get_partition_dict(steps=self.steps) if self.partition_dict is None else self.partition_dict.get(partition, None)
         self.drift_config_dict = drift_detection.drift_detection_partition_dict[
             partition
         ] if self.drift_config_dict is None else self.drift_config_dict
@@ -267,15 +282,23 @@ class ViewsDataLoader:
         alerts = None
 
         if use_saved:
-            # Check if the VIEWSER data file exists
-            try:
-                if path_viewser_df.exists():
+            if path_viewser_df.exists():
+                try:
                     df = read_dataframe(path_viewser_df)
                     logger.info(f"Reading saved data from {path_viewser_df}")
-            except Exception as e:
-                raise RuntimeError(
-                    f"Use of saved data was specified but getting {path_viewser_df} failed with: {e}"
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Use of saved data was specified but getting {path_viewser_df} failed with: {e}"
+                    )
+            else:
+                logger.info(f"Saved data not found at {path_viewser_df}, fetching from viewser...")
+                df, alerts = self._fetch_data_from_viewser(self_test)
+                data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                create_data_fetch_log_file(
+                    self._path_raw, self.partition, self._model_name, data_fetch_timestamp
                 )
+                logger.info(f"Saving data to {path_viewser_df}")
+                save_dataframe(df, path_viewser_df)
         else:
             logger.info(f"Fetching data from viewser...")
             df, alerts = self._fetch_data_from_viewser(self_test) 
