@@ -19,6 +19,19 @@ class ReconciliationManager:
             raise ValueError(
                 "The number of time steps in the country dataset and the grid dataset must match."
             )
+        
+        if c_dataset._time_id != pg_dataset._time_id:
+            raise ValueError(
+                f"You are trying to reconcile datasets with different time units. "
+                f"Country dataset time unit: {c_dataset._time_id}, "
+                f"Grid dataset time unit: {pg_dataset._time_id}"
+            )
+        
+        if c_dataset._time_values != pg_dataset._time_values:
+            raise ValueError(
+                f"The time values in the country dataset and the grid dataset must match. Uncommon time steps: "
+                f"{set(c_dataset._time_values) ^ set(pg_dataset._time_values)}"
+            )
 
         self._valid_cids = list(
             set(self._pg_dataset._country_to_grids_cache.keys())
