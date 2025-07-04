@@ -740,7 +740,7 @@ class ModelManager:
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
             self._data_loader = ViewsDataLoader(model_path=self._model_path, 
-                                                steps=len(self._config_hyperparameters.get("steps", 36)), 
+                                                steps=len(self._config_hyperparameters.get("steps", [*range(1, 36 + 1, 1)])), 
                                                 partition_dict=self._partition_dict)
 
         if self._use_prediction_store:
