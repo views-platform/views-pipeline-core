@@ -59,7 +59,7 @@ class EnsembleManager(ForecastingModelManager):
         self,
         ensemble_path: EnsemblePathManager,
         wandb_notifications: bool = True,
-        use_prediction_store: bool = True,
+        use_prediction_store: bool = False,
     ) -> None:
         """
         Initialize the EnsembleManager.
