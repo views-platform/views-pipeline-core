@@ -59,7 +59,7 @@ class EnsembleManager(ForecastingModelManager):
         self,
         ensemble_path: EnsemblePathManager,
         wandb_notifications: bool = True,
-        use_prediction_store: bool = False,
+        use_prediction_store: bool = True,
     ) -> None:
         """
         Initialize the EnsembleManager.
@@ -160,10 +160,31 @@ class EnsembleManager(ForecastingModelManager):
 
         return shell_command
 
+    # @staticmethod
+    # def _get_aggregated_df(df_to_aggregate, aggregation):
+    #     """
+    #     Aggregates the DataFrames of model outputs based on the specified aggregation method.
+
+    #     Args:
+    #     - df_to_aggregate (list of pd.DataFrame): A list of DataFrames of model outputs.
+    #     - aggregation (str): The aggregation method to use (either "mean" or "median").
+
+    #     Returns:
+    #     - df (pd.DataFrame): The aggregated DataFrame of model outputs.
+    #     """
+
+    #     if aggregation == "mean":
+    #         return pd.concat(df_to_aggregate).groupby(level=[0, 1]).mean()
+    #     elif aggregation == "median":
+    #         return pd.concat(df_to_aggregate).groupby(level=[0, 1]).median()
+    #     else:
+    #         raise ValueError(f"Invalid aggregation method: {aggregation}")
+
     @staticmethod
     def _get_aggregated_df(df_to_aggregate, aggregation):
         """
         Aggregates the DataFrames of model outputs based on the specified aggregation method.
+        Converts single-element lists to scalars and checks for multi-element lists.
 
         Args:
         - df_to_aggregate (list of pd.DataFrame): A list of DataFrames of model outputs.
@@ -173,10 +194,40 @@ class EnsembleManager(ForecastingModelManager):
         - df (pd.DataFrame): The aggregated DataFrame of model outputs.
         """
 
+        # Process each DataFrame: convert single-element lists to scalars, handle empty lists as NaN, 
+        # and throw an exception for multi-element lists
+        processed_dfs = []
+        for df in df_to_aggregate:
+            # Create a copy to avoid modifying the original DataFrame
+            df_processed = df.copy()
+            
+            for col in df_processed.columns:
+                # Process each element in the column
+                def process_element(elem):
+                    if isinstance(elem, list):
+                        if len(elem) == 1:
+                            return elem[0]  # Unwrap single-element list
+                        elif len(elem) == 0:
+                            return None     # Convert empty list to None (becomes NaN)
+                        else:
+                            # Throw exception for multi-element list
+                            raise ValueError(
+                                f"Aggregating distributions is not supported. Found list with {len(elem)} values in column '{col}'."
+                            )
+                    else:
+                        return elem  # Return non-list values as-is
+                
+                df_processed[col] = df_processed[col].apply(process_element)
+            
+            processed_dfs.append(df_processed)
+        
+        # Concatenate processed DataFrames and aggregate
+        concatenated = pd.concat(processed_dfs)
+        
         if aggregation == "mean":
-            return pd.concat(df_to_aggregate).groupby(level=[0, 1]).mean()
+            return concatenated.groupby(level=[0, 1]).mean()
         elif aggregation == "median":
-            return pd.concat(df_to_aggregate).groupby(level=[0, 1]).median()
+            return concatenated.groupby(level=[0, 1]).median()
         else:
             raise ValueError(f"Invalid aggregation method: {aggregation}")
 
