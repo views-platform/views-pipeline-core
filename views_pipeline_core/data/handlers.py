@@ -18,8 +18,9 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-
 class _ViewsDataset:
+    _BASE_YEAR = 1980
+
     def __init__(
         self,
         source: Union[pd.DataFrame, str, Path],
@@ -1663,6 +1664,13 @@ class PGMDataset(_PGDataset):
         dates = pd.to_datetime(years.astype(str) + "-" + months.astype(str) + "-01")
         return dates.to_frame(name="date")
 
+    def get_month_of_year(self) -> pd.DataFrame:
+        """Get month of year (1-12) based on months since base year (1980)."""
+        self._build_entity_metadata_cache()
+        months_since_base = self._entity_metadata_cache["month_id"].reindex(self.dataframe.index)
+        month_of_year = ((months_since_base - 1) % 12) + 1
+        return month_of_year.to_frame(name="month")
+
 
 class PGYDataset(_ViewsDataset):
 
@@ -1865,6 +1873,13 @@ class CMDataset(_CDataset):
         """Get fiscal quarter from month"""
         months = self.get_month()["month"]
         return ((months - 1) // 3 + 1).to_frame(name="quarter")
+
+    def get_month_of_year(self) -> pd.DataFrame:
+        """Get month of year (1-12) based on months since base year (1980)."""
+        self._build_entity_metadata_cache()
+        months_since_base = self._entity_metadata_cache["month_id"].reindex(self.dataframe.index)
+        month_of_year = ((months_since_base - 1) % 12) + 1
+        return month_of_year.to_frame(name="month")
 
 
 class CYDataset(_CDataset):

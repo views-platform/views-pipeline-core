@@ -250,3 +250,51 @@ def wandb_alert(
             logger.error(f"Usage error sending WandB alert: {e}")
         except Exception as e:
             logger.error(f"Unexpected error sending WandB alert: {e}")
+
+def timestamp_to_date(timestamp):
+    from datetime import datetime
+    return datetime.fromtimestamp(float(timestamp)).strftime('%Y-%m-%d %H:%M:%S')
+
+def format_evaluation_dict(evaluation_dict):
+    formatted_dict = {}
+    for key, value in evaluation_dict.items():
+        if key.startswith("_"):
+            # remove the underscore prefix
+            key = key[1:]
+        if key == "timestamp":
+            formatted_dict[key] = timestamp_to_date(value)
+        elif key == "runtime":
+            # convert seconds to hours, minutes, and seconds
+            if isinstance(value, (int, float)):
+                hours, remainder = divmod(int(value), 3600)
+                formatted_dict[key] = f"{hours}h {remainder // 60}m {remainder % 60}s"
+            else:
+                formatted_dict[key] = value
+        elif isinstance(value, wandb.old.summary.SummarySubDict):
+            continue
+        elif isinstance(value, (int, float)):
+            formatted_dict[key] = value
+        elif isinstance(value, str) and value.isdigit():
+            formatted_dict[key] = int(value)
+        else:
+            formatted_dict[key] = value
+
+    return formatted_dict
+
+def format_metadata_dict(metadata_dict):
+    formatted_dict = {}
+    for key, value in metadata_dict.items():
+        if key == "steps" and isinstance(value, (list, tuple)):
+            value = len(value)
+
+        if key.startswith("_"):
+            # remove the underscore prefix
+            key = key[1:]
+        if isinstance(value, (int, float)):
+            formatted_dict[key] = value
+        elif isinstance(value, str) and value.isdigit():
+            formatted_dict[key] = int(value)
+        else:
+            formatted_dict[key] = value
+
+    return formatted_dict

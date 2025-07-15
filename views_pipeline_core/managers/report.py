@@ -1,7 +1,7 @@
 import base64
 from io import BytesIO
 from pathlib import Path
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Tuple, Any
 import pandas as pd
 import matplotlib.pyplot as plt
 from views_pipeline_core.managers.mapping import MappingManager
@@ -85,28 +85,83 @@ class ReportManager:
         """
         self.content.append(html_img)
 
-    def add_table(self, dataframe: pd.DataFrame) -> None:
+    def add_table(self, data: Union[pd.DataFrame, dict]) -> None:
+        """
+        Add a table from DataFrame or dictionary (supports nested dictionaries)
+        
+        Args:
+            data: DataFrame or dictionary (flat or nested) to display as table
+        """
+        if isinstance(data, pd.DataFrame):
+            df = data
+        elif isinstance(data, dict):
+            # Convert dictionary to list of (path, value) tuples
+            items = self._flatten_dict(data)
+            
+            if not items:
+                # Handle empty dictionary case
+                df = pd.DataFrame(columns=["Value"])
+            else:
+                # Determine maximum depth for column structure
+                max_depth = max(len(path) for path, _ in items)
+                
+                # Create column names (Level 1, Level 2, ... Value)
+                columns = [f"Level {i+1}" for i in range(max_depth)] + ["Value"]
+                
+                # Build rows with padded paths and values
+                rows = []
+                for path, value in items:
+                    padded_path = list(path) + [""] * (max_depth - len(path))
+                    rows.append(padded_path + [value])
+                
+                df = pd.DataFrame(rows, columns=columns)
+        else:
+            raise TypeError("Input must be DataFrame or dictionary")
+        
+        # Apply styling and add to content
         styled_table = (
-            dataframe.style.set_properties(
-                **{"font-size": "0.9em", "padding": "0.5rem"}
-            )
-            .set_table_styles(
-                [
-                    {"selector": "thead", "props": [("background-color", "#f8f9fa")]},
-                    {
-                        "selector": "tr:nth-of-type(odd)",
-                        "props": [("background-color", "#fdfdfe")],
-                    },
-                    {
-                        "selector": "tr:hover",
-                        "props": [("background-color", "#f1f3f5")],
-                    },
-                ]
-            )
+            df.style.set_properties(**{"font-size": "0.9em", "padding": "0.5rem"})
+            .set_table_styles([
+                {"selector": "thead", "props": [("background-color", "#f8f9fa")]},
+                {"selector": "tr:nth-of-type(odd)", "props": [("background-color", "#fdfdfe")]},
+                {"selector": "tr:hover", "props": [("background-color", "#f1f3f5")]}
+            ])
             .hide_index()
             .to_html()
         )
         self.content.append(f'<div class="table-container">{styled_table}</div>\n')
+
+    def _flatten_dict(self, 
+                     d: dict, 
+                     parent_path: Tuple[str, ...] = (), 
+                     items: Optional[List[Tuple[Tuple[str, ...], Any]]] = None
+                    ) -> List[Tuple[Tuple[str, ...], Any]]:
+        """
+        Recursively flatten dictionary to (path, value) tuples
+        
+        Args:
+            d: Dictionary to flatten
+            parent_path: Current path in recursion
+            items: Accumulator for results
+            
+        Returns:
+            List of (path_tuple, value) pairs
+        """
+        if items is None:
+            items = []
+            
+        for k, v in d.items():
+            current_path = parent_path + (str(k),)
+            
+            if isinstance(v, dict):
+                self._flatten_dict(v, current_path, items)
+            else:
+                # Handle non-scalar values by string conversion
+                if not isinstance(v, (int, float, str, bool, type(None))):
+                    v = str(v)
+                items.append((current_path, v))
+                
+        return items
 
     def export_as_html(self, file_path: str) -> None:
         css = """

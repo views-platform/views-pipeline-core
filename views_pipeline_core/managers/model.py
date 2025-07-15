@@ -456,6 +456,27 @@ class ModelPathManager:
             and f.suffix == PipelineConfig().dataframe_format
         ]
         return sorted(paths, reverse=True)
+    
+    def _get_evaluation_metrics_file_paths(self, run_type: str, conflict_type: str, eval_type: str) -> List[Path]:
+        valid_run_types = ForecastingModelManager._get_valid_run_types()
+        valid_conflict_types = ForecastingModelManager._get_valid_conflict_types()
+        valid_eval_types = ForecastingModelManager._get_valid_eval_types()
+
+        if run_type not in valid_run_types:
+            raise ValueError(f"Invalid run type: {run_type}. Must be one of {valid_run_types}.")
+        if conflict_type not in valid_conflict_types:
+            raise ValueError(f"Invalid conflict type: {conflict_type}. Must be one of {valid_conflict_types}.")
+        if eval_type not in valid_eval_types:
+            raise ValueError(f"Invalid evaluation type: {eval_type}. Must be one of {valid_eval_types}.")
+        
+        paths = [
+            f
+            for f in self.data_generated.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"eval_{eval_type}_{conflict_type}_{run_type}")
+            and f.suffix == PipelineConfig().dataframe_format
+        ]
+        return sorted(paths, reverse=True)
 
     def get_latest_model_artifact_path(self, run_type: str) -> Path:
         """
@@ -864,6 +885,7 @@ class ModelManager:
             **self._config_hyperparameters,
             **self._config_meta,
             **self._config_deployment,
+            **self._partition_dict,
         }
         return config
 
@@ -882,6 +904,7 @@ class ForecastingModelManager(ModelManager):
             model_path (ModelPathManager): The path manager for the model.
         """
         super().__init__(model_path, wandb_notifications, use_prediction_store)
+
 
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
@@ -904,6 +927,21 @@ class ForecastingModelManager(ModelManager):
             return 12
         else:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
+        
+    @staticmethod
+    def _get_valid_conflict_types() -> List[str]:
+        """Get a tuple of valid conflict types."""
+        return ("sb", "os", "ns")
+    
+    @staticmethod
+    def _get_valid_eval_types() -> List[str]:
+        """Get a tuple of valid evaluation types."""
+        return ("month", "ts", "step")
+    
+    @staticmethod
+    def _get_valid_run_types() -> List[str]:
+        """Get a tuple of valid run types."""
+        return ("calibration", "validation", "forecasting")
 
     @staticmethod
     def _get_conflict_type(target: str) -> str:
@@ -1047,8 +1085,10 @@ class ForecastingModelManager(ModelManager):
                 self._execute_model_evaluation(config, artifact_name)
             if forecast:
                 self._execute_model_forecasting(config, artifact_name)
-            if report:
-                self._execute_reporting(config)
+            if report and forecast:
+                self._execute_forecast_reporting(config)
+            if report and eval:
+                self._generate_evaluation_report(config)
 
         end_t = time.time()
         minutes = (end_t - start_t) / 60
@@ -1298,7 +1338,7 @@ class ForecastingModelManager(ModelManager):
                     'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
                 )
 
-    def _execute_reporting(self, config: Dict) -> None:
+    def _execute_forecast_reporting(self, config: Dict) -> None:
         """
         Executes the reporting process.
 
@@ -1586,7 +1626,7 @@ class ForecastingModelManager(ModelManager):
                 df_predictions.forecasts.to_store(name=name, overwrite=True)
 
             # Log predictions to WandB
-            wandb.save(str(path_generated / self._predictions_name))
+            # wandb.save(str(path_generated / self._predictions_name)) # Temporarily disabled to avoid saving large files to WandB
             wandb.log({"predictions": wandb.Table(dataframe=df_predictions)})
 
             wandb_alert(
@@ -1805,3 +1845,44 @@ class ForecastingModelManager(ModelManager):
             wandb_notifications=self._wandb_notifications,
             models_path=self._model_path.models,
         )
+
+    def _generate_evaluation_report(self) -> Path:
+        """Generate an evaluation report based on the evaluation DataFrame."""
+
+        # # Get latest eval run
+        # from wandb import Api
+        # api = Api()
+        # wandb_runs = api.runs("views_pipeline/rnn_proto_calibration", include_sweeps=False)
+        # # Pick the latest successfully finished run
+        # latest_run = next(run for run in wandb_runs if run.state == "finished" and len(dict(run.summary)) > 1)
+        # # Example usage: print or use latest_run.summary in your report
+        # print("Latest finished run summary:", latest_run.summary)
+        evaluation_dict = wandb.summary._as_dict()
+        metadata_dict = dict(wandb.config._as_dict())
+
+        def _create_report() -> Path:
+            """Helper function to create and export report."""
+
+            report_manager = ReportManager()
+            # Build report content
+            report_manager.add_heading(
+                f"Evaluation Report for {self._model_path.model_name}", level=1
+            )
+            report_manager.add_table(metadata_dict)
+            report_manager.add_table(evaluation_dict)
+            report_path = self._model_path.reports / f"report_{generate_model_file_name(run_type=self._args.run_type, file_extension='')}.html"
+            report_manager.export_as_html(
+                report_path
+            )
+            return report_path
+
+        _create_report()
+        # Send WandB alert
+        wandb_alert(
+            title="Evaluation Report Generated",
+            text=f"Evaluation report for {self._model_path.model_name} has been successfully "
+            f"generated and saved locally at {self._model_path.reports}.",
+            wandb_notifications=self._wandb_notifications,
+            models_path=self._model_path.models,
+        )
+            
