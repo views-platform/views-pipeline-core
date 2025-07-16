@@ -20,6 +20,10 @@ from views_pipeline_core.wandb.utils import (
     add_wandb_metrics,
     log_wandb_log_dict,
     wandb_alert,
+    format_metadata_dict,
+    format_evaluation_dict,
+    get_latest_run,
+    timestamp_to_date,
 )
 from views_pipeline_core.files.utils import (
     read_dataframe,
@@ -456,27 +460,35 @@ class ModelPathManager:
             and f.suffix == PipelineConfig().dataframe_format
         ]
         return sorted(paths, reverse=True)
-    
-    def _get_evaluation_metrics_file_paths(self, run_type: str, conflict_type: str, eval_type: str) -> List[Path]:
-        valid_run_types = ForecastingModelManager._get_valid_run_types()
-        valid_conflict_types = ForecastingModelManager._get_valid_conflict_types()
-        valid_eval_types = ForecastingModelManager._get_valid_eval_types()
 
-        if run_type not in valid_run_types:
-            raise ValueError(f"Invalid run type: {run_type}. Must be one of {valid_run_types}.")
-        if conflict_type not in valid_conflict_types:
-            raise ValueError(f"Invalid conflict type: {conflict_type}. Must be one of {valid_conflict_types}.")
-        if eval_type not in valid_eval_types:
-            raise ValueError(f"Invalid evaluation type: {eval_type}. Must be one of {valid_eval_types}.")
-        
-        paths = [
-            f
-            for f in self.data_generated.iterdir()
-            if f.is_file()
-            and f.stem.startswith(f"eval_{eval_type}_{conflict_type}_{run_type}")
-            and f.suffix == PipelineConfig().dataframe_format
-        ]
-        return sorted(paths, reverse=True)
+    # def _get_evaluation_metrics_file_paths(
+    #     self, run_type: str, conflict_type: str, eval_type: str
+    # ) -> List[Path]:
+    #     valid_run_types = ForecastingModelManager._get_valid_run_types()
+    #     valid_conflict_types = ForecastingModelManager._get_valid_conflict_types()
+    #     valid_eval_types = ForecastingModelManager._get_valid_eval_types()
+
+    #     if run_type not in valid_run_types:
+    #         raise ValueError(
+    #             f"Invalid run type: {run_type}. Must be one of {valid_run_types}."
+    #         )
+    #     if conflict_type not in valid_conflict_types:
+    #         raise ValueError(
+    #             f"Invalid conflict type: {conflict_type}. Must be one of {valid_conflict_types}."
+    #         )
+    #     if eval_type not in valid_eval_types:
+    #         raise ValueError(
+    #             f"Invalid evaluation type: {eval_type}. Must be one of {valid_eval_types}."
+    #         )
+
+    #     paths = [
+    #         f
+    #         for f in self.data_generated.iterdir()
+    #         if f.is_file()
+    #         and f.stem.startswith(f"eval_{eval_type}_{conflict_type}_{run_type}")
+    #         and f.suffix == PipelineConfig().dataframe_format
+    #     ]
+    #     return sorted(paths, reverse=True)
 
     def get_latest_model_artifact_path(self, run_type: str) -> Path:
         """
@@ -733,6 +745,7 @@ class ModelManager:
         """
         self.__class__.__instances__ += 1
         from views_pipeline_core.managers.log import LoggingManager
+
         self._model_repo = "views-models"
         self._entity = "views_pipeline"
 
@@ -760,9 +773,13 @@ class ModelManager:
             )
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
-            self._data_loader = ViewsDataLoader(model_path=self._model_path, 
-                                                steps=len(self._config_hyperparameters.get("steps", [*range(1, 36 + 1, 1)])), 
-                                                partition_dict=self._partition_dict)
+            self._data_loader = ViewsDataLoader(
+                model_path=self._model_path,
+                steps=len(
+                    self._config_hyperparameters.get("steps", [*range(1, 36 + 1, 1)])
+                ),
+                partition_dict=self._partition_dict,
+            )
 
         if self._use_prediction_store:
             from views_forecasts.extensions import ForecastsStore, ViewsMetadata
@@ -905,7 +922,6 @@ class ForecastingModelManager(ModelManager):
         """
         super().__init__(model_path, wandb_notifications, use_prediction_store)
 
-
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
         """
@@ -927,21 +943,6 @@ class ForecastingModelManager(ModelManager):
             return 12
         else:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
-        
-    @staticmethod
-    def _get_valid_conflict_types() -> List[str]:
-        """Get a tuple of valid conflict types."""
-        return ("sb", "os", "ns")
-    
-    @staticmethod
-    def _get_valid_eval_types() -> List[str]:
-        """Get a tuple of valid evaluation types."""
-        return ("month", "ts", "step")
-    
-    @staticmethod
-    def _get_valid_run_types() -> List[str]:
-        """Get a tuple of valid run types."""
-        return ("calibration", "validation", "forecasting")
 
     @staticmethod
     def _get_conflict_type(target: str) -> str:
@@ -1020,6 +1021,7 @@ class ForecastingModelManager(ModelManager):
         self.config = self._update_single_config(args)
         self._project = f"{self.config['name']}_{args.run_type}"
         self._eval_type = args.eval_type
+        self.config["eval_type"] = args.eval_type
         self._args = args
 
         # Fetch data
@@ -1088,7 +1090,7 @@ class ForecastingModelManager(ModelManager):
             if report and forecast:
                 self._execute_forecast_reporting(config)
             if report and eval:
-                self._generate_evaluation_report(config)
+                self._execute_evaluation_reporting(config)
 
         end_t = time.time()
         minutes = (end_t - start_t) / 60
@@ -1359,8 +1361,16 @@ class ForecastingModelManager(ModelManager):
                     historical_df = None
                     for model in models:
                         mp = ModelPathManager(model_path=model, validate=True)
-                        config = ModelManager(model_path=mp, wandb_notifications=False, use_prediction_store=False).configs
-                        df = read_dataframe(file_path=mp._get_raw_data_file_paths(run_type=self._args.run_type)[0])
+                        config = ModelManager(
+                            model_path=mp,
+                            wandb_notifications=False,
+                            use_prediction_store=False,
+                        ).configs
+                        df = read_dataframe(
+                            file_path=mp._get_raw_data_file_paths(
+                                run_type=self._args.run_type
+                            )[0]
+                        )
                         # print(f"Columns for model {mp.model_name}: {df.columns}")
                         if reference_index is None or historical_df is None:
                             reference_index = df.index
@@ -1427,6 +1437,7 @@ class ForecastingModelManager(ModelManager):
             **self._config_hyperparameters,
             **self._config_meta,
             **self._config_deployment,
+            **self._partition_dict,
         }
         config["run_type"] = args.run_type
         config["sweep"] = args.sweep
@@ -1449,6 +1460,7 @@ class ForecastingModelManager(ModelManager):
             **wandb_config,
             **self._config_meta,
             **self._config_deployment,
+            **self._partition_dict,
         }
         config["run_type"] = self._args.run_type
         config["sweep"] = self._args.sweep
@@ -1814,8 +1826,7 @@ class ForecastingModelManager(ModelManager):
                 )
                 report_manager.add_html(
                     html=historical_line_graph.plot_predictions_vs_historical(
-                        as_html=True,
-                        alpha=0.9
+                        as_html=True, alpha=0.9
                     )
                 )
             # Generate report path
@@ -1846,43 +1857,144 @@ class ForecastingModelManager(ModelManager):
             models_path=self._model_path.models,
         )
 
-    def _generate_evaluation_report(self) -> Path:
+    def _execute_evaluation_reporting(self, config: Dict) -> None:
+        """
+        Executes the reporting process.
+
+        Args:
+            config (dict): Configuration object containing parameters and settings.
+        """
+
+        # from wandb import Api
+
+        # api = Api()
+        # wandb_runs = sorted(
+        #     api.runs("views_pipeline/tide_proto_calibration", include_sweeps=False),
+        #     key=lambda run: run.created_at,
+        #     reverse=True,
+        # )
+        # # Pick the latest successfully finished run
+        # latest_run = next(
+        #     run
+        #     for run in wandb_runs
+        #     if run.state == "finished" and len(dict(run.summary)) > 1
+        # )
+        # logger.info(f"Using latest found summary: {latest_run.summary}")
+
+        latest_run = get_latest_run(
+            entity=self._entity,
+            model_name=self._model_path.model_name,
+            run_type="calibration"
+        )
+
+        # Use the latest run summary to generate the evaluation report
+        
+
+        with wandb.init(
+            project=self._project, entity=self._entity, config=config, job_type="report"
+        ):
+            add_wandb_metrics()
+            try:
+                logger.info(
+                    f"Generating evaluation report for {self._model_path.target} {self.config['name']}..."
+                )
+
+                # Grab info for baseline models from wandb.
+
+                if self._model_path._target == "ensemble":
+                    # In case there are any data preprocessing or unique steps before generating the report
+                    self._generate_evaluation_report(wandb_run=latest_run)
+                elif self._model_path._target == "model":
+                    self._generate_evaluation_report(wandb_run=latest_run)
+                else:
+                    raise ValueError(
+                        f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
+                    )
+
+            except Exception as e:
+                logger.error(f"Error generating evaluation report: {e}", exc_info=True)
+                wandb_alert(
+                    title="Evaluation Report Generation Error",
+                    text=f"An error occurred during the generation of the evaluation report for {self.config['name']}: {traceback.format_exc()}",
+                    level=wandb.AlertLevel.ERROR,
+                    wandb_notifications=self._wandb_notifications,
+                    models_path=self._model_path.models,
+                )
+                raise
+
+    def _generate_evaluation_report(
+        self, wandb_run: 'wandb.apis.public.runs.Run'
+    ) -> Path:
         """Generate an evaluation report based on the evaluation DataFrame."""
 
-        # # Get latest eval run
-        # from wandb import Api
-        # api = Api()
-        # wandb_runs = api.runs("views_pipeline/rnn_proto_calibration", include_sweeps=False)
-        # # Pick the latest successfully finished run
-        # latest_run = next(run for run in wandb_runs if run.state == "finished" and len(dict(run.summary)) > 1)
-        # # Example usage: print or use latest_run.summary in your report
-        # print("Latest finished run summary:", latest_run.summary)
-        evaluation_dict = wandb.summary._as_dict()
-        metadata_dict = dict(wandb.config._as_dict())
+        evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
+        metadata_dict = format_metadata_dict(dict(wandb_run.config))
+        
+        # Common steps
+        report_manager = ReportManager()
+        report_manager.add_heading(
+            f"Evaluation Report for {self._model_path.model_name}", level=1
+        )
+        # report_manager.add_heading(f"Run ID: {f'{wandb_run.id}' if wandb_run.id else 'N/A'}", level=3, link=wandb_run.url)
+        # report_manager.add_heading(f"Owner: {f'{wandb_run.user.name} ({wandb_run.user.username})' if wandb_run.user.name else 'N/A'}", level=3)
+        _timestamp = dict(wandb_run.summary).get('_timestamp', None)
+        run_date_str = f"{timestamp_to_date(_timestamp)}" if _timestamp else 'N/A'
+        # report_manager.add_heading(f"Run Date: {run_date_str}", level=3)
+        # report_manager.add_heading(f"Pipeline Core Version: {PipelineConfig().current_version}", level=3)
 
-        def _create_report() -> Path:
-            """Helper function to create and export report."""
+        report_manager.add_key_value_list({
+            "Run ID": f'{wandb_run.id}' if wandb_run.id else 'N/A',
+            "Owner": f'{wandb_run.user.name} ({wandb_run.user.username})' if wandb_run.user.name else 'N/A',
+            "Run Date": run_date_str,
+            "Pipeline Version": PipelineConfig().current_version,
+        })
 
-            report_manager = ReportManager()
-            # Build report content
-            report_manager.add_heading(
-                f"Evaluation Report for {self._model_path.model_name}", level=1
+        def _create_model_report() -> None:
+            """Helper function to create and export model report."""
+            report_manager.add_table(data=format_metadata_dict(metadata_dict), header=f"{self._model_path._target.title()} Configuration", as_html=False)
+            report_manager.add_table(data=format_evaluation_dict(evaluation_dict), header=f"{self._model_path._target.title()} Metrics", as_html=False)
+
+            eval_scheme_md = """### Evaluation Scheme Description
+
+This evaluation uses a **rolling-origin holdout strategy** with an **expanding input window** and a **fixed model artifact**.
+
+- A single model is trained once on historical data up to a cutoff date and then saved (no retraining).
+- The model generates forecasts for a fixed forecast horizon of 36 months starting immediately after the training period.
+- For each evaluation step, both the input data and the forecast window are shifted forward by one month, expanding the input by adding the newly available data point.
+- The model is re-run 12 times, each time using the same trained model artifact but with updated input data and a new rolling forecast origin.
+- Forecast accuracy is assessed by comparing each forecast window to the corresponding true observations in the holdout test set.
+- This scheme tests the stability and robustness of the fixed model when re-applied to updated data without retraining, simulating how the model would perform if deployed as-is and used to re-forecast each month."""
+
+            report_manager.add_markdown(markdown_text=eval_scheme_md)
+    
+            report_manager.add_heading("Baseline Metrics", level=2)
+            report_manager.add_heading("Model Rankings", level=2)
+            # if run_html:
+            #     report_manager.add_html(run_html)
+        
+        def _create_ensemble_report() -> None:
+            """Helper function to create and export ensemble report."""
+            pass
+
+        if self._model_path._target == "model":
+            report_path = _create_model_report()
+        elif self._model_path._target == "ensemble":
+            report_path = _create_ensemble_report()
+        else:
+            raise ValueError(
+                f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
             )
-            report_manager.add_table(metadata_dict)
-            report_manager.add_table(evaluation_dict)
-            report_path = self._model_path.reports / f"report_{generate_model_file_name(run_type=self._args.run_type, file_extension='')}.html"
-            report_manager.export_as_html(
-                report_path
-            )
-            return report_path
+        
+        report_path = (
+            self._model_path.reports
+            / f"report_{generate_model_file_name(run_type=self._args.run_type, file_extension='')}.html"
+        )
+        report_manager.export_as_html(report_path)
 
-        _create_report()
-        # Send WandB alert
         wandb_alert(
             title="Evaluation Report Generated",
-            text=f"Evaluation report for {self._model_path.model_name} has been successfully "
-            f"generated and saved locally at {self._model_path.reports}.",
+            text=f"Evaluation report for {self._model_path.model_name} has been successfully"
+            f"generated and saved locally at {report_path}.",
             wandb_notifications=self._wandb_notifications,
             models_path=self._model_path.models,
         )
-            

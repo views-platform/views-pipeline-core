@@ -5,6 +5,7 @@ from dataclasses import asdict
 import wandb
 import logging
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -258,11 +259,16 @@ def timestamp_to_date(timestamp):
 def format_evaluation_dict(evaluation_dict):
     formatted_dict = {}
     for key, value in evaluation_dict.items():
+        orig_key = key
         if key.startswith("_"):
-            # remove the underscore prefix
             key = key[1:]
+
         if key == "timestamp":
-            formatted_dict[key] = timestamp_to_date(value)
+            # try:
+            #     formatted_dict[key] = timestamp_to_date(float(value))
+            # except (ValueError, TypeError):
+            #     formatted_dict[key] = value
+            continue
         elif key == "runtime":
             # convert seconds to hours, minutes, and seconds
             if isinstance(value, (int, float)):
@@ -275,10 +281,11 @@ def format_evaluation_dict(evaluation_dict):
         elif isinstance(value, (int, float)):
             formatted_dict[key] = value
         elif isinstance(value, str) and value.isdigit():
-            formatted_dict[key] = int(value)
+            formatted_dict[key] = float(value)
         else:
             formatted_dict[key] = value
 
+    formatted_dict = dict(sorted(formatted_dict.items(), key=lambda item: item[0]))
     return formatted_dict
 
 def format_metadata_dict(metadata_dict):
@@ -296,5 +303,27 @@ def format_metadata_dict(metadata_dict):
             formatted_dict[key] = int(value)
         else:
             formatted_dict[key] = value
-
+    formatted_dict = dict(sorted(formatted_dict.items(), key=lambda item: item[0]))
     return formatted_dict
+
+def get_latest_run(entity: str, model_name: str, run_type: str) -> Optional['wandb.apis.public.runs.Run']:
+    """
+    Retrieves the latest WandB run from the current session.
+
+    Returns:
+        Optional[wandb.Run]: The latest run object if available, otherwise None.
+    """
+    from wandb import Api
+    api = Api()
+    wandb_runs = sorted(
+        api.runs(f"{entity}/{model_name}_{run_type}", include_sweeps=False),
+        key=lambda run: run.created_at,
+        reverse=True,
+    )
+    # Pick the latest successfully finished run
+    latest_run = next(
+        run
+        for run in wandb_runs
+        if run.state == "finished" and len(dict(run.summary)) > 1
+    )
+    return latest_run if latest_run else None

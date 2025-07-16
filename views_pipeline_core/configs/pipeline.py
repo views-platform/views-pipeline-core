@@ -10,6 +10,7 @@ class PipelineConfig:
         self._organization_name = 'views'
         # self._version_range = ">=0.2.0,<1.0.0"
         self._package_name = 'views-pipeline-core'
+        self._current_version = None
 
     @property
     def dataframe_format(self) -> str:
@@ -28,6 +29,23 @@ class PipelineConfig:
     @property
     def package_name(self) -> str:
         return self._package_name
+    
+    @property
+    def current_version(self) -> str:
+        if not self._current_version:
+            import toml
+            from pathlib import Path
+            pyproject_path = Path(__file__).parent.parent.parent / "pyproject.toml"
+            if pyproject_path.exists():
+                pyproject = toml.load(pyproject_path)
+                self._current_version = (
+                    pyproject.get("tool", {})
+                    .get("poetry", {})
+                    .get("version", "")
+                )
+            else:
+                self._current_version = ""
+        return self._current_version
 
     @dataframe_format.setter
     def dataframe_format(self, format: str):
