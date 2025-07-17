@@ -287,5 +287,73 @@ def get_css() -> str:
             color: var(--secondary);
             text-decoration: underline;
         }
+        /* Column splitting container - vertical layout */
+        .split-table-container-columns {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .table-chunk {
+            overflow-x: auto;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.1);
+            background: white;
+        }
+        
+        /* Row splitting container */
+        .split-table-container-rows {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+        }
+        
+        @media (max-width: 768px) {
+            .split-table-container-rows {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Improved table spacing */
+        .table-container table,
+        .table-chunk table {
+            width: 100% !important;
+            table-layout: auto;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+        
+        .table-container th,
+        .table-container td,
+        .table-chunk th,
+        .table-chunk td {
+            padding: 12px 16px !important;
+            border-bottom: 1px solid #e9ecef !important;
+            word-break: break-word;
+            white-space: normal;
+            max-width: 350px;  /* Maximum width for cells */
+            min-width: 100px;   /* Minimum width for cells */
+        }
+        
+        .table-container th,
+        .table-chunk th {
+            background-color: #f8f9fa !important;
+            font-weight: 600 !important;
+            color: #4B5563;
+        }
+        
+        .table-container tr:last-child td,
+        .table-chunk tr:last-child td {
+            border-bottom: none !important;
+        }
+        /* Responsive table headers */
+        .table-container th {
+            min-width: 150px;  /* Minimum width for column headers */
+        }
+        
+        /* Auto column widths based on content */
+        .table-auto-layout {
+            table-layout: auto !important;
+        }
         </style>
     """

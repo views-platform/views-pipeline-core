@@ -13,6 +13,7 @@ from views_pipeline_core.templates.reports.styles.tailwind import get_css
 class ReportManager:
     # Threshold for splitting tables
     TABLE_SPLIT_THRESHOLD = 8
+    TABLE_SPLIT_THRESHOLD_COLS = 3
     
     def __init__(self):
         self.content = []
@@ -183,26 +184,28 @@ class ReportManager:
         header: Optional[str] = None, 
         as_html: bool = False,
         link: Optional[str] = None,
-        split_threshold: int = TABLE_SPLIT_THRESHOLD
+        split_threshold: int = TABLE_SPLIT_THRESHOLD,
+        split_col_threshold: int = TABLE_SPLIT_THRESHOLD_COLS
     ) -> None:
         """
-        Add a table from DataFrame or dictionary (supports nested dictionaries) with optional header
+        Add a table from DataFrame or dictionary with splitting for large tables
         
         Args:
-            data: DataFrame or dictionary (flat or nested) to display as table
+            data: DataFrame or dictionary to display as table
             header: Optional header text for the table
             link: Optional hyperlink to wrap the table
             split_threshold: Split tables with more rows than this threshold
+            split_col_threshold: Split tables with more columns than this threshold
         """
         if isinstance(data, pd.DataFrame):
-            # Split DataFrame if it exceeds threshold
-            if len(data) > split_threshold:
-                result = self._split_dataframe(data, header, split_threshold)
+            # Handle both row and column splitting
+            if len(data) > split_threshold or len(data.columns) > split_col_threshold:
+                result = self._split_dataframe(data, header, split_threshold, split_col_threshold)
             else:
                 styled_table = self._style_dataframe(data)
                 result = self._wrap_table_with_header(styled_table, header)
         elif isinstance(data, dict):
-            # Split dictionary if it exceeds threshold
+            # Handle row splitting for dictionaries
             if len(data) > split_threshold:
                 result = self._split_dictionary(data, header, split_threshold)
             else:
@@ -220,26 +223,40 @@ class ReportManager:
         else:
             self.content.append(result)
 
-    def _split_dataframe(self, df: pd.DataFrame, header: Optional[str], split_threshold: int) -> str:
-        """Split a DataFrame into two halves and display side-by-side"""
-        half = len(df) // 2
-        df1 = df.iloc[:half]
-        df2 = df.iloc[half:]
-        
-        table1 = self._style_dataframe(df1)
-        table2 = self._style_dataframe(df2)
-        
-        split_html = f"""
-        <div class="split-table-container">
-            <div class="table-container">
-                {table1}
+
+    def _split_dataframe(
+        self, 
+        df: pd.DataFrame, 
+        header: Optional[str], 
+        row_threshold: int, 
+        col_threshold: int
+    ) -> str:
+        """Split a DataFrame into smaller tables based on rows and columns"""
+        # First handle row splitting
+        if len(df) > row_threshold:
+            half = len(df) // 2
+            df1 = df.iloc[:half]
+            df2 = df.iloc[half:]
+            
+            # Handle column splitting for each row-split table
+            table1 = self._split_dataframe_by_columns(df1, col_threshold)
+            table2 = self._split_dataframe_by_columns(df2, col_threshold)
+            
+            split_html = f"""
+            <div class="split-table-container-rows">
+                <div class="table-container">
+                    {table1}
+                </div>
+                <div class="table-container">
+                    {table2}
+                </div>
             </div>
-            <div class="table-container">
-                {table2}
-            </div>
-        </div>
-        """
+            """
+        else:
+            # Only column splitting needed
+            split_html = self._split_dataframe_by_columns(df, col_threshold)
         
+        # Wrap with header if provided
         if header:
             return f'''
             <div class="mb-7">
@@ -249,6 +266,34 @@ class ReportManager:
             '''
         else:
             return split_html
+        
+    def _split_dataframe_by_columns(
+        self, 
+        df: pd.DataFrame, 
+        col_threshold: int
+    ) -> str:
+        """Split a DataFrame into multiple tables based on columns"""
+        if len(df.columns) <= col_threshold:
+            return self._style_dataframe(df)
+            
+        # Split columns into chunks
+        chunks = []
+        cols = df.columns.tolist()
+        for i in range(0, len(cols), col_threshold):
+            chunk_cols = cols[i:i+col_threshold]
+            chunk_df = df[chunk_cols]
+            chunks.append(chunk_df)
+        
+        # Generate HTML for each chunk (stacked vertically)
+        chunks_html = []
+        for idx, chunk_df in enumerate(chunks):
+            styled = self._style_dataframe(chunk_df)
+            # Add spacing between column chunks
+            spacing = "mt-6" if idx > 0 else ""
+            chunks_html.append(f'<div class="table-chunk {spacing}">{styled}</div>')
+        
+        return "\n".join(chunks_html)
+
 
     def _split_dictionary(self, data: dict, header: Optional[str], split_threshold: int) -> str:
         """Split a dictionary into two halves and display side-by-side"""

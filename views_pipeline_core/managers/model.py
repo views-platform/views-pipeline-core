@@ -33,6 +33,7 @@ from views_pipeline_core.files.utils import (
     generate_model_file_name,
     generate_output_file_name,
 )
+from views_pipeline_core.reports.utils import get_conflict_type_from_feature_name, filter_metrics_from_dict
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.evaluation_manager import EvaluationManager
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
@@ -1884,11 +1885,10 @@ class ForecastingModelManager(ModelManager):
         latest_run = get_latest_run(
             entity=self._entity,
             model_name=self._model_path.model_name,
-            run_type="calibration"
+            run_type="calibration",
         )
 
         # Use the latest run summary to generate the evaluation report
-        
 
         with wandb.init(
             project=self._project, entity=self._entity, config=config, job_type="report"
@@ -1905,7 +1905,8 @@ class ForecastingModelManager(ModelManager):
                     # In case there are any data preprocessing or unique steps before generating the report
                     self._generate_evaluation_report(wandb_run=latest_run)
                 elif self._model_path._target == "model":
-                    self._generate_evaluation_report(wandb_run=latest_run)
+                    for target in self.config["targets"]:
+                        self._generate_evaluation_report(wandb_run=latest_run, target=target)
                 else:
                     raise ValueError(
                         f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
@@ -1923,55 +1924,85 @@ class ForecastingModelManager(ModelManager):
                 raise
 
     def _generate_evaluation_report(
-        self, wandb_run: 'wandb.apis.public.runs.Run'
+        self, wandb_run: "wandb.apis.public.runs.Run", target: str
     ) -> Path:
         """Generate an evaluation report based on the evaluation DataFrame."""
-
         evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
-        
+        conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
+        metrics = metadata_dict.get("metrics", [])
         # Common steps
         report_manager = ReportManager()
         report_manager.add_heading(
             f"Evaluation Report for {self._model_path.model_name}", level=1
         )
-        # report_manager.add_heading(f"Run ID: {f'{wandb_run.id}' if wandb_run.id else 'N/A'}", level=3, link=wandb_run.url)
-        # report_manager.add_heading(f"Owner: {f'{wandb_run.user.name} ({wandb_run.user.username})' if wandb_run.user.name else 'N/A'}", level=3)
-        _timestamp = dict(wandb_run.summary).get('_timestamp', None)
-        run_date_str = f"{timestamp_to_date(_timestamp)}" if _timestamp else 'N/A'
-        # report_manager.add_heading(f"Run Date: {run_date_str}", level=3)
-        # report_manager.add_heading(f"Pipeline Core Version: {PipelineConfig().current_version}", level=3)
+        _timestamp = dict(wandb_run.summary).get("_timestamp", None)
+        run_date_str = f"{timestamp_to_date(_timestamp)}" if _timestamp else "N/A"
+        report_manager.add_heading("Run Summary", level=2)
+        report_manager.add_markdown(
+            markdown_text=(
+            f"**Run ID**: [{wandb_run.id}]({wandb_run.url})  \n"
+            f"**Owner**: {wandb_run.user.name} ({wandb_run.user.username})  \n"
+            f"**Run Date**: {run_date_str}  \n"
+            f"**Pipeline Version**: {PipelineConfig().current_version}"
+            )
+        )
 
-        report_manager.add_key_value_list({
-            "Run ID": f'{wandb_run.id}' if wandb_run.id else 'N/A',
-            "Owner": f'{wandb_run.user.name} ({wandb_run.user.username})' if wandb_run.user.name else 'N/A',
-            "Run Date": run_date_str,
-            "Pipeline Version": PipelineConfig().current_version,
-        })
+        methodology_md = (
+            f"- **Target Variable**: {target} ({type_of_conflict.title()})\n"
+            f"- **Level of Analysis (resolution)**: {metadata_dict.get('level', 'N/A')}\n"
+            f"- **Evaluation Scheme**: `Rolling-Origin Holdout`\n"
+            f"    - **Forecast Horizon**: {metadata_dict.get('steps', 'N/A')}\n"
+            f"    - **Number of Rolling Origins**: {self._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())}\n"
+        )
+        report_manager.add_heading("Methodology", level=2)
+        report_manager.add_markdown(markdown_text=methodology_md)
+        # Only include calibration, validation, and forecast key-value pairs from metadata_dict
+        filtered_metadata = {
+            k: v
+            for k, v in metadata_dict.items()
+            if k.lower() in {"calibration", "validation", "forecasting"}
+        }
+        report_manager.add_heading("Data Partitions", level=2)
+        report_manager.add_table(filtered_metadata)
 
         def _create_model_report() -> None:
             """Helper function to create and export model report."""
-            report_manager.add_table(data=format_metadata_dict(metadata_dict), header=f"{self._model_path._target.title()} Configuration", as_html=False)
-            report_manager.add_table(data=format_evaluation_dict(evaluation_dict), header=f"{self._model_path._target.title()} Metrics", as_html=False)
 
-            eval_scheme_md = """### Evaluation Scheme Description
+            # report_manager.add_table(
+            #     data=format_metadata_dict(metadata_dict),
+            #     header=f"{self._model_path._target.title()} Configuration",
+            #     as_html=False,
+            # )
+            # report_manager.add_table(
+            #     data=format_evaluation_dict(evaluation_dict),
+            #     header=f"{self._model_path._target.title()} Metrics",
+            #     as_html=False,
+            # )
+            report_manager.add_heading(f"Model Metrics ({conflict_code}, {type_of_conflict.title()})", level=2)
+            for metric in metrics:
+                report_manager.add_heading(f"{str(metric).upper()}", level=3)
+                print(f"Adding table for metric: {metric}")
+                report_manager.add_table(data=filter_metrics_from_dict(evaluation_dict=evaluation_dict, metric=metric, conflict_code=conflict_code, model_name=metadata_dict.get('name', None)))
 
-This evaluation uses a **rolling-origin holdout strategy** with an **expanding input window** and a **fixed model artifact**.
-
-- A single model is trained once on historical data up to a cutoff date and then saved (no retraining).
-- The model generates forecasts for a fixed forecast horizon of 36 months starting immediately after the training period.
-- For each evaluation step, both the input data and the forecast window are shifted forward by one month, expanding the input by adding the newly available data point.
-- The model is re-run 12 times, each time using the same trained model artifact but with updated input data and a new rolling forecast origin.
-- Forecast accuracy is assessed by comparing each forecast window to the corresponding true observations in the holdout test set.
-- This scheme tests the stability and robustness of the fixed model when re-applied to updated data without retraining, simulating how the model would perform if deployed as-is and used to re-forecast each month."""
+            report_manager.add_heading(f"Evaluation Scheme Description", level=3)
+            eval_scheme_md = (
+                "This evaluation uses a **rolling-origin holdout strategy** with an **expanding input window** and a **fixed model artifact**.\n\n"
+                f"- A single model is trained once on historical data up to a cutoff date and then saved (no retraining).\n"
+                f"- The model generates forecasts for a fixed forecast horizon of 36 months starting immediately after the training period.\n"
+                f"- For each evaluation step, both the input data and the forecast window are shifted forward by one month, expanding the input by adding the newly available data point.\n"
+                f"- The model is re-run {self._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())} times, each time using the same trained model artifact but with updated input data and a new rolling forecast origin.\n"
+                f"- Forecast accuracy is assessed by comparing each forecast window to the corresponding true observations in the holdout test set.\n"
+                f"- This scheme tests the stability and robustness of the fixed model when re-applied to updated data without retraining, simulating how the model would perform if deployed as-is and used to re-forecast each month."
+            )
 
             report_manager.add_markdown(markdown_text=eval_scheme_md)
-    
+
             report_manager.add_heading("Baseline Metrics", level=2)
             report_manager.add_heading("Model Rankings", level=2)
             # if run_html:
             #     report_manager.add_html(run_html)
-        
+
         def _create_ensemble_report() -> None:
             """Helper function to create and export ensemble report."""
             pass
@@ -1984,10 +2015,10 @@ This evaluation uses a **rolling-origin holdout strategy** with an **expanding i
             raise ValueError(
                 f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
             )
-        
+
         report_path = (
             self._model_path.reports
-            / f"report_{generate_model_file_name(run_type=self._args.run_type, file_extension='')}.html"
+            / f"report_{generate_model_file_name(run_type=self._args.run_type, file_extension='')}_{conflict_code}.html"
         )
         report_manager.export_as_html(report_path)
 
