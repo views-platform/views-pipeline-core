@@ -10,10 +10,9 @@ import tqdm
 
 from views_pipeline_core.managers.model import ModelPathManager, ModelManager, ForecastingModelManager
 from views_pipeline_core.wandb.utils import add_wandb_metrics, wandb_alert
-from views_pipeline_core.models.check import validate_ensemble_model
+from views_pipeline_core.ensembles.check import validate_ensemble_model
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.ensembles import reconciliation
 from views_pipeline_core.managers.reconciliation import ReconciliationManager
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset
 
@@ -58,7 +57,7 @@ class EnsembleManager(ForecastingModelManager):
     def __init__(
         self,
         ensemble_path: EnsemblePathManager,
-        wandb_notifications: bool = True,
+        wandb_notifications: bool = False,
         use_prediction_store: bool = False,
     ) -> None:
         """
@@ -318,10 +317,15 @@ class EnsembleManager(ForecastingModelManager):
             try:
                 logger.info(f"Evaluating model {config['name']}...")
                 df_predictions = self._evaluate_ensemble(self._eval_type)
+
                 handle_ensemble_log_creation(
                     model_path=self._model_path, config=config
                 )
-                self._evaluate_prediction_dataframe(df_predictions, ensemble=True)
+
+                for i, df in enumerate(df_predictions):
+                    self._save_predictions(df, self._model_path.data_generated, i)
+
+                self._evaluate_prediction_dataframe(df_predictions, self._eval_type, ensemble=True)
 
                 wandb_alert(
                     title=f"Evaluation for {self._model_path.target} {config['name']} completed successfully.",
@@ -414,7 +418,6 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             List[pd.DataFrame]: A list of aggregated DataFrames containing the evaluation metrics for each model.
         """
-        path_generated_e = self._model_path.data_generated
         run_type = self.config["run_type"]
         dfs = []
         dfs_agg = []
