@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import tqdm
 import random
+import json
 
 from views_pipeline_core.wandb.utils import (
     add_wandb_metrics,
@@ -28,6 +29,7 @@ from views_pipeline_core.files.utils import (
     generate_evaluation_file_name,
     generate_model_file_name,
     generate_output_file_name,
+    generate_evaluation_report_name,
 )
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_evaluation.evaluation.evaluation_manager import EvaluationManager
@@ -457,6 +459,16 @@ class ModelPathManager:
         ]
         return sorted(paths, reverse=True)
 
+    def _get_eval_file_paths(self, run_type: str, conflict_type: str) -> List[Path]:
+        paths = [
+            f
+            for f in self.data_generated.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"eval_{run_type}_{conflict_type}")
+            and f.suffix == PipelineConfig().dataframe_format
+        ]
+        return sorted(paths, reverse=True)
+
     def get_latest_model_artifact_path(self, run_type: str) -> Path:
         """
         Retrieve the path (pathlib path object) latest model artifact for a given run type based on the modification time.
@@ -701,7 +713,7 @@ class ModelManager:
     def __init__(
         self,
         model_path: ModelPathManager,
-        wandb_notifications: bool = True,
+        wandb_notifications: bool = False,
         use_prediction_store: bool = True,
     ) -> None:
         """
@@ -712,6 +724,7 @@ class ModelManager:
         """
         self.__class__.__instances__ += 1
         from views_pipeline_core.managers.log import LoggingManager
+
         self._model_repo = "views-models"
         self._entity = "views_pipeline"
 
@@ -729,19 +742,22 @@ class ModelManager:
             "config_hyperparameters.py", "get_hp_config"
         )
         self._config_meta = self.__load_config("config_meta.py", "get_meta_config")
+        self._partition_dict = self.__load_config("config_partitions.py", "generate")
 
         if self._model_path.target == "model":
             self._config_sweep = self.__load_config(
                 "config_sweep.py", "get_sweep_config"
             )
-            self._partition_dict = self.__load_config(
-                "config_partitions.py", "generate"
-            )
+
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
-            self._data_loader = ViewsDataLoader(model_path=self._model_path, 
-                                                steps=len(self._config_hyperparameters.get("steps", [*range(1, 36 + 1, 1)])), 
-                                                partition_dict=self._partition_dict)
+            self._data_loader = ViewsDataLoader(
+                model_path=self._model_path,
+                steps=len(
+                    self._config_hyperparameters.get("steps", [*range(1, 36 + 1, 1)])
+                ),
+                partition_dict=self._partition_dict,
+            )
 
         if self._use_prediction_store:
             from views_forecasts.extensions import ForecastsStore, ViewsMetadata
@@ -872,7 +888,7 @@ class ForecastingModelManager(ModelManager):
     def __init__(
         self,
         model_path: ModelPathManager,
-        wandb_notifications: bool = True,
+        wandb_notifications: bool = False,
         use_prediction_store: bool = True,
     ) -> None:
         """
@@ -1179,7 +1195,7 @@ class ForecastingModelManager(ModelManager):
                 )
 
                 if self.config["metrics"]:
-                    self._evaluate_prediction_dataframe(list_df_predictions)
+                    self._evaluate_prediction_dataframe(list_df_predictions, self._eval_type)
                 else:
                     raise ValueError(
                         'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
@@ -1319,8 +1335,16 @@ class ForecastingModelManager(ModelManager):
                     historical_df = None
                     for model in models:
                         mp = ModelPathManager(model_path=model, validate=True)
-                        config = ModelManager(model_path=mp, wandb_notifications=False, use_prediction_store=False).configs
-                        df = read_dataframe(file_path=mp._get_raw_data_file_paths(run_type=self._args.run_type)[0])
+                        config = ModelManager(
+                            model_path=mp,
+                            wandb_notifications=False,
+                            use_prediction_store=False,
+                        ).configs
+                        df = read_dataframe(
+                            file_path=mp._get_raw_data_file_paths(
+                                run_type=self._args.run_type
+                            )[0]
+                        )
                         # print(f"Columns for model {mp.model_name}: {df.columns}")
                         if reference_index is None or historical_df is None:
                             reference_index = df.index
@@ -1454,6 +1478,30 @@ class ForecastingModelManager(ModelManager):
             wandb_alert(
                 title="Artifact Saving Error",
                 text=f"An error occurred while saving the artifact {_latest_model_artifact_path.relative_to(self._model_path.root)} to WandB: {traceback.format_exc()}",
+                level=wandb.AlertLevel.ERROR,
+                wandb_notifications=self._wandb_notifications,
+                models_path=self._model_path.models,
+            )
+            raise
+
+    def _save_eval_report(self, eval_report, path_reports, conflict_type):
+        try:
+            path_reports = Path(path_reports)
+            path_reports.mkdir(parents=True, exist_ok=True)
+            eval_report_path = generate_evaluation_report_name(
+                self.config["run_type"],
+                conflict_type,
+                self.config["timestamp"],
+                file_extension=".json",
+            )
+            with open(path_reports / eval_report_path, "w") as f:
+                json.dump(eval_report, f)
+            
+        except Exception as e:
+            logger.error(f"Error saving evaluation report: {e}", exc_info=True)
+            wandb_alert(
+                title="Evaluation Report Saving Error",
+                text=f"An error occurred while saving the evaluation report for {self.config['name']} at {path_reports.relative_to(self._model_path.root)}: {traceback.format_exc()}",
                 level=wandb.AlertLevel.ERROR,
                 wandb_notifications=self._wandb_notifications,
                 models_path=self._model_path.models,
@@ -1605,13 +1653,15 @@ class ForecastingModelManager(ModelManager):
                 models_path=self._model_path.models,
             )
             raise
+    
 
-    def _evaluate_prediction_dataframe(self, df_predictions, ensemble=False) -> None:
+    def _evaluate_prediction_dataframe(self, df_predictions, eval_type, ensemble=False) -> None:
         """
         Evaluates the prediction DataFrame against actual values and logs the evaluation metrics.
 
         Args:
             df_predictions (pd.DataFrame or dict): The DataFrame or dictionary containing the prediction results.
+            eval_type (str): The type of evaluation to be performed.
             ensemble (bool, optional): Flag indicating whether the predictions are from an ensemble model. Defaults to False.
 
         Returns:
@@ -1629,14 +1679,11 @@ class ForecastingModelManager(ModelManager):
         Raises:
             None
         """
-        # metrics_manager = MetricsManager(self.config["metrics"])
         evaluation_manager = EvaluationManager(self.config["metrics"])
         if not ensemble:
             df_path = self._model_path._get_raw_data_file_paths(
                 run_type=self._args.run_type
-            )[
-                0
-            ]  # get the latest i.e first file
+            )[0]  # get the latest i.e first file
             df_viewser = read_dataframe(df_path)
         else:
             # If the predictions are from an ensemble model, the actual values are not available in the forecast store
@@ -1655,7 +1702,7 @@ class ForecastingModelManager(ModelManager):
             conflict_type = ForecastingModelManager._get_conflict_type(target)
 
             eval_result_dict = evaluation_manager.evaluate(
-                df_actual, df_predictions, target, steps=self.config["steps"]
+                df_actual, df_predictions, target, self.config
             )
             step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
             time_series_wise_evaluation, df_time_series_wise_evaluation = (
@@ -1679,9 +1726,17 @@ class ForecastingModelManager(ModelManager):
                     self._model_path.data_generated,
                     conflict_type,
                 )
+
+            if ensemble:
+                from views_pipeline_core.reports.generator import EvalReportGenerator
+                eval_report_generator = EvalReportGenerator(self.config, target)
+                eval_report = eval_report_generator.generate_eval_report_dict(eval_type)
+                self._save_eval_report(eval_report, self._model_path.reports, conflict_type)
+                
         wandb_alert(
             title=f"Metrics for {self._model_path.model_name}",
             text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
+            wandb_notifications=self._wandb_notifications,
         )
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
@@ -1774,8 +1829,7 @@ class ForecastingModelManager(ModelManager):
                 )
                 report_manager.add_html(
                     html=historical_line_graph.plot_predictions_vs_historical(
-                        as_html=True,
-                        alpha=0.9
+                        as_html=True, alpha=0.9
                     )
                 )
             # Generate report path
