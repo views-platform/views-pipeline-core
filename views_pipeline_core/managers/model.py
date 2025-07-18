@@ -1410,9 +1410,28 @@ class ForecastingModelManager(ModelManager):
                         f"Forecast dataframe was probably not found. Please run the pipeline in forecasting mode with '--run_type forecasting' to generate the forecast dataframe. More info: {e}"
                     )
 
-                self._generate_forecast_report(
+                from views_pipeline_core.templates.reports.forecast import ForecastReportTemplate
+                logger.info(
+                    f"Generating forecast report for {self._model_path.target} {self.config['name']}..."
+                )
+
+                forecast_template = ForecastReportTemplate(
+                config=self.config,
+                model_path=self._model_path,
+                run_type=self._args.run_type
+            )
+                report_path = forecast_template.generate(
                     forecast_dataframe=forecast_df,
-                    historical_dataframe=historical_df,
+                    historical_dataframe=historical_df
+                )
+                
+                # Send WandB alert
+                wandb_alert(
+                    title="Forecast Report Generated",
+                    text=f"Forecast report for {self._model_path.target} {self._model_path.model_name} has been successfully "
+                    f"generated and saved locally at {report_path}.",
+                    wandb_notifications=self._wandb_notifications,
+                    models_path=self._model_path.models,
                 )
             except Exception as e:
                 logger.error(f"Error generating forecast report: {e}", exc_info=True)
@@ -1768,98 +1787,98 @@ class ForecastingModelManager(ModelManager):
         print(result)
         return f"```\n{result}\n```"
 
-    def _generate_forecast_report(
-        self,
-        forecast_dataframe: pd.DataFrame,
-        historical_dataframe: pd.DataFrame = None,
-    ) -> None:
-        """Generate a forecast report based on the prediction DataFrame."""
-        dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
+    # def _generate_forecast_report(
+    #     self,
+    #     forecast_dataframe: pd.DataFrame,
+    #     historical_dataframe: pd.DataFrame = None,
+    # ) -> None:
+    #     """Generate a forecast report based on the prediction DataFrame."""
+    #     dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
 
-        def _create_report() -> Path:
-            """Helper function to create and export report."""
-            forecast_dataset = dataset_cls(forecast_dataframe)
+    #     def _create_report() -> Path:
+    #         """Helper function to create and export report."""
+    #         forecast_dataset = dataset_cls(forecast_dataframe)
 
-            report_manager = ReportManager()
-            # Build report content
-            report_manager.add_heading(
-                f"Forecast report for {self._model_path.model_name}", level=1
-            )
-            report_manager.add_heading("Maps", level=2)
+    #         report_manager = ReportManager()
+    #         # Build report content
+    #         report_manager.add_heading(
+    #             f"Forecast report for {self._model_path.model_name}", level=1
+    #         )
+    #         report_manager.add_heading("Maps", level=2)
 
-            for target in tqdm.tqdm(
-                self.config["targets"], desc="Generating forecast maps"
-            ):
-                # Handle uncertainty
-                if forecast_dataset.sample_size > 1:
-                    logger.info(
-                        f"Sample size of {forecast_dataset.sample_size} for target {target} found. Calculating MAP..."
-                    )
-                    forecast_dataset_map = type(forecast_dataset)(
-                        forecast_dataset.calculate_map(features=[f"pred_{target}"])
-                    )
-                    target = f"{target}_map"
+    #         for target in tqdm.tqdm(
+    #             self.config["targets"], desc="Generating forecast maps"
+    #         ):
+    #             # Handle uncertainty
+    #             if forecast_dataset.sample_size > 1:
+    #                 logger.info(
+    #                     f"Sample size of {forecast_dataset.sample_size} for target {target} found. Calculating MAP..."
+    #                 )
+    #                 forecast_dataset_map = type(forecast_dataset)(
+    #                     forecast_dataset.calculate_map(features=[f"pred_{target}"])
+    #                 )
+    #                 target = f"{target}_map"
 
-                # Common steps
-                mapping_manager = MappingManager(
-                    forecast_dataset_map
-                    if forecast_dataset.sample_size > 1
-                    else forecast_dataset
-                )
-                subset_dataframe = mapping_manager.get_subset_mapping_dataframe(
-                    entity_ids=None, time_ids=None
-                )
-                report_manager.add_heading(f"Forecast for {target}", level=3)
-                report_manager.add_html(
-                    html=mapping_manager.plot_map(
-                        mapping_dataframe=subset_dataframe,
-                        target=f"pred_{target}",
-                        interactive=True,
-                        as_html=True,
-                    )
-                )
-            if isinstance(forecast_dataset, CMDataset):
-                logger.info("Generating historical vs forecast graphs for CM dataset")
-                report_manager.add_heading("Historical vs Forecasted", level=2)
-                historical_dataset = dataset_cls(
-                    historical_dataframe, targets=self.config["targets"]
-                )
-                historical_line_graph = HistoricalLineGraph(
-                    historical_dataset=historical_dataset,
-                    forecast_dataset=forecast_dataset,
-                )
-                report_manager.add_html(
-                    html=historical_line_graph.plot_predictions_vs_historical(
-                        as_html=True, alpha=0.9
-                    )
-                )
-            # Generate report path
-            report_path = (
-                self._model_path.reports
-                / f"report_{generate_model_file_name(run_type=self._args.run_type, file_extension='')}.html"
-            )
+    #             # Common steps
+    #             mapping_manager = MappingManager(
+    #                 forecast_dataset_map
+    #                 if forecast_dataset.sample_size > 1
+    #                 else forecast_dataset
+    #             )
+    #             subset_dataframe = mapping_manager.get_subset_mapping_dataframe(
+    #                 entity_ids=None, time_ids=None
+    #             )
+    #             report_manager.add_heading(f"Forecast for {target}", level=3)
+    #             report_manager.add_html(
+    #                 html=mapping_manager.plot_map(
+    #                     mapping_dataframe=subset_dataframe,
+    #                     target=f"pred_{target}",
+    #                     interactive=True,
+    #                     as_html=True,
+    #                 )
+    #             )
+    #         if isinstance(forecast_dataset, CMDataset):
+    #             logger.info("Generating historical vs forecast graphs for CM dataset")
+    #             report_manager.add_heading("Historical vs Forecasted", level=2)
+    #             historical_dataset = dataset_cls(
+    #                 historical_dataframe, targets=self.config["targets"]
+    #             )
+    #             historical_line_graph = HistoricalLineGraph(
+    #                 historical_dataset=historical_dataset,
+    #                 forecast_dataset=forecast_dataset,
+    #             )
+    #             report_manager.add_html(
+    #                 html=historical_line_graph.plot_predictions_vs_historical(
+    #                     as_html=True, alpha=0.9
+    #                 )
+    #             )
+    #         # Generate report path
+    #         report_path = (
+    #             self._model_path.reports
+    #             / f"report_{generate_model_file_name(run_type=self._args.run_type, file_extension='')}.html"
+    #         )
 
-            # Export report
-            report_manager.export_as_html(report_path)
-            return report_path
+    #         # Export report
+    #         report_manager.export_as_html(report_path)
+    #         return report_path
 
-        try:
-            # Get appropriate dataset class
-            dataset_cls = dataset_classes[self.config["level"]]
-        except KeyError:
-            raise ValueError(f"Invalid level: {self.config['level']}")
+    #     try:
+    #         # Get appropriate dataset class
+    #         dataset_cls = dataset_classes[self.config["level"]]
+    #     except KeyError:
+    #         raise ValueError(f"Invalid level: {self.config['level']}")
 
-        # Create and export report
-        report_path = _create_report()
+    #     # Create and export report
+    #     report_path = _create_report()
 
-        # Send WandB alert
-        wandb_alert(
-            title="Forecast Report Generated",
-            text=f"Forecast report for {self._model_path.model_name} has been successfully "
-            f"generated and saved locally at {report_path}.",
-            wandb_notifications=self._wandb_notifications,
-            models_path=self._model_path.models,
-        )
+    #     # Send WandB alert
+    #     wandb_alert(
+    #         title="Forecast Report Generated",
+    #         text=f"Forecast report for {self._model_path.model_name} has been successfully "
+    #         f"generated and saved locally at {report_path}.",
+    #         wandb_notifications=self._wandb_notifications,
+    #         models_path=self._model_path.models,
+    #     )
 
     def _execute_evaluation_reporting(self, config: Dict) -> None:
         """
@@ -1898,24 +1917,26 @@ class ForecastingModelManager(ModelManager):
         ):
             add_wandb_metrics()
             try:
-                logger.info(
-                    f"Generating evaluation report for {self._model_path.target} {self.config['name']}..."
-                )
-
-                # Grab info for baseline models from wandb.
-
-                if self._model_path._target == "ensemble":
-                    # In case there are any data preprocessing or unique steps before generating the report
-                    for target in self.config["targets"]:
-                        self._generate_evaluation_report(wandb_run=latest_run, target=target)
-                elif self._model_path._target == "model":
-                    for target in self.config["targets"]:
-                        self._generate_evaluation_report(wandb_run=latest_run, target=target)
-                else:
-                    raise ValueError(
-                        f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
+                from views_pipeline_core.templates.reports.evaluation import EvaluationReportTemplate
+                for target in self.config["targets"]:
+                    evaluation_template = EvaluationReportTemplate(
+                        config=self.config,
+                        model_path=self._model_path,
+                        run_type=self._args.run_type
                     )
-
+                    report_path = evaluation_template.generate(
+                        wandb_run=latest_run,
+                        target=target
+                    )
+                
+                # Send WandB alert
+                wandb_alert(
+                    title="Evaluation Report Generated",
+                    text=f"Evaluation report for {self._model_path.model_name} has been successfully"
+                    f"generated and saved locally at {report_path}.",
+                    wandb_notifications=self._wandb_notifications,
+                    models_path=self._model_path.models,
+                )
             except Exception as e:
                 logger.error(f"Error generating evaluation report: {e}", exc_info=True)
                 wandb_alert(
@@ -1927,169 +1948,171 @@ class ForecastingModelManager(ModelManager):
                 )
                 raise
 
-    def _generate_evaluation_report(
-        self, wandb_run: "wandb.apis.public.runs.Run", target: str
-    ) -> Path:
-        """Generate an evaluation report based on the evaluation DataFrame."""
-        evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
-        metadata_dict = format_metadata_dict(dict(wandb_run.config))
-        conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
-        metrics = metadata_dict.get("metrics", [])
-        # Common steps
-        report_manager = ReportManager()
-        report_manager.add_heading(
-            f"Evaluation report for {self._model_path.target} {self._model_path.model_name}", level=1
-        )
-        _timestamp = dict(wandb_run.summary).get("_timestamp", None)
-        run_date_str = f"{timestamp_to_date(_timestamp)}" if _timestamp else "N/A"
-        report_manager.add_heading("Run Summary", level=2)
-        report_manager.add_markdown(
-            markdown_text=(
-            f"**Run ID**: [{wandb_run.id}]({wandb_run.url})  \n"
-            f"**Owner**: {wandb_run.user.name} ({wandb_run.user.username})  \n"
-            f"**Run Date**: {run_date_str}  \n"
-            f"**Constituent Models**: {metadata_dict.get('models', None)}  \n" if self._model_path.target == "ensemble" else ""
-            f"**Pipeline Version**: {PipelineConfig().current_version}"
-            )
-        )
+    # def _generate_evaluation_report(
+    #     self, wandb_run: "wandb.apis.public.runs.Run", target: str
+    # ) -> Path:
+    #     """Generate an evaluation report based on the evaluation DataFrame."""
+        # evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
+        # metadata_dict = format_metadata_dict(dict(wandb_run.config))
+        # conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
+        # metrics = metadata_dict.get("metrics", [])
+        # # Common steps
+        # report_manager = ReportManager()
+        # report_manager.add_heading(
+        #     f"Evaluation report for {self._model_path.target} {self._model_path.model_name}", level=1
+        # )
+        # _timestamp = dict(wandb_run.summary).get("_timestamp", None)
+        # run_date_str = f"{timestamp_to_date(_timestamp)}" if _timestamp else "N/A"
+        # report_manager.add_heading("Run Summary", level=2)
+        # report_manager.add_markdown(
+        #     markdown_text=(
+        #     f"**Run ID**: [{wandb_run.id}]({wandb_run.url})  \n"
+        #     f"**Owner**: {wandb_run.user.name} ({wandb_run.user.username})  \n"
+        #     f"**Run Date**: {run_date_str}  \n"
+        #     f"**Constituent Models**: {metadata_dict.get('models', None)}  \n" if self._model_path.target == "ensemble" else ""
+        #     f"**Pipeline Version**: {PipelineConfig().current_version}"
+        #     )
+        # )
 
-        methodology_md = (
-            f"- **Target Variable**: {target}"
-            + (f" ({type_of_conflict.title()})" if type_of_conflict else "")
-            + "\n"
-            f"- **Level of Analysis (resolution)**: {metadata_dict.get('level', 'N/A')}\n"
-            f"- **Evaluation Scheme**: `Rolling-Origin Holdout`\n"
-            f"    - **Forecast Horizon**: {metadata_dict.get('steps', 'N/A')}\n"
-            f"    - **Number of Rolling Origins**: {self._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())}\n"
-        )
-        report_manager.add_heading("Methodology", level=2)
-        report_manager.add_markdown(markdown_text=methodology_md)
-        # Only include calibration, validation, and forecast key-value pairs from metadata_dict
+        # methodology_md = (
+        #     f"- **Target Variable**: {target}"
+        #     + (f" ({type_of_conflict.title()})" if type_of_conflict else "")
+        #     + "\n"
+        #     f"- **Level of Analysis (resolution)**: {metadata_dict.get('level', 'N/A')}\n"
+        #     f"- **Evaluation Scheme**: `Rolling-Origin Holdout`\n"
+        #     f"    - **Forecast Horizon**: {metadata_dict.get('steps', 'N/A')}\n"
+        #     f"    - **Number of Rolling Origins**: {self._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())}\n"
+        # )
+        # report_manager.add_heading("Methodology", level=2)
+        # report_manager.add_markdown(markdown_text=methodology_md)
+        # # Only include calibration, validation, and forecast key-value pairs from metadata_dict
 
-        def _create_model_report() -> None:
-            """Helper function to create and export model report."""
-            try:
-                partition_metadata = {
-                    k: v
-                    for k, v in metadata_dict.items()
-                    if k.lower() in {"calibration", "validation", "forecasting"}
-                }
-                report_manager.add_heading("Data Partitions", level=2)
-                report_manager.add_table(partition_metadata)
-            except Exception as e:
-                logger.warning(
-                    f"Could not find partition metadata in the run summary",
-                )
+        # def _create_model_report() -> None:
+        #     """Helper function to create and export model report."""
+        #     try:
+        #         partition_metadata = {
+        #             k: v
+        #             for k, v in metadata_dict.items()
+        #             if k.lower() in {"calibration", "validation", "forecasting"}
+        #         }
+        #         report_manager.add_heading("Data Partitions", level=2)
+        #         report_manager.add_table(partition_metadata)
+        #     except Exception as e:
+        #         logger.warning(
+        #             f"Could not find partition metadata in the run summary",
+        #         )
 
-            report_manager.add_heading(f"Model Metrics", level=2)
-            for metric in metrics:
-                report_manager.add_heading(f"{str(metric).upper()}", level=3)
-                print(f"Adding table for metric: {metric}")
-                report_manager.add_table(data=filter_metrics_from_dict(evaluation_dict=evaluation_dict, metric=metric, conflict_code=conflict_code, model_name=metadata_dict.get('name', None)))
+        #     report_manager.add_heading(f"Model Metrics", level=2)
+        #     for metric in metrics:
+        #         report_manager.add_heading(f"{str(metric).upper()}", level=3)
+        #         print(f"Adding table for metric: {metric}")
+        #         report_manager.add_table(data=filter_metrics_from_dict(evaluation_dict=evaluation_dict, metric=metric, conflict_code=conflict_code, model_name=metadata_dict.get('name', None)))
         
-        # More common steps
-        report_manager.add_heading(f"Evaluation Scheme Description", level=2)
-        eval_scheme_md = (
-            "This evaluation uses a **rolling-origin holdout strategy** with an **expanding input window** and a **fixed model artifact**.\n\n"
-            f"- A single model is trained once on historical data up to a cutoff date and then saved (no retraining).\n"
-            f"- The model generates forecasts for a fixed forecast horizon of 36 months starting immediately after the training period.\n"
-            f"- For each evaluation step, both the input data and the forecast window are shifted forward by one month, expanding the input by adding the newly available data point.\n"
-            f"- The model is re-run {self._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())} times, each time using the same trained model artifact but with updated input data and a new rolling forecast origin.\n"
-            f"- Forecast accuracy is assessed by comparing each forecast window to the corresponding true observations in the holdout test set.\n"
-            f"- This scheme tests the stability and robustness of the fixed model when re-applied to updated data without retraining, simulating how the model would perform if deployed as-is and used to re-forecast each month."
-        )
+        # # More common steps
+        # report_manager.add_heading(f"Evaluation Scheme Description", level=2)
+        # eval_scheme_md = (
+        #     "This evaluation uses a **rolling-origin holdout strategy** with an **expanding input window** and a **fixed model artifact**.\n\n"
+        #     f"- A single model is trained once on historical data up to a cutoff date and then saved (no retraining).\n"
+        #     f"- The model generates forecasts for a fixed forecast horizon of 36 months starting immediately after the training period.\n"
+        #     f"- For each evaluation step, both the input data and the forecast window are shifted forward by one month, expanding the input by adding the newly available data point.\n"
+        #     f"- The model is re-run {self._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())} times, each time using the same trained model artifact but with updated input data and a new rolling forecast origin.\n"
+        #     f"- Forecast accuracy is assessed by comparing each forecast window to the corresponding true observations in the holdout test set.\n"
+        #     f"- This scheme tests the stability and robustness of the fixed model when re-applied to updated data without retraining, simulating how the model would perform if deployed as-is and used to re-forecast each month."
+        # )
 
-        report_manager.add_markdown(markdown_text=eval_scheme_md)
+        # report_manager.add_markdown(markdown_text=eval_scheme_md)
 
 
-        def _create_ensemble_report() -> None:
-            """Helper function to create and export ensemble report."""
-            # Get ensemble run
-            models = self.configs.get("models", [])
-            verified_partition_dict = None # Set after it is known that all constituent models have the same partition metadata
+        # def _create_ensemble_report() -> None:
+        #     """Helper function to create and export ensemble report."""
+        #     # Get ensemble run
+        #     models = self.configs.get("models", [])
+        #     verified_partition_dict = None # Set after it is known that all constituent models have the same partition metadata
             
-            # Get constituent model runs
-            constituent_model_runs = []
-            for model in models:
-                latest_run = get_latest_run(entity="views_pipeline", model_name=model, run_type="calibration")
-                if latest_run:
-                    constituent_model_runs.append(latest_run)
-                else:
-                    print(f"No run found for model {model}")
+        #     # Get constituent model runs
+        #     constituent_model_runs = []
+        #     for model in models:
+        #         latest_run = get_latest_run(entity="views_pipeline", model_name=model, run_type="calibration")
+        #         if latest_run:
+        #             constituent_model_runs.append(latest_run)
+        #         else:
+        #             print(f"No run found for model {model}")
             
-            # Verify that all constituent models have the same partition metadata
-            try:
-                for model_run in constituent_model_runs:
-                    temp_metadata_dict = format_metadata_dict(dict(model_run.config))
-                    partition_metadata_dict = {
-                        k: v
-                        for k, v in temp_metadata_dict.items()
-                        if k.lower() in {"calibration", "validation", "forecasting"}
-                    }
-                    model_name = temp_metadata_dict.get('name', "N/A")
-                    if verified_partition_dict is None:
-                        verified_partition_dict = partition_metadata_dict
-                    else:
-                        # Verify that all constituent models have the same partition metadata
-                        if verified_partition_dict != partition_metadata_dict:
-                            raise ValueError(
-                                f"Partition metadata mismatch between models: {verified_partition_dict} and {partition_metadata_dict}. Offending model: {model_name}"
-                            )
-                report_manager.add_heading("Data Partitions", level=2)
-                report_manager.add_table(verified_partition_dict)
+        #     # Verify that all constituent models have the same partition metadata
+        #     try:
+        #         for model_run in constituent_model_runs:
+        #             temp_metadata_dict = format_metadata_dict(dict(model_run.config))
+        #             partition_metadata_dict = {
+        #                 k: v
+        #                 for k, v in temp_metadata_dict.items()
+        #                 if k.lower() in {"calibration", "validation", "forecasting"}
+        #             }
+        #             model_name = temp_metadata_dict.get('name', "N/A")
+        #             if verified_partition_dict is None:
+        #                 verified_partition_dict = partition_metadata_dict
+        #             else:
+        #                 # Verify that all constituent models have the same partition metadata
+        #                 if verified_partition_dict != partition_metadata_dict:
+        #                     raise ValueError(
+        #                         f"Partition metadata mismatch between models: {verified_partition_dict} and {partition_metadata_dict}. Offending model: {model_name}"
+        #                     )
+        #         report_manager.add_heading("Data Partitions", level=2)
+        #         report_manager.add_table(verified_partition_dict)
 
-                # Add ensemble metrics
-                report_manager.add_heading(f"Model Metrics", level=2)
-                for i, metric in enumerate(metrics):
-                    full_metric_dataframe = None
-                    report_manager.add_heading(f"{str(metric).upper()}", level=3)
-                    print(f"Adding table for metric: {metric}")
+        #         # Add ensemble metrics
+        #         report_manager.add_heading(f"Model Metrics", level=2)
+        #         for i, metric in enumerate(metrics):
+        #             full_metric_dataframe = None
+        #             report_manager.add_heading(f"{str(metric).upper()}", level=3)
+        #             print(f"Adding table for metric: {metric}")
                     
-                    # Save the overall ensemble metrics first
-                    full_metric_dataframe = filter_metrics_from_dict(evaluation_dict=evaluation_dict, metric=metric, conflict_code=conflict_code, model_name=metadata_dict.get('name', None))
-                    # If no metrics found for the ensemble, skip to the next metric
-                    if full_metric_dataframe is None:
-                        logger.warning(
-                            f"No metrics found for metric: {metric} in the ensemble's evaluation dictionary."
-                        )
-                        continue
-                    # Now add the metrics for each constituent model
-                    for model_run in constituent_model_runs:
-                        temp_evaluation_dict = format_evaluation_dict(dict(model_run.summary))
-                        temp_metadata_dict = format_metadata_dict(dict(model_run.config))
-                        metric_dataframe = filter_metrics_from_dict(evaluation_dict=temp_evaluation_dict, metric=metric, conflict_code=conflict_code, model_name=temp_metadata_dict.get('name', None))
-                        full_metric_dataframe = pd.concat([full_metric_dataframe, metric_dataframe], axis=0)
-                    report_manager.add_table(data=full_metric_dataframe)
-            except Exception as e:
-                logger.error(f"Error generating evaluation report: {e}", exc_info=True)
-                wandb_alert(
-                    title="Evaluation Report Generation Error",
-                    text=f"An error occurred during the generation of the evaluation report for {self.config['name']}: {traceback.format_exc()}",
-                    level=wandb.AlertLevel.ERROR,
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
-                raise
+        #             # Save the overall ensemble metrics first
+        #             full_metric_dataframe = filter_metrics_from_dict(evaluation_dict=evaluation_dict, metric=metric, conflict_code=conflict_code, model_name=metadata_dict.get('name', None))
+        #             # If no metrics found for the ensemble, skip to the next metric
+        #             if full_metric_dataframe is None:
+        #                 logger.warning(
+        #                     f"No metrics found for metric: {metric} in the ensemble's evaluation dictionary."
+        #                 )
+        #                 continue
+        #             # Now add the metrics for each constituent model
+        #             for model_run in constituent_model_runs:
+        #                 temp_evaluation_dict = format_evaluation_dict(dict(model_run.summary))
+        #                 temp_metadata_dict = format_metadata_dict(dict(model_run.config))
+        #                 metric_dataframe = filter_metrics_from_dict(evaluation_dict=temp_evaluation_dict, metric=metric, conflict_code=conflict_code, model_name=temp_metadata_dict.get('name', None))
+        #                 full_metric_dataframe = pd.concat([full_metric_dataframe, metric_dataframe], axis=0)
+        #             report_manager.add_table(data=full_metric_dataframe)
+        #     except Exception as e:
+        #         logger.error(f"Error generating evaluation report: {e}", exc_info=True)
+        #         wandb_alert(
+        #             title="Evaluation Report Generation Error",
+        #             text=f"An error occurred during the generation of the evaluation report for {self.config['name']}: {traceback.format_exc()}",
+        #             level=wandb.AlertLevel.ERROR,
+        #             wandb_notifications=self._wandb_notifications,
+        #             models_path=self._model_path.models,
+        #         )
+        #         raise
 
-        if self._model_path._target == "model":
-            report_path = _create_model_report()
-        elif self._model_path._target == "ensemble":
-            report_path = _create_ensemble_report()
-        else:
-            raise ValueError(
-                f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
-            )
+        # if self._model_path._target == "model":
+        #     report_path = _create_model_report()
+        # elif self._model_path._target == "ensemble":
+        #     report_path = _create_ensemble_report()
+        # else:
+        #     raise ValueError(
+        #         f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
+        #     )
 
-        report_path = (
-            self._model_path.reports
-            / f"report_{generate_model_file_name(run_type=self._args.run_type, file_extension='')}_{conflict_code}.html"
-        )
-        report_manager.export_as_html(report_path)
+        # report_path = (
+        #     self._model_path.reports
+        #     / f"report_{generate_model_file_name(run_type=self._args.run_type, file_extension='')}_{conflict_code}.html"
+        # )
+        # report_manager.export_as_html(report_path)
 
-        wandb_alert(
-            title="Evaluation Report Generated",
-            text=f"Evaluation report for {self._model_path.model_name} has been successfully"
-            f"generated and saved locally at {report_path}.",
-            wandb_notifications=self._wandb_notifications,
-            models_path=self._model_path.models,
-        )
+
+        # wandb_alert(
+        #     title="Evaluation Report Generated",
+        #     text=f"Evaluation report for {self._model_path.model_name} has been successfully"
+        #     f"generated and saved locally at {report_path}.",
+        #     wandb_notifications=self._wandb_notifications,
+        #     models_path=self._model_path.models,
+        # )
+        
