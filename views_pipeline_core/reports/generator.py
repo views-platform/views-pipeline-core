@@ -93,7 +93,7 @@ class EvalReportGenerator:
             "Model Name": model_name,
             # "MSE": mse,
             "MSLE": msle,
-            "mean ŷ": mean_pred
+            "mean prediction": mean_pred
         }
 
 
