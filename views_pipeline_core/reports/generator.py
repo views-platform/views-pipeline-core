@@ -84,9 +84,9 @@ class EvalReportGenerator:
         return read_dataframe(path)
 
     def _single_result(self, model_type: str, model_name: str, df_eval_ts: pd.DataFrame, df_pred: pd.DataFrame):
-        # mse = df_eval_ts.loc["ts00", "MSE"] # Add back after publishing latest version of views-evaluation
-        msle = np.sqrt(df_eval_ts.loc["ts00", "RMSLE"])
-        mean_pred = df_pred.get(f"pred_{self.target}", [None]).mean()
+        # mse = df_eval_ts["MSE"].mean() # Add back after publishing latest version of views-evaluation
+        msle = np.sqrt(df_eval_ts["RMSLE"]).mean()
+        mean_pred = df_pred[f"pred_{self.target}"].mean()
         
         return {
             "Type": model_type,
