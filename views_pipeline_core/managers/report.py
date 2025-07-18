@@ -7,13 +7,13 @@ import matplotlib.pyplot as plt
 from html import escape
 from datetime import datetime
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.templates.reports.styles.tailwind import get_css
+from views_pipeline_core.reports.styles.tailwind import get_css
 
 
 class ReportManager:
     # Threshold for splitting tables
     TABLE_SPLIT_THRESHOLD = 8
-    TABLE_SPLIT_THRESHOLD_COLS = 3
+    TABLE_SPLIT_THRESHOLD_COLS = 6
     
     def __init__(self):
         self.content = []

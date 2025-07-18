@@ -326,4 +326,4 @@ def get_latest_run(entity: str, model_name: str, run_type: str) -> Optional['wan
         for run in wandb_runs
         if run.state == "finished" and len(dict(run.summary)) > 1
     )
-    return latest_run if latest_run else None
+    return latest_run if len(dict(latest_run.summary)) > 1 else None

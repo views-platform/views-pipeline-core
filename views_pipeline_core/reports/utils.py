@@ -17,7 +17,7 @@ def get_conflict_type_from_feature_name(feature_name: str) -> Optional[str]:
     for conflict_type in valid_conflict_types.keys():
         if conflict_type in tokens:
             return conflict_type, valid_conflict_types[conflict_type]
-    return None
+    return '', ''
 
 def filter_metrics_from_dict(evaluation_dict: dict, metric: str, conflict_code: str, model_name: str = None) -> pd.DataFrame:
     result = {}

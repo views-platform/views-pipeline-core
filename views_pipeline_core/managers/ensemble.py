@@ -303,8 +303,12 @@ class EnsembleManager(ForecastingModelManager):
             self._execute_model_evaluation(config)
         if forecast:
             self._execute_model_forecasting(config)
-        if report:
-            self._execute_reporting(config)
+        if report and forecast:
+            self._execute_forecast_reporting(config)
+        if report and eval:
+            self._execute_evaluation_reporting(config)
+        # if report:
+        #     self._execute_reporting(config)
 
         end_t = time.time()
         minutes = (end_t - start_t) / 60
