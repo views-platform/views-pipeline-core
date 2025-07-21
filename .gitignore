@@ -11,6 +11,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Prototype classes
+prototypes/
+
 # C extensions
 *.so
 
