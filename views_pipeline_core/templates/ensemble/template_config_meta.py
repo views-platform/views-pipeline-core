@@ -36,7 +36,7 @@ def generate(script_path: Path, model_name: str) -> bool:
         "targets": "ln_ged_sb_dep",  # Eg. "ln_ged_sb_dep"
         "level": "pgm", # Eg. "pgm", "cm"
         "aggregation": "median", # Eg. "median", "mean"
-        "metrics": ["MSE", "RMSLE", "CRPS"],
+        "metrics": ["MSE", "MSLE", "CRPS"],
         "creator": "Your name here" 
     }}
     return meta_config
