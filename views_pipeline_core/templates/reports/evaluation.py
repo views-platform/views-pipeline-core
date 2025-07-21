@@ -49,7 +49,7 @@ class EvaluationReportTemplate:
             )
         )
 
-        methodology_md = (
+        task_definition_md = (
             f"- **Target Variable**: {target}"
             + (f" ({type_of_conflict.title()})" if type_of_conflict else "")
             + "\n"
@@ -58,8 +58,8 @@ class EvaluationReportTemplate:
             f"    - **Forecast Horizon**: {metadata_dict.get('steps', 'N/A')}\n"
             f"    - **Number of Rolling Origins**: {ForecastingModelManager._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())}\n"
         )
-        report_manager.add_heading("Methodology", level=2)
-        report_manager.add_markdown(markdown_text=methodology_md)
+        report_manager.add_heading("Task Definition", level=2)
+        report_manager.add_markdown(markdown_text=task_definition_md)
         
         # Evaluation scheme description
         eval_scheme_md = (
