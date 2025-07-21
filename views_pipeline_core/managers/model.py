@@ -1731,9 +1731,19 @@ class ForecastingModelManager(ModelManager):
                     self._model_path.data_generated,
                     conflict_type,
                 )
-
             
-            eval_report = evaluation_manager.generate_dict_report(self.config, target, conflict_type)
+            from views_evaluation.reports.generator import EvalReportGenerator
+            eval_report_generator = EvalReportGenerator(self.config, target, conflict_type)
+            eval_report = eval_report_generator.generate_eval_report_dict(df_predictions, df_time_series_wise_evaluation)
+            if ensemble:
+                for model_name in self.config["models"]:
+                    pm = ModelPathManager(model_name)
+                    rolling_origin_number = self._resolve_evaluation_sequence_number(self.config["eval_type"])
+                    paths = pm._get_generated_predictions_data_file_paths(self.config["run_type"])[:rolling_origin_number]
+                    # print(paths)
+                    df_preds = [read_dataframe(path) for path in paths]
+                    df_eval_ts = read_dataframe(pm._get_eval_file_paths(self.config["run_type"], conflict_type)[0])
+                    eval_report = eval_report_generator.update_ensemble_eval_report(model_name, df_preds, df_eval_ts)
             self._save_eval_report(eval_report, self._model_path.reports, conflict_type)
                 
         wandb_alert(
