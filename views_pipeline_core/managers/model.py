@@ -32,7 +32,6 @@ from views_pipeline_core.files.utils import (
     generate_evaluation_report_name,
 )
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_evaluation.evaluation.evaluation_manager import EvaluationManager
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.utils import replace_nan_values
 from views_pipeline_core.managers.mapping import MappingManager
@@ -880,6 +879,7 @@ class ModelManager:
             **self._config_hyperparameters,
             **self._config_meta,
             **self._config_deployment,
+            **self._partition_dict,
         }
         return config
 
@@ -1411,8 +1411,10 @@ class ForecastingModelManager(ModelManager):
             **self._config_hyperparameters,
             **self._config_meta,
             **self._config_deployment,
+            **self._partition_dict,
         }
         config["run_type"] = args.run_type
+        config["eval_type"] = args.eval_type
         config["sweep"] = args.sweep
 
         validate_config(config)
@@ -1433,8 +1435,10 @@ class ForecastingModelManager(ModelManager):
             **wandb_config,
             **self._config_meta,
             **self._config_deployment,
+            **self._partition_dict,
         }
         config["run_type"] = self._args.run_type
+        config["eval_type"] = self._args.eval_type
         config["sweep"] = self._args.sweep
 
         validate_config(config)
@@ -1679,6 +1683,7 @@ class ForecastingModelManager(ModelManager):
         Raises:
             None
         """
+        from views_evaluation.evaluation.evaluation_manager import EvaluationManager
         evaluation_manager = EvaluationManager(self.config["metrics"])
         if not ensemble:
             df_path = self._model_path._get_raw_data_file_paths(
@@ -1702,7 +1707,7 @@ class ForecastingModelManager(ModelManager):
             conflict_type = ForecastingModelManager._get_conflict_type(target)
 
             eval_result_dict = evaluation_manager.evaluate(
-                df_actual, df_predictions, target, self.config["steps"]
+                df_actual, df_predictions, target, self.config
             )
             step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
             time_series_wise_evaluation, df_time_series_wise_evaluation = (
@@ -1727,11 +1732,9 @@ class ForecastingModelManager(ModelManager):
                     conflict_type,
                 )
 
-            if ensemble:
-                from views_pipeline_core.reports.generator import EvalReportGenerator
-                eval_report_generator = EvalReportGenerator(self.config, target)
-                eval_report = eval_report_generator.generate_eval_report_dict(eval_type)
-                self._save_eval_report(eval_report, self._model_path.reports, conflict_type)
+            
+            eval_report = evaluation_manager.generate_dict_report(self.config, target, conflict_type)
+            self._save_eval_report(eval_report, self._model_path.reports, conflict_type)
                 
         wandb_alert(
             title=f"Metrics for {self._model_path.model_name}",
