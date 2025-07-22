@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import tqdm
 import random
+import json
 
 from views_pipeline_core.wandb.utils import (
     add_wandb_metrics,
@@ -32,10 +33,10 @@ from views_pipeline_core.files.utils import (
     generate_evaluation_file_name,
     generate_model_file_name,
     generate_output_file_name,
+    generate_evaluation_report_name,
 )
 from views_pipeline_core.reports.utils import get_conflict_type_from_feature_name, filter_metrics_from_dict
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_evaluation.evaluation.evaluation_manager import EvaluationManager
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.utils import replace_nan_values
 from views_pipeline_core.managers.mapping import MappingManager
@@ -462,34 +463,15 @@ class ModelPathManager:
         ]
         return sorted(paths, reverse=True)
 
-    # def _get_evaluation_metrics_file_paths(
-    #     self, run_type: str, conflict_type: str, eval_type: str
-    # ) -> List[Path]:
-    #     valid_run_types = ForecastingModelManager._get_valid_run_types()
-    #     valid_conflict_types = ForecastingModelManager._get_valid_conflict_types()
-    #     valid_eval_types = ForecastingModelManager._get_valid_eval_types()
-
-    #     if run_type not in valid_run_types:
-    #         raise ValueError(
-    #             f"Invalid run type: {run_type}. Must be one of {valid_run_types}."
-    #         )
-    #     if conflict_type not in valid_conflict_types:
-    #         raise ValueError(
-    #             f"Invalid conflict type: {conflict_type}. Must be one of {valid_conflict_types}."
-    #         )
-    #     if eval_type not in valid_eval_types:
-    #         raise ValueError(
-    #             f"Invalid evaluation type: {eval_type}. Must be one of {valid_eval_types}."
-    #         )
-
-    #     paths = [
-    #         f
-    #         for f in self.data_generated.iterdir()
-    #         if f.is_file()
-    #         and f.stem.startswith(f"eval_{eval_type}_{conflict_type}_{run_type}")
-    #         and f.suffix == PipelineConfig().dataframe_format
-    #     ]
-    #     return sorted(paths, reverse=True)
+    def _get_eval_file_paths(self, run_type: str, conflict_type: str) -> List[Path]:
+        paths = [
+            f
+            for f in self.data_generated.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"eval_{run_type}_{conflict_type}")
+            and f.suffix == PipelineConfig().dataframe_format
+        ]
+        return sorted(paths, reverse=True)
 
     def get_latest_model_artifact_path(self, run_type: str) -> Path:
         """
@@ -735,7 +717,7 @@ class ModelManager:
     def __init__(
         self,
         model_path: ModelPathManager,
-        wandb_notifications: bool = True,
+        wandb_notifications: bool = False,
         use_prediction_store: bool = True,
     ) -> None:
         """
@@ -764,14 +746,13 @@ class ModelManager:
             "config_hyperparameters.py", "get_hp_config"
         )
         self._config_meta = self.__load_config("config_meta.py", "get_meta_config")
+        self._partition_dict = self.__load_config("config_partitions.py", "generate")
 
         if self._model_path.target == "model":
             self._config_sweep = self.__load_config(
                 "config_sweep.py", "get_sweep_config"
             )
-            self._partition_dict = self.__load_config(
-                "config_partitions.py", "generate"
-            )
+
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
             self._data_loader = ViewsDataLoader(
@@ -903,6 +884,7 @@ class ModelManager:
             **self._config_hyperparameters,
             **self._config_meta,
             **self._config_deployment,
+            **self._partition_dict,
         }
         if hasattr(self, "_partition_dict") and self._partition_dict is not None:
             config.update(self._partition_dict)
@@ -913,7 +895,7 @@ class ForecastingModelManager(ModelManager):
     def __init__(
         self,
         model_path: ModelPathManager,
-        wandb_notifications: bool = True,
+        wandb_notifications: bool = False,
         use_prediction_store: bool = True,
     ) -> None:
         """
@@ -1223,7 +1205,7 @@ class ForecastingModelManager(ModelManager):
                 )
 
                 if self.config["metrics"]:
-                    self._evaluate_prediction_dataframe(list_df_predictions)
+                    self._evaluate_prediction_dataframe(list_df_predictions, self._eval_type)
                 else:
                     raise ValueError(
                         'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
@@ -1458,10 +1440,12 @@ class ForecastingModelManager(ModelManager):
             **self._config_hyperparameters,
             **self._config_meta,
             **self._config_deployment,
+            **self._partition_dict,
         }
         if hasattr(self, "_partition_dict") and self._partition_dict is not None:
             config.update(self._partition_dict)
         config["run_type"] = args.run_type
+        config["eval_type"] = args.eval_type
         config["sweep"] = args.sweep
 
         validate_config(config)
@@ -1482,10 +1466,12 @@ class ForecastingModelManager(ModelManager):
             **wandb_config,
             **self._config_meta,
             **self._config_deployment,
+            **self._partition_dict,
         }
         if hasattr(self, "_partition_dict") and self._partition_dict is not None:
             config.update(self._partition_dict)
         config["run_type"] = self._args.run_type
+        config["eval_type"] = self._args.eval_type
         config["sweep"] = self._args.sweep
 
         validate_config(config)
@@ -1529,6 +1515,30 @@ class ForecastingModelManager(ModelManager):
             wandb_alert(
                 title="Artifact Saving Error",
                 text=f"An error occurred while saving the artifact {_latest_model_artifact_path.relative_to(self._model_path.root)} to WandB: {traceback.format_exc()}",
+                level=wandb.AlertLevel.ERROR,
+                wandb_notifications=self._wandb_notifications,
+                models_path=self._model_path.models,
+            )
+            raise
+
+    def _save_eval_report(self, eval_report, path_reports, conflict_type):
+        try:
+            path_reports = Path(path_reports)
+            path_reports.mkdir(parents=True, exist_ok=True)
+            eval_report_path = generate_evaluation_report_name(
+                self.config["run_type"],
+                conflict_type,
+                self.config["timestamp"],
+                file_extension=".json",
+            )
+            with open(path_reports / eval_report_path, "w") as f:
+                json.dump(eval_report, f)
+            
+        except Exception as e:
+            logger.error(f"Error saving evaluation report: {e}", exc_info=True)
+            wandb_alert(
+                title="Evaluation Report Saving Error",
+                text=f"An error occurred while saving the evaluation report for {self.config['name']} at {path_reports.relative_to(self._model_path.root)}: {traceback.format_exc()}",
                 level=wandb.AlertLevel.ERROR,
                 wandb_notifications=self._wandb_notifications,
                 models_path=self._model_path.models,
@@ -1680,13 +1690,15 @@ class ForecastingModelManager(ModelManager):
                 models_path=self._model_path.models,
             )
             raise
+    
 
-    def _evaluate_prediction_dataframe(self, df_predictions, ensemble=False) -> None:
+    def _evaluate_prediction_dataframe(self, df_predictions, eval_type, ensemble=False) -> None:
         """
         Evaluates the prediction DataFrame against actual values and logs the evaluation metrics.
 
         Args:
             df_predictions (pd.DataFrame or dict): The DataFrame or dictionary containing the prediction results.
+            eval_type (str): The type of evaluation to be performed.
             ensemble (bool, optional): Flag indicating whether the predictions are from an ensemble model. Defaults to False.
 
         Returns:
@@ -1704,14 +1716,12 @@ class ForecastingModelManager(ModelManager):
         Raises:
             None
         """
-        # metrics_manager = MetricsManager(self.config["metrics"])
+        from views_evaluation.evaluation.evaluation_manager import EvaluationManager
         evaluation_manager = EvaluationManager(self.config["metrics"])
         if not ensemble:
             df_path = self._model_path._get_raw_data_file_paths(
                 run_type=self._args.run_type
-            )[
-                0
-            ]  # get the latest i.e first file
+            )[0]  # get the latest i.e first file
             df_viewser = read_dataframe(df_path)
         else:
             # If the predictions are from an ensemble model, the actual values are not available in the forecast store
@@ -1730,8 +1740,7 @@ class ForecastingModelManager(ModelManager):
             conflict_type = ForecastingModelManager._get_conflict_type(target)
 
             eval_result_dict = evaluation_manager.evaluate(
-                df_actual, df_predictions, target, steps=self.config["steps"],
-                config=self.config
+                df_actual, df_predictions, target, self.config
             )
             step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
             time_series_wise_evaluation, df_time_series_wise_evaluation = (
@@ -1755,9 +1764,25 @@ class ForecastingModelManager(ModelManager):
                     self._model_path.data_generated,
                     conflict_type,
                 )
+            
+            # from views_evaluation.reports.generator import EvalReportGenerator
+            # eval_report_generator = EvalReportGenerator(self.config, target, conflict_type)
+            # eval_report = eval_report_generator.generate_eval_report_dict(df_predictions, df_time_series_wise_evaluation)
+            # if ensemble:
+            #     for model_name in self.config["models"]:
+            #         pm = ModelPathManager(model_name)
+            #         rolling_origin_number = self._resolve_evaluation_sequence_number(self.config["eval_type"])
+            #         paths = pm._get_generated_predictions_data_file_paths(self.config["run_type"])[:rolling_origin_number]
+            #         # print(paths)
+            #         df_preds = [read_dataframe(path) for path in paths]
+            #         df_eval_ts = read_dataframe(pm._get_eval_file_paths(self.config["run_type"], conflict_type)[0])
+            #         eval_report = eval_report_generator.update_ensemble_eval_report(model_name, df_preds, df_eval_ts)
+            # self._save_eval_report(eval_report, self._model_path.reports, conflict_type)
+
         wandb_alert(
             title=f"Metrics for {self._model_path.model_name}",
             text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
+            wandb_notifications=self._wandb_notifications,
         )
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
@@ -1779,8 +1804,9 @@ class ForecastingModelManager(ModelManager):
                 if not str(key).startswith("_"):
                     value = float(value)
                     # add metric and value to the dataframe
-                    metric_df = metric_df.append(
-                        {"Metric": key, "Value": value}, ignore_index=True
+                    metric_df = pd.concat(
+                        [metric_df, pd.DataFrame([{"Metric": key, "Value": value}])],
+                        ignore_index=True
                     )
             except:
                 continue

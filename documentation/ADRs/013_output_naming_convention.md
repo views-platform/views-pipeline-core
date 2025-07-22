@@ -17,20 +17,20 @@ This is particularly important for managing prediction versions, tracking when p
 ## Decision
 The evaluation naming convention for a single model follows this structure:
 ```
-eval_<evaluation_schema>_<conflict_type>_<run_type>_<timestamp>.pkl
+eval_<run_type>_<conflict_type>_<evaluation_schema>_<timestamp>.pkl
 ```
-- evaluation_schema: Three ways to calculate metrics - month (month-wise), ts (time-series-wise), and step (step-wise).
-- conflict_type: Three categories of armed conflict - sb (state-based), ns (non state-based), and os (one-sided).
 - run_type: The type of run (e.g., calibration, validation).
+- conflict_type: Three categories of armed conflict - sb (state-based), ns (non state-based), and os (one-sided).
+- evaluation_schema: Three ways to calculate metrics - month (month-wise), ts (time-series-wise), and step (step-wise).
 - timestamp: The timestamp when **the model was trained**. The format is`YYYYMMDD_HHMMSS`.
 
 The evaluation naming convention for an ensemble model has the same structure:
 ```
-eval_<evaluation_schema>_<conflict_type>_<run_type>_<timestamp>.pkl
+eval_<run_type>_<conflict_type>_<evaluation_schema>_<timestamp>.pkl
 ```
-- evaluation_schema: Three ways to calculate metrics - month (month-wise), ts (time-series-wise), and step (step-wise).
-- conflict_type: Three categories of armed conflict - sb (state-based), ns (non state-based), and os (one-sided).
 - run_type: The type of run (e.g., calibration, validation).
+- conflict_type: Three categories of armed conflict - sb (state-based), ns (non state-based), and os (one-sided).
+- evaluation_schema: Three ways to calculate metrics - month (month-wise), ts (time-series-wise), and step (step-wise).
 - timestamp: The timestamp when **the evaluation is generated**. The format is`YYYYMMDD_HHMMSS`.
 
 ## Consequences

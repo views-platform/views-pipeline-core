@@ -27,6 +27,18 @@ def filter_metrics_from_dict(
     conflict_code: str,
     model_name: str = None,
 ) -> pd.DataFrame:
+    """
+    Filters metrics from an evaluation dictionary based on specified metric names and a conflict code.
+
+    Args:
+        evaluation_dict (dict): Dictionary containing evaluation results with metric names as keys.
+        metrics (list[str]): List of metric names to filter for.
+        conflict_code (str): Conflict code to filter keys by.
+        model_name (str, optional): Name of the model to include as an index in the resulting DataFrame.
+
+    Returns:
+        pd.DataFrame: DataFrame containing filtered metrics. If `model_name` is provided, it is used as the index.
+    """
     result = {}
     for key in evaluation_dict.keys():
         tokens = re.split(r"[_/\-]", key.lower())
@@ -38,6 +50,18 @@ def filter_metrics_from_dict(
         result = pd.DataFrame([result], columns=result.keys()).set_index("Model Name")
     else:
         result = pd.DataFrame([result], columns=result.keys())
+    return result
+
+def search_for_item_name(searchspace: list, keywords: list[str]) -> Optional[str]:
+    result = None
+    for key in searchspace:
+        tokens = re.split(r"[_/\-]", key.lower())
+        # Ensure all metrics are present in tokens
+        if all(m.lower() in tokens for m in keywords):
+            if result is None:
+                result = key
+            else:
+                print(f"Multiple results found for keywords {keywords}: {result} and {key}. Refine your search criteria.")
     return result
 
 
