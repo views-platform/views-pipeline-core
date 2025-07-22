@@ -774,10 +774,14 @@ class ModelManager:
 
     def __ascii_splash(self) -> None:
         from art import text2art
-
+        _pc = PipelineConfig()
         text = text2art(
-            f"{PipelineConfig().package_name.replace('-', ' ')}", font="random-medium"
+            f"{self._model_path.model_name.replace('-', ' ')}", font="random-medium"
         )
+        # Add smaller subtext underneath the main text
+        subtext = f"{_pc.package_name} v{_pc.current_version}"
+        # Combine main text and subtext (subtext in smaller font, e.g. using ANSI dim)
+        text += f"\033{subtext}\033\n"
         colored_text = "".join(
             [f"\033[{random.choice(range(31, 37))}m{char}\033[0m" for char in text]
         )
