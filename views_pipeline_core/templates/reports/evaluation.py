@@ -53,10 +53,16 @@ class EvaluationReportTemplate:
             f"- **Target Variable**: {target}"
             + (f" ({type_of_conflict.title()})" if type_of_conflict else "")
             + "\n"
-            f"- **Level of Analysis (resolution)**: {metadata_dict.get('level', 'N/A')}\n"
+            f"- **Spatiotemporal Resolution**: {metadata_dict.get('level', 'N/A')}\n"
             f"- **Evaluation Scheme**: `Rolling-Origin Holdout`\n"
-            f"    - **Forecast Horizon**: {metadata_dict.get('steps', 'N/A')}\n"
+            f"    - **Minimum Forecast Horizon**: {metadata_dict.get('steps', [None, None])[0]}\n"
+            f"    - **Maximum Forecast Horizon**: {metadata_dict.get('steps', [None, None])[1]}\n"
             f"    - **Number of Rolling Origins**: {ForecastingModelManager._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())}\n"
+            f"    - **Context Window Origin**: {metadata_dict.get('validation', {'train': [None, None], 'test': [None, None]}).get('train')[0]}\n"
+            f"    - **Context Window Schedule**: Fixed-origin, Expanding\n"
+            f"    - **Target Window Schedule**: Rolling-origin, Fixed-length\n"
+            f"    - **Target Window First Origin**: {metadata_dict.get('validation', {'train': [None, None], 'test': [None, None]}).get('train')[1]}\n"
+            f"    - **Training Schedule**: Frozen trained model artifact\n"
         )
         report_manager.add_heading("Task Definition", level=2)
         report_manager.add_markdown(markdown_text=task_definition_md)
@@ -101,23 +107,23 @@ class EvaluationReportTemplate:
         metrics: List[str]
     ) -> None:
         """Add model-specific content to the evaluation report."""
-        try:
-            partition_metadata = {
-                k: v
-                for k, v in metadata_dict.items()
-                if k.lower() in {"calibration", "validation", "forecasting"}
-            }
-            report_manager.add_heading("Data Partitions", level=2)
-            report_manager.add_table(partition_metadata)
-        except Exception:
-            logger.warning("Could not find partition metadata in the run summary")
+        # try:
+        #     partition_metadata = {
+        #         k: v
+        #         for k, v in metadata_dict.items()
+        #         if k.lower() in {"calibration", "validation", "forecasting"}
+        #     }
+        #     report_manager.add_heading("Data Partitions", level=2)
+        #     report_manager.add_table(partition_metadata)
+        # except Exception:
+        #     logger.warning("Could not find partition metadata in the run summary")
 
         report_manager.add_heading("Model Metrics", level=2)
         for metric in metrics:
             report_manager.add_heading(f"{str(metric).upper()}", level=3)
             report_manager.add_table(data=filter_metrics_from_dict(
                 evaluation_dict=evaluation_dict,
-                metric=metric,
+                metrics=[metric, 'mean'],
                 conflict_code=conflict_code,
                 model_name=metadata_dict.get('name', None)
             ))
@@ -157,8 +163,8 @@ class EvaluationReportTemplate:
                     raise ValueError(
                         f"Partition metadata mismatch between models: Offending model: {model_name}"
                     )
-            report_manager.add_heading("Data Partitions", level=2)
-            report_manager.add_table(verified_partition_dict)
+            # report_manager.add_heading("Data Partitions", level=2)
+            # report_manager.add_table(verified_partition_dict)
 
             # Add ensemble metrics
             report_manager.add_heading("Model Metrics", level=2)
@@ -169,7 +175,7 @@ class EvaluationReportTemplate:
                 # Get ensemble metrics
                 full_metric_dataframe = filter_metrics_from_dict(
                     evaluation_dict=evaluation_dict,
-                    metric=metric,
+                    metrics=[metric, 'mean'],
                     conflict_code=conflict_code,
                     model_name=metadata_dict.get('name', None)
                 )

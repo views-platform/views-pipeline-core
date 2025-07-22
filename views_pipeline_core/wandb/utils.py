@@ -291,8 +291,8 @@ def format_evaluation_dict(evaluation_dict):
 def format_metadata_dict(metadata_dict):
     formatted_dict = {}
     for key, value in metadata_dict.items():
-        if key == "steps" and isinstance(value, (list, tuple)):
-            value = len(value)
+        # if key == "steps" and isinstance(value, (list, tuple)):
+        #     value = len(value)
 
         if key.startswith("_"):
             # remove the underscore prefix
