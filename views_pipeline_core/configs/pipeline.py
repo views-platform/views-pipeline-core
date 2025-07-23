@@ -10,11 +10,16 @@ class PipelineConfig:
         self._organization_name = 'views'
         # self._version_range = ">=0.2.0,<1.0.0"
         self._package_name = 'views-pipeline-core'
+        #self.months_to_update = None
 
     @property
     def dataframe_format(self) -> str:
         logger.debug(f"Dataframe format: {self._dataframe_format}")
         return self._dataframe_format
+    
+    @property
+    def months_to_update(self) -> list[int]:
+        return [543,544, 545]
     
     @property
     def views_pipeline_core_version_range(self) -> str:
