@@ -1322,7 +1322,7 @@ class ForecastingModelManager(ModelManager):
                 )
 
             if self.config["metrics"]:
-                self._evaluate_prediction_dataframe(df_predictions)
+                self._evaluate_prediction_dataframe(df_predictions, self._eval_type)
             else:
                 raise ValueError(
                     'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
