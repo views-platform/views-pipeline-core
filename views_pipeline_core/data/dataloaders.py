@@ -48,7 +48,7 @@ TRANSFORMATIONS_EXPECTING_DF = {
 class UpdateViewser:
 
 
-    
+
     def __init__(self, queryset, viewser_df, data_path: str | Path, months_to_update: List[int]):
         self.queryset = queryset
         self.viewser_df = viewser_df
@@ -422,12 +422,17 @@ class ViewsDataLoader:
             months_to_update = PipelineConfig().months_to_update
             logger.debug(f"months to update: {months_to_update}")
             loa_qs = queryset_base.model_dump()['loa']
+            print(loa_qs)
             logger.debug(f"Level of Analysis: {loa_qs}")
 
             if loa_qs == 'priogrid_month':
                 update_path = os.getenv("pgm_path")
             elif loa_qs =='country_month':
                 update_path = os.getenv("cm_path")
+            else:
+                logger.warning("Unknown loa, no update path")
+
+            print("Update path", update_path)
 
             builder = UpdateViewser(queryset_base, viewser_df=df, data_path=update_path, months_to_update=months_to_update)
             df = builder.run()
