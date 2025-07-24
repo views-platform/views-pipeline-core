@@ -19,7 +19,7 @@ class PipelineConfig:
     
     @property
     def months_to_update(self) -> list[int]:
-        return [543,544, 545]
+        return [543,544,545]
     
     @property
     def views_pipeline_core_version_range(self) -> str:

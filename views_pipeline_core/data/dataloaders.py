@@ -19,6 +19,7 @@ import views_transformation_library.views_2 as views2
 import views_transformation_library.splag4d as splag4d
 import views_transformation_library.missing as missing
 from viewser import Queryset, Column
+import traceback
 import views_transformation_library.splag_country as splag_country 
 import views_transformation_library.spatial_tree as spatial_tree
 import views_transformation_library.spacetime_distance as spacetime_distance
@@ -37,7 +38,8 @@ transformation_mapping={'ops.ln': views2.ln,
                        'spatial.lag': splag4d.get_splag4d,
                        'spatial.treelag':spatial_tree.get_tree_lag,
                        'spatial.sptime_dist': spacetime_distance.get_spacetime_distances,
-                       'temporal.moving_sum':views2.moving_sum,}
+                       'temporal.moving_sum':views2.moving_sum,
+                       'temporal.moving_average':views2.moving_sum,}
 
 TRANSFORMATIONS_EXPECTING_DF = {
     "spatial.lag"
@@ -157,7 +159,6 @@ class UpdateViewser:
         ----------
         overwrite_external : bool, default False
             If True, replace self.df_external with the processed result.
-
         Returns
         -------
         pd.DataFrame
@@ -247,7 +248,8 @@ class UpdateViewser:
 
             for transformation in transformations:
                 name = transformation["name"]
-                args = list(map(int, transformation.get("arguments", [])))
+                #args = list(map(int, transformation.get("arguments", [])))
+                args = transformation.get("arguments", [])
                 transform_func = transformation_mapping.get(name)
 
                 if not transform_func:
@@ -458,8 +460,9 @@ class ViewsDataLoader:
         
         except Exception as e:
             logger.error(f"Error fetching data from viewser: {e}", exc_info=True)
+            logger.error(traceback.format_exc())
             raise RuntimeError(
-                f"Error fetching data from viewser: {e}"
+                f"Error fetching data from viewser: {e.with_traceback()}"
             )
 
 
