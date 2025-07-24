@@ -395,6 +395,21 @@ class ViewsDataLoader:
         logger.debug(f"Path to dotenv file: {dotenv_path}")
         load_dotenv(dotenv_path=dotenv_path)
 
+        months_to_update = PipelineConfig().months_to_update
+        logger.debug(f"months to update: {months_to_update}")
+        loa_qs = queryset_base.model_dump()['loa']
+        print(loa_qs)
+        logger.debug(f"Level of Analysis: {loa_qs}")
+
+        if loa_qs == 'priogrid_month':
+            update_path = os.getenv("pgm_path")
+        elif loa_qs =='country_month':
+            update_path = os.getenv("cm_path")
+        else:
+            logger.warning("Unknown loa, no update path")
+
+        print("Update path", update_path)
+
         if queryset_base is None:
             raise RuntimeError(
                 f"Could not find queryset for {self._model_name}"
@@ -419,20 +434,6 @@ class ViewsDataLoader:
                     )
             logger.info("Updating the VIEWSER DF")
             logger.debug(f"NaNs found in dataframe from viewser: {df.isna().sum()}")
-            months_to_update = PipelineConfig().months_to_update
-            logger.debug(f"months to update: {months_to_update}")
-            loa_qs = queryset_base.model_dump()['loa']
-            print(loa_qs)
-            logger.debug(f"Level of Analysis: {loa_qs}")
-
-            if loa_qs == 'priogrid_month':
-                update_path = os.getenv("pgm_path")
-            elif loa_qs =='country_month':
-                update_path = os.getenv("cm_path")
-            else:
-                logger.warning("Unknown loa, no update path")
-
-            print("Update path", update_path)
 
             builder = UpdateViewser(queryset_base, viewser_df=df, data_path=update_path, months_to_update=months_to_update)
             df = builder.run()
