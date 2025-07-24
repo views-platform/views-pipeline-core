@@ -70,11 +70,11 @@ class EvaluationReportTemplate:
         
         # Evaluation scheme description
         eval_scheme_md = (
-            "This evaluation scheme uses a **fixed-origin**, **expanding context window** with a **rolling-origin**, **fixed-length target window** strategy.\n"
-            "A single **frozen trained model artifact** — trained once on data spanning a **fixed-origin**, **fixed-length training period** — is used throughout.\n"
+            f"This evaluation scheme uses a **fixed-origin**, **expanding context window** with a **rolling-origin**, **fixed-length target window** strategy.\n"
+            f"A single **frozen trained model artifact** — trained once on data spanning a **fixed-origin**, **fixed-length training period** — is used throughout.\n"
             f"    - The model is trained once on historical data ending at a defined cutoff date, then saved as a **frozen model artifact** (not retrained).\n"
             f"    - The model generates forecasts for a **fixed forecast horizon** of {len(metadata_dict.get('steps', [*range(1, 36 + 1, 1)]))} temporal units, beginning immediately after the context window ends.\n"
-            f"    - At each of the 12 evaluation iterations, the context window is expanded by one additional temporal unit of input data, always starting from the original origin and ending at a new cutoff.\n"
+            f"    - At each of the {ForecastingModelManager._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())} evaluation iterations, the context window is expanded by one additional temporal unit of input data, always starting from the original origin and ending at a new cutoff.\n"
             f"    - The **target window** — a fixed-length, out-of-sample segment of the **target feature** — shifts forward by one temporal unit at each iteration, beginning immediately after the context window ends.\n"
             f"    - The frozen model artifact is re-applied at each iteration using the updated context window, while the model parameters remain unchanged.\n"
             f"    - **Forecast performance** is assessed by comparing the model's predictions to the ground-truth values observed in each corresponding target window of the **holdout set**.\n"
