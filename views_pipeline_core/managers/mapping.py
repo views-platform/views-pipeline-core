@@ -1,6 +1,11 @@
 import pandas as pd
 import numpy as np
-from views_pipeline_core.data.handlers import PGMDataset, CMDataset, _CDataset, _PGDataset
+from views_pipeline_core.data.handlers import (
+    PGMDataset,
+    CMDataset,
+    _CDataset,
+    _PGDataset,
+)
 import logging
 from typing import Union, Optional, List
 from pathlib import Path
@@ -388,7 +393,7 @@ class MappingManager:
         if interactive:
             fig = self._plot_interactive_map(mapping_dataframe, target)
             if as_html:
-                return fig.to_html(full_html=True)
+                return fig.to_html(full_html=False)
             else:
                 return fig
         else:

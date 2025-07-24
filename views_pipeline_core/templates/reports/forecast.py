@@ -3,7 +3,12 @@ from pathlib import Path
 import tqdm
 import pandas as pd
 from views_pipeline_core.managers.model import ModelPathManager
-from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+from views_pipeline_core.data.handlers import (
+    CMDataset,
+    PGMDataset,
+    _CDataset,
+    _PGDataset,
+)
 from views_pipeline_core.managers.report import ReportManager
 from views_pipeline_core.managers.mapping import MappingManager
 from views_pipeline_core.visualizations.historical import HistoricalLineGraph
@@ -11,6 +16,7 @@ from views_pipeline_core.files.utils import generate_model_file_name
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 class ForecastReportTemplate:
     def __init__(self, config: Dict, model_path: ModelPathManager, run_type: str):
@@ -33,7 +39,8 @@ class ForecastReportTemplate:
             report_manager = ReportManager()
             # Build report content
             report_manager.add_heading(
-                f"Forecast report for {self.model_path.target} {self.model_path.model_name}", level=1
+                f"Forecast report for {self.model_path.target} {self.model_path.model_name}",
+                level=1,
             )
             report_manager.add_heading("Maps", level=2)
 
@@ -67,10 +74,12 @@ class ForecastReportTemplate:
                         interactive=True,
                         as_html=True,
                     ),
-                    height=900
+                    height=900,
                 )
-                if isinstance(forecast_dataset, CMDataset):
-                    logger.info("Generating historical vs forecast graphs for CM dataset")
+                if isinstance(forecast_dataset, _CDataset):
+                    logger.info(
+                        "Generating historical vs forecast graphs for CM dataset"
+                    )
                     report_manager.add_heading("Historical vs Forecasted", level=2)
                     historical_dataset = dataset_cls(
                         historical_dataframe, targets=self.config["targets"]
@@ -81,9 +90,9 @@ class ForecastReportTemplate:
                     )
                     report_manager.add_html(
                         html=historical_line_graph.plot_predictions_vs_historical(
-                            as_html=True, alpha=0.9
+                            targets=[target], as_html=True, alpha=0.9
                         ),
-                        height=800
+                        height=700,
                     )
             # Generate report path
             report_path = (

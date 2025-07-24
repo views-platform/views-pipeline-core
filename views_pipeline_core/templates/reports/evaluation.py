@@ -3,8 +3,13 @@ from pathlib import Path
 import wandb
 import pandas as pd
 from views_pipeline_core.managers.model import ModelPathManager, ForecastingModelManager
-from views_pipeline_core.wandb.utils import get_latest_run, format_evaluation_dict, format_metadata_dict, timestamp_to_date
-from views_pipeline_core.reports.utils import ( 
+from views_pipeline_core.wandb.utils import (
+    get_latest_run,
+    format_evaluation_dict,
+    format_metadata_dict,
+    timestamp_to_date,
+)
+from views_pipeline_core.reports.utils import (
     get_conflict_type_from_feature_name,
     filter_metrics_from_dict,
     search_for_item_name,
@@ -18,24 +23,24 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class EvaluationReportTemplate:
     def __init__(self, config: Dict, model_path: ModelPathManager, run_type: str):
         self.config = config
         self.model_path = model_path
         self.run_type = run_type
 
-    def generate(
-        self, wandb_run: "wandb.apis.public.runs.Run", target: str
-    ) -> Path:
+    def generate(self, wandb_run: "wandb.apis.public.runs.Run", target: str) -> Path:
         """Generate an evaluation report based on the evaluation DataFrame."""
         evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
         conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
         metrics = metadata_dict.get("metrics", [])
-        
+
         report_manager = ReportManager()
         report_manager.add_heading(
-            f"Evaluation report for {self.model_path.target} {self.model_path.model_name}", level=1
+            f"Evaluation report for {self.model_path.target} {self.model_path.model_name}",
+            level=1,
         )
         _timestamp = dict(wandb_run.summary).get("_timestamp", None)
         run_date_str = f"{timestamp_to_date(_timestamp)}" if _timestamp else "N/A"
@@ -46,7 +51,9 @@ class EvaluationReportTemplate:
             f"**Run Date**: {run_date_str}  \n"
         )
         if self.model_path.target == "ensemble":
-            markdown_text += f"**Constituent Models**: {metadata_dict.get('models', None)}  \n"
+            markdown_text += (
+                f"**Constituent Models**: {metadata_dict.get('models', None)}  \n"
+            )
         markdown_text += f"**Pipeline Version**: {PipelineConfig().current_version}"
         report_manager.add_markdown(markdown_text=markdown_text)
 
@@ -67,7 +74,7 @@ class EvaluationReportTemplate:
         )
         report_manager.add_heading("Task Definition", level=2)
         report_manager.add_markdown(markdown_text=task_definition_md)
-        
+
         # Evaluation scheme description
         eval_scheme_md = (
             f"This evaluation scheme uses a **fixed-origin**, **expanding context window** with a **rolling-origin**, **fixed-length target window** strategy.\n"
@@ -82,12 +89,16 @@ class EvaluationReportTemplate:
         )
         report_manager.add_heading("Evaluation Scheme Description", level=2)
         report_manager.add_markdown(markdown_text=eval_scheme_md)
-        
+
         # Model-specific report content
         if self.model_path.target == "model":
-            self._add_model_report_content(report_manager, metadata_dict, evaluation_dict, conflict_code, metrics)
+            self._add_model_report_content(
+                report_manager, metadata_dict, evaluation_dict, conflict_code, metrics
+            )
         elif self.model_path.target == "ensemble":
-            self._add_ensemble_report_content(report_manager, metadata_dict, evaluation_dict, conflict_code, metrics)
+            self._add_ensemble_report_content(
+                report_manager, metadata_dict, evaluation_dict, conflict_code, metrics
+            )
         else:
             raise ValueError(
                 f"Invalid target type: {self.model_path.target}. Expected 'model' or 'ensemble'."
@@ -107,7 +118,7 @@ class EvaluationReportTemplate:
         metadata_dict: Dict,
         evaluation_dict: Dict,
         conflict_code: str,
-        metrics: List[str]
+        metrics: List[str],
     ) -> None:
         """Add model-specific content to the evaluation report."""
         # try:
@@ -127,9 +138,9 @@ class EvaluationReportTemplate:
             # report_manager.add_heading(f"{str(metric).upper()}", level=3)
             metric_dataframe = filter_metrics_from_dict(
                 evaluation_dict=evaluation_dict,
-                metrics=[metric, 'mean'],
+                metrics=[metric, "mean"],
                 conflict_code=conflict_code,
-                model_name=metadata_dict.get('name', None)
+                model_name=metadata_dict.get("name", None),
             )
             report_manager.add_table(data=metric_dataframe)
 
@@ -139,19 +150,21 @@ class EvaluationReportTemplate:
         metadata_dict: Dict,
         evaluation_dict: Dict,
         conflict_code: str,
-        metrics: List[str]
+        metrics: List[str],
     ) -> None:
         """Add ensemble-specific content to the evaluation report."""
         models = self.config.get("models", [])
         verified_partition_dict = None
-        
+
         # Get constituent model runs
         constituent_model_runs = []
         for model in models:
-            latest_run = get_latest_run(entity="views_pipeline", model_name=model, run_type="calibration")
+            latest_run = get_latest_run(
+                entity="views_pipeline", model_name=model, run_type="calibration"
+            )
             if latest_run:
                 constituent_model_runs.append(latest_run)
-        
+
         # Verify partition metadata consistency
         try:
             for model_run in constituent_model_runs:
@@ -161,7 +174,7 @@ class EvaluationReportTemplate:
                     for k, v in temp_metadata_dict.items()
                     if k.lower() in {"calibration", "validation", "forecasting"}
                 }
-                model_name = temp_metadata_dict.get('name', "N/A")
+                model_name = temp_metadata_dict.get("name", "N/A")
                 if verified_partition_dict is None:
                     verified_partition_dict = partition_metadata_dict
                 elif verified_partition_dict != partition_metadata_dict:
@@ -176,34 +189,43 @@ class EvaluationReportTemplate:
             for metric in metrics:
                 full_metric_dataframe = None
                 report_manager.add_heading(f"{str(metric).upper()}", level=3)
-                
+
                 # Get ensemble metrics
                 full_metric_dataframe = filter_metrics_from_dict(
                     evaluation_dict=evaluation_dict,
-                    metrics=[metric, 'mean'],
+                    metrics=[metric, "mean"],
                     conflict_code=conflict_code,
-                    model_name=metadata_dict.get('name', None)
+                    model_name=metadata_dict.get("name", None),
                 )
-                
+
                 # Get constituent model metrics
                 for model_run in constituent_model_runs:
-                    temp_evaluation_dict = format_evaluation_dict(dict(model_run.summary))
+                    temp_evaluation_dict = format_evaluation_dict(
+                        dict(model_run.summary)
+                    )
                     temp_metadata_dict = format_metadata_dict(dict(model_run.config))
                     metric_dataframe = filter_metrics_from_dict(
                         evaluation_dict=temp_evaluation_dict,
-                        metrics=[metric, 'mean'],
+                        metrics=[metric, "mean"],
                         conflict_code=conflict_code,
-                        model_name=temp_metadata_dict.get('name', None)
+                        model_name=temp_metadata_dict.get("name", None),
                     )
                     if full_metric_dataframe is None:
                         full_metric_dataframe = metric_dataframe
                     else:
-                        full_metric_dataframe = pd.concat([full_metric_dataframe, metric_dataframe], axis=0)
-                
+                        full_metric_dataframe = pd.concat(
+                            [full_metric_dataframe, metric_dataframe], axis=0
+                        )
+
                 if full_metric_dataframe is not None:
                     # Sort by metric name
-                    target_metric_to_sort = search_for_item_name(searchspace=full_metric_dataframe.columns.tolist(), keywords=[metric, 'mean', 'time', 'series'])
-                    full_metric_dataframe = full_metric_dataframe.sort_values(by=target_metric_to_sort, ascending=True)
+                    target_metric_to_sort = search_for_item_name(
+                        searchspace=full_metric_dataframe.columns.tolist(),
+                        keywords=[metric, "mean", "time", "series"],
+                    )
+                    full_metric_dataframe = full_metric_dataframe.sort_values(
+                        by=target_metric_to_sort, ascending=True
+                    )
                     report_manager.add_table(data=full_metric_dataframe)
         except Exception as e:
             logger.error(f"Error generating ensemble report: {e}", exc_info=True)
