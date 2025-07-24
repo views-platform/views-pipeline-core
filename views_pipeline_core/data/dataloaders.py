@@ -159,7 +159,6 @@ class UpdateViewser:
         ----------
         overwrite_external : bool, default False
             If True, replace self.df_external with the processed result.
-
         Returns
         -------
         pd.DataFrame
@@ -249,7 +248,8 @@ class UpdateViewser:
 
             for transformation in transformations:
                 name = transformation["name"]
-                args = list(map(int, transformation.get("arguments", [])))
+                #args = list(map(int, transformation.get("arguments", [])))
+                args = transformation.get("arguments", [])
                 transform_func = transformation_mapping.get(name)
 
                 if not transform_func:
