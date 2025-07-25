@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 from typing import Dict, Tuple, List, Any
+import ast
 import numpy as np
 import pandas as pd
 import logging
@@ -42,16 +43,40 @@ transformation_mapping={'ops.ln': views2.ln,
                        'temporal.moving_average':views2.moving_sum,}
 
 TRANSFORMATIONS_EXPECTING_DF = {
-    "spatial.lag"
+    "spatial.lag",
+    "spatial.sptime_dist"
 }
 
 
 
 class UpdateViewser:
 
-
+    """
+    A class to update data from VIEWSER. It reads a queryset, inferrs all variables names
+    and transformations, preprocesses the update df, updates the df from viewser and 
+    applies all transformations to the appropriate columns. 
+    """
 
     def __init__(self, queryset, viewser_df, data_path: str | Path, months_to_update: List[int]):
+
+        """
+        Initializes the UpdateViewser class with a queryset, a dataframe from viewser (with missed updated), 
+        a path to the dataframe with updates from GED & Acled and a list of months to update.
+
+        Args:
+            queryset: The queryset for the respective model.
+            viewser_df: a dataframe from VIEWSER that does not contain the latest updates for GED & Acled data.
+            data_path: the path to the update dataframe with updates for GED and Acled data.
+            months_to_update: A list of months 
+
+        This class initializes by extracting the following information from the queryset:
+        - Base_Variables: A list of column names based on the 'from_column' e.g.: 'country_month.ged_sb_best_sum_nokgi'.
+          Columns in the update df have the last part of base_variables as their column names e.g. 'ged_sb_best_sum_nokgi'.
+        - Var_Names: A list of column names after transformations have been applied.
+          Columns in the VIEWSER df have var_names as their column names e.g. 'raw_ged_sb'.
+        - Transformation_list: A list of lists of transformations applied to Base_Variables to produce 
+        """
+
         self.queryset = queryset
         self.viewser_df = viewser_df
         self.data_path = Path(data_path)
@@ -68,7 +93,7 @@ class UpdateViewser:
 
     def run(self) -> pd.DataFrame:
         """
-        Execute every step and return the final dataframe. Safe to call twice:
+        Function executes all frunctions in the right order to update the dataframe from VIEWSER. Safe to call twice:
         we memoise the result after first run.
         """
         if self.result is not None: 
@@ -101,8 +126,10 @@ class UpdateViewser:
         self
     ) -> Tuple[List[str], List[str], List[List[Dict[str, Any]]]]:
         """
-        Extract core information from the queryset that are needed later on for the 
-        transformations.
+        Extracts core information from the queryset that are needed later on for the 
+        transformations. For every line in the queryset it records the 'from_column' as
+        Base Variable, 'Column' as Variable Name and all Transformations applied to the Base
+        Variable.
 
         Outputs: Base Variable, Variable Name and Transformations applied to the Base Variable.
         """
@@ -153,7 +180,18 @@ class UpdateViewser:
     # 3. ------------  PREPROCESS THE UPDATE DF  ---------- #
     def preprocess_update_df(self, *, overwrite_external: bool = False) -> pd.DataFrame:
         """
-        Adapts the update dataframe for the queryset and only keeps the columns and time stamps necessary
+        Takes the self.df_external dataframe (=the update df containing the updates for GED & Acled). 
+        As the Base Variables also contain their loa e.g. 'country_month.ged_sb_best_sum_nokgi', 
+        we strip the first part and only keep the last part. The we check for which variables in the queryset,
+        we have updates and call these columns overlap. We only keep the columns in the update df with the overlap columns.
+        Next, we only keep the month_ids in the update df that we want to update as specified in 'months_to_update'.
+        In the update df, the column names are based on the base variable names e.g. ged_sb_best_sum_nokgi, however, 
+        the df from viewser has the variable names as defined in the queryset. Untransformed variables that we pull 
+        from VIEWSER always start with "raw". We therefore need to match the base variables to their respective names 
+        from the queryset and then rename them in the update df, such that it can be used to update the viewser df. 
+
+        Example: col in VIEWSER df is called 'raw_ged_sb' corresponds to 'ged_sb_best_sum_nokgi' in the update df
+        --> rename 'ged_sb_best_sum_nokgi' to 'raw_ged_sb'
 
         Parameters
         ----------
@@ -203,11 +241,19 @@ class UpdateViewser:
             self.df_external = df_new
 
         return df_new
+    
+
+    def _smart_cast(self, arg):
+        try:
+            return ast.literal_eval(arg)
+        except Exception:
+            return arg
+
 
     # 4. ------------  APPLY THE TRANSFORMATIONS  ------------------------- #
     def _apply_all_transformations(self, df_old: pd.DataFrame) -> pd.DataFrame:
         """
-        Re-build every *transformed* GED / ACLED variable described in the queryset in the right order.
+        Re-builds every *transformed* GED / ACLED variable described in the queryset in the right order.
         Operates **in-place** on `df_old` and returns it for convenience.
         """
         ix = pd.IndexSlice
@@ -249,7 +295,14 @@ class UpdateViewser:
             for transformation in transformations:
                 name = transformation["name"]
                 #args = list(map(int, transformation.get("arguments", [])))
-                args = transformation.get("arguments", [])
+                def smart_cast(arg):
+                    try:
+                        return ast.literal_eval(arg)
+                    except Exception:
+                        return arg
+                #args = [smart_cast(arg) for arg in transformation.get("arguments", [])]
+                #args = transformation.get("arguments", [])
+                args = [self._smart_cast(arg) for arg in transformation.get("arguments", [])]
                 transform_func = transformation_mapping.get(name)
 
                 if not transform_func:
