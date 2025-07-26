@@ -1582,7 +1582,7 @@ class _PGDataset(_ViewsDataset):
             .to_frame(name="isoab")
         )
 
-    def get_name(self) -> pd.DataFrame:
+    def get_name(self, with_id: bool = False) -> pd.DataFrame:
         """Get country names for each priogrid"""
         # # Get country IDs from priogrids
         # country_ids = self._get_entity_attr("c_id")
@@ -1593,11 +1593,19 @@ class _PGDataset(_ViewsDataset):
         # # Use c accessor to get country names
         # return country_df.c.name.to_frame(name="country_name")
         self._build_entity_metadata_cache()
-        return (
-            self._entity_metadata_cache["name"]
-            .reindex(self.dataframe.index)
-            .to_frame(name="name")
-        )
+        if not with_id:
+            return (
+                self._entity_metadata_cache["name"]
+                .reindex(self.dataframe.index)
+                .to_frame(name="name")
+            )
+        else:
+            # merge country id with name in the same column
+            country_id = self._entity_metadata_cache["country_id"].reindex(self.dataframe.index)
+            country_name = self._entity_metadata_cache["name"].reindex(self.dataframe.index)
+            # combine both into a single string over the entire col
+            combined = country_id.astype(str) + " - " + country_name
+            return combined.to_frame(name="name")
 
     def get_region(self) -> pd.DataFrame:
         """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
@@ -1744,13 +1752,21 @@ class _CDataset(_ViewsDataset):
             .to_frame(name="isoab")
         )
 
-    def get_name(self) -> pd.DataFrame:
+    def get_name(self, with_id: bool = False) -> pd.DataFrame:
         self._build_entity_metadata_cache()
-        return (
-            self._entity_metadata_cache["name"]
-            .reindex(self.dataframe.index)
-            .to_frame(name="name")
-        )
+        if not with_id:
+            return (
+                self._entity_metadata_cache["name"]
+                .reindex(self.dataframe.index)
+                .to_frame(name="name")
+            )
+        else:
+            # merge country id with name in the same column
+            country_id = self._entity_metadata_cache["country_id"].reindex(self.dataframe.index)
+            country_name = self._entity_metadata_cache["name"].reindex(self.dataframe.index)
+            # combine both into a single string over the entire col
+            combined = country_id.astype(str) + " - " + country_name
+            return combined.to_frame(name="country_name")
 
     def get_gwcode(self) -> pd.DataFrame:
         self._build_entity_metadata_cache()
