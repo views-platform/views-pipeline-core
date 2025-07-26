@@ -8,7 +8,11 @@ import pandas as pd
 import traceback
 import tqdm
 
-from views_pipeline_core.managers.model import ModelPathManager, ModelManager, ForecastingModelManager
+from views_pipeline_core.managers.model import (
+    ModelPathManager,
+    ModelManager,
+    ForecastingModelManager,
+)
 from views_pipeline_core.wandb.utils import add_wandb_metrics, wandb_alert
 from views_pipeline_core.ensembles.check import validate_ensemble_model
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
@@ -71,47 +75,118 @@ class EnsembleManager(ForecastingModelManager):
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
         self.config = {}
         self.__activate_reconciliation = True
+        self._use_prediction_store = use_prediction_store
 
-    def __reconcile_pg_with_c(self, pg_dataframe: pd.DataFrame = None, c_dataframe: pd.DataFrame = None) -> Optional[pd.DataFrame]:
+    def __reconcile_pg_with_c(
+        self, pg_dataframe: pd.DataFrame = None, c_dataframe: pd.DataFrame = None
+    ) -> Optional[pd.DataFrame]:
         """
         Perform reconciliation using PGM with CM.
         This method is a placeholder for the actual reconciliation logic.
         """
         # Placeholder for reconciliation logic
+        latest_c_dataset = None
+        latest_pg_dataset = None
+
         cm_model = self.configs.get("reconcile_with", None)
         if cm_model is None:
-            logger.info('No reconciliation model specified. Skipping reconciliation.')
+            logger.info("No reconciliation model specified. Skipping reconciliation.")
             return None
-        
-        try:
-            latest_c_dataset = _CDataset(source=EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0]) if c_dataframe is None else _CDataset(source=c_dataframe)
-        except Exception as e:
-            logger.info(f"{e}")
-            if latest_c_dataset is None:
-                try:
-                    if self._use_prediction_store:
-                        from views_forecasts.extensions import ForecastsStore, ViewsMetadata
-                        logger.info(f"Fetching latest C dataset for model {cm_model} from prediction store.")
-                        run_id = ViewsMetadata().get_run_id_from_name(self._pred_store_name)
-                        all_runs = ViewsMetadata().with_name(cm_model).fetch()['name'].to_list()
-                        # fetch latest forecast from ensemble to be reconciled with
-                        reconcile_with_forecasts = [fc for fc in all_runs if cm_model in fc and 'forecasting' in fc]
-                        reconcile_with_forecasts.sort()
-                        reconcile_with_forecast = reconcile_with_forecasts[-1]
-                        latest_c_dataset = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
-                except Exception as e:
-                    logger.error(f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed.")
-                    return None
-        
-        latest_pg_dataset = _PGDataset(source=self._model_path._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0]) if pg_dataframe is None else _PGDataset(source=pg_dataframe)
+        if self._use_prediction_store and c_dataframe is None:
+            try:
+                from views_forecasts.extensions import ForecastsStore, ViewsMetadata
 
+                logger.info(
+                    f"Fetching latest C dataset for model {cm_model} from prediction store."
+                )
+                run_id = ViewsMetadata().get_run_id_from_name(self._pred_store_name)
+                all_runs = ViewsMetadata().with_name(cm_model).fetch()["name"].to_list()
+                # fetch latest forecast from ensemble to be reconciled with
+                reconcile_with_forecasts = [
+                    fc for fc in all_runs if cm_model in fc and "forecasting" in fc
+                ]
+                reconcile_with_forecasts.sort()
+                reconcile_with_forecast = reconcile_with_forecasts[-1]
+                latest_c_dataset = pd.DataFrame.forecasts.read_store(
+                    run=run_id, name=reconcile_with_forecast
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed: {e}"
+                )
+                return None
+        elif not self._use_prediction_store and c_dataframe is None:
+            logger.info(
+                f"Fetching latest C dataset for model {cm_model} from local path."
+            )
+            try:
+                latest_c_dataset = _CDataset(
+                    source=EnsemblePathManager(
+                        cm_model
+                    )._get_generated_predictions_data_file_paths(
+                        run_type=self.config["run_type"]
+                    )[
+                        0
+                    ]
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed."
+                )
+                return None
+        elif c_dataframe is not None:
+            logger.info(
+                f"Fetching latest C dataset for model {cm_model} from local path."
+            )
+            latest_c_dataset = _CDataset(source=c_dataframe)
+        else:
+            logger.warning(
+                f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed."
+            )
+            return None
+
+        # try:
+        #     latest_c_dataset = _CDataset(source=EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(run_type=self.config["run_type"])[0]) if c_dataframe is None else _CDataset(source=c_dataframe)
+        # except Exception as e:
+        #     logger.info(f"{e}")
+        #     if latest_c_dataset is None:
+        #         try:
+        #             if self._use_prediction_store:
+        #                 from views_forecasts.extensions import ForecastsStore, ViewsMetadata
+        #                 logger.info(f"Fetching latest C dataset for model {cm_model} from prediction store.")
+        #                 run_id = ViewsMetadata().get_run_id_from_name(self._pred_store_name)
+        #                 all_runs = ViewsMetadata().with_name(cm_model).fetch()['name'].to_list()
+        #                 # fetch latest forecast from ensemble to be reconciled with
+        #                 reconcile_with_forecasts = [fc for fc in all_runs if cm_model in fc and 'forecasting' in fc]
+        #                 reconcile_with_forecasts.sort()
+        #                 reconcile_with_forecast = reconcile_with_forecasts[-1]
+        #                 latest_c_dataset = pd.DataFrame.forecasts.read_store(run=run_id, name=reconcile_with_forecast)
+        #         except Exception as e:
+        #             logger.error(f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed.")
+        #             return None
+
+        latest_pg_dataset = (
+            _PGDataset(
+                source=self._model_path._get_generated_predictions_data_file_paths(
+                    run_type=self.config["run_type"]
+                )[0]
+            )
+            if pg_dataframe is None
+            else _PGDataset(source=pg_dataframe)
+        )
 
         if latest_pg_dataset is None:
-            logger.error(f"Could not find latest PG dataset for model {self._model_path.target}. Reconciliation cannot proceed.")
+            logger.error(
+                f"Could not find latest PG dataset for model {self._model_path.target}. Reconciliation cannot proceed."
+            )
             return None
 
-        reconciliation_manager = ReconciliationManager(c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset)
-        reconciled_pg = reconciliation_manager.reconcile(lr=0.01, max_iters=500, tol=1e-6)
+        reconciliation_manager = ReconciliationManager(
+            c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset
+        )
+        reconciled_pg = reconciliation_manager.reconcile(
+            lr=0.01, max_iters=500, tol=1e-6
+        )
         return reconciled_pg
 
     @staticmethod
@@ -193,13 +268,13 @@ class EnsembleManager(ForecastingModelManager):
         - df (pd.DataFrame): The aggregated DataFrame of model outputs.
         """
 
-        # Process each DataFrame: convert single-element lists to scalars, handle empty lists as NaN, 
+        # Process each DataFrame: convert single-element lists to scalars, handle empty lists as NaN,
         # and throw an exception for multi-element lists
         processed_dfs = []
         for df in df_to_aggregate:
             # Create a copy to avoid modifying the original DataFrame
             df_processed = df.copy()
-            
+
             for col in df_processed.columns:
                 # Process each element in the column
                 def process_element(elem):
@@ -207,7 +282,7 @@ class EnsembleManager(ForecastingModelManager):
                         if len(elem) == 1:
                             return elem[0]  # Unwrap single-element list
                         elif len(elem) == 0:
-                            return None     # Convert empty list to None (becomes NaN)
+                            return None  # Convert empty list to None (becomes NaN)
                         else:
                             # Throw exception for multi-element list
                             raise ValueError(
@@ -215,14 +290,14 @@ class EnsembleManager(ForecastingModelManager):
                             )
                     else:
                         return elem  # Return non-list values as-is
-                
+
                 df_processed[col] = df_processed[col].apply(process_element)
-            
+
             processed_dfs.append(df_processed)
-        
+
         # Concatenate processed DataFrames and aggregate
         concatenated = pd.concat(processed_dfs)
-        
+
         if aggregation == "mean":
             return concatenated.groupby(level=[0, 1]).mean()
         elif aggregation == "median":
@@ -252,7 +327,7 @@ class EnsembleManager(ForecastingModelManager):
                 eval=args.evaluate,
                 forecast=args.forecast,
                 use_saved=args.saved,
-                report=args.report
+                report=args.report,
             )
         except Exception as e:
             logger.error(
@@ -373,14 +448,14 @@ class EnsembleManager(ForecastingModelManager):
                 logger.info(f"Evaluating model {config['name']}...")
                 df_predictions = self._evaluate_ensemble(self._eval_type)
 
-                handle_ensemble_log_creation(
-                    model_path=self._model_path, config=config
-                )
+                handle_ensemble_log_creation(model_path=self._model_path, config=config)
 
                 for i, df in enumerate(df_predictions):
                     self._save_predictions(df, self._model_path.data_generated, i)
 
-                self._evaluate_prediction_dataframe(df_predictions, self._eval_type, ensemble=True)
+                self._evaluate_prediction_dataframe(
+                    df_predictions, self._eval_type, ensemble=True
+                )
 
                 wandb_alert(
                     title=f"Evaluation for {self._model_path.target} {config['name']} completed successfully.",
@@ -425,9 +500,7 @@ class EnsembleManager(ForecastingModelManager):
                     wandb_notifications=self._wandb_notifications,
                     models_path=self._model_path.models,
                 )
-                handle_ensemble_log_creation(
-                    model_path=self._model_path, config=config
-                )
+                handle_ensemble_log_creation(model_path=self._model_path, config=config)
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
             except Exception as e:
@@ -504,48 +577,53 @@ class EnsembleManager(ForecastingModelManager):
         run_type = self.config["run_type"]
         dfs = []
 
-        for model_name in tqdm.tqdm(self.configs["models"], desc="Forecasting ensemble"):
+        for model_name in tqdm.tqdm(
+            self.configs["models"], desc="Forecasting ensemble"
+        ):
             tqdm.tqdm.write(f"Current model: {model_name}")
             dfs.append(self._forecast_model_artifact(model_name, run_type))
 
         df_prediction = EnsembleManager._get_aggregated_df(
             dfs, self.configs["aggregation"]
         )
-        
+
         if self.__activate_reconciliation:
-            try:
-                reconciliation_type = self.configs.get("reconciliation", None)
-                if reconciliation_type == "pgm_cm_point":
-                    # If reconciliation is specified, reconcile the predictions
-                    df_prediction = self.__reconcile_pg_with_c(pg_dataframe=df_prediction)
-                    wandb_alert(
-                            title=f"{self._model_path.target.title()} reconciliation complete",
-                            text=f"",
-                            level=wandb.AlertLevel.INFO,
-                            wandb_notifications=self._wandb_notifications,
-                            models_path=self._model_path.models,
-                        )
-                else:
+            reconciliation_type = self.configs.get("reconciliation", None)
+            if reconciliation_type == "pgm_cm_point":
+                # If reconciliation is specified, reconcile the predictions
+                reconciled_pg = self.__reconcile_pg_with_c(pg_dataframe=df_prediction)
+                if reconciled_pg is not None:
+                    df_prediction = reconciled_pg
                     logger.info(
-                        f"No valid reconciliation type specified. Returning predictions without reconciliation."
+                        f"Reconciliation complete for {self._model_path.target} {model_name}. Predictions reconciled with C dataset."
                     )
-                if not isinstance(df_prediction, pd.DataFrame):
-                    raise TypeError(
-                        f"Expected predictions to be a DataFrame, got {type(df_prediction)} instead."
+                    wandb_alert(
+                        title=f"{self._model_path.target.title()} reconciliation complete",
+                        text=f"",
+                        level=wandb.AlertLevel.INFO,
+                        wandb_notifications=self._wandb_notifications,
+                        models_path=self._model_path.models,
                     )
-            except Exception as e:
-                logger.error(
-                    f"Error during reconciliation: {e}",
-                    exc_info=True,
+                else:
+                    wandb_alert(
+                        title=f"{self._model_path.target.title()} Reconciliation Error. Skipping reconciliation.",
+                        text=f"Reconciliation returned None for {self._model_path.target} {model_name}: {traceback.format_exc()}",
+                        level=wandb.AlertLevel.WARNING,
+                        wandb_notifications=self._wandb_notifications,
+                        models_path=self._model_path.models,
+                    )
+                    logger.warning(
+                        f"Reconciliation returned None for {self._model_path.target} {model_name}. Predictions not reconciled."
+                    )
+            else:
+                logger.info(
+                    f"No valid reconciliation type specified. Returning predictions without reconciliation."
                 )
-                wandb_alert(
-                    title=f"{self._model_path.target.title()} Reconciliation Error",
-                    text=f"An error occurred during reconciliation of {self._model_path.target} {model_name}: {traceback.format_exc()}",
-                    level=wandb.AlertLevel.ERROR,
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
-                raise
+
+        if not isinstance(df_prediction, pd.DataFrame):
+            raise TypeError(
+                f"Expected predictions to be a DataFrame, got {type(df_prediction)} instead."
+            )
 
         return df_prediction
 
