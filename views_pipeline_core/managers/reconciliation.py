@@ -3,6 +3,7 @@ from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 import torch
 import logging
 from views_pipeline_core.data.statistics import ForecastReconciler
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +32,12 @@ class ReconciliationManager:
                 f"Country dataset time unit: {c_dataset._time_id}, "
                 f"Grid dataset time unit: {pg_dataset._time_id}"
             )
-        
-        if c_dataset._time_values != pg_dataset._time_values:
+
+        uncommon_time_steps = set(c_dataset._time_values) ^ set(pg_dataset._time_values)
+        if uncommon_time_steps:
             raise ValueError(
-                f"The time values in the country dataset and the grid dataset must match. Uncommon time steps: "
-                f"{set(c_dataset._time_values) ^ set(pg_dataset._time_values)}"
+                f"The datasets have different time steps: {uncommon_time_steps}. "
+                "Ensure both datasets cover the same time periods."
             )
 
         self._valid_cids = list(
