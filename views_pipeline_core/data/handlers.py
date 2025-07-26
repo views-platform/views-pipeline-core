@@ -1301,7 +1301,24 @@ class _ViewsDataset:
             raise ValueError(f"Time ID {time_id} not found in dataset's time values.")
 
         var_idx = self.targets.index(feature)
-        pred_tensor = self.to_tensor()  # Shape (time, entity, samples, vars)
+        pred_tensor = self.to_tensor()
+
+        if "ln" in feature.split("_"):
+            logger.info(
+                f"Unlogging tensor for feature '{feature}' for time_id '{time_id}' before reconciliation."
+            )
+              # Shape (time, entity, samples, vars)
+            # unlog the tensor if it starts with 'ln_'
+            pred_tensor = np.exp(pred_tensor) - 1
+        elif "lx" in feature.split("_"):
+            pred_tensor = np.exp(pred_tensor) - np.exp(100)
+            logger.info(
+                f"Unlogging tensor with offset for feature '{feature}' for time_id '{time_id}' before reconciliation."
+            )
+        else:
+            logger.info(
+                f"No transformation required for feature '{feature}' for time_id '{time_id}'."
+            )
 
         # Get the time index using the provided time_id
         time_idx = self._get_time_index(time_id)
@@ -1545,6 +1562,21 @@ class _PGDataset(_ViewsDataset):
 
         # Convert tensor to numpy array (handle device tensors)
         reconciled_np = reconciled_tensor.cpu().numpy()
+        if "ln" in feature.split("_"):
+            # take the natural log of the tensor if it starts with 'ln_'
+            logger.info(
+                f"Applying log transformation to reconciled tensor for feature '{feature}' at time_id '{time_id}'."
+            )
+            reconciled_np = np.log(reconciled_np + 1)
+        elif "lx" in feature.split("_"):
+            reconciled_np = np.log(reconciled_np + np.exp(-100))
+            logger.info(
+                f"Applying log transformation with offset to reconciled tensor for feature '{feature}' at time_id '{time_id}'."
+            )
+        else:
+            logger.info(
+                f"No transformation required for feature '{feature}' for time_id '{time_id}'."
+            )
 
         # Update each grid cell's data
         for idx, entity_id in enumerate(entity_ids):
