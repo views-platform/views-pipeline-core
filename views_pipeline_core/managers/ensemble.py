@@ -107,9 +107,9 @@ class EnsembleManager(ForecastingModelManager):
                 ]
                 reconcile_with_forecasts.sort()
                 reconcile_with_forecast = reconcile_with_forecasts[-1]
-                latest_c_dataset = pd.DataFrame.forecasts.read_store(
+                latest_c_dataset = _CDataset(source=pd.DataFrame.forecasts.read_store(
                     run=run_id, name=reconcile_with_forecast
-                )
+                ))
             except Exception as e:
                 logger.warning(
                     f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed: {e}"

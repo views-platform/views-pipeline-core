@@ -10,6 +10,11 @@ class ReconciliationManager:
     def __init__(self, c_dataset: _CDataset, pg_dataset: _PGDataset):
         self._c_dataset = c_dataset
         self._pg_dataset = pg_dataset
+        if not isinstance(c_dataset, _CDataset):
+            raise TypeError(f"Expected _CDataset, got {type(c_dataset)}")
+        if not isinstance(pg_dataset, _PGDataset):
+            raise TypeError(f"Expected _PGDataset, got {type(pg_dataset)}")
+
         self._device = self.__detect_torch_device()
         print(f"Using device: {self._device}")
         self._reconciler = ForecastReconciler(device=self._device)
