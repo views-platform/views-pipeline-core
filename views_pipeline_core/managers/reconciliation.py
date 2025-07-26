@@ -5,6 +5,9 @@ import logging
 from views_pipeline_core.data.statistics import ForecastReconciler
 import pandas as pd
 
+from joblib import Parallel, delayed
+from tqdm.auto import tqdm
+
 logger = logging.getLogger(__name__)
 
 class ReconciliationManager:
@@ -115,33 +118,75 @@ class ReconciliationManager:
         # Return the reconciled dataframe
         return reconciled_tensor
 
+    # def reconcile(self, lr=0.01, max_iters=500, tol=1e-6):
+    #     """
+    #     Reconciles the forecast for all valid country and time IDs.
+    #     """
+    #     for country_idx, country_id in enumerate(self._valid_cids, start=1):
+    #         for time_idx, time_id in enumerate(self._valid_time_ids, start=1):
+    #             for feature_idx, feature in enumerate(self._valid_targets, start=1):
+    #                 # Update log in place
+    #                 sys.stdout.write(
+    #                     f"\r{' ' * 80}\r"  # Clear the previous line
+    #                     f"Reconciling country {country_idx}/{len(self._valid_cids)}, "
+    #                     f"time {time_idx}/{len(self._valid_time_ids)}, "
+    #                     f"feature {feature_idx}/{len(self._valid_targets)}..."
+    #                 )
+    #                 sys.stdout.flush()
+                    
+    #                 self._pg_dataset.reconcile(
+    #                     country_id=country_id, 
+    #                     time_id=time_id, 
+    #                     reconciled_tensor=self._reconcile_single_timestep(
+    #                         country_id, time_id, feature, lr, max_iters, tol
+    #                     ), 
+    #                     feature=feature
+    #                 )
+        
+    #     # Clear the line after completion
+    #     sys.stdout.write("\rReconciliation complete.\n")
+    #     sys.stdout.flush()
+        
+    #     return self._pg_dataset.reconciled_dataframe
+
     def reconcile(self, lr=0.01, max_iters=500, tol=1e-6):
         """
         Reconciles the forecast for all valid country and time IDs.
         """
-        for country_idx, country_id in enumerate(self._valid_cids, start=1):
-            for time_idx, time_id in enumerate(self._valid_time_ids, start=1):
-                for feature_idx, feature in enumerate(self._valid_targets, start=1):
-                    # Update log in place
-                    sys.stdout.write(
-                        f"\r{' ' * 80}\r"  # Clear the previous line
-                        f"Reconciling country {country_idx}/{len(self._valid_cids)}, "
-                        f"time {time_idx}/{len(self._valid_time_ids)}, "
-                        f"feature {feature_idx}/{len(self._valid_targets)}..."
-                    )
-                    sys.stdout.flush()
-                    
-                    self._pg_dataset.reconcile(
-                        country_id=country_id, 
-                        time_id=time_id, 
-                        reconciled_tensor=self._reconcile_single_timestep(
-                            country_id, time_id, feature, lr, max_iters, tol
-                        ), 
-                        feature=feature
-                    )
+        # Prepare all reconciliation tasks
+        tasks = []
+        for country_id in self._valid_cids:
+            for time_id in self._valid_time_ids:
+                for feature in self._valid_targets:
+                    tasks.append((country_id, time_id, feature))
         
-        # Clear the line after completion
+        total_tasks = len(tasks)
+        
+        # Process tasks in parallel
+        results = Parallel(n_jobs=-1, prefer="threads")(
+            delayed(self._process_single_task)(country_id, time_id, feature, lr, max_iters, tol)
+            for country_id, time_id, feature in tqdm(tasks, total=total_tasks, desc="Reconciling forecasts")
+        )
+        
+        # Update dataset with reconciled results
+        for country_id, time_id, feature, reconciled_tensor in results:
+            self._pg_dataset.reconcile(
+                country_id=country_id,
+                time_id=time_id,
+                reconciled_tensor=reconciled_tensor,
+                feature=feature
+            )
+        
         sys.stdout.write("\rReconciliation complete.\n")
         sys.stdout.flush()
         
         return self._pg_dataset.reconciled_dataframe
+
+    def _process_single_task(self, country_id, time_id, feature, lr, max_iters, tol):
+        """
+        Wrapper for single reconciliation task to enable parallel processing.
+        """
+        tensor = self._reconcile_single_timestep(
+            country_id, time_id, feature, lr, max_iters, tol
+        )
+        return country_id, time_id, feature, tensor
