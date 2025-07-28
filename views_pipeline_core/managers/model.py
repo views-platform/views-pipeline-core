@@ -1714,6 +1714,7 @@ class ForecastingModelManager(ModelManager):
                 eval_result_dict["time_series"]
             )
             month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
+            mean_prediction = eval_result_dict["mean_prediction"]
 
             log_wandb_log_dict(
                 step_wise_evaluation,
@@ -1734,7 +1735,7 @@ class ForecastingModelManager(ModelManager):
             
             from views_evaluation.reports.generator import EvalReportGenerator
             eval_report_generator = EvalReportGenerator(self.config, target, conflict_type)
-            eval_report = eval_report_generator.generate_eval_report_dict(df_predictions, df_time_series_wise_evaluation)
+            eval_report = eval_report_generator.generate_eval_report_dict(df_predictions, df_time_series_wise_evaluation, mean_prediction)
             if ensemble:
                 for model_name in self.config["models"]:
                     pm = ModelPathManager(model_name)
