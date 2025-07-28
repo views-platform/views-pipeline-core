@@ -1,4 +1,4 @@
-from typing import Dict, Union
+from typing import Union
 from statistics import mean
 import re
 from dataclasses import asdict
@@ -257,6 +257,23 @@ def timestamp_to_date(timestamp):
     return datetime.fromtimestamp(float(timestamp)).strftime('%Y-%m-%d %H:%M:%S')
 
 def format_evaluation_dict(evaluation_dict):
+    """
+    Formats an evaluation dictionary by processing its keys and values according to specific rules.
+
+    - Removes leading underscores from keys.
+    - Skips the "timestamp" key.
+    - Converts "runtime" values (in seconds) to a human-readable string format (e.g., "1h 2m 3s").
+    - Skips values that are instances of `wandb.old.summary.SummarySubDict`.
+    - Converts string values that represent digits to floats.
+    - Preserves integer and float values as-is.
+    - Sorts the resulting dictionary by key.
+
+    Args:
+        evaluation_dict (dict): The input dictionary containing evaluation metrics.
+
+    Returns:
+        dict: A formatted and sorted dictionary with processed keys and values.
+    """
     formatted_dict = {}
     for key, value in evaluation_dict.items():
         orig_key = key
@@ -289,6 +306,21 @@ def format_evaluation_dict(evaluation_dict):
     return formatted_dict
 
 def format_metadata_dict(metadata_dict):
+    """
+    Formats a metadata dictionary by processing its keys and values.
+
+    - Removes leading underscores from keys.
+    - Converts string values that represent digits to integers.
+    - Keeps integer and float values as-is.
+    - Leaves other types of values unchanged.
+    - Returns a new dictionary with keys sorted alphabetically.
+
+    Args:
+        metadata_dict (dict): The input dictionary containing metadata.
+
+    Returns:
+        dict: A formatted and sorted dictionary with processed keys and values.
+    """
     formatted_dict = {}
     for key, value in metadata_dict.items():
         # if key == "steps" and isinstance(value, (list, tuple)):

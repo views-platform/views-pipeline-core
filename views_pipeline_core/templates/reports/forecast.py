@@ -2,17 +2,17 @@ from typing import Dict
 from pathlib import Path
 import tqdm
 import pandas as pd
-from views_pipeline_core.managers.model import ModelPathManager
-from views_pipeline_core.data.handlers import (
+from ...managers.model import ModelPathManager
+from ...data.handlers import (
     CMDataset,
     PGMDataset,
     _CDataset,
     _PGDataset,
 )
-from views_pipeline_core.managers.report import ReportManager
-from views_pipeline_core.managers.mapping import MappingManager
-from views_pipeline_core.visualizations.historical import HistoricalLineGraph
-from views_pipeline_core.files.utils import generate_model_file_name
+from ...managers.report import ReportManager
+from ...managers.mapping import MappingManager
+from ...visualizations.historical import HistoricalLineGraph
+from ...files.utils import generate_model_file_name
 import logging
 
 logger = logging.getLogger(__name__)

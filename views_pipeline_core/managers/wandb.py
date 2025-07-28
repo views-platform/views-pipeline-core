@@ -1,4 +1,4 @@
-from views_pipeline_core.managers.model import ModelPathManager
+from ..managers.model import ModelPathManager
 import wandb
 import pandas as pd
 import joblib

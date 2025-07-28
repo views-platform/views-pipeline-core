@@ -1,13 +1,13 @@
 import base64
 from io import BytesIO
 from pathlib import Path
-from typing import Optional, List, Union, Tuple, Any
+from typing import Optional, Union
 import pandas as pd
 import matplotlib.pyplot as plt
 from html import escape
 from datetime import datetime
-from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.reports.styles.tailwind import get_css
+from ..configs.pipeline import PipelineConfig
+from ..reports.styles.tailwind import get_css
 
 
 class ReportManager:
@@ -24,6 +24,15 @@ class ReportManager:
         self.footer = None
 
     def add_heading(self, text: str, level: int = 1, link: Optional[str] = None) -> None:
+        """
+        Adds a heading to the report content with customizable level, styling, and optional hyperlink.
+        Args:
+            text (str): The heading text to display.
+            level (int, optional): The heading level (1, 2, or 3). Defaults to 1.
+            link (Optional[str], optional): An optional URL to wrap the heading text in a hyperlink. Defaults to None.
+        Returns:
+            None
+        """
         classes = {
             1: "text-3xl font-bold text-primary mb-6 mt-8",
             2: "text-2xl font-semibold text-secondary mb-5 mt-7",
@@ -36,6 +45,16 @@ class ReportManager:
         self.content.append(f'<h{level} class="{classes.get(level, "text-3xl font-bold text-primary mb-6")}">{text}</h{level}>\n')
 
     def add_paragraph(self, text: str, link: Optional[str] = None) -> None:
+        """
+        Adds a paragraph of text to the report content, optionally embedding a hyperlink.
+        If a link is provided, the text will be wrapped in an anchor tag pointing to the specified URL.
+        The paragraph is styled with predefined CSS classes for consistent appearance.
+        Args:
+            text (str): The paragraph text to add.
+            link (Optional[str], optional): The URL to link the text to. Defaults to None.
+        Returns:
+            None
+        """
         if link:
             text = f'<a href="{escape(link)}" target="_blank">{text}</a>'
             
@@ -47,6 +66,16 @@ class ReportManager:
         height: Optional[int] = 600,
         link: Optional[str] = None
     ) -> None:
+        """
+        Adds an HTML visualization to the report content, optionally wrapped in a hyperlink and displayed within a styled container.
+        If Plotly.js has not been loaded, it inserts the Plotly script before adding the visualization.
+        Args:
+            html (str): The HTML string representing the visualization to be added.
+            height (Optional[int], optional): The height of the visualization container in pixels. Defaults to 600.
+            link (Optional[str], optional): An optional URL to wrap the visualization in a hyperlink. Defaults to None.
+        Returns:
+            None
+        """
         if not self._plotly_js_loaded:
             self.content.insert(0, self._get_plotly_script())
             self._plotly_js_loaded = True
@@ -71,10 +100,19 @@ class ReportManager:
     
     def add_markdown(self, markdown_text: str) -> None:
         """
-        Render Markdown text in the report
-        
+        Adds Markdown-formatted text to the report, rendering it as HTML.
+        Attempts to convert the provided Markdown text to HTML using the `markdown` library
+        with support for tables, fenced code blocks, line breaks, and sane lists. The rendered
+        HTML is wrapped in a styled container and appended to the report content. If the
+        `markdown` library is not available, the method falls back to displaying the raw
+        Markdown text as plain paragraphs.
+            markdown_text (str): Markdown formatted text to render in the report.
+         
         Args:
             markdown_text: Markdown formatted text to render
+
+        Returns:
+            None
         """
         try:
             import markdown
@@ -141,6 +179,22 @@ class ReportManager:
         as_html: bool = False,
         link: Optional[str] = None
     ) -> None:
+        """
+        Adds an image to the report, supporting matplotlib figures, axes, or image file paths.
+
+        Parameters:
+            image (Union[str, plt.Figure, plt.Axes]): The image to add. Can be a file path (str), a matplotlib Figure, or Axes.
+            caption (Optional[str], optional): Caption text to display below the image. Defaults to None.
+            as_html (bool, optional): If True, returns the HTML string for the image card instead of appending to content. Defaults to False.
+            link (Optional[str], optional): Optional hyperlink to wrap the image. Defaults to None.
+
+        Returns:
+            None or str: Returns None if the image is appended to the report content, or the HTML string if as_html is True.
+
+        Raises:
+            FileNotFoundError: If the provided image path does not exist.
+            ValueError: If the image type is unsupported.
+        """
         if isinstance(image, (plt.Figure, plt.Axes)):
             buf = BytesIO()
             fig = image.figure if isinstance(image, plt.Axes) else image
@@ -455,6 +509,17 @@ class ReportManager:
         self.footer = text
 
     def export_as_html(self, file_path: str) -> None:
+        """
+        Exports the report content as an HTML file.
+        This method generates a complete HTML document containing the report's content,
+        applies custom CSS styles, and includes a footer with an optional message,
+        timestamp, and the current version of views-pipeline-core. The generated HTML
+        is saved to the specified file path.
+        Args:
+            file_path (str): The path to the file where the HTML report will be saved.
+        Returns:
+            None
+        """
         css = get_css()
 
         # Generate timestamp

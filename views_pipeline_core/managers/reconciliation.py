@@ -1,9 +1,9 @@
 import sys
-from views_pipeline_core.data.handlers import _CDataset, _PGDataset
+from ..data.handlers import _CDataset, _PGDataset
 import torch
 import logging
-from views_pipeline_core.data.statistics import ForecastReconciler
-from views_pipeline_core.wandb.utils import wandb_alert
+from ..data.statistics import ForecastReconciler
+from ..wandb.utils import wandb_alert
 
 logger = logging.getLogger(__name__)
 
@@ -143,10 +143,15 @@ class ReconciliationManager:
                         ), 
                         feature=feature
                     )
-            wandb_alert(
-                title=self.__class__.__name__,
-                text=f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})",
-            )
+
+            if country_idx % 10 == 0 or country_idx == len(self._valid_cids):
+                # logger.info(
+                #     f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})"
+                # )
+                wandb_alert(
+                    title=self.__class__.__name__,
+                    text=f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})",
+                )
         
         # Clear the line after completion
         sys.stdout.write("\rReconciliation complete.\n")

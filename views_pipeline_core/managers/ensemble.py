@@ -8,17 +8,17 @@ import pandas as pd
 import traceback
 import tqdm
 
-from views_pipeline_core.managers.model import (
+from ..managers.model import (
     ModelPathManager,
     ModelManager,
     ForecastingModelManager,
 )
-from views_pipeline_core.wandb.utils import add_wandb_metrics, wandb_alert
-from views_pipeline_core.ensembles.check import validate_ensemble_model
-from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
-from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.managers.reconciliation import ReconciliationManager
-from views_pipeline_core.data.handlers import _PGDataset, _CDataset
+from ..wandb.utils import add_wandb_metrics, wandb_alert
+from ..ensembles.check import validate_ensemble_model
+from ..files.utils import handle_ensemble_log_creation, read_dataframe
+from ..configs.pipeline import PipelineConfig
+from ..managers.reconciliation import ReconciliationManager
+from ..data.handlers import _PGDataset, _CDataset
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +81,19 @@ class EnsembleManager(ForecastingModelManager):
         self, pg_dataframe: pd.DataFrame = None, c_dataframe: pd.DataFrame = None
     ) -> Optional[pd.DataFrame]:
         """
-        Perform reconciliation using PGM with CM.
-        This method is a placeholder for the actual reconciliation logic.
+        Reconciles the PG dataset with the C dataset using a specified reconciliation model.
+
+        This method fetches the latest C dataset either from a prediction store, a local path, or directly from the provided DataFrame,
+        depending on the configuration and input arguments. It also fetches the PG dataset similarly. The reconciliation is performed
+        using the `ReconciliationManager`, which applies an optimization procedure to align the PG dataset with the C dataset.
+
+        Args:
+            pg_dataframe (pd.DataFrame, optional): The PG dataset to reconcile. If None, the dataset is loaded from the configured path.
+            c_dataframe (pd.DataFrame, optional): The C dataset to reconcile with. If None, the dataset is loaded from the prediction store or local path.
+
+        Returns:
+            Optional[pd.DataFrame]: The reconciled PG dataset as a DataFrame, or None if reconciliation cannot proceed due to missing data or configuration.
         """
-        # Placeholder for reconciliation logic
         latest_c_dataset = None
         latest_pg_dataset = None
 

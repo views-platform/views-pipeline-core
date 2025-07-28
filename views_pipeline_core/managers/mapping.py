@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from views_pipeline_core.data.handlers import (
+from ..data.handlers import (
     PGMDataset,
     CMDataset,
     _CDataset,

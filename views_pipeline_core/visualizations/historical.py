@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from typing import Union, List, Optional, Dict, Tuple
-from views_pipeline_core.data.handlers import (
+from ..data.handlers import (
     CMDataset,
     PGMDataset,
     CYDataset,

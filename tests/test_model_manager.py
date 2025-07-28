@@ -19,7 +19,8 @@ def mock_model_path():
             "config_deployment.py": "path/to/config_deployment.py",
             "config_hyperparameters.py": "path/to/config_hyperparameters.py",
             "config_meta.py": "path/to/config_meta.py",
-            "config_sweep.py": "path/to/config_sweep.py"
+            "config_sweep.py": "path/to/config_sweep.py",
+            "config_partitions.py": "path/to/config_partitions.py"
         }
         mock_instance._validate = False
         yield mock
@@ -121,7 +122,8 @@ def test_model_manager_init(mock_model_path):
         "config_deployment.py": "path/to/config_deployment.py",
         "config_hyperparameters.py": "path/to/config_hyperparameters.py",
         "config_meta.py": "path/to/config_meta.py",
-        "config_sweep.py": "path/to/config_sweep.py"
+        "config_sweep.py": "path/to/config_sweep.py",
+        "config_partitions.py": "path/to/config_partitions.py"
     }
     mock_config_deployment_content = """
 def get_deployment_config():
@@ -190,7 +192,9 @@ def test_update_single_config(mock_model_path):
     mock_model_instance.get_scripts.return_value = {
         "config_deployment.py": "path/to/config_deployment.py",
         "config_hyperparameters.py": "path/to/config_hyperparameters.py",
-        "config_meta.py": "path/to/config_meta.py"
+        "config_meta.py": "path/to/config_meta.py",
+        "config_partitions.py": "path/to/config_partitions.py",
+        
     }
     mock_config_deployment_content = """
 def get_deployment_config():
@@ -280,7 +284,8 @@ def test_update_sweep_config(mock_model_path):
     mock_model_instance = mock_model_path.return_value
     mock_model_instance.get_scripts.return_value = {
         "config_sweep.py": "path/to/config_sweep.py",
-        "config_meta.py": "path/to/config_meta.py"
+        "config_meta.py": "path/to/config_meta.py",
+        "config_partitions.py": "path/to/config_partitions.py"
     }
     mock_config_sweep_content = """
 def get_sweep_config():
@@ -366,7 +371,8 @@ def test_execute_single_run(mock_model_path, mock_dataloader, mock_wandb):
     mock_model_instance.get_scripts.return_value = {
         "config_deployment.py": "path/to/config_deployment.py",
         "config_hyperparameters.py": "path/to/config_hyperparameters.py",
-        "config_meta.py": "path/to/config_meta.py"
+        "config_meta.py": "path/to/config_meta.py",
+        "config_partitions.py": "path/to/config_partitions.py"
     }
     mock_config_deployment_content = """
 def get_deployment_config():

@@ -12,12 +12,10 @@ import traceback
 import wandb
 import pandas as pd
 from pathlib import Path
-import numpy as np
-import tqdm
 import random
 import json
 
-from views_pipeline_core.wandb.utils import (
+from ..wandb.utils import (
     add_wandb_metrics,
     log_wandb_log_dict,
     wandb_alert,
@@ -26,7 +24,7 @@ from views_pipeline_core.wandb.utils import (
     get_latest_run,
     timestamp_to_date,
 )
-from views_pipeline_core.files.utils import (
+from ..files.utils import (
     read_dataframe,
     save_dataframe,
     handle_single_log_creation,
@@ -35,20 +33,13 @@ from views_pipeline_core.files.utils import (
     generate_output_file_name,
     generate_evaluation_report_name,
 )
-from views_pipeline_core.reports.utils import (
-    get_conflict_type_from_feature_name,
-    filter_metrics_from_dict,
-)
-from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.data.handlers import CMDataset, PGMDataset
-from views_pipeline_core.data.utils import replace_nan_values
-from views_pipeline_core.managers.mapping import MappingManager
-from views_pipeline_core.managers.report import ReportManager
-from views_pipeline_core.models.check import (
+
+from ..configs.pipeline import PipelineConfig
+from ..models.check import (
     validate_prediction_dataframe,
     validate_config,
 )
-from views_pipeline_core.visualizations.historical import HistoricalLineGraph
+
 
 logger = logging.getLogger(__name__)
 
