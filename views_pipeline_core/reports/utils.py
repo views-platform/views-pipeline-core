@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 import re
 import pandas as pd
 
@@ -23,7 +23,7 @@ def get_conflict_type_from_feature_name(feature_name: str) -> Optional[str]:
 
 def filter_metrics_from_dict(
     evaluation_dict: dict,
-    metrics: list[str],
+    metrics: List[str],
     conflict_code: str,
     model_name: str = None,
 ) -> pd.DataFrame:
@@ -45,6 +45,7 @@ def filter_metrics_from_dict(
         # Ensure all metrics are present in tokens
         if all(m.lower() in tokens for m in metrics) and conflict_code.lower() in tokens:
             result[key] = evaluation_dict[key]
+        # result[key] = search_for_item_name(searchspace=tokens, keywords=[*metrics, conflict_code])
     if model_name:
         result = {"Model Name": model_name, **result}
         result = pd.DataFrame([result], columns=result.keys()).set_index("Model Name")
@@ -52,17 +53,63 @@ def filter_metrics_from_dict(
         result = pd.DataFrame([result], columns=result.keys())
     return result
 
-def search_for_item_name(searchspace: list, keywords: list[str]) -> Optional[str]:
-    result = None
-    for key in searchspace:
-        tokens = re.split(r"[_/\-]", key.lower())
-        # Ensure all metrics are present in tokens
-        if all(m.lower() in tokens for m in keywords):
-            if result is None:
-                result = key
-            else:
-                print(f"Multiple results found for keywords {keywords}: {result} and {key}. Refine your search criteria.")
-    return result
+def search_for_item_name(searchspace: List[str], keywords: List[str]) -> Optional[str]:
+    """
+    Searches for an item name that contains all keyword parts. Returns the first match
+    if unique, warns about multiple matches, and returns None if no matches found.
+
+    Args:
+        searchspace: List of strings to search through
+        keywords: List of keywords/phrases to match
+
+    Returns:
+        First matching item if unique match found, otherwise None
+    """
+    # Handle empty keywords upfront
+    if not keywords:
+        return None
+
+    # Preprocess keywords: split, normalize, and remove empties
+    keyword_parts = []
+    for kw in keywords:
+        parts = re.split(r"[_/\-]", kw.lower())
+        keyword_parts.extend(p for p in parts if p)
+    
+    # Handle case where keywords only contained separators
+    if not keyword_parts:
+        return None
+
+    matches = []
+    for item in searchspace:
+        # Tokenize item and remove empty tokens
+        tokens = [t for t in re.split(r"[_/\-]", item.lower()) if t]
+        
+        # Check if all keyword parts are present
+        if all(kw_part in tokens for kw_part in keyword_parts):
+            matches.append(item)
+
+    # Handle results
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    
+    print(f"Warning: Multiple matches found for {keywords}: {matches}. Returning first match.")
+    return matches[0]
+
+def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: str, metrics: list, conflict_code: str, model_name: str, keywords: list = []) -> pd.DataFrame:
+    target_metric_keys = []
+    for metric in metrics:
+        result = search_for_item_name(searchspace=list(evaluation_dict.keys()), keywords=[eval_type, metric, conflict_code, *keywords])
+        if result:
+            target_metric_keys.append(result)
+    
+    metric_dataframe = pd.DataFrame(
+        [{k: evaluation_dict[k] for k in target_metric_keys}],
+        columns=target_metric_keys,
+        index=[model_name]
+    )
+    return metric_dataframe
 
 
 # def filter_metrics_from_dict(evaluation_dict: dict, metric: str, conflict_code: str, model_name: str = None) -> pd.DataFrame:

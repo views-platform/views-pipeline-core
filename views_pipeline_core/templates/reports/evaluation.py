@@ -13,6 +13,7 @@ from ...reports.utils import (
     get_conflict_type_from_feature_name,
     filter_metrics_from_dict,
     search_for_item_name,
+    filter_metrics_by_eval_type_and_metrics
 )
 from ...files.utils import (
     generate_model_file_name,
@@ -29,13 +30,15 @@ class EvaluationReportTemplate:
         self.config = config
         self.model_path = model_path
         self.run_type = run_type
+        self.eval_types = ("time-series-wise", "step-wise", "month-wise")
 
     def generate(self, wandb_run: "wandb.apis.public.runs.Run", target: str) -> Path:
         """Generate an evaluation report based on the evaluation DataFrame."""
         evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
         conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
-        metrics = metadata_dict.get("metrics", [])
+        priority_metrics = ["MSLE", "MSE", "Y_HAT_BAR"]
+        metrics = set(metadata_dict.get("metrics", [])).intersection(priority_metrics)
 
         report_manager = ReportManager()
         report_manager.add_heading(
@@ -72,7 +75,7 @@ class EvaluationReportTemplate:
             f"    - **Target Window First Origin**: {metadata_dict.get('calibration', {'train': [None, None], 'test': [None, None]}).get('train')[1]}\n"
             f"    - **Training Schedule**: Frozen trained model artifact\n"
         )
-        report_manager.add_heading("Task Definition", level=2)
+        report_manager.add_heading("Task Description", level=2)
         report_manager.add_markdown(markdown_text=task_definition_md)
 
         # Evaluation scheme description
@@ -87,8 +90,8 @@ class EvaluationReportTemplate:
             f"    - **Forecast performance** is assessed by comparing the model's predictions to the ground-truth values observed in each corresponding target window of the **holdout set**.\n"
             f"    - This strategy evaluates the **stability and robustness** of a fixed model under operational conditions, where retraining is deferred and forecasts are updated as new input data becomes available.\n"
         )
-        report_manager.add_heading("Evaluation Scheme Description", level=2)
-        report_manager.add_markdown(markdown_text=eval_scheme_md)
+        # report_manager.add_heading("Evaluation Scheme Description", level=2)
+        # report_manager.add_markdown(markdown_text=eval_scheme_md)
 
         # Model-specific report content
         if self.model_path.target == "model":
@@ -134,15 +137,28 @@ class EvaluationReportTemplate:
 
         report_manager.add_heading("Model Metrics", level=2)
         # full_metric_dataframe = None
-        for metric in metrics:
-            # report_manager.add_heading(f"{str(metric).upper()}", level=3)
-            metric_dataframe = filter_metrics_from_dict(
+        # for metric in metrics:
+        #     # report_manager.add_heading(f"{str(metric).upper()}", level=3)
+        #     metric_dataframe = filter_metrics_from_dict(
+        #         evaluation_dict=evaluation_dict,
+        #         metrics=[metric, "mean"],
+        #         conflict_code=conflict_code,
+        #         model_name=metadata_dict.get("name", None),
+        #     )
+        #     report_manager.add_table(data=metric_dataframe)
+        for eval_type in self.eval_types:
+            metric_dataframe = filter_metrics_by_eval_type_and_metrics(
                 evaluation_dict=evaluation_dict,
-                metrics=[metric, "mean"],
+                eval_type=eval_type,
+                metrics=metrics,
                 conflict_code=conflict_code,
                 model_name=metadata_dict.get("name", None),
+                keywords=["mean"]
             )
-            report_manager.add_table(data=metric_dataframe)
+            report_manager.add_table(
+                data=metric_dataframe,
+                header=f"{eval_type.replace('-', ' ').title()}",
+            )
 
     def _add_ensemble_report_content(
         self,
@@ -186,16 +202,24 @@ class EvaluationReportTemplate:
 
             # Add ensemble metrics
             report_manager.add_heading("Model Metrics", level=2)
-            for metric in metrics:
+            for eval_type in self.eval_types:
                 full_metric_dataframe = None
-                report_manager.add_heading(f"{str(metric).upper()}", level=3)
+                # report_manager.add_heading(f"{str(eval_type).upper()}", level=3)
 
                 # Get ensemble metrics
-                full_metric_dataframe = filter_metrics_from_dict(
+                # full_metric_dataframe = filter_metrics_from_dict(
+                #     evaluation_dict=evaluation_dict,
+                #     metrics=[metric, "mean"],
+                #     conflict_code=conflict_code,
+                #     model_name=metadata_dict.get("name", None),
+                # )
+                full_metric_dataframe = filter_metrics_by_eval_type_and_metrics(
                     evaluation_dict=evaluation_dict,
-                    metrics=[metric, "mean"],
+                    eval_type=eval_type,
+                    metrics=metrics,
                     conflict_code=conflict_code,
                     model_name=metadata_dict.get("name", None),
+                    keywords=["mean"]
                 )
 
                 # Get constituent model metrics
@@ -204,11 +228,13 @@ class EvaluationReportTemplate:
                         dict(model_run.summary)
                     )
                     temp_metadata_dict = format_metadata_dict(dict(model_run.config))
-                    metric_dataframe = filter_metrics_from_dict(
+                    metric_dataframe = filter_metrics_by_eval_type_and_metrics(
                         evaluation_dict=temp_evaluation_dict,
-                        metrics=[metric, "mean"],
+                        eval_type=eval_type,
+                        metrics=metrics,
                         conflict_code=conflict_code,
                         model_name=temp_metadata_dict.get("name", None),
+                        keywords=["mean"]
                     )
                     if full_metric_dataframe is None:
                         full_metric_dataframe = metric_dataframe
@@ -221,12 +247,12 @@ class EvaluationReportTemplate:
                     # Sort by metric name
                     target_metric_to_sort = search_for_item_name(
                         searchspace=full_metric_dataframe.columns.tolist(),
-                        keywords=[metric, "mean", "time", "series"],
+                        keywords=["MSLE"] if "MSLE" in metrics else metrics[0],
                     )
                     full_metric_dataframe = full_metric_dataframe.sort_values(
                         by=target_metric_to_sort, ascending=True
                     )
-                    report_manager.add_table(data=full_metric_dataframe)
+                    report_manager.add_table(data=full_metric_dataframe, header=f"{eval_type.replace('-', ' ').title()}",)
         except Exception as e:
             logger.error(f"Error generating ensemble report: {e}", exc_info=True)
             raise
