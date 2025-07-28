@@ -13,7 +13,7 @@ from ...reports.utils import (
     get_conflict_type_from_feature_name,
     filter_metrics_from_dict,
     search_for_item_name,
-    filter_metrics_by_eval_type_and_metrics
+    filter_metrics_by_eval_type_and_metrics,
 )
 from ...files.utils import (
     generate_model_file_name,
@@ -37,7 +37,7 @@ class EvaluationReportTemplate:
         evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
         conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
-        priority_metrics = ["MSLE", "MSE", "Y_HAT_BAR"]
+        priority_metrics = ["MSLE", "MSE", "y_hat_bar"]
         metrics = set(metadata_dict.get("metrics", [])).intersection(priority_metrics)
 
         report_manager = ReportManager()
@@ -153,8 +153,13 @@ class EvaluationReportTemplate:
                 metrics=metrics,
                 conflict_code=conflict_code,
                 model_name=metadata_dict.get("name", None),
-                keywords=["mean"]
+                keywords=["mean"],
             )
+            # if "y_hat_bar" in metric_dataframe.columns:
+            #     metric_dataframe.rename(
+            #         columns={"y_hat_bar": r"$\bar{\hat{y}}$"},
+            #         inplace=True,
+            #     )
             report_manager.add_table(
                 data=metric_dataframe,
                 header=f"{eval_type.replace('-', ' ').title()}",
@@ -219,7 +224,7 @@ class EvaluationReportTemplate:
                     metrics=metrics,
                     conflict_code=conflict_code,
                     model_name=metadata_dict.get("name", None),
-                    keywords=["mean"]
+                    keywords=["mean"],
                 )
 
                 # Get constituent model metrics
@@ -234,7 +239,7 @@ class EvaluationReportTemplate:
                         metrics=metrics,
                         conflict_code=conflict_code,
                         model_name=temp_metadata_dict.get("name", None),
-                        keywords=["mean"]
+                        keywords=["mean"],
                     )
                     if full_metric_dataframe is None:
                         full_metric_dataframe = metric_dataframe
@@ -252,7 +257,15 @@ class EvaluationReportTemplate:
                     full_metric_dataframe = full_metric_dataframe.sort_values(
                         by=target_metric_to_sort, ascending=True
                     )
-                    report_manager.add_table(data=full_metric_dataframe, header=f"{eval_type.replace('-', ' ').title()}",)
+                    # if "y_hat_bar" in full_metric_dataframe.columns:
+                    #     full_metric_dataframe.rename(
+                    #         columns={"y_hat_bar": r"$\bar{\hat{y}}$"},
+                    #         inplace=True,
+                    #     )
+                    report_manager.add_table(
+                        data=full_metric_dataframe,
+                        header=f"{eval_type.replace('-', ' ').title()}",
+                    )
         except Exception as e:
             logger.error(f"Error generating ensemble report: {e}", exc_info=True)
             raise
