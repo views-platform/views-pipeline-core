@@ -19,12 +19,12 @@ class PipelineConfig:
     
     @property
     def months_to_update(self) -> list[int]:
-        return [543,544,545]
+        return [543, 544, 545, 546]
     
     @property
     def views_pipeline_core_version_range(self) -> str:
         from views_pipeline_core.managers.package import PackageManager
-        return f">={PackageManager.get_latest_release_version_from_github('views-pipeline-core')}, <2.0.0"
+        return f">={PackageManager.get_latest_release_version_from_github('views-pipeline-core')}, <3.0.0"
     
     @property
     def organization_name(self) -> str:

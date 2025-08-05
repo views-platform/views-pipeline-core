@@ -1798,7 +1798,7 @@ class _CDataset(_ViewsDataset):
             country_name = self._entity_metadata_cache["name"].reindex(self.dataframe.index)
             # combine both into a single string over the entire col
             combined = country_id.astype(str) + " - " + country_name
-            return combined.to_frame(name="country_name")
+            return combined.to_frame(name="name")
 
     def get_gwcode(self) -> pd.DataFrame:
         self._build_entity_metadata_cache()
