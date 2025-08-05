@@ -18,10 +18,6 @@ class PipelineConfig:
         return self._dataframe_format
     
     @property
-    def months_to_update(self) -> list[int]:
-        return [543,544,545]
-    
-    @property
     def views_pipeline_core_version_range(self) -> str:
         from views_pipeline_core.managers.package import PackageManager
         return f">={PackageManager.get_latest_release_version_from_github('views-pipeline-core')}, <2.0.0"

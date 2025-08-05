@@ -95,6 +95,10 @@ def parse_args():
         "-re", "--report", action="store_true", help="Generate forecast report."
     )
 
+    parser.add_argument(
+        "-u", "--update_viewser", action="store_true", help="Update the viewser dataframe for a set of months where viewser returns only zeros."
+    )
+
     return parser.parse_args()
 
 
