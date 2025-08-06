@@ -11,6 +11,8 @@ from views_pipeline_core.configs import drift_detection
 from views_pipeline_core.files.utils import create_data_fetch_log_file
 from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
+from views_pipeline_core.cli.utils import parse_args
+import argparse
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.managers.model import ModelPathManager
 from ingester3.ViewsMonth import ViewsMonth
@@ -57,7 +59,7 @@ class UpdateViewser:
     applies all transformations to the appropriate columns. 
     """
 
-    def __init__(self, queryset, viewser_df, data_path: str | Path, months_to_update: List[int]):
+    def __init__(self, queryset:Queryset, viewser_df:pd.DataFrame, data_path: str | Path, months_to_update: List[int]):
 
         """
         Initializes the UpdateViewser class with a queryset, a dataframe from viewser (with missed updated), 
@@ -85,8 +87,27 @@ class UpdateViewser:
         (self.base_variables,
          self.var_names,
          self.transformation_list) = self._extract_from_queryset()
+        
+        if not any(var.startswith("raw_") for var in self.var_names):
+            raise ValueError(
+                "Queryset does not contain any variable staring with raw_. "
+                "At least one raw_ variable is required to update the viewser df."
+            )
 
-        self.df_external = self._load_update_df()
+        #self.df_external = self._load_update_df()
+        self.df_external = read_dataframe(self.data_path)
+
+        max_month_id_viewser = self.viewser_df.index.get_level_values("month_id").max()
+        max_month_id_external = self.df_external.index.get_level_values("month_id").max()
+        logger.info(f"Max month_id: viewser_df={max_month_id_viewser}")
+        logger.info(f"Max month_id: update_df={max_month_id_external}")
+
+        if max_month_id_viewser > max_month_id_external:
+            raise ValueError(
+                f"Max month_id mismatch: viewser_df={max_month_id_viewser}, "
+                f"update dataframe={max_month_id_external}, "
+                f"Make sure to get the latest update dataframe! "
+            )
 
         self.result: pd.DataFrame | None = None  # filled by .run()
 
@@ -94,7 +115,7 @@ class UpdateViewser:
     def run(self) -> pd.DataFrame:
         """
         Function executes all frunctions in the right order to update the dataframe from VIEWSER. Safe to call twice:
-        we memoise the result after first run.
+        we memorise the result after first run.
         """
         if self.result is not None: 
             logger.debug('Use saved dataframe')       # already done
@@ -426,6 +447,81 @@ class ViewsDataLoader:
                 )
         pass
 
+    def _get_viewser_update_config(self, queryset_base:Queryset) -> tuple[int, str]:
+        """
+        Retrieves the configuration for updating the viewser dataset based on the provided queryset.
+
+        This method locates and loads the required `.env` file from the project root, extracts the number of months to update,
+        and determines the appropriate update path based on the level of analysis (LOA) specified in the queryset.
+
+        Args:
+            queryset_base: An object with a `model_dump()` method that returns a dictionary containing the 'loa' key.
+
+        Returns:
+            tuple[int, str]: A tuple containing the number of months to update (as a string from the environment variable)
+                             and the update path (as a string or None if LOA is unknown).
+
+        Raises:
+            FileNotFoundError: If the required `.env` file is not found.
+            RuntimeError: If the `.env` file is found but cannot be loaded.
+        """
+        dotenv_path = self._model_path.find_project_root() / '.env'
+        logger.debug(f"Path to dotenv file: {dotenv_path}")
+
+        if not dotenv_path.exists():
+            raise FileNotFoundError(f"Required .env file not found: {dotenv_path}")
+
+        if not load_dotenv(dotenv_path=dotenv_path):
+            raise RuntimeError(f".env file found but could not be loaded: {dotenv_path}")
+
+
+        #months_to_update = PipelineConfig().months_to_update #read from .env
+        months_to_update_str = os.getenv("month_to_update")
+        months_to_update = ast.literal_eval(months_to_update_str)
+        logger.debug(f"Months to update: {months_to_update}")
+
+        loa_qs = queryset_base.model_dump()['loa']
+        logger.debug(f"Level of Analysis: {loa_qs}")
+
+        if loa_qs == 'priogrid_month':
+            update_path = os.getenv("pgm_path")
+        elif loa_qs == 'country_month':
+            update_path = os.getenv("cm_path")
+        else:
+            logger.warning("Unknown LOA; no update path set")
+            update_path = None
+
+        logger.debug(f"Update path: {update_path}")
+        return months_to_update, update_path
+    
+    def _overwrite_viewser(self, df:pd.DataFrame, queryset_base:Queryset, args:argparse.Namespace) -> pd.DataFrame:
+        """
+        Updates the provided DataFrame using the Viewser update process if specified in the arguments.
+
+        If `args.update_viewser` is True, this method retrieves the update configuration,
+        initializes an UpdateViewser instance, and updates the DataFrame accordingly.
+        Logs the update process and the number of NaN values after transformation.
+        If updating is not requested, logs that the DataFrame has not been updated.
+
+        Args:
+            df (pd.DataFrame): The DataFrame to potentially update.
+            queryset_base (Any): The base queryset used for configuration and updating.
+            args (Namespace): Arguments containing the `update_viewser` flag.
+
+        Returns:
+            pd.DataFrame: The (possibly updated) DataFrame.
+        """
+        if args.update_viewser:
+            logger.info("Updating the VIEWSER DF")
+            months_to_update, update_path = self._get_viewser_update_config(queryset_base)
+            builder = UpdateViewser(queryset_base, viewser_df=df, data_path=update_path, months_to_update=months_to_update)
+            df = builder.run()
+            logger.info("VIEWSER UPDATE DONE")
+            logger.debug(f"NaNs in df after transformations: {df.isna().sum()}")
+        else:
+            logger.info("VIEWSER DATAFRAME WILL NOT BE UPDATED")
+        return df
+
     def _fetch_data_from_viewser(self, self_test: bool) -> tuple[pd.DataFrame, list]:
         """
         Fetches and prepares the initial DataFrame from viewser.
@@ -446,24 +542,6 @@ class ViewsDataLoader:
         )
 
         queryset_base = self._model_path.get_queryset()  # just used here..
-        dotenv_path = self._model_path.find_project_root()/ 'ensembles' / '.env'
-        logger.debug(f"Path to dotenv file: {dotenv_path}")
-        load_dotenv(dotenv_path=dotenv_path)
-
-        months_to_update = PipelineConfig().months_to_update
-        logger.debug(f"months to update: {months_to_update}")
-        loa_qs = queryset_base.model_dump()['loa']
-        print(loa_qs)
-        logger.debug(f"Level of Analysis: {loa_qs}")
-
-        if loa_qs == 'priogrid_month':
-            update_path = os.getenv("pgm_path")
-        elif loa_qs =='country_month':
-            update_path = os.getenv("cm_path")
-        else:
-            logger.warning("Unknown loa, no update path")
-
-        print("Update path", update_path)
 
         if queryset_base is None:
             raise RuntimeError(
@@ -471,6 +549,9 @@ class ViewsDataLoader:
             )
         else:
             logger.info(f"Found queryset for {self._model_name}")
+
+        args = parse_args()
+        #dotenv_path = self._model_path.find_project_root()/ 'ensembles' / '.env'
 
         try:
             df, alerts = queryset_base.publish().fetch_with_drift_detection(
@@ -480,20 +561,14 @@ class ViewsDataLoader:
                 self_test=self_test,
             )
 
-            logger.info('NSPECTING DF FROM VIEWSER')
             for ialert, alert in enumerate(
             str(alerts).strip("[").strip("]").split("Input")):
                 if "offender" in alert:
                     logger.warning(
                         {f"{self._model_path.model_name} data alert {ialert}": str(alert)}
                     )
-            logger.info("Updating the VIEWSER DF")
-            logger.debug(f"NaNs found in dataframe from viewser: {df.isna().sum()}")
 
-            builder = UpdateViewser(queryset_base, viewser_df=df, data_path=update_path, months_to_update=months_to_update)
-            df = builder.run()
-            logger.info("VIEWSER UPDATE DONE")
-            logger.debug(f"NaNs in df after transformations: {df.isna().sum()}")
+            df = self._overwrite_viewser(df, queryset_base, args)
             df = ensure_float64(df)
             return df, alerts
         
@@ -503,20 +578,16 @@ class ViewsDataLoader:
                 start_date=self.month_first,
                 end_date=self.month_last - 1,
             )
-            logger.info("Updating the VIEWSER DF after failed drift detection")
-            builder = UpdateViewser(queryset_base, viewser_df=df, data_path = update_path, months_to_update=months_to_update)
-            df = builder.run()
-            logger.info("VIEWSER UPDATE DONE")
-            logger.debug(f"NaNs in df after transformations: {df.isna().sum()}")
+
+            df = self._overwrite_viewser(df, queryset_base, args)
             df = ensure_float64(df)
+
             return df, None
-        
+
         except Exception as e:
             logger.error(f"Error fetching data from viewser: {e}", exc_info=True)
             logger.error(traceback.format_exc())
-            raise RuntimeError(
-                f"Error fetching data from viewser: {e.with_traceback()}"
-            )
+            raise RuntimeError(f"Error fetching data from viewser: {e}") from e            
 
 
     def _get_month_range(self) -> tuple[int, int]:
