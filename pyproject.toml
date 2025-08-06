@@ -28,7 +28,6 @@ scipy = "^1.15.1"
 art = "^6.4"
 torch = "^2.6.0"
 markdown = "^3.8.2"
-views-transformation-library = "^2.7.2"
 
 [build-system]
 requires = ["poetry-core"]

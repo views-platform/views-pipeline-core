@@ -8,9 +8,7 @@ from viewser import Queryset, Column
 
 from pathlib import Path
 import matplotlib.pyplot as plt
-import seaborn as sns
 import logging
-import scipy.stats as stats
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 from contextlib import contextmanager
@@ -1307,7 +1305,7 @@ class _ViewsDataset:
             logger.info(
                 f"Unlogging tensor for feature '{feature}' for time_id '{time_id}' before reconciliation."
             )
-              # Shape (time, entity, samples, vars)
+            # Shape (time, entity, samples, vars)
             # unlog the tensor if it starts with 'ln_'
             pred_tensor = np.exp(pred_tensor) - 1
         elif "lx" in feature.split("_"):
