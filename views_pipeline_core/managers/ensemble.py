@@ -27,8 +27,26 @@ logger = logging.getLogger(__name__)
 
 class EnsemblePathManager(ModelPathManager):
     """
-    A class to manage ensemble paths and directories within the ViEWS Pipeline.
-    Inherits from ModelPathManager and sets the target to 'ensemble'.
+    EnsemblePathManager is a specialized path manager for handling ensemble model directories and paths within the VIEWS Pipeline.
+    It inherits from ModelPathManager and sets the target to 'ensemble', providing ensemble-specific path initialization and management.
+
+    Class Attributes:
+        _target (str): The target type for this path manager, set to 'ensemble'.
+
+    Class Methods:
+        _initialize_class_paths(current_path: Path = None) -> None:
+            Initializes class-level paths specific to ensemble models, including setting up the root directory for ensembles.
+
+    Instance Methods:
+        __init__(ensemble_name_or_path: Union[str, Path], validate: bool = True) -> None:
+            Initializes an EnsemblePathManager instance for a given ensemble name or path, with optional validation.
+
+    Args:
+        ensemble_name_or_path (str or Path): The name or path of the ensemble to manage.
+        validate (bool, optional): Whether to validate the provided paths and names. Defaults to True.
+
+    Usage:
+        Use EnsemblePathManager to manage and interact with ensemble model directories and files in a standardized way within the VIEWS Pipeline.
     """
 
     _target = "ensemble"
@@ -58,11 +76,61 @@ class EnsemblePathManager(ModelPathManager):
 
 
 class EnsembleManager(ForecastingModelManager):
+    """
+    EnsembleManager is a class for managing the training, evaluation, forecasting, and reconciliation of ensemble forecasting models.
+
+    This manager orchestrates the workflow for ensembles of forecasting models, including:
+    - Training each model in the ensemble.
+    - Evaluating and aggregating predictions from ensemble members.
+    - Forecasting with the ensemble and optionally reconciling predictions with another model's output.
+    - Handling data input/output, including integration with prediction stores and local files.
+    - Managing shell script execution for model artifacts.
+    - Sending notifications and alerts via Weights & Biases (wandb).
+
+    Key Features:
+    - Flexible configuration for ensemble members, aggregation methods, and reconciliation.
+    - Support for both local and remote (prediction store) data sources.
+    - Robust error handling and logging.
+    - Utilities for aggregating DataFrames, running shell scripts, and reporting results.
+
+        ensemble_path (EnsemblePathManager): The path manager for ensemble artifacts.
+        wandb_notifications (bool, optional): Enable or disable Weights & Biases notifications. Defaults to True.
+        use_prediction_store (bool, optional): Enable or disable use of the prediction store for data. Defaults to True.
+
+    Attributes:
+        config (dict): Configuration dictionary for the ensemble run.
+        __activate_reconciliation (bool): Internal flag to enable reconciliation.
+        _use_prediction_store (bool): Flag indicating whether to use the prediction store.
+
+    Methods:
+        __reconcile_pg_with_c(pg_dataframe, c_dataframe): Reconcile PG dataset with C dataset using a reconciliation model.
+        _get_shell_command(...): Construct a shell command for running a model script.
+        _get_aggregated_df(df_to_aggregate, aggregation): Aggregate DataFrames using mean or median, with special handling for list values.
+        execute_single_run(args): Execute a single run of the ensemble workflow.
+        _execute_model_tasks(...): Execute training, evaluation, forecasting, and reporting tasks.
+        _execute_model_training(...): Train the ensemble models.
+        _execute_model_evaluation(...): Evaluate the ensemble models.
+        _execute_model_forecasting(...): Forecast with the ensemble models.
+        _train_ensemble(...): Train all models in the ensemble.
+        _evaluate_ensemble(...): Evaluate all models in the ensemble and aggregate results.
+        _forecast_ensemble(...): Forecast with all models in the ensemble and aggregate results, with optional reconciliation.
+        _execute_shell_script(...): Execute a shell script for a model artifact.
+        _train_model_artifact(...): Train a single model artifact.
+        _evaluate_model_artifact(...): Evaluate a single model artifact and return predictions.
+        _forecast_model_artifact(...): Forecast with a single model artifact and return predictions.
+
+        Exception: Propagates exceptions encountered during training, evaluation, forecasting, or reconciliation.
+
+    Logging and Notifications:
+        - Logs progress and errors at each stage.
+        - Sends alerts to Weights & Biases for errors and completion events.
+    """
+
     def __init__(
         self,
         ensemble_path: EnsemblePathManager,
         wandb_notifications: bool = True,
-        use_prediction_store: bool = True,
+        use_prediction_store: bool = False,
     ) -> None:
         """
         Initialize the EnsembleManager.
@@ -116,9 +184,11 @@ class EnsembleManager(ForecastingModelManager):
                 ]
                 reconcile_with_forecasts.sort()
                 reconcile_with_forecast = reconcile_with_forecasts[-1]
-                latest_c_dataset = _CDataset(source=pd.DataFrame.forecasts.read_store(
-                    run=run_id, name=reconcile_with_forecast
-                ))
+                latest_c_dataset = _CDataset(
+                    source=pd.DataFrame.forecasts.read_store(
+                        run=run_id, name=reconcile_with_forecast
+                    )
+                )
             except Exception as e:
                 logger.warning(
                     f"Could not find latest C dataset for model {cm_model}. Reconciliation cannot proceed: {e}"
@@ -207,6 +277,7 @@ class EnsembleManager(ForecastingModelManager):
         forecast: bool,
         use_saved: bool = False,
         eval_type: str = "standard",
+        update_viewser: bool = False,
     ) -> list:
         """
         Constructs a shell command for running a model script with specified options.
@@ -237,6 +308,8 @@ class EnsembleManager(ForecastingModelManager):
             shell_command.append("--forecast")
         if use_saved:
             shell_command.append("--saved")
+        if update_viewser:
+            shell_command.append("--update_viewser")
 
         shell_command.append("--eval_type")
         shell_command.append(eval_type)
@@ -337,6 +410,7 @@ class EnsembleManager(ForecastingModelManager):
                 forecast=args.forecast,
                 use_saved=args.saved,
                 report=args.report,
+                update_viewser=args.update_viewser,
             )
         except Exception as e:
             logger.error(
@@ -360,6 +434,7 @@ class EnsembleManager(ForecastingModelManager):
         forecast: bool,
         use_saved: bool,
         report: bool,
+        update_viewser: bool,
     ) -> None:
         """
         Executes various model-related tasks including training, evaluation, and forecasting.
@@ -381,11 +456,11 @@ class EnsembleManager(ForecastingModelManager):
         start_t = time.time()
 
         if train:
-            self._execute_model_training(config, use_saved)
+            self._execute_model_training(config, use_saved, update_viewser)
         if eval:
-            self._execute_model_evaluation(config)
+            self._execute_model_evaluation(config, update_viewser)
         if forecast:
-            self._execute_model_forecasting(config)
+            self._execute_model_forecasting(config, update_viewser)
         if report and forecast:
             self._execute_forecast_reporting(config)
         if report and eval:
@@ -397,7 +472,9 @@ class EnsembleManager(ForecastingModelManager):
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
 
-    def _execute_model_training(self, config: dict, use_saved: bool) -> None:
+    def _execute_model_training(
+        self, config: dict, use_saved: bool, update_viewser: bool
+    ) -> None:
         """
         Executes the model training process.
 
@@ -414,7 +491,7 @@ class EnsembleManager(ForecastingModelManager):
             add_wandb_metrics()
             try:
                 logger.info(f"Training model {config['name']}...")
-                self._train_ensemble(use_saved)
+                self._train_ensemble(use_saved=use_saved, update_viewser=update_viewser)
 
                 wandb_alert(
                     title=f"Training for {self._model_path.target} {config['name']} completed successfully.",
@@ -436,8 +513,21 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 raise
 
-    def _execute_model_evaluation(self, config: dict) -> None:
+    def _execute_model_evaluation(self, config: dict, update_viewser: bool) -> None:
         """
+        Executes the model evaluation process within a Weights & Biases (wandb) run context.
+
+        This method initializes a wandb run for model evaluation, logs relevant metrics,
+        evaluates the ensemble model, saves predictions, evaluates the prediction dataframes,
+        and sends notifications or alerts based on the evaluation outcome.
+
+            config (dict): Configuration object containing parameters and settings for the evaluation.
+            update_viewser (bool): Flag indicating whether to update the viewser during evaluation.
+
+        Raises:
+            Exception: Propagates any exception that occurs during the evaluation process after logging and sending an alert.
+
+
         Executes the model evaluation process.
 
         Args:
@@ -455,7 +545,9 @@ class EnsembleManager(ForecastingModelManager):
             add_wandb_metrics()
             try:
                 logger.info(f"Evaluating model {config['name']}...")
-                df_predictions = self._evaluate_ensemble(self._eval_type)
+                df_predictions = self._evaluate_ensemble(
+                    self._eval_type, update_viewser
+                )
 
                 handle_ensemble_log_creation(model_path=self._model_path, config=config)
 
@@ -483,8 +575,19 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 raise
 
-    def _execute_model_forecasting(self, config: dict) -> None:
+    def _execute_model_forecasting(self, config: dict, update_viewser: bool) -> None:
         """
+        Executes the model forecasting process within a Weights & Biases (wandb) run context.
+
+        This method initializes a wandb run for forecasting, logs relevant metrics, performs ensemble forecasting,
+        sends notifications upon success or failure, handles log creation, and saves the generated predictions.
+        In case of errors during forecasting, it logs the error, sends an alert, and re-raises the exception.
+
+            config (dict): Configuration object containing parameters and settings for the forecasting process.
+
+
+        Raises:
+            Exception: Propagates any exception that occurs during the forecasting process after logging and alerting.
         Executes the model forecasting process.
 
         Args:
@@ -502,7 +605,7 @@ class EnsembleManager(ForecastingModelManager):
             add_wandb_metrics()
             try:
                 logger.info(f"Forecasting model {config['name']}...")
-                df_prediction = self._forecast_ensemble()
+                df_prediction = self._forecast_ensemble(update_viewser=update_viewser)
 
                 wandb_alert(
                     title=f"Forecasting for {self._model_path.target} {config['name']} completed successfully.",
@@ -526,7 +629,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 raise
 
-    def _train_ensemble(self, use_saved: bool) -> None:
+    def _train_ensemble(self, use_saved: bool, update_viewser: bool) -> None:
         """
         Trains an ensemble of models specified in the configuration.
 
@@ -540,9 +643,13 @@ class EnsembleManager(ForecastingModelManager):
 
         for model_name in tqdm.tqdm(self.config["models"], desc="Training ensemble"):
             tqdm.tqdm.write(f"Current model: {model_name}")
-            self._train_model_artifact(model_name, run_type, use_saved)
+            self._train_model_artifact(
+                model_name, run_type, use_saved, update_viewser=update_viewser
+            )
 
-    def _evaluate_ensemble(self, eval_type: str) -> List[pd.DataFrame]:
+    def _evaluate_ensemble(
+        self, eval_type: str, update_viewser: bool
+    ) -> List[pd.DataFrame]:
         """
         Evaluates the ensemble of models based on the specified evaluation type.
 
@@ -561,7 +668,11 @@ class EnsembleManager(ForecastingModelManager):
 
         for model_name in tqdm.tqdm(self.config["models"], desc="Evaluating ensemble"):
             tqdm.tqdm.write(f"Current model: {model_name}")
-            dfs.append(self._evaluate_model_artifact(model_name, run_type, eval_type))
+            dfs.append(
+                self._evaluate_model_artifact(
+                    model_name, run_type, eval_type, update_viewser
+                )
+            )
 
         tqdm.tqdm.write(f"Aggregating metrics...")
         for i in range(len(dfs[0])):
@@ -573,15 +684,23 @@ class EnsembleManager(ForecastingModelManager):
 
         return dfs_agg
 
-    def _forecast_ensemble(self) -> None:
+    def _forecast_ensemble(self, update_viewser: bool) -> None:
         """
-        Generates ensemble forecasts by iterating over the models specified in the configuration.
+         Generates ensemble forecasts by iterating over the models specified in the configuration, aggregates their results, and optionally reconciles the predictions.
 
-        This method forecasts using each model listed in the configuration, aggregates the results,
-        and returns the aggregated forecast dataframe.
+        This method performs the following steps:
+        1. Iterates over each model listed in the configuration and generates forecasts.
+        2. Aggregates the individual model forecasts into a single DataFrame using the specified aggregation method.
+        3. Optionally applies reconciliation to the aggregated predictions if reconciliation is activated and configured.
+        4. Returns the final aggregated (and possibly reconciled) forecast DataFrame.
 
-        Returns:
-            None
+        Args:
+            update_viewser (bool): Flag indicating whether to update the viewser during forecasting.
+
+            pd.DataFrame: The aggregated (and possibly reconciled) forecast DataFrame.
+
+        Raises:
+            TypeError: If the final predictions are not returned as a pandas DataFrame.
         """
         run_type = self.config["run_type"]
         dfs = []
@@ -590,7 +709,9 @@ class EnsembleManager(ForecastingModelManager):
             self.configs["models"], desc="Forecasting ensemble"
         ):
             tqdm.tqdm.write(f"Current model: {model_name}")
-            dfs.append(self._forecast_model_artifact(model_name, run_type))
+            dfs.append(
+                self._forecast_model_artifact(model_name, run_type, update_viewser)
+            )
 
         df_prediction = EnsembleManager._get_aggregated_df(
             dfs, self.configs["aggregation"]
@@ -646,6 +767,7 @@ class EnsembleManager(ForecastingModelManager):
         forecast: bool = False,
         use_saved: bool = True,
         eval_type: str = "standard",
+        update_viewser: bool = False,
     ) -> None:
         """
         Executes a shell script for a model artifact.
@@ -659,6 +781,7 @@ class EnsembleManager(ForecastingModelManager):
             forecast (bool, optional): Whether to forecast using the model. Defaults to False.
             use_saved (bool, optional): Whether to use saved data. Defaults to True.
             eval_type (str, optional): The type of evaluation to perform. Defaults to "standard".
+            update_viewser (bool, optional): Whether to update the viewser dataframe. Defaults to False.
 
         Raises:
             Exception: If an error occurs during the execution of the shell command.
@@ -676,6 +799,7 @@ class EnsembleManager(ForecastingModelManager):
             forecast=forecast,
             use_saved=use_saved,
             eval_type=eval_type,
+            update_viewser=update_viewser,
         )
 
         try:
@@ -688,7 +812,7 @@ class EnsembleManager(ForecastingModelManager):
             raise
 
     def _train_model_artifact(
-        self, model_name: str, run_type: str, use_saved: bool
+        self, model_name: str, run_type: str, use_saved: bool, update_viewser: bool
     ) -> None:
         """
         Trains a single model artifact.
@@ -701,6 +825,7 @@ class EnsembleManager(ForecastingModelManager):
             model_name (str): The name of the model to be trained.
             run_type (str): The type of run to be performed.
             use_saved (bool): Flag indicating whether to use a saved model.
+            update_viewser (bool): Flag indicating whether to update the viewser dataframe.
 
         Raises:
             Exception: If there is an error during the execution of the shell command.
@@ -709,11 +834,16 @@ class EnsembleManager(ForecastingModelManager):
 
         model_path = ModelPathManager(model_name)
         self._execute_shell_script(
-            run_type, model_path, model_name, train=True, use_saved=use_saved
+            run_type,
+            model_path,
+            model_name,
+            train=True,
+            use_saved=use_saved,
+            update_viewser=update_viewser,
         )
 
     def _evaluate_model_artifact(
-        self, model_name: str, run_type: str, eval_type: str
+        self, model_name: str, run_type: str, eval_type: str, update_viewser: bool
     ) -> List[pd.DataFrame]:
         """
         Evaluate a model artifact by loading or generating predictions.
@@ -726,6 +856,7 @@ class EnsembleManager(ForecastingModelManager):
             model_name (str): The name of the model to evaluate.
             run_type (str): The type of run (e.g., 'calibration', 'validation', 'forecasting').
             eval_type (str): The type of evaluation (e.g., 'standard', 'long', 'complete', 'live').
+            update_viewser (bool): Flag to indicate whether to update the viewser dataframe.
 
         Returns:
             List[pd.DataFrame]: A list of DataFrames containing the predictions.
@@ -764,6 +895,7 @@ class EnsembleManager(ForecastingModelManager):
                         model_name,
                         evaluate=True,
                         eval_type=eval_type,
+                        update_viewser=update_viewser,
                     )
                     pred = pd.DataFrame.forecasts.read_store(
                         run=self._pred_store_name, name=name
@@ -786,6 +918,7 @@ class EnsembleManager(ForecastingModelManager):
                         model_name,
                         evaluate=True,
                         eval_type=eval_type,
+                        update_viewser=update_viewser,
                     )
                     pred = read_dataframe(
                         f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}{PipelineConfig().dataframe_format}"
@@ -795,7 +928,9 @@ class EnsembleManager(ForecastingModelManager):
 
         return preds
 
-    def _forecast_model_artifact(self, model_name: str, run_type: str) -> pd.DataFrame:
+    def _forecast_model_artifact(
+        self, model_name: str, run_type: str, update_viewser: bool
+    ) -> pd.DataFrame:
         """
         Forecasts a model artifact and returns the predictions as a DataFrame.
         This method forecasts a single model's artifact based on the provided model name and run type.
@@ -805,6 +940,7 @@ class EnsembleManager(ForecastingModelManager):
         Args:
             model_name (str): The name of the model to forecast.
             run_type (str): The type of run (e.g., 'forecasting').
+            update_viewser (bool): Flag to indicate whether to update the viewser dataframe.
 
         Returns:
             pd.DataFrame: A DataFrame containing the forecasted predictions.
@@ -834,7 +970,11 @@ class EnsembleManager(ForecastingModelManager):
                     f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
                 )
                 self._execute_shell_script(
-                    run_type, model_path, model_name, forecast=True
+                    run_type,
+                    model_path,
+                    model_name,
+                    forecast=True,
+                    update_viewser=update_viewser,
                 )
                 pred = pd.DataFrame.forecasts.read_store(
                     run=self._pred_store_name, name=name
@@ -852,7 +992,11 @@ class EnsembleManager(ForecastingModelManager):
                     f"No existing {run_type} predictions found. Generating new {run_type} predictions..."
                 )
                 self._execute_shell_script(
-                    run_type, model_path, model_name, forecast=True
+                    run_type,
+                    model_path,
+                    model_name,
+                    forecast=True,
+                    update_viewser=update_viewser,
                 )
                 pred = read_dataframe(
                     f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}"

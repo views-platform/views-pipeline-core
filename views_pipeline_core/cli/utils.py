@@ -82,13 +82,19 @@ def parse_args():
     )
 
     parser.add_argument(
-        "-dd", "--drift_self_test", action="store_true", default=False,
-        help="Enable drift-detection self_test at data-fetch"
+        "-dd",
+        "--drift_self_test",
+        action="store_true",
+        default=False,
+        help="Enable drift-detection self_test at data-fetch",
     )
 
     parser.add_argument(
-        "-et", "--eval_type", type=str, default="standard",
-        help="Type of evaluation to be performed"
+        "-et",
+        "--eval_type",
+        type=str,
+        default="standard",
+        help="Type of evaluation to be performed",
     )
 
     parser.add_argument(
@@ -96,14 +102,27 @@ def parse_args():
     )
 
     parser.add_argument(
-        "-u", "--update_viewser", action="store_true", help="Update the viewser dataframe for a set of months where viewser returns only zeros."
+        "-u",
+        "--update_viewser",
+        action="store_true",
+        help="Update the viewser dataframe for a set of months where viewser returns only zeros.",
     )
 
     return parser.parse_args()
 
 
 def validate_arguments(args):
-    if args.report and args.run_type not in ("forecasting", "calibration", "validation") and args.train:
+    if args.report and not args.forecast and not args.evaluate:
+        print(
+            "Error: --report flag requires either --forecast or --evaluate to be set. Exiting."
+        )
+        sys.exit(1)
+
+    if (
+        args.report
+        and args.run_type not in ("forecasting", "calibration", "validation")
+        and args.train
+    ):
         print(
             "Error: --report flag can only be used with --run_type forecasting and calibration. Exiting."
         )
@@ -120,7 +139,7 @@ def validate_arguments(args):
         )
         print("To fix: Remove --train, or --evaluate flags when --sweep is flagged.")
         sys.exit(1)
-    
+
     if args.sweep and args.forecast:
         print(
             "Error: Sweep runs cannot have --forecast flag set because sweep doesn't do forecasting. Exiting."
@@ -163,9 +182,7 @@ def validate_arguments(args):
 
     if args.ensemble and args.sweep:
         # This is a temporary solution. In the future we might need to train and sweep the ensemble models.
-        print(
-            "Error: --aggregation flag cannot be used with --sweep. Exiting."
-        )
+        print("Error: --aggregation flag cannot be used with --sweep. Exiting.")
         sys.exit(1)
 
     if (not args.train and not args.sweep) and not args.saved:

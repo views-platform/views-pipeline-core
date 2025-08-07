@@ -1001,6 +1001,7 @@ class ForecastingModelManager(ModelManager):
         Args:
             args: Command line arguments.
         """
+        wandb.login()
         self.config = self._update_single_config(args)
         self._project = f"{self.config['name']}_{args.run_type}"
         self._eval_type = args.eval_type
@@ -1027,7 +1028,7 @@ class ForecastingModelManager(ModelManager):
             args: Command line arguments.
         """
         # self.config = self._update_sweep_config(args)
-
+        wandb.login()
         self._project = f"{self._config_sweep['name']}_sweep"
         self._eval_type = args.eval_type
         self._args = args
