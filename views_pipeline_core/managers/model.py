@@ -1815,7 +1815,7 @@ class ForecastingModelManager(ModelManager):
                     metric_df = pd.concat(
                         [metric_df, pd.DataFrame([{"Metric": key, "Value": value}])],
                         ignore_index=True,
-                    )
+                    ).sort_values(by="Metric")
             except:
                 continue
         result = tabulate(metric_df, headers="keys", tablefmt="grid")
