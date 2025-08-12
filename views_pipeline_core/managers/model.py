@@ -1676,7 +1676,7 @@ class ForecastingModelManager(ModelManager):
 
             # Log predictions to WandB
             # wandb.save(str(path_generated / self._predictions_name)) # Temporarily disabled to avoid saving large files to WandB
-            wandb.log({"predictions": wandb.Table(dataframe=df_predictions)})
+            # wandb.log({"predictions": wandb.Table(dataframe=df_predictions)})
 
             wandb_alert(
                 title="Predictions Saved",
