@@ -1,4 +1,4 @@
-from views_pipeline_core.templates.utils import save_python_script
+from ...templates.utils import save_python_script
 from pathlib import Path
 import logging
 
