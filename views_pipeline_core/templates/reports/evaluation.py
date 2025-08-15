@@ -42,8 +42,10 @@ class EvaluationReportTemplate:
         self.config = config
         self.model_path = model_path
         self.run_type = run_type
-        self.eval_types = ("time-series-wise", "step-wise", "month-wise")
-        self.baseline_models = ["zero_baseline", "locf_baseline", "average_baseline"]
+        self.eval_types = ("time-series-wise") # "step-wise", "month-wise"
+        self.cm_baseline_models = ["zero_cmbaseline", "locf_cmbaseline", "average_cmbaseline"]
+        self.pgm_baseline_models = ["zero_pgmbaseline", "locf_pgmbaseline", "average_pgmbaseline"]
+        self.views_models_url = "https://github.com/views-platform/views-models"
 
     def generate(self, wandb_run: "wandb.apis.public.runs.Run", target: str) -> Path:
         """
@@ -79,7 +81,7 @@ class EvaluationReportTemplate:
         run_date_str = f"{timestamp_to_date(_timestamp)}" if _timestamp else "N/A"
         report_manager.add_heading("Run Summary", level=2)
         markdown_text = (
-            f"**Run ID**: [{wandb_run.id}]({wandb_run.url})  \n"
+            f"**Run ID**: [{wandb_run.id}]({wandb_run.url}) (links to WandB run) \n"
             f"**Owner**: {wandb_run.user.name} ({wandb_run.user.username})  \n"
             f"**Run Date**: {run_date_str}  \n"
         )
@@ -96,8 +98,8 @@ class EvaluationReportTemplate:
             + "\n"
             f"- **Spatiotemporal Resolution**: {metadata_dict.get('level', 'N/A')}\n"
             f"- **Evaluation Scheme**: `Rolling-Origin Holdout`\n"
-            f"    - **Minimum Forecast Horizon**: {metadata_dict.get('steps', [None, None])[0]}\n"
-            f"    - **Maximum Forecast Horizon**: {metadata_dict.get('steps', [None, None])[-1]}\n"
+            f"    - **Minimum forecast lead time**: {metadata_dict.get('steps', [None, None])[0]}\n"
+            f"    - **Maximum forecast lead time**: {metadata_dict.get('steps', [None, None])[-1]}\n"
             f"    - **Number of Rolling Origins**: {ForecastingModelManager._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())}\n"
             f"    - **Context Window Origin**: {metadata_dict.get('calibration', {'train': [None, None], 'test': [None, None]}).get('train')[0]}\n"
             f"    - **Context Window Schedule**: Fixed-origin, Expanding\n"
@@ -224,17 +226,32 @@ class EvaluationReportTemplate:
         models = self.config.get(
             "models", []
         )  # will only be populated for ensemble runs
-        models = set(models).union(self.baseline_models)
+        if metadata_dict.get("level", None) == "cm":
+            models = set(models).union(self.cm_baseline_models)
+        elif metadata_dict.get("level", None) == "pgm":
+            models = set(models).union(self.pgm_baseline_models)
+        else:
+            logger.warning(
+                f"Unknown level '{metadata_dict.get('level', None)}'. No baseline models added."
+            )
+        # models = set(models).union(self.baseline_models)
         verified_partition_dict = None
+        verified_level = metadata_dict.get("level", None)
 
         # Get constituent model runs
         constituent_model_runs = []
         for model in models:
-            latest_run = get_latest_run(
-                entity="views_pipeline", model_name=model, run_type="calibration"
-            )
-            if latest_run:
-                constituent_model_runs.append(latest_run)
+            try:
+                latest_run = get_latest_run(
+                    entity="views_pipeline", model_name=model, run_type="calibration"
+                )
+                if latest_run:
+                    constituent_model_runs.append(latest_run)
+            except Exception as e:
+                logger.warning(
+                    f"Error retrieving latest run for model '{model}': {e}. Skipping...",
+                    exc_info=True,
+                )
 
         # Verify partition metadata consistency
         try:
@@ -245,6 +262,12 @@ class EvaluationReportTemplate:
                     for k, v in temp_metadata_dict.items()
                     if k.lower() in {"calibration", "validation", "forecasting"}
                 }
+                if verified_level is None:
+                    verified_level = temp_metadata_dict.get("level", None)
+                elif verified_level != temp_metadata_dict.get("level", None):
+                    raise ValueError(
+                        f"LoA metadata mismatch between models: Offending model: {temp_metadata_dict.get('name', 'N/A')}. Expected level: {verified_level}, found: {temp_metadata_dict.get('level', 'N/A')}"
+                    )
                 model_name = temp_metadata_dict.get("name", "N/A")
                 if verified_partition_dict is None:
                     verified_partition_dict = partition_metadata_dict
@@ -257,6 +280,9 @@ class EvaluationReportTemplate:
 
             # Add ensemble metrics
             report_manager.add_heading("Model Metrics", level=2)
+            report_manager.add_markdown(
+                markdown_text=f"More information about the following models can be found [here]({self.views_models_url})\n"
+            )
             for eval_type in self.eval_types:
                 full_metric_dataframe = None
                 # report_manager.add_heading(f"{str(eval_type).upper()}", level=3)
