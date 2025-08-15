@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 class MockArgs:
-    def __init__(self, train, evaluate, forecast, saved, run_type, eval_type, report, sweep=False):
+    def __init__(self, train, evaluate, forecast, saved, run_type, eval_type, report, sweep=False, update_viewser=False):
         self.train = train
         self.evaluate = evaluate
         self.forecast = forecast
@@ -26,6 +26,7 @@ class MockArgs:
         self.eval_type = eval_type
         self.report = report
         self.sweep = sweep
+        self.update_viewser = update_viewser
 
 @pytest.fixture
 def mock_model_path():
@@ -62,6 +63,7 @@ def mock_constituent_model_path():
                 run_type="test",
                 eval_type="standard",
                 report=False,
+                update_viewser=False
             ),
             [
                 "/path/to/models/test_model/run.sh",
@@ -82,6 +84,7 @@ def mock_constituent_model_path():
                 run_type="forecast",
                 eval_type="detailed",
                 report=False,
+                update_viewser=False
             ),
             [
                 "/path/to/models/test_model/run.sh",
@@ -103,6 +106,7 @@ def mock_constituent_model_path():
                 run_type="calibration",
                 eval_type="minimal",
                 report=False,
+                update_viewser=False
             ),
             [
                 "/path/to/models/test_model/run.sh",
@@ -152,6 +156,7 @@ class TestParametrized:
             args.forecast,
             args.saved,
             args.eval_type,
+            args.update_viewser
         )
         assert command == expected_command
 
@@ -218,6 +223,7 @@ class TestParametrized:
                 forecast=args.forecast,
                 use_saved=args.saved,
                 report=args.report,
+                update_viewser=args.update_viewser,
             )
 
             # Test exception handling
@@ -288,6 +294,7 @@ class TestParametrized:
                 forecast=args.forecast,
                 use_saved=args.saved,
                 report=args.report,
+                update_viewser=args.update_viewser
             )
 
             # Validate W&B metrics (allow multiple calls)
@@ -298,11 +305,13 @@ class TestParametrized:
                 assert mock_handle_ensemble_log_creation.call_count >= 1
 
             # Validate training
-            if args.train:
+            if expected_methods_called["train"]:
                 mock_logger.info.assert_any_call(
                     "Training model test_model..."
                 )
-                mock_train_ensemble.assert_called_once_with(args.saved)
+                mock_train_ensemble.assert_called_once_with(use_saved=args.saved, update_viewser=args.update_viewser)
+            else:
+                mock_train_ensemble.assert_not_called()
                 # Check for any call with these arguments, ignoring others
                 # calls = [
                 #     call(
@@ -318,28 +327,33 @@ class TestParametrized:
                 # assert len(calls) > 0, "Expected wandb_alert call not found"
 
             # Validate evaluation
-            if args.evaluate:
+            if expected_methods_called["evaluate"]:
                 mock_logger.info.assert_any_call(
                     "Evaluating model test_model..."
                 )
-                mock_evaluate_ensemble.assert_called_once_with(manager._eval_type)
+                mock_evaluate_ensemble.assert_called_once_with(manager._eval_type, args.update_viewser)
                 mock_handle_ensemble_log_creation.assert_called()
+            else:
+                mock_evaluate_ensemble.assert_not_called()
+
                 # mock_evaluate_prediction_dataframe.assert_called_once_with(
                 #     mock_evaluate_ensemble.return_value, 
                 #     ensemble=True
                 # )
 
             # Validate forecasting
-            if args.forecast:
+            if expected_methods_called["forecast"]:
                 mock_logger.info.assert_any_call(
                     "Forecasting model test_model..."
                 )
-                mock_forecast_ensemble.assert_called()
+                mock_forecast_ensemble.assert_called_once_with(update_viewser=args.update_viewser)
                 mock_handle_ensemble_log_creation.assert_called()
                 mock_save_predictions.assert_called_once_with(
                     mock_forecast_ensemble.return_value,
                     manager._model_path.data_generated
                 )
+            else:
+                mock_forecast_ensemble.assert_not_called()
                 # Check for any call with these arguments, ignoring others
                 # calls = [
                 #     call(
@@ -372,6 +386,7 @@ class TestParametrized:
                     forecast=args.forecast,
                     use_saved=args.saved,
                     report=args.report,
+                    update_viewser=args.update_viewser
                 )
             
             # Validate appropriate error is raised

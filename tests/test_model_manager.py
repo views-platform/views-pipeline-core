@@ -379,7 +379,10 @@ def get_deployment_config():
     deployment_config = {'deployment_status': 'shadow'}
     return deployment_config
 """
-    with patch("importlib.util.spec_from_file_location") as mock_spec, patch("importlib.util.module_from_spec") as mock_module, patch("builtins.open", mock_open(read_data=mock_config_deployment_content)):
+    with patch("importlib.util.spec_from_file_location") as mock_spec, \
+     patch("importlib.util.module_from_spec") as mock_module, \
+     patch("builtins.open", mock_open(read_data=mock_config_deployment_content)), \
+     patch("wandb.login") as mock_wandb_login:
         mock_spec.return_value.loader = MagicMock()
         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
         manager = ForecastingModelManager(mock_model_instance, use_prediction_store=False)

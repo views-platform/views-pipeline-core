@@ -157,11 +157,11 @@ class PosteriorDistributionAnalyzer:
             adjusted.append((new_low, new_high))
             
         # idek man
-        if len(adjusted) > 1:
-            self._compute_summary()
-            # logger.debug(f"Adjusted HDIs: {adjusted}")
-        else:
-            return adjusted
+        # if len(adjusted) > 1:
+        #     self._compute_summary()
+        #     # logger.debug(f"Adjusted HDIs: {adjusted}")
+        # else:
+        #     return adjusted
         return adjusted
 
 
