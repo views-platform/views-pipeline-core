@@ -112,11 +112,11 @@ def parse_args():
 
 
 def validate_arguments(args):
-    if args.report and not args.forecast and not args.evaluate:
-        print(
-            "Error: --report flag requires either --forecast or --evaluate to be set. Exiting."
-        )
-        sys.exit(1)
+    # if args.report and not args.forecast and not args.evaluate:
+    #     print(
+    #         "Error: --report flag requires either --forecast or --evaluate to be set. Exiting."
+    #     )
+    #     sys.exit(1)
 
     if (
         args.report

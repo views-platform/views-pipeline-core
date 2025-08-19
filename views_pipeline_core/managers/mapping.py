@@ -15,8 +15,6 @@ import plotly.express as px
 from io import BytesIO
 import base64
 
-# nbformat dependency is required
-
 logger = logging.getLogger(__name__)
 
 
@@ -27,18 +25,30 @@ class MappingManager:
         self._entity_id = self._dataset._entity_id
         self._time_id = self._dataset._time_id
         if isinstance(views_dataset, _PGDataset):
-            # from ingester3.extensions import PgAccessor
-
             self._world = self.__get_priogrid_shapefile()
-
         elif isinstance(views_dataset, _CDataset):
-            # from ingester3.extensions import CAccessor
-
             self._world = self.__get_country_shapefile()
         else:
             raise ValueError("Invalid dataset type. Must be a PGMDataset or CMDataset.")
-        # self._mapping_dataframe = self.__init_mapping_dataframe(self._dataframe)
         self._mapping_dataframe = None
+        self._prepare_base_geojson()  # Initialize base GeoJSON
+
+    def _prepare_base_geojson(self):
+        """Create simplified base GeoJSON and set location parameters"""
+        base_gdf = self._world.to_crs(epsg=4326).copy()
+        base_gdf['geometry'] = base_gdf.geometry.simplify(
+            tolerance=0.20,
+            preserve_topology=True
+        )
+        
+        if isinstance(self._dataset, _PGDataset):
+            self._location_col = 'gid'
+            self._featureidkey = "properties.gid"
+        else:  # Country dataset
+            self._location_col = 'isoab'
+            self._featureidkey = "properties.ADM0_A3"
+
+        self._base_geojson = base_gdf.__geo_interface__
 
     def __get_country_shapefile(self):
         path = (
@@ -68,16 +78,13 @@ class MappingManager:
         ]
         if not missing.empty:
             logger.warning(f"Missing geometries for: {missing['isoab'].unique()}")
-            # Handle missing cases (e.g., filter or impute)
         if drop_missing_geometries:
             initial_count = len(mapping_dataframe)
-            # Filter out null/empty geometries
             cleaned_gdf = mapping_dataframe[
                 (~mapping_dataframe.geometry.is_empty)
                 & (~mapping_dataframe.geometry.isna())
             ].copy()
 
-            # Calculate dropped rows
             dropped_count = initial_count - len(cleaned_gdf)
             if dropped_count > 0:
                 logger.warning(
@@ -85,7 +92,6 @@ class MappingManager:
                     f"Remaining: {len(cleaned_gdf)} rows. "
                     f"Missing IDs: {mapping_dataframe[self._entity_id][mapping_dataframe.geometry.isna()].unique().tolist()}"
                 )
-
             return cleaned_gdf
         return mapping_dataframe
 
@@ -98,52 +104,35 @@ class MappingManager:
         _dataframe[numeric_cols] = _dataframe[numeric_cols].astype(np.float32)
 
         if isinstance(self._dataset, _CDataset):
-            # Add ISO codes to the dataframe
             _dataframe = self.__add_isoab(dataframe=_dataframe)
-
-            # Merge with shapefile geometries
             _dataframe = _dataframe.merge(
                 self._world[["ADM0_A3", "geometry"]],
                 left_on="isoab",
                 right_on="ADM0_A3",
                 how="left",
             )
-
-            # Create GeoDataFrame with ALL columns and explicit geometry
             merged_gdf = gpd.GeoDataFrame(
                 _dataframe,
-                geometry="geometry",  # Use merged geometry column
+                geometry="geometry",
                 crs=self._world.crs,
             )
-
             return self.__check_missing_geometries(merged_gdf)
 
         elif isinstance(self._dataset, _PGDataset):
-            # _dataframe = self.__add_cid(dataframe=_dataframe)
-            # Merge priogrid geometries
             _dataframe = _dataframe.merge(
                 self._world[["gid", "geometry"]],
                 left_on=self._entity_id,
                 right_on="gid",
                 how="left",
             )
-
             return self.__check_missing_geometries(
                 gpd.GeoDataFrame(_dataframe, geometry="geometry", crs=self._world.crs)
             )
 
     def __add_isoab(self, dataframe: pd.DataFrame):
-        # if isinstance(self._dataset, CMDataset):
-        #     dataframe.rename(columns={self._entity_id: "c_id"}, inplace=True)
-        #     dataframe["country_name"] = dataframe.c.name
-        #     dataframe["isoab"] = dataframe.c.isoab
-        #     dataframe.rename(columns={"c_id": self._entity_id}, inplace=True)
-        # return dataframe
-        # Get ISO codes and country names through dataset methods
         iso_df = self._dataset.get_isoab().reset_index()
         name_df = self._dataset.get_name().reset_index()
 
-        # Merge with main dataframe
         dataframe = dataframe.merge(
             iso_df[[self._time_id, self._entity_id, "isoab"]],
             on=[self._time_id, self._entity_id],
@@ -155,7 +144,6 @@ class MappingManager:
             how="left",
         )
         dataframe.rename(columns={"name": "country_name"}, inplace=True)
-
         return dataframe
 
     def get_subset_mapping_dataframe(
@@ -163,13 +151,6 @@ class MappingManager:
         time_ids: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
     ) -> pd.DataFrame:
-        """
-        Get subset dataframe for specified time.
-
-        Parameters:
-        time_ids: Single time ID for static maps or list of time IDs for interactive maps
-        entity_ids: Single entity ID or list of entity IDs
-        """
         _dataframe = self._dataset.get_subset_dataframe(
             time_ids=time_ids, entity_ids=entity_ids
         )
@@ -177,43 +158,35 @@ class MappingManager:
         return _dataframe
 
     def _plot_interactive_map(self, mapping_dataframe: gpd.GeoDataFrame, target: str):
-        if not isinstance(mapping_dataframe, gpd.GeoDataFrame):
-            mapping_dataframe = gpd.GeoDataFrame(mapping_dataframe, geometry="geometry")
-        # Convert to geographic CRS for Plotly
-        mapping_dataframe = mapping_dataframe.to_crs(epsg=4326).copy()
-
-        # Simplify geometries for faster rendering
-        mapping_dataframe["geometry"] = mapping_dataframe.geometry.simplify(
-            tolerance=0.20,  # Adjust based on data scale (degrees for EPSG:4326)
-            preserve_topology=True,
-        )
+        # Convert to regular DataFrame without geometries
+        plot_df = pd.DataFrame(mapping_dataframe.drop(columns='geometry', errors='ignore'))
+        
+        # Prepare hover data
         hover_data = [self._entity_id, self._time_id, target]
         if isinstance(self._dataset, _CDataset):
             hover_data.append("country_name")
 
-        # Create figure with slider
+        # Create optimized figure using base GeoJSON
         fig = px.choropleth(
-            mapping_dataframe,
-            geojson=mapping_dataframe.geometry,
-            locations=mapping_dataframe.index,
+            plot_df,
+            geojson=self._base_geojson,
+            locations=self._location_col,
+            featureidkey=self._featureidkey,
             color=target,
             animation_frame=self._time_id,
             projection="natural earth",
             hover_data=hover_data,
             color_continuous_scale="OrRd",
             range_color=(
-                # mapping_dataframe[target].min(),
-                # mapping_dataframe[target].max(),
-                mapping_dataframe[target].quantile(0.05),
-                mapping_dataframe[target].quantile(0.95),
+                plot_df[target].quantile(0.05),
+                plot_df[target].quantile(0.95),
             ),
             labels={self._time_id: "Time Period", target: target},
         )
 
-        # Adjust layout for larger size
+        # Layout adjustments
         fig.update_layout(
-            height=900,  # Increased from default 450
-            # width=1200,  # Increased from default 700
+            height=900,
             autosize=True,
             margin={"r": 0, "t": 40, "l": 0, "b": 40},
             sliders=[
@@ -222,33 +195,14 @@ class MappingManager:
                         "prefix": f"{self._time_id}: ",
                         "font": {"size": 14},
                     },
-                    "pad": {"t": 50, "b": 20},  # Added bottom padding
-                    "len": 0.9,  # Make slider wider
+                    "pad": {"t": 50, "b": 20},
+                    "len": 0.9,
                 }
             ],
-        )
-        # fig.update_layout(
-        #     height=1000,  # Increased height
-        #     margin={"r": 0, "t": 40, "l": 0, "b": 140},  # More bottom space
-        #     sliders=[
-        #         {
-        #             "currentvalue": {
-        #                 "prefix": f"{self._time_id}: ",
-        #                 "font": {"size": 14},
-        #                 "xanchor": "right",
-        #                 "offset": 20,
-        #             },
-        #             "pad": {"t": 50, "b": 100},  # Increased bottom padding
-        #             "len": 0.95,
-        #             "x": 0.05,  # Left-align slider
-        #         }
-        #     ],
-        # )
-        fig.update_layout(
             annotations=[
                 dict(
                     x=0.5,
-                    y=-0.15,  # Position below main plot
+                    y=-0.15,
                     showarrow=False,
                     text="",
                     xref="paper",
@@ -258,17 +212,17 @@ class MappingManager:
         )
 
         fig.update_traces(
-            marker_line_width=0.5, marker_opacity=0.9, selector=dict(type="choropleth")
+            marker_line_width=0.5,
+            marker_opacity=0.9,
+            selector=dict(type="choropleth")
         )
 
-        # Improve map rendering
         fig.update_geos(
             fitbounds="locations",
             visible=False,
             showcountries=True,
-            countrycolor="rgba(100,100,100,0.3)",  # Lighter gray
-            countrywidth=0.3,  # Thinner borders
-            # Add grid line styling
+            countrycolor="rgba(100,100,100,0.3)",
+            countrywidth=0.3,
             showlakes=True,
             showocean=False,
             showsubunits=True,
@@ -276,46 +230,23 @@ class MappingManager:
             subunitwidth=0.05,
         )
 
-        # Add latitude/longitude grid styling
-        # fig.update_layout(
-        #     geo=dict(
-        #         lonaxis=dict(
-        #             showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
-        #         ),
-        #         lataxis=dict(
-        #             showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
-        #         ),
-        #     )
-        # )
-
         return fig
 
     def _plot_static_map(
         self, mapping_dataframe: gpd.GeoDataFrame, target: str, time_unit: int
     ):
-        # Validation checks
         if target not in mapping_dataframe.columns:
-            raise ValueError(f"Target column '{target}' not found in mapping dataframe")
-
+            raise ValueError(f"Target column '{target}' not found")
         if mapping_dataframe[target].isnull().all():
-            raise ValueError(f"No valid values found for target '{target}'")
+            raise ValueError(f"No valid values for target '{target}'")
 
         fig, ax = plt.subplots(1, 1, figsize=(15, 10))
-
-        # Plot boundaries
         mapping_dataframe.boundary.plot(ax=ax, linewidth=0.3, color="black")
 
-        # Plot data values
         plot = mapping_dataframe.plot(
             column=target,
             ax=ax,
             legend=True,
-            # legend_kwds={
-            #     "label": f"",
-            #     "orientation": "horizontal",
-            #     "pad": 0.01,
-            #     "aspect": 40,
-            # },
             cmap="OrRd",
             vmin=mapping_dataframe[target].quantile(0.05),
             vmax=mapping_dataframe[target].quantile(0.95),
@@ -324,11 +255,7 @@ class MappingManager:
             alpha=0.9,
         )
 
-        # Add metadata
-        plt.title(
-            f"{target} for {self._time_id} {int(time_unit)}",
-            fontsize=15,
-        )
+        plt.title(f"{target} for {self._time_id} {int(time_unit)}", fontsize=15)
         plt.xlabel("Longitude", fontsize=12)
         plt.ylabel("Latitude", fontsize=12)
 
@@ -355,35 +282,10 @@ class MappingManager:
         interactive: bool = False,
         as_html: bool = False,
     ):
-        """
-        Plots a map based on the provided mapping dataframe and target variable.
-
-        Parameters:
-        -----------
-        mapping_dataframe : pd.DataFrame
-            The dataframe containing the mapping data.
-        target : str
-            The target variable to plot. Must be a dependent variable or feature in the dataset.
-        interactive : bool, optional
-            If True, creates an interactive plot. Default is False.
-        as_html : bool, optional
-            If True, returns the plot as an HTML string. Default is False.
-
-        Returns:
-        --------
-        fig or str
-            The plot figure object or an HTML string if `as_html` is True.
-
-        Raises:
-        -------
-        ValueError
-            If the target is not a dependent variable or feature in the dataset.
-            If static plots are requested with multiple time units.
-        """
         target_options = set(self._dataset.targets).union(set(self._dataset.features))
         if target not in target_options:
             raise ValueError(
-                f"Target must be a dependent variable or feature in the dataset. Choose from {target_options}"
+                f"Target must be a dependent variable or feature. Choose from {target_options}"
             )
 
         mapping_dataframe[target] = mapping_dataframe[target].apply(
@@ -393,7 +295,11 @@ class MappingManager:
         if interactive:
             fig = self._plot_interactive_map(mapping_dataframe, target)
             if as_html:
-                return fig.to_html(full_html=False)
+                return fig.to_html(
+                    full_html=False,
+                    include_plotlyjs="cdn",  # Use CDN for plotly.js
+                    default_height=900
+                )
             else:
                 return fig
         else:
@@ -402,13 +308,11 @@ class MappingManager:
                 raise ValueError("Static plots require single time unit")
             fig = self._plot_static_map(mapping_dataframe, target, time_units[0])
             if as_html:
-                # Convert figure to HTML image
                 buf = BytesIO()
                 fig.savefig(buf, format="png", bbox_inches="tight", dpi=150)
                 plt.close(fig)
                 buf.seek(0)
                 img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
-                html_img = f'<img src="data:image/png;base64,{img_str}">'
-                return html_img
+                return f'<img src="data:image/png;base64,{img_str}">'
             else:
                 return fig

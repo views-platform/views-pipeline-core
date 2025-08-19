@@ -774,11 +774,12 @@ class ViewsDataLoader:
             RuntimeError: If the saved data file is not found or if the data is incompatible with the partition.
         """
         self.partition = partition  # if self.partition is None else self.partition
-        self.partition_dict = (
-            self._get_partition_dict(steps=self.steps)
-            if self.partition_dict is None
-            else self.partition_dict.get(partition, None)
-        )
+        # self.partition_dict = (
+        #     self._get_partition_dict(steps=self.steps)
+        #     if self.partition_dict is None
+        #     else self.partition_dict.get(partition, None)
+        # )
+        self.partition_dict = self.partition_dict.get(partition, None)
         self.drift_config_dict = (
             drift_detection.drift_detection_partition_dict[partition]
             if self.drift_config_dict is None
