@@ -39,7 +39,7 @@ def generate(script_path: Path, model_name: str, model_algorithm: str) -> bool:
         # "queryset": "escwa001_cflong",
         # "level": "pgm",
         # "creator": "Your name here",
-        "metrics": ["RMSLE", "CRPS"],
+        "metrics": ["RMSLE", "CRPS", "MSE", "MSLE", "y_hat_bar"],
     }}
     return meta_config
 """

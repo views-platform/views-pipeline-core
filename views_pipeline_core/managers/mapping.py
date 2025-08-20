@@ -1,16 +1,21 @@
 import pandas as pd
 import numpy as np
-from views_pipeline_core.data.handlers import PGMDataset, CMDataset, _CDataset, _PGDataset
+from ..data.handlers import (
+    PGMDataset,
+    CMDataset,
+    _CDataset,
+    _PGDataset,
+)
 import logging
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Dict, Any
 from pathlib import Path
 import matplotlib.pyplot as plt
 import geopandas as gpd
 import plotly.express as px
+import plotly.graph_objects as go
 from io import BytesIO
 import base64
-
-# nbformat dependency is required
+import gc
 
 logger = logging.getLogger(__name__)
 
@@ -21,19 +26,47 @@ class MappingManager:
         self._dataframe = self._dataset.dataframe
         self._entity_id = self._dataset._entity_id
         self._time_id = self._dataset._time_id
+        
         if isinstance(views_dataset, _PGDataset):
-            # from ingester3.extensions import PgAccessor
-
             self._world = self.__get_priogrid_shapefile()
-
+            self._location_col = 'gid'
+            self._featureidkey = "properties.gid"
+            # Get all available priogrid attributes (excluding geometry)
+            self._priogrid_attributes = [col for col in self._world.columns if col != 'geometry']
         elif isinstance(views_dataset, _CDataset):
-            # from ingester3.extensions import CAccessor
-
             self._world = self.__get_country_shapefile()
+            self._location_col = 'isoab'
+            self._featureidkey = "properties.ADM0_A3"
+            # Get all available country attributes (excluding geometry)
+            self._country_attributes = [col for col in self._world.columns if col != 'geometry']
         else:
             raise ValueError("Invalid dataset type. Must be a PGMDataset or CMDataset.")
-        # self._mapping_dataframe = self.__init_mapping_dataframe(self._dataframe)
+            
         self._mapping_dataframe = None
+        self._base_geojson = None
+        self._prepare_base_geojson()  # Initialize base GeoJSON
+
+    def _prepare_base_geojson(self):
+        """Create simplified base GeoJSON with only essential properties"""
+        base_gdf = self._world.to_crs(epsg=4326).copy()
+        
+        # Keep only essential properties to reduce size
+        if isinstance(self._dataset, _PGDataset):
+            base_gdf = base_gdf[['gid', 'geometry']]
+        else:
+            base_gdf = base_gdf[['ADM0_A3', 'geometry']]
+            
+        # Simplify geometries to reduce file size
+        base_gdf['geometry'] = base_gdf.geometry.simplify(
+            tolerance=0.3,  # Increased tolerance for smaller file size
+            preserve_topology=True
+        )
+        
+        self._base_geojson = base_gdf.__geo_interface__
+        
+        # Free memory
+        del base_gdf
+        gc.collect()
 
     def __get_country_shapefile(self):
         path = (
@@ -63,16 +96,13 @@ class MappingManager:
         ]
         if not missing.empty:
             logger.warning(f"Missing geometries for: {missing['isoab'].unique()}")
-            # Handle missing cases (e.g., filter or impute)
         if drop_missing_geometries:
             initial_count = len(mapping_dataframe)
-            # Filter out null/empty geometries
             cleaned_gdf = mapping_dataframe[
                 (~mapping_dataframe.geometry.is_empty)
                 & (~mapping_dataframe.geometry.isna())
             ].copy()
 
-            # Calculate dropped rows
             dropped_count = initial_count - len(cleaned_gdf)
             if dropped_count > 0:
                 logger.warning(
@@ -80,7 +110,6 @@ class MappingManager:
                     f"Remaining: {len(cleaned_gdf)} rows. "
                     f"Missing IDs: {mapping_dataframe[self._entity_id][mapping_dataframe.geometry.isna()].unique().tolist()}"
                 )
-
             return cleaned_gdf
         return mapping_dataframe
 
@@ -93,52 +122,37 @@ class MappingManager:
         _dataframe[numeric_cols] = _dataframe[numeric_cols].astype(np.float32)
 
         if isinstance(self._dataset, _CDataset):
-            # Add ISO codes to the dataframe
             _dataframe = self.__add_isoab(dataframe=_dataframe)
-
-            # Merge with shapefile geometries
+            # Include all country attributes in the merge
             _dataframe = _dataframe.merge(
-                self._world[["ADM0_A3", "geometry"]],
+                self._world,
                 left_on="isoab",
                 right_on="ADM0_A3",
                 how="left",
             )
-
-            # Create GeoDataFrame with ALL columns and explicit geometry
             merged_gdf = gpd.GeoDataFrame(
                 _dataframe,
-                geometry="geometry",  # Use merged geometry column
+                geometry="geometry",
                 crs=self._world.crs,
             )
-
             return self.__check_missing_geometries(merged_gdf)
 
         elif isinstance(self._dataset, _PGDataset):
-            # _dataframe = self.__add_cid(dataframe=_dataframe)
-            # Merge priogrid geometries
+            # Include all priogrid attributes in the merge
             _dataframe = _dataframe.merge(
-                self._world[["gid", "geometry"]],
+                self._world,
                 left_on=self._entity_id,
                 right_on="gid",
                 how="left",
             )
-
             return self.__check_missing_geometries(
                 gpd.GeoDataFrame(_dataframe, geometry="geometry", crs=self._world.crs)
             )
 
     def __add_isoab(self, dataframe: pd.DataFrame):
-        # if isinstance(self._dataset, CMDataset):
-        #     dataframe.rename(columns={self._entity_id: "c_id"}, inplace=True)
-        #     dataframe["country_name"] = dataframe.c.name
-        #     dataframe["isoab"] = dataframe.c.isoab
-        #     dataframe.rename(columns={"c_id": self._entity_id}, inplace=True)
-        # return dataframe
-        # Get ISO codes and country names through dataset methods
         iso_df = self._dataset.get_isoab().reset_index()
         name_df = self._dataset.get_name().reset_index()
 
-        # Merge with main dataframe
         dataframe = dataframe.merge(
             iso_df[[self._time_id, self._entity_id, "isoab"]],
             on=[self._time_id, self._entity_id],
@@ -150,7 +164,6 @@ class MappingManager:
             how="left",
         )
         dataframe.rename(columns={"name": "country_name"}, inplace=True)
-
         return dataframe
 
     def get_subset_mapping_dataframe(
@@ -158,13 +171,6 @@ class MappingManager:
         time_ids: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
     ) -> pd.DataFrame:
-        """
-        Get subset dataframe for specified time.
-
-        Parameters:
-        time_ids: Single time ID for static maps or list of time IDs for interactive maps
-        entity_ids: Single entity ID or list of entity IDs
-        """
         _dataframe = self._dataset.get_subset_dataframe(
             time_ids=time_ids, entity_ids=entity_ids
         )
@@ -172,78 +178,190 @@ class MappingManager:
         return _dataframe
 
     def _plot_interactive_map(self, mapping_dataframe: gpd.GeoDataFrame, target: str):
-        if not isinstance(mapping_dataframe, gpd.GeoDataFrame):
-            mapping_dataframe = gpd.GeoDataFrame(mapping_dataframe, geometry="geometry")
-        # Convert to geographic CRS for Plotly
-        mapping_dataframe = mapping_dataframe.to_crs(epsg=4326).copy()
-
-        # Simplify geometries for faster rendering
-        mapping_dataframe["geometry"] = mapping_dataframe.geometry.simplify(
-            tolerance=0.20,  # Adjust based on data scale (degrees for EPSG:4326)
-            preserve_topology=True,
-        )
-        hover_data = [self._entity_id, self._time_id, target]
+        # Create pivot table for efficient data storage
+        all_locations = mapping_dataframe[self._location_col].unique()
+        all_times = sorted(mapping_dataframe[self._time_id].unique())
+        
+        # Create pivot table
+        pivot_df = mapping_dataframe.pivot_table(
+            index=self._location_col,
+            columns=self._time_id,
+            values=target,
+            aggfunc='first'
+        ).reindex(all_locations)
+        
+        # Convert to float32 to save memory
+        z_data = pivot_df[all_times].astype(np.float32).values
+        
+        # Precompute fixed properties for hover data
+        fixed_props = mapping_dataframe.drop_duplicates(self._location_col).set_index(self._location_col)
+        
+        # Prepare base customdata (fixed properties)
         if isinstance(self._dataset, _CDataset):
-            hover_data.append("country_name")
-
-        # Create figure with slider
-        fig = px.choropleth(
-            mapping_dataframe,
-            geojson=mapping_dataframe.geometry,
-            locations=mapping_dataframe.index,
-            color=target,
-            animation_frame=self._time_id,
-            projection="natural earth",
-            hover_data=hover_data,
-            color_continuous_scale="OrRd",
-            range_color=(
-                # mapping_dataframe[target].min(),
-                # mapping_dataframe[target].max(),
-                mapping_dataframe[target].quantile(0.05),
-                mapping_dataframe[target].quantile(0.95),
-            ),
-            labels={self._time_id: "Time Period", target: target},
+            # Include all country attributes in hover data
+            base_customdata = []
+            for loc in all_locations:
+                # Get the location index value first
+                row_data = [loc]  # Add location ID as first element
+                # Add all country attributes
+                for attr in self._country_attributes:
+                    if attr in fixed_props.columns:
+                        row_data.append(fixed_props.loc[loc, attr])
+                    else:
+                        row_data.append(None)  # Handle missing attributes
+                row_data.append(all_times[0])  # Add time
+                base_customdata.append(row_data)
+            
+            # Create hovertemplate for country data
+            hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(self._country_attributes)])
+            hovertemplate = f"<b>Location ID</b>: %{{customdata[0]}}<br>" + hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(self._country_attributes)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+        else:
+            # Include all priogrid attributes in hover data
+            base_customdata = []
+            for loc in all_locations:
+                # Get the location index value first
+                row_data = [loc]  # Add location ID as first element
+                # Add all priogrid attributes
+                for attr in self._priogrid_attributes:
+                    if attr in fixed_props.columns:
+                        row_data.append(fixed_props.loc[loc, attr])
+                    else:
+                        row_data.append(None)  # Handle missing attributes
+                row_data.append(all_times[0])  # Add time
+                base_customdata.append(row_data)
+            
+            # Create hovertemplate for priogrid data
+            hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(self._priogrid_attributes)])
+            hovertemplate = f"<b>Location ID</b>: %{{customdata[0]}}<br>" + hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(self._priogrid_attributes)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+        
+        # Calculate global color range
+        z_min, z_max = np.nanquantile(z_data, [0.05, 1.00])
+        
+        # Create figure with graph objects for better control
+        fig = go.Figure(
+            data=go.Choropleth(
+                geojson=self._base_geojson,
+                locations=all_locations,
+                z=z_data[:, 0],  # First time step
+                featureidkey=self._featureidkey,
+                customdata=base_customdata,
+                hovertemplate=hovertemplate,
+                marker_line_width=0.5,
+                coloraxis="coloraxis"
+            )
         )
-
-        # Adjust layout for larger size
+        
+        # Prepare frames with time-specific data
+        frames = []
+        for i, time in enumerate(all_times[1:], start=1):
+            # Prepare customdata for this frame
+            if isinstance(self._dataset, _CDataset):
+                frame_customdata = []
+                for loc in all_locations:
+                    # Get the location index value first
+                    row_data = [loc]  # Add location ID as first element
+                    # Add all country attributes
+                    for attr in self._country_attributes:
+                        if attr in fixed_props.columns:
+                            row_data.append(fixed_props.loc[loc, attr])
+                        else:
+                            row_data.append(None)  # Handle missing attributes
+                    row_data.append(time)  # Add time
+                    frame_customdata.append(row_data)
+                
+                frame_hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(self._country_attributes)])
+                frame_hovertemplate = f"<b>Location ID</b>: %{{customdata[0]}}<br>" + frame_hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(self._country_attributes)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+            else:
+                frame_customdata = []
+                for loc in all_locations:
+                    # Get the location index value first
+                    row_data = [loc]  # Add location ID as first element
+                    # Add all priogrid attributes
+                    for attr in self._priogrid_attributes:
+                        if attr in fixed_props.columns:
+                            row_data.append(fixed_props.loc[loc, attr])
+                        else:
+                            row_data.append(None)  # Handle missing attributes
+                    row_data.append(time)  # Add time
+                    frame_customdata.append(row_data)
+                
+                frame_hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(self._priogrid_attributes)])
+                frame_hovertemplate = f"<b>Location ID</b>: %{{customdata[0]}}<br>" + frame_hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(self._priogrid_attributes)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+            
+            frames.append(go.Frame(
+                data=[go.Choropleth(
+                    z=z_data[:, i],
+                    customdata=frame_customdata,
+                    hovertemplate=frame_hovertemplate
+                )],
+                name=str(time)
+            ))
+        
+        fig.frames = frames
+        
+        # Add play button and slider
         fig.update_layout(
-            height=900,  # Increased from default 450
-            # width=1200,  # Increased from default 700
+            updatemenus=[{
+                "type": "buttons",
+                "buttons": [
+                    {
+                        "args": [None, {"frame": {"duration": 500, "redraw": True}, 
+                                "fromcurrent": True, "transition": {"duration": 300}}],
+                        "label": "Play",
+                        "method": "animate"
+                    },
+                    {
+                        "args": [[None], {"frame": {"duration": 0, "redraw": True}, 
+                                "mode": "immediate", "transition": {"duration": 0}}],
+                        "label": "Pause",
+                        "method": "animate"
+                    }
+                ],
+                "direction": "left",
+                "pad": {"r": 10, "t": 87},
+                "showactive": False,
+                "type": "buttons",
+                "x": 0.1,
+                "xanchor": "right",
+                "y": 0,
+                "yanchor": "top"
+            }],
+            sliders=[{
+                "active": 0,
+                "yanchor": "top",
+                "xanchor": "left",
+                "currentvalue": {
+                    "font": {"size": 14},
+                    "prefix": f"{self._time_id}: ",
+                    "visible": True,
+                    "xanchor": "right"
+                },
+                "transition": {"duration": 300, "easing": "cubic-in-out"},
+                "pad": {"b": 10, "t": 50},
+                "len": 0.9,
+                "x": 0.1,
+                "y": 0,
+                "steps": [{
+                    "args": [
+                        [str(time)],
+                        {"frame": {"duration": 300, "redraw": True}, "mode": "immediate"}
+                    ],
+                    "label": str(time),
+                    "method": "animate"
+                } for time in all_times]
+            }]
+        )
+        
+        # Layout adjustments
+        fig.update_layout(
+            height=900,
             autosize=True,
             margin={"r": 0, "t": 40, "l": 0, "b": 40},
-            sliders=[
-                {
-                    "currentvalue": {
-                        "prefix": f"{self._time_id}: ",
-                        "font": {"size": 14},
-                    },
-                    "pad": {"t": 50, "b": 20},  # Added bottom padding
-                    "len": 0.9,  # Make slider wider
-                }
-            ],
-        )
-        # fig.update_layout(
-        #     height=1000,  # Increased height
-        #     margin={"r": 0, "t": 40, "l": 0, "b": 140},  # More bottom space
-        #     sliders=[
-        #         {
-        #             "currentvalue": {
-        #                 "prefix": f"{self._time_id}: ",
-        #                 "font": {"size": 14},
-        #                 "xanchor": "right",
-        #                 "offset": 20,
-        #             },
-        #             "pad": {"t": 50, "b": 100},  # Increased bottom padding
-        #             "len": 0.95,
-        #             "x": 0.05,  # Left-align slider
-        #         }
-        #     ],
-        # )
-        fig.update_layout(
+            coloraxis=dict(colorscale="OrRd", cmin=z_min, cmax=z_max),
             annotations=[
                 dict(
                     x=0.5,
-                    y=-0.15,  # Position below main plot
+                    y=-0.15,
                     showarrow=False,
                     text="",
                     xref="paper",
@@ -252,18 +370,12 @@ class MappingManager:
             ]
         )
 
-        fig.update_traces(
-            marker_line_width=0.5, marker_opacity=0.9, selector=dict(type="choropleth")
-        )
-
-        # Improve map rendering
         fig.update_geos(
             fitbounds="locations",
             visible=False,
             showcountries=True,
-            countrycolor="rgba(100,100,100,0.3)",  # Lighter gray
-            countrywidth=0.3,  # Thinner borders
-            # Add grid line styling
+            countrycolor="rgba(100,100,100,0.3)",
+            countrywidth=0.3,
             showlakes=True,
             showocean=False,
             showsubunits=True,
@@ -271,59 +383,36 @@ class MappingManager:
             subunitwidth=0.05,
         )
 
-        # Add latitude/longitude grid styling
-        # fig.update_layout(
-        #     geo=dict(
-        #         lonaxis=dict(
-        #             showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
-        #         ),
-        #         lataxis=dict(
-        #             showgrid=True, gridcolor="rgba(200,200,200,0.3)", gridwidth=0.2
-        #         ),
-        #     )
-        # )
-
+        # Free memory
+        del pivot_df, z_data, fixed_props, base_customdata
+        gc.collect()
+        
         return fig
 
     def _plot_static_map(
         self, mapping_dataframe: gpd.GeoDataFrame, target: str, time_unit: int
     ):
-        # Validation checks
         if target not in mapping_dataframe.columns:
-            raise ValueError(f"Target column '{target}' not found in mapping dataframe")
-
+            raise ValueError(f"Target column '{target}' not found")
         if mapping_dataframe[target].isnull().all():
-            raise ValueError(f"No valid values found for target '{target}'")
+            raise ValueError(f"No valid values for target '{target}'")
 
         fig, ax = plt.subplots(1, 1, figsize=(15, 10))
-
-        # Plot boundaries
         mapping_dataframe.boundary.plot(ax=ax, linewidth=0.3, color="black")
 
-        # Plot data values
         plot = mapping_dataframe.plot(
             column=target,
             ax=ax,
             legend=True,
-            # legend_kwds={
-            #     "label": f"",
-            #     "orientation": "horizontal",
-            #     "pad": 0.01,
-            #     "aspect": 40,
-            # },
             cmap="OrRd",
             vmin=mapping_dataframe[target].quantile(0.05),
-            vmax=mapping_dataframe[target].quantile(0.95),
+            vmax=mapping_dataframe[target].quantile(1.00),
             linewidth=0.1,
             edgecolor="#404040",
             alpha=0.9,
         )
 
-        # Add metadata
-        plt.title(
-            f"{target} for {self._time_id} {int(time_unit)}",
-            fontsize=15,
-        )
+        plt.title(f"{target} for {self._time_id} {int(time_unit)}", fontsize=15)
         plt.xlabel("Longitude", fontsize=12)
         plt.ylabel("Latitude", fontsize=12)
 
@@ -350,35 +439,10 @@ class MappingManager:
         interactive: bool = False,
         as_html: bool = False,
     ):
-        """
-        Plots a map based on the provided mapping dataframe and target variable.
-
-        Parameters:
-        -----------
-        mapping_dataframe : pd.DataFrame
-            The dataframe containing the mapping data.
-        target : str
-            The target variable to plot. Must be a dependent variable or feature in the dataset.
-        interactive : bool, optional
-            If True, creates an interactive plot. Default is False.
-        as_html : bool, optional
-            If True, returns the plot as an HTML string. Default is False.
-
-        Returns:
-        --------
-        fig or str
-            The plot figure object or an HTML string if `as_html` is True.
-
-        Raises:
-        -------
-        ValueError
-            If the target is not a dependent variable or feature in the dataset.
-            If static plots are requested with multiple time units.
-        """
         target_options = set(self._dataset.targets).union(set(self._dataset.features))
         if target not in target_options:
             raise ValueError(
-                f"Target must be a dependent variable or feature in the dataset. Choose from {target_options}"
+                f"Target must be a dependent variable or feature. Choose from {target_options}"
             )
 
         mapping_dataframe[target] = mapping_dataframe[target].apply(
@@ -388,7 +452,16 @@ class MappingManager:
         if interactive:
             fig = self._plot_interactive_map(mapping_dataframe, target)
             if as_html:
-                return fig.to_html(full_html=True)
+                html_str = fig.to_html(
+                    full_html=True,
+                    include_plotlyjs="cdn",  # Use CDN for plotly.js
+                    default_height=900,
+                    div_id="map-container"
+                )
+                # Free memory after generating HTML
+                del fig
+                gc.collect()
+                return html_str
             else:
                 return fig
         else:
@@ -397,13 +470,11 @@ class MappingManager:
                 raise ValueError("Static plots require single time unit")
             fig = self._plot_static_map(mapping_dataframe, target, time_units[0])
             if as_html:
-                # Convert figure to HTML image
                 buf = BytesIO()
                 fig.savefig(buf, format="png", bbox_inches="tight", dpi=150)
                 plt.close(fig)
                 buf.seek(0)
                 img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
-                html_img = f'<img src="data:image/png;base64,{img_str}">'
-                return html_img
+                return f'<img src="data:image/png;base64,{img_str}">'
             else:
                 return fig

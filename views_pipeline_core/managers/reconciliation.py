@@ -1,8 +1,9 @@
 import sys
-from views_pipeline_core.data.handlers import _CDataset, _PGDataset
+from ..data.handlers import _CDataset, _PGDataset
 import torch
 import logging
-from views_pipeline_core.data.statistics import ForecastReconciler
+from ..data.statistics import ForecastReconciler
+from ..wandb.utils import wandb_alert
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +11,11 @@ class ReconciliationManager:
     def __init__(self, c_dataset: _CDataset, pg_dataset: _PGDataset):
         self._c_dataset = c_dataset
         self._pg_dataset = pg_dataset
+        if not isinstance(c_dataset, _CDataset):
+            raise TypeError(f"Expected _CDataset, got {type(c_dataset)}")
+        if not isinstance(pg_dataset, _PGDataset):
+            raise TypeError(f"Expected _PGDataset, got {type(pg_dataset)}")
+
         self._device = self.__detect_torch_device()
         print(f"Using device: {self._device}")
         self._reconciler = ForecastReconciler(device=self._device)
@@ -26,11 +32,12 @@ class ReconciliationManager:
                 f"Country dataset time unit: {c_dataset._time_id}, "
                 f"Grid dataset time unit: {pg_dataset._time_id}"
             )
-        
-        if c_dataset._time_values != pg_dataset._time_values:
+
+        uncommon_time_steps = set(c_dataset._time_values) ^ set(pg_dataset._time_values)
+        if uncommon_time_steps:
             raise ValueError(
-                f"The time values in the country dataset and the grid dataset must match. Uncommon time steps: "
-                f"{set(c_dataset._time_values) ^ set(pg_dataset._time_values)}"
+                f"The datasets have different time steps: {uncommon_time_steps}. "
+                "Ensure both datasets cover the same time periods."
             )
 
         self._valid_cids = list(
@@ -48,6 +55,10 @@ class ReconciliationManager:
             )
         self._valid_time_ids = set(self._c_dataset._time_values) & set(
             self._pg_dataset._time_values
+        )
+        wandb_alert(
+            title=self.__class__.__name__,
+            text=f"All checks passed. Starting reconciliation with {len(self._valid_cids)} valid countries and {len(self._valid_time_ids)} valid time IDs for targets: {self._valid_targets}",
         )
 
     def __detect_torch_device(self):
@@ -132,9 +143,21 @@ class ReconciliationManager:
                         ), 
                         feature=feature
                     )
+
+            if country_idx % 10 == 0 or country_idx == len(self._valid_cids):
+                # logger.info(
+                #     f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})"
+                # )
+                wandb_alert(
+                    title=self.__class__.__name__,
+                    text=f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})",
+                )
         
         # Clear the line after completion
         sys.stdout.write("\rReconciliation complete.\n")
         sys.stdout.flush()
-        
+        wandb_alert(
+            title=self.__class__.__name__,
+            text="All reconciliations have been successfully completed."
+        )
         return self._pg_dataset.reconciled_dataframe

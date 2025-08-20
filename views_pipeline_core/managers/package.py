@@ -2,8 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 import re
-from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.managers.model import ModelPathManager
+from ..configs.pipeline import PipelineConfig
+from ..managers.model import ModelPathManager
 import requests
 import logging
 import time

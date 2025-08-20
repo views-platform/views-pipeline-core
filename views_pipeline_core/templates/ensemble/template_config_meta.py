@@ -33,10 +33,10 @@ def generate(script_path: Path, model_name: str) -> bool:
     meta_config = {{
         "name": "{model_name}", # Eg. "happy_kitten"
         "models": [], # Eg. ["model1", "model2", "model3"]
-        "targets": "ln_ged_sb_dep",  # Eg. "ln_ged_sb_dep"
+        "targets": ["ln_ged_sb_dep"],
         "level": "pgm", # Eg. "pgm", "cm"
         "aggregation": "median", # Eg. "median", "mean"
-        "metrics": ["RMSLE", "CRPS"],
+        "metrics": ["RMSLE", "CRPS", "MSE", "MSLE", "y_hat_bar"],
         "creator": "Your name here" 
     }}
     return meta_config
