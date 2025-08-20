@@ -328,7 +328,7 @@ class EvaluationReportTemplate:
                     # Sort by metric name
                     target_metric_to_sort = search_for_item_name(
                         searchspace=full_metric_dataframe.columns.tolist(),
-                        keywords=["MSLE"] if "MSLE" in metrics else metrics[0],
+                        keywords=["MSLE"] if "MSLE" in metrics else list(metrics)[0],
                     )
                     full_metric_dataframe = full_metric_dataframe.sort_values(
                         by=target_metric_to_sort, ascending=True
