@@ -99,19 +99,19 @@ def search_for_item_name(searchspace: List[str], keywords: List[str]) -> Optiona
 
 def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: str, metrics: list, conflict_code: str, model_name: str, keywords: list = []) -> pd.DataFrame:
     if not isinstance(metrics, list):
-        raise ValueError("Metrics should be a list.")
+        raise ValueError(f"Metrics should be a list. Got {type(metrics)} instead.")
     if not all(isinstance(m, str) for m in metrics):
-        raise ValueError("Metrics should be a list of strings.")
+        raise ValueError(f"Metrics should be a list of strings. Got {[type(m) for m in metrics]} instead.")
     if not isinstance(eval_type, str):
-        raise ValueError("Eval type should be a string.")
+        raise ValueError(f"Eval type should be a string. Got {type(eval_type)} instead.")
     if not isinstance(conflict_code, str):
-        raise ValueError("Conflict code should be a string.")
+        raise ValueError(f"Conflict code should be a string. Got {type(conflict_code)} instead.")
     if not isinstance(keywords, list):
-        raise ValueError("Keywords should be a list.")
+        raise ValueError(f"Keywords should be a list. Got {type(keywords)} instead.")
     if not all(isinstance(k, str) for k in keywords):
-        raise ValueError("Keywords should be a list of strings.")
+        raise ValueError(f"Keywords should be a list of strings. Got {[type(k) for k in keywords]} instead.")
     if not isinstance(evaluation_dict, dict):
-        raise ValueError("Evaluation dictionary should be a dictionary.")
+        raise ValueError(f"Evaluation dictionary should be a dictionary. Got {type(evaluation_dict)} instead.")
 
     target_metric_keys = []
     for metric in metrics:
