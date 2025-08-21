@@ -144,55 +144,6 @@ class EvaluationReportTemplate:
         logger.info(f"Exported report to {report_path}")
         return report_path
 
-    def _add_model_report_content(
-        self,
-        report_manager: ReportManager,
-        metadata_dict: Dict,
-        evaluation_dict: Dict,
-        conflict_code: str,
-        metrics: List[str],
-    ) -> None:
-        """Add model-specific content to the evaluation report."""
-        # try:
-        #     partition_metadata = {
-        #         k: v
-        #         for k, v in metadata_dict.items()
-        #         if k.lower() in {"calibration", "validation", "forecasting"}
-        #     }
-        #     report_manager.add_heading("Data Partitions", level=2)
-        #     report_manager.add_table(partition_metadata)
-        # except Exception:
-        #     logger.warning("Could not find partition metadata in the run summary")
-
-        report_manager.add_heading("Model Metrics", level=2)
-        # full_metric_dataframe = None
-        # for metric in metrics:
-        #     # report_manager.add_heading(f"{str(metric).upper()}", level=3)
-        #     metric_dataframe = filter_metrics_from_dict(
-        #         evaluation_dict=evaluation_dict,
-        #         metrics=[metric, "mean"],
-        #         conflict_code=conflict_code,
-        #         model_name=metadata_dict.get("name", None),
-        #     )
-        #     report_manager.add_table(data=metric_dataframe)
-        for eval_type in self.eval_types:
-            metric_dataframe = filter_metrics_by_eval_type_and_metrics(
-                evaluation_dict=evaluation_dict,
-                eval_type=eval_type,
-                metrics=metrics,
-                conflict_code=conflict_code,
-                model_name=metadata_dict.get("name", None),
-                keywords=["mean"],
-            )
-            # if "y_hat_bar" in metric_dataframe.columns:
-            #     metric_dataframe.rename(
-            #         columns={"y_hat_bar": r"$\bar{\hat{y}}$"},
-            #         inplace=True,
-            #     )
-            report_manager.add_table(
-                data=metric_dataframe,
-                header=f"{eval_type.replace('-', ' ').title()}",
-            )
 
     def _add_report_content(
         self,
@@ -326,13 +277,22 @@ class EvaluationReportTemplate:
 
                 if full_metric_dataframe is not None and not full_metric_dataframe.empty:
                     # Sort by metric name
-                    target_metric_to_sort = search_for_item_name(
-                        searchspace=full_metric_dataframe.columns.tolist(),
-                        keywords=["MSLE"] if "MSLE" in metrics else list(metrics)[0],
-                    )
-                    full_metric_dataframe = full_metric_dataframe.sort_values(
-                        by=target_metric_to_sort, ascending=True
-                    )
+                    valid_metric_search_index = 0
+                    while True:
+                        try:
+                            target_metric_to_sort = search_for_item_name(
+                                searchspace=full_metric_dataframe.columns.tolist(),
+                                keywords=["MSLE"] if "MSLE" in metrics else list(metrics)[valid_metric_search_index],
+                            )
+                            full_metric_dataframe = full_metric_dataframe.sort_values(
+                                by=target_metric_to_sort, ascending=True
+                            )
+                            break
+                        except KeyError:
+                            logger.warning(
+                                f"Metric '{target_metric_to_sort}' not found in DataFrame columns. Trying next metric...")
+                            valid_metric_search_index += 1
+
                     # if "y_hat_bar" in full_metric_dataframe.columns:
                     #     full_metric_dataframe.rename(
                     #         columns={"y_hat_bar": r"$\bar{\hat{y}}$"},
