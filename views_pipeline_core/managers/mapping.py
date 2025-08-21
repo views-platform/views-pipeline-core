@@ -21,7 +21,17 @@ logger = logging.getLogger(__name__)
 
 
 class MappingManager:
-    def __init__(self, views_dataset: Union[PGMDataset, CMDataset]):
+    def __init__(self, views_dataset: Union[_PGDataset, _CDataset]):
+        """
+        Initializes the mapping manager with the provided dataset, setting up internal references
+        to the dataset's dataframe, entity and time identifiers, and loading the appropriate
+        shapefile and location metadata based on the dataset type.
+        Args:
+            views_dataset (Union[_PGDataset, _CDataset]): The dataset to be managed, either a
+                priogrid dataset (_PGDataset) or a country dataset (_CDataset).
+        Raises:
+            ValueError: If the provided dataset is not an instance of _PGDataset or _CDataset.
+        """
         self._dataset = views_dataset
         self._dataframe = self._dataset.dataframe
         self._entity_id = self._dataset._entity_id
@@ -35,30 +45,41 @@ class MappingManager:
             self._priogrid_attributes = [col for col in self._world.columns if col != 'geometry']
         elif isinstance(views_dataset, _CDataset):
             self._world = self.__get_country_shapefile()
-            self._location_col = 'isoab'
+            self._location_col = 'ADM0_A3'
             self._featureidkey = "properties.ADM0_A3"
             # Get all available country attributes (excluding geometry)
             self._country_attributes = [col for col in self._world.columns if col != 'geometry']
         else:
-            raise ValueError("Invalid dataset type. Must be a PGMDataset or CMDataset.")
-            
+            raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
+
         self._mapping_dataframe = None
         self._base_geojson = None
         self._prepare_base_geojson()  # Initialize base GeoJSON
 
     def _prepare_base_geojson(self):
-        """Create simplified base GeoJSON with only essential properties"""
+        """
+        Creates a simplified base GeoJSON representation of the world dataset with only essential properties.
+        This method transforms the world GeoDataFrame to WGS84 (EPSG:4326), retains only the necessary columns
+        (depending on the dataset type), and simplifies the geometries to reduce file size. The resulting
+        GeoJSON is stored in the `_base_geojson` attribute. Memory used by intermediate objects is released
+        after processing.
+        Returns:
+            None
+        """
         base_gdf = self._world.to_crs(epsg=4326).copy()
         
         # Keep only essential properties to reduce size
         if isinstance(self._dataset, _PGDataset):
             base_gdf = base_gdf[['gid', 'geometry']]
-        else:
+        elif isinstance(self._dataset, _CDataset):
+            # For country datasets, keep ADM0_A3 (which matches isoab) and geometry
             base_gdf = base_gdf[['ADM0_A3', 'geometry']]
+        else:
+            raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
             
         # Simplify geometries to reduce file size
         base_gdf['geometry'] = base_gdf.geometry.simplify(
-            tolerance=0.3,  # Increased tolerance for smaller file size
+            tolerance=0.3,
             preserve_topology=True
         )
         
@@ -69,6 +90,17 @@ class MappingManager:
         gc.collect()
 
     def __get_country_shapefile(self):
+        """
+        Loads and returns the country shapefile as a GeoDataFrame.
+
+        Returns:
+            geopandas.GeoDataFrame: A GeoDataFrame containing the country boundaries
+            from the 'ne_110m_admin_0_countries.shp' shapefile.
+
+        Raises:
+            FileNotFoundError: If the shapefile does not exist at the specified path.
+            OSError: If there is an issue reading the shapefile.
+        """
         path = (
             Path(__file__).parent.parent
             / "mapping"
@@ -76,9 +108,31 @@ class MappingManager:
             / "country"
             / "ne_110m_admin_0_countries.shp"
         )
-        return gpd.read_file(path)
+        world = gpd.read_file(path)
+        
+        # Ensure ADM0_A3 column exists and is properly formatted
+        # if 'ADM0_A3' not in world.columns:
+        #     # Try to find the ISO code column with a different name
+        #     iso_cols = [col for col in world.columns if 'iso' in col.lower() or 'a3' in col.lower()]
+        #     if iso_cols:
+        #         world = world.rename(columns={iso_cols[0]: 'ADM0_A3'})
+        #     else:
+        #         # If no ISO code column found, create one from the index
+        #         world['ADM0_A3'] = world.index.astype(str)
+        
+        return world
 
     def __get_priogrid_shapefile(self):
+        """
+        Loads and returns the PrioGrid shapefile as a GeoDataFrame.
+
+        Returns:
+            geopandas.GeoDataFrame: A GeoDataFrame containing the PrioGrid cell shapefile data.
+
+        Raises:
+            FileNotFoundError: If the shapefile does not exist at the specified path.
+            OSError: If there is an issue reading the shapefile.
+        """
         path = (
             Path(__file__).parent.parent
             / "mapping"
@@ -91,6 +145,20 @@ class MappingManager:
     def __check_missing_geometries(
         self, mapping_dataframe: pd.DataFrame, drop_missing_geometries: bool = True
     ):
+        """
+        Checks for missing geometries in the provided GeoDataFrame and optionally drops rows with missing geometries.
+
+        Args:
+            mapping_dataframe (pd.DataFrame): The DataFrame containing geometry data to check.
+            drop_missing_geometries (bool, optional): If True, rows with missing or empty geometries are dropped from the DataFrame. Defaults to True.
+
+        Returns:
+            pd.DataFrame: The cleaned DataFrame with missing geometries removed if `drop_missing_geometries` is True; otherwise, returns the original DataFrame.
+
+        Logs:
+            - Warns if any missing geometries are found, listing their unique 'isoab' values.
+            - Warns about the number of rows dropped and the IDs of missing geometries if any rows are removed.
+        """
         missing = mapping_dataframe[
             mapping_dataframe.geometry.is_empty | mapping_dataframe.geometry.isna()
         ]
@@ -114,6 +182,25 @@ class MappingManager:
         return mapping_dataframe
 
     def __init_mapping_dataframe(self, dataframe: pd.DataFrame) -> gpd.GeoDataFrame:
+        """
+        Initializes and returns a GeoDataFrame for mapping purposes based on the provided DataFrame and the dataset type.
+
+        This method processes the input DataFrame by:
+        - Resetting its index and selecting relevant columns (targets, entity ID, and time ID).
+        - Casting all numeric columns to float32 for consistency.
+        - Depending on the dataset type (`_CDataset` or `_PGDataset`), it adds ISO country codes and merges with a world geometry DataFrame (`self._world`) using appropriate keys.
+        - Constructs a GeoDataFrame with the merged data and checks for missing geometries.
+
+        Args:
+            dataframe (pd.DataFrame): The input DataFrame containing the data to be mapped.
+
+        Returns:
+            gpd.GeoDataFrame: A GeoDataFrame ready for mapping, with geometries merged and validated.
+
+        Raises:
+            KeyError: If required columns for merging are missing in the input DataFrame or `self._world`.
+            ValueError: If geometries are missing after merging.
+        """
         _dataframe = dataframe.reset_index()[
             self._dataset.targets + [self._entity_id, self._time_id]
         ]
@@ -123,6 +210,10 @@ class MappingManager:
 
         if isinstance(self._dataset, _CDataset):
             _dataframe = self.__add_isoab(dataframe=_dataframe)
+
+            # _dataframe['isoab'] = _dataframe['isoab'].str.upper()
+            # self._world['ADM0_A3'] = self._world['ADM0_A3'].str.upper()
+            
             # Include all country attributes in the merge
             _dataframe = _dataframe.merge(
                 self._world,
@@ -139,6 +230,7 @@ class MappingManager:
 
         elif isinstance(self._dataset, _PGDataset):
             # Include all priogrid attributes in the merge
+            _dataframe = self.__add_isoab(dataframe=_dataframe)
             _dataframe = _dataframe.merge(
                 self._world,
                 left_on=self._entity_id,
@@ -148,10 +240,22 @@ class MappingManager:
             return self.__check_missing_geometries(
                 gpd.GeoDataFrame(_dataframe, geometry="geometry", crs=self._world.crs)
             )
+        
+        else:
+            raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
 
     def __add_isoab(self, dataframe: pd.DataFrame):
+        """
+        Adds 'isoab' and 'country_name' columns to the given DataFrame by merging with ISO and name datasets.
+
+        Parameters:
+            dataframe (pd.DataFrame): The input DataFrame to which 'isoab' and 'country_name' columns will be added.
+
+        Returns:
+            pd.DataFrame: The input DataFrame with additional 'isoab' and 'country_name' columns merged in.
+        """
         iso_df = self._dataset.get_isoab().reset_index()
-        name_df = self._dataset.get_name().reset_index()
+        name_df = self._dataset.get_name(with_id=True).reset_index()
 
         dataframe = dataframe.merge(
             iso_df[[self._time_id, self._entity_id, "isoab"]],
@@ -171,6 +275,16 @@ class MappingManager:
         time_ids: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
     ) -> pd.DataFrame:
+        """
+        Retrieves a subset of the mapping DataFrame based on specified time and entity IDs.
+
+        Parameters:
+            time_ids (Optional[Union[int, List[int]]]): An integer or list of integers specifying the time IDs to filter the DataFrame. If None, no filtering is applied on time IDs.
+            entity_ids (Optional[Union[int, List[int]]]): An integer or list of integers specifying the entity IDs to filter the DataFrame. If None, no filtering is applied on entity IDs.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the subset of mapping data filtered by the provided time and entity IDs.
+        """
         _dataframe = self._dataset.get_subset_dataframe(
             time_ids=time_ids, entity_ids=entity_ids
         )
@@ -178,6 +292,20 @@ class MappingManager:
         return _dataframe
 
     def _plot_interactive_map(self, mapping_dataframe: gpd.GeoDataFrame, target: str):
+        """
+        Generates an interactive animated choropleth map using Plotly, visualizing the temporal evolution of a target variable across geographic locations.
+        Args:
+            mapping_dataframe (gpd.GeoDataFrame): A GeoDataFrame containing geographic features, time identifiers, and the target variable to visualize.
+            target (str): The name of the column in `mapping_dataframe` representing the variable to be visualized on the map.
+        Returns:
+            plotly.graph_objs._figure.Figure: A Plotly Figure object containing the interactive animated choropleth map.
+        Details:
+            - The map animates over the time dimension, allowing users to explore changes in the target variable across locations.
+            - Hover tooltips display location-specific metadata, excluding geometry and index columns.
+            - The color scale is globally normalized based on quantiles of the target variable.
+            - Includes play/pause controls and a time slider for animation.
+            - Memory usage is optimized by converting data to float32 and cleaning up intermediate variables.
+        """
         # Create pivot table for efficient data storage
         all_locations = mapping_dataframe[self._location_col].unique()
         all_times = sorted(mapping_dataframe[self._time_id].unique())
@@ -196,43 +324,34 @@ class MappingManager:
         # Precompute fixed properties for hover data
         fixed_props = mapping_dataframe.drop_duplicates(self._location_col).set_index(self._location_col)
         
-        # Prepare base customdata (fixed properties)
-        if isinstance(self._dataset, _CDataset):
-            # Include all country attributes in hover data
-            base_customdata = []
-            for loc in all_locations:
-                # Get the location index value first
-                row_data = [loc]  # Add location ID as first element
-                # Add all country attributes
-                for attr in self._country_attributes:
-                    if attr in fixed_props.columns:
-                        row_data.append(fixed_props.loc[loc, attr])
-                    else:
-                        row_data.append(None)  # Handle missing attributes
-                row_data.append(all_times[0])  # Add time
-                base_customdata.append(row_data)
-            
-            # Create hovertemplate for country data
-            hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(self._country_attributes)])
-            hovertemplate = f"<b>Location ID</b>: %{{customdata[0]}}<br>" + hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(self._country_attributes)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+        # Define columns to exclude from hover (geometry, index columns, and the target column)
+        exclude_cols = ['geometry', self._time_id, self._entity_id, target]
+        hover_columns = [col for col in fixed_props.columns if col not in exclude_cols]
+        
+        # Determine location label based on dataset type
+        if isinstance(self._dataset, _PGDataset):
+            location_label = "gid"
+        elif isinstance(self._dataset, _CDataset):
+            location_label = "ADM0_A3"
         else:
-            # Include all priogrid attributes in hover data
-            base_customdata = []
-            for loc in all_locations:
-                # Get the location index value first
-                row_data = [loc]  # Add location ID as first element
-                # Add all priogrid attributes
-                for attr in self._priogrid_attributes:
-                    if attr in fixed_props.columns:
-                        row_data.append(fixed_props.loc[loc, attr])
-                    else:
-                        row_data.append(None)  # Handle missing attributes
-                row_data.append(all_times[0])  # Add time
-                base_customdata.append(row_data)
-            
-            # Create hovertemplate for priogrid data
-            hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(self._priogrid_attributes)])
-            hovertemplate = f"<b>Location ID</b>: %{{customdata[0]}}<br>" + hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(self._priogrid_attributes)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+            raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
+        
+        # Prepare base customdata (fixed properties)
+        base_customdata = []
+        for loc in all_locations:
+            row_data = [loc]  # Add location ID as first element
+            # Add all hover columns (excluding target)
+            for attr in hover_columns:
+                if attr in fixed_props.columns:
+                    row_data.append(fixed_props.loc[loc, attr])
+                else:
+                    row_data.append(None)
+            row_data.append(all_times[0])  # Add time
+            base_customdata.append(row_data)
+        
+        # Create hovertemplate
+        hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(hover_columns)])
+        hovertemplate = f"<b>{location_label}</b>: %{{customdata[0]}}<br>" + hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
         
         # Calculate global color range
         z_min, z_max = np.nanquantile(z_data, [0.05, 1.00])
@@ -255,38 +374,20 @@ class MappingManager:
         frames = []
         for i, time in enumerate(all_times[1:], start=1):
             # Prepare customdata for this frame
-            if isinstance(self._dataset, _CDataset):
-                frame_customdata = []
-                for loc in all_locations:
-                    # Get the location index value first
-                    row_data = [loc]  # Add location ID as first element
-                    # Add all country attributes
-                    for attr in self._country_attributes:
-                        if attr in fixed_props.columns:
-                            row_data.append(fixed_props.loc[loc, attr])
-                        else:
-                            row_data.append(None)  # Handle missing attributes
-                    row_data.append(time)  # Add time
-                    frame_customdata.append(row_data)
-                
-                frame_hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(self._country_attributes)])
-                frame_hovertemplate = f"<b>Location ID</b>: %{{customdata[0]}}<br>" + frame_hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(self._country_attributes)+1}]}}<br>{target}: %{{z}}<extra></extra>"
-            else:
-                frame_customdata = []
-                for loc in all_locations:
-                    # Get the location index value first
-                    row_data = [loc]  # Add location ID as first element
-                    # Add all priogrid attributes
-                    for attr in self._priogrid_attributes:
-                        if attr in fixed_props.columns:
-                            row_data.append(fixed_props.loc[loc, attr])
-                        else:
-                            row_data.append(None)  # Handle missing attributes
-                    row_data.append(time)  # Add time
-                    frame_customdata.append(row_data)
-                
-                frame_hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(self._priogrid_attributes)])
-                frame_hovertemplate = f"<b>Location ID</b>: %{{customdata[0]}}<br>" + frame_hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(self._priogrid_attributes)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+            frame_customdata = []
+            for loc in all_locations:
+                row_data = [loc]  # Add location ID as first element
+                # Add all hover columns
+                for attr in hover_columns:
+                    if attr in fixed_props.columns:
+                        row_data.append(fixed_props.loc[loc, attr])
+                    else:
+                        row_data.append(None)
+                row_data.append(time)  # Add time
+                frame_customdata.append(row_data)
+            
+            frame_hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(hover_columns)])
+            frame_hovertemplate = f"<b>{location_label}</b>: %{{customdata[0]}}<br>" + frame_hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
             
             frames.append(go.Frame(
                 data=[go.Choropleth(
@@ -352,11 +453,11 @@ class MappingManager:
             }]
         )
         
-        # Layout adjustments
+        # Layout adjustments with increased padding
         fig.update_layout(
             height=900,
             autosize=True,
-            margin={"r": 0, "t": 40, "l": 0, "b": 40},
+            margin={"r": 20, "t": 60, "l": 20, "b": 60},  # Increased padding
             coloraxis=dict(colorscale="OrRd", cmin=z_min, cmax=z_max),
             annotations=[
                 dict(
@@ -392,6 +493,25 @@ class MappingManager:
     def _plot_static_map(
         self, mapping_dataframe: gpd.GeoDataFrame, target: str, time_unit: int
     ):
+        """
+        Plots a static choropleth map for a specified target column in a GeoDataFrame.
+
+        Parameters
+        mapping_dataframe : gpd.GeoDataFrame
+            The GeoDataFrame containing the geometries and data to plot.
+        target : str
+            The name of the column in `mapping_dataframe` to visualize.
+        time_unit : int
+            The time unit to display in the plot title.
+
+        Raises
+        ValueError
+            If the target column is not found in the dataframe or contains only null values.
+
+        Returns
+        matplotlib.figure.Figure
+            The matplotlib Figure object containing the generated map.
+        """
         if target not in mapping_dataframe.columns:
             raise ValueError(f"Target column '{target}' not found")
         if mapping_dataframe[target].isnull().all():
@@ -439,6 +559,27 @@ class MappingManager:
         interactive: bool = False,
         as_html: bool = False,
     ):
+        """
+        Plots a map visualization of the provided mapping DataFrame for a specified target variable.
+
+        Depending on the parameters, the map can be rendered as either an interactive Plotly map or a static Matplotlib plot.
+        The output can also be returned as an HTML string for embedding in web pages.
+
+        Args:
+            mapping_dataframe (pd.DataFrame): The DataFrame containing mapping data to plot.
+            target (str): The name of the target variable or feature to visualize. Must be present in the dataset's targets or features.
+            interactive (bool, optional): If True, generates an interactive Plotly map. If False, generates a static Matplotlib plot. Defaults to False.
+            as_html (bool, optional): If True, returns the plot as an HTML string (either Plotly HTML or base64-encoded PNG). If False, returns the figure object. Defaults to False.
+
+        Returns:
+            Union[str, matplotlib.figure.Figure, plotly.graph_objs.Figure]:
+                - If as_html is True: HTML string representation of the plot.
+                - If as_html is False: The figure object (Plotly or Matplotlib) for further manipulation or display.
+
+        Raises:
+            ValueError: If the target is not a valid dependent variable or feature.
+            ValueError: If a static plot is requested for multiple time units in the data.
+        """
         target_options = set(self._dataset.targets).union(set(self._dataset.features))
         if target not in target_options:
             raise ValueError(

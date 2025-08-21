@@ -1340,6 +1340,10 @@ class _PGDataset(_ViewsDataset):
 
     def validate_indices(self) -> None:
         super().validate_indices()
+        if self.dataframe.index.names[1] != "priogrid_id":
+            raise ValueError(
+                f"CDataset requires index 1 to be 'priogrid_id', found {self.dataframe.index.names}"
+            )
 
     def _build_entity_metadata_cache(self):
         """Build a cache mapping country_ids to metadata using the QS"""
