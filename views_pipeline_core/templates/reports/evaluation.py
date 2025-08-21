@@ -42,7 +42,7 @@ class EvaluationReportTemplate:
         self.config = config
         self.model_path = model_path
         self.run_type = run_type
-        self.eval_types = ("time-series-wise") # "step-wise", "month-wise"
+        self.eval_types = ["time-series-wise"] # "step-wise", "month-wise"
         self.cm_baseline_models = ["zero_cmbaseline", "locf_cmbaseline", "average_cmbaseline"]
         self.pgm_baseline_models = ["zero_pgmbaseline", "locf_pgmbaseline", "average_pgmbaseline"]
         self.views_models_url = "https://github.com/views-platform/views-models"
