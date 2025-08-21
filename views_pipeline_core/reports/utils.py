@@ -99,12 +99,20 @@ def search_for_item_name(searchspace: List[str], keywords: List[str]) -> Optiona
 
 def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: str, metrics: list, conflict_code: str, model_name: str, keywords: list = []) -> pd.DataFrame:
     if not isinstance(metrics, list):
-        raise ValueError("Metrics should be a list of strings.")
-    if not isinstance(metrics[0], str):
+        raise ValueError("Metrics should be a list.")
+    if not all(isinstance(m, str) for m in metrics):
         raise ValueError("Metrics should be a list of strings.")
     if not isinstance(eval_type, str):
         raise ValueError("Eval type should be a string.")
-    
+    if not isinstance(conflict_code, str):
+        raise ValueError("Conflict code should be a string.")
+    if not isinstance(keywords, list):
+        raise ValueError("Keywords should be a list.")
+    if not all(isinstance(k, str) for k in keywords):
+        raise ValueError("Keywords should be a list of strings.")
+    if not isinstance(evaluation_dict, dict):
+        raise ValueError("Evaluation dictionary should be a dictionary.")
+
     target_metric_keys = []
     for metric in metrics:
         result = search_for_item_name(searchspace=list(evaluation_dict.keys()), keywords=[eval_type, metric, conflict_code, *keywords])
