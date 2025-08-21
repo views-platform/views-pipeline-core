@@ -1443,7 +1443,6 @@ class ForecastingModelManager(ModelManager):
             **self._config_hyperparameters,
             **self._config_meta,
             **self._config_deployment,
-            **self._partition_dict,
         }
         if hasattr(self, "_partition_dict") and self._partition_dict is not None:
             config.update(self._partition_dict)
@@ -1469,7 +1468,6 @@ class ForecastingModelManager(ModelManager):
             **wandb_config,
             **self._config_meta,
             **self._config_deployment,
-            **self._partition_dict,
         }
         if hasattr(self, "_partition_dict") and self._partition_dict is not None:
             config.update(self._partition_dict)
