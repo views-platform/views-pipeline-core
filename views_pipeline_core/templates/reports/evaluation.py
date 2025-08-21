@@ -200,8 +200,8 @@ class EvaluationReportTemplate:
                     constituent_model_runs.append(latest_run)
             except Exception as e:
                 logger.warning(
-                    f"Error retrieving latest run for model '{model}': {e}. Skipping...",
-                    exc_info=True,
+                    f"Error finding latest run for model '{model}'. Skipping...",
+                    exc_info=False,
                 )
 
         # Verify partition metadata consistency
@@ -277,21 +277,18 @@ class EvaluationReportTemplate:
 
                 if full_metric_dataframe is not None and not full_metric_dataframe.empty:
                     # Sort by metric name
-                    valid_metric_search_index = 0
-                    while True:
-                        try:
-                            target_metric_to_sort = search_for_item_name(
-                                searchspace=full_metric_dataframe.columns.tolist(),
-                                keywords=["MSLE"] if "MSLE" in metrics else list(metrics)[valid_metric_search_index],
-                            )
-                            full_metric_dataframe = full_metric_dataframe.sort_values(
-                                by=target_metric_to_sort, ascending=True
-                            )
-                            break
-                        except KeyError:
-                            logger.warning(
-                                f"Metric '{target_metric_to_sort}' not found in DataFrame columns. Trying next metric...")
-                            valid_metric_search_index += 1
+                    try:
+                        target_metric_to_sort = search_for_item_name(
+                                    searchspace=full_metric_dataframe.columns.tolist(),
+                                    keywords=["MSLE"] if "MSLE" in metrics else list(metrics)[0],
+                        )
+                        full_metric_dataframe = full_metric_dataframe.sort_values(
+                            by=target_metric_to_sort, ascending=True
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Error sorting metrics by target metric '{target_metric_to_sort}'. Defaulting to no sorting."
+                        )
 
                     # if "y_hat_bar" in full_metric_dataframe.columns:
                     #     full_metric_dataframe.rename(
