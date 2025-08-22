@@ -19,8 +19,17 @@ logger = logging.getLogger(__name__)
 
 
 class MappingManager:
-    _COUNTRY_HOVER_COLS = ['country_name']
-    _PRIOGRID_HOVER_COLS = ['gid', 'row', 'col', 'country_name', 'isoab', 'xcoord', 'ycoord']
+    _COUNTRY_HOVER_COLS = ["country_name"]
+    _PRIOGRID_HOVER_COLS = [
+        "gid",
+        "row",
+        "col",
+        "country_name",
+        "isoab",
+        "xcoord",
+        "ycoord",
+    ]
+
     def __init__(self, views_dataset: Union[_PGDataset, _CDataset]):
         """
         Initializes the mapping manager with the provided dataset, setting up internal references
@@ -36,20 +45,24 @@ class MappingManager:
         self._dataframe = self._dataset.dataframe
         self._entity_id = self._dataset._entity_id
         self._time_id = self._dataset._time_id
-        
+
         if isinstance(views_dataset, _PGDataset):
             self._world = self.__get_priogrid_shapefile()
-            self._location_col = 'gid'
+            self._location_col = "gid"
             self._featureidkey = "properties.gid"
             # Get all available priogrid attributes (excluding geometry)
-            self._priogrid_attributes = [col for col in self._world.columns if col != 'geometry']
+            self._priogrid_attributes = [
+                col for col in self._world.columns if col != "geometry"
+            ]
             self._hover_columns = self._PRIOGRID_HOVER_COLS
         elif isinstance(views_dataset, _CDataset):
             self._world = self.__get_country_shapefile()
-            self._location_col = 'ADM0_A3'
+            self._location_col = "ADM0_A3"
             self._featureidkey = "properties.ADM0_A3"
             # Get all available country attributes (excluding geometry)
-            self._country_attributes = [col for col in self._world.columns if col != 'geometry']
+            self._country_attributes = [
+                col for col in self._world.columns if col != "geometry"
+            ]
             self._hover_columns = self._COUNTRY_HOVER_COLS
         else:
             raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
@@ -69,24 +82,23 @@ class MappingManager:
             None
         """
         base_gdf = self._world.to_crs(epsg=4326).copy()
-        
+
         # Keep only essential properties to reduce size
         if isinstance(self._dataset, _PGDataset):
-            base_gdf = base_gdf[['gid', 'geometry']]
+            base_gdf = base_gdf[["gid", "geometry"]]
         elif isinstance(self._dataset, _CDataset):
             # For country datasets, keep ADM0_A3 (which matches isoab) and geometry
-            base_gdf = base_gdf[['ADM0_A3', 'geometry']]
+            base_gdf = base_gdf[["ADM0_A3", "geometry"]]
         else:
             raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
-            
+
         # Simplify geometries to reduce file size
-        base_gdf['geometry'] = base_gdf.geometry.simplify(
-            tolerance=0.01,
-            preserve_topology=True
+        base_gdf["geometry"] = base_gdf.geometry.simplify(
+            tolerance=0.01, preserve_topology=True
         )
-        
+
         self._base_geojson = base_gdf.__geo_interface__
-        
+
         # Free memory
         del base_gdf
         gc.collect()
@@ -111,7 +123,7 @@ class MappingManager:
             / "ne_110m_admin_0_countries.shp"
         )
         world = gpd.read_file(path)
-        
+
         # Ensure ADM0_A3 column exists and is properly formatted
         # if 'ADM0_A3' not in world.columns:
         #     # Try to find the ISO code column with a different name
@@ -121,7 +133,7 @@ class MappingManager:
         #     else:
         #         # If no ISO code column found, create one from the index
         #         world['ADM0_A3'] = world.index.astype(str)
-        
+
         return world
 
     def __get_priogrid_shapefile(self):
@@ -215,7 +227,7 @@ class MappingManager:
 
             # _dataframe['isoab'] = _dataframe['isoab'].str.upper()
             # self._world['ADM0_A3'] = self._world['ADM0_A3'].str.upper()
-            
+
             # Include all country attributes in the merge
             _dataframe = _dataframe.merge(
                 self._world,
@@ -242,7 +254,7 @@ class MappingManager:
             return self.__check_missing_geometries(
                 gpd.GeoDataFrame(_dataframe, geometry="geometry", crs=self._world.crs)
             )
-        
+
         else:
             raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
 
@@ -311,24 +323,30 @@ class MappingManager:
         # Create pivot table for efficient data storage
         all_locations = mapping_dataframe[self._location_col].unique()
         all_times = sorted(mapping_dataframe[self._time_id].unique())
-        
+
         # Create pivot table
         pivot_df = mapping_dataframe.pivot_table(
             index=self._location_col,
             columns=self._time_id,
             values=target,
-            aggfunc='first'
+            aggfunc="first",
         ).reindex(all_locations)
-        
+
         # Convert to float32 to save memory
         z_data = pivot_df[all_times].astype(np.float32).values
-        
+
         # Precompute fixed properties for hover data
-        fixed_props = mapping_dataframe.drop_duplicates(self._location_col).set_index(self._location_col)
-        
-        exclude_cols = ['geometry', self._time_id, self._entity_id, target]
-        hover_columns = [col for col in self._hover_columns if col in fixed_props.columns and col not in exclude_cols]
-        
+        fixed_props = mapping_dataframe.drop_duplicates(self._location_col).set_index(
+            self._location_col
+        )
+
+        exclude_cols = ["geometry", self._time_id, self._entity_id, target]
+        hover_columns = [
+            col
+            for col in self._hover_columns
+            if col in fixed_props.columns and col not in exclude_cols
+        ]
+
         # Determine location label based on dataset type
         if isinstance(self._dataset, _PGDataset):
             location_label = "gid"
@@ -336,7 +354,7 @@ class MappingManager:
             location_label = "ADM0_A3"
         else:
             raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
-        
+
         # Prepare base customdata (fixed properties)
         base_customdata = []
         for loc in all_locations:
@@ -349,14 +367,23 @@ class MappingManager:
                     row_data.append(None)
             row_data.append(all_times[0])  # Add time
             base_customdata.append(row_data)
-        
+
         # Create hovertemplate
-        hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(hover_columns)])
-        hovertemplate = f"<b>{location_label}</b>: %{{customdata[0]}}<br>" + hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
-        
+        hover_attrs = "<br>".join(
+            [
+                f"<b>{attr}</b>: %{{customdata[{i+1}]}}"
+                for i, attr in enumerate(hover_columns)
+            ]
+        )
+        hovertemplate = (
+            f"<b>{location_label}</b>: %{{customdata[0]}}<br>"
+            + hover_attrs
+            + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+        )
+
         # Calculate global color range
         z_min, z_max = np.nanquantile(z_data, [0.05, 1.00])
-        
+
         # Create figure with graph objects for better control
         fig = go.Figure(
             data=go.Choropleth(
@@ -367,10 +394,10 @@ class MappingManager:
                 customdata=base_customdata,
                 hovertemplate=hovertemplate,
                 marker_line_width=0.5,
-                coloraxis="coloraxis"
+                coloraxis="coloraxis",
             )
         )
-        
+
         # Prepare frames with time-specific data
         frames = []
         for i, time in enumerate(all_times[1:], start=1):
@@ -386,74 +413,109 @@ class MappingManager:
                         row_data.append(None)
                 row_data.append(time)  # Add time
                 frame_customdata.append(row_data)
-            
-            frame_hover_attrs = "<br>".join([f"<b>{attr}</b>: %{{customdata[{i+1}]}}" for i, attr in enumerate(hover_columns)])
-            frame_hovertemplate = f"<b>{location_label}</b>: %{{customdata[0]}}<br>" + frame_hover_attrs + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
-            
-            frames.append(go.Frame(
-                data=[go.Choropleth(
-                    z=z_data[:, i],
-                    customdata=frame_customdata,
-                    hovertemplate=frame_hovertemplate
-                )],
-                name=str(time)
-            ))
-        
+
+            frame_hover_attrs = "<br>".join(
+                [
+                    f"<b>{attr}</b>: %{{customdata[{i+1}]}}"
+                    for i, attr in enumerate(hover_columns)
+                ]
+            )
+            frame_hovertemplate = (
+                f"<b>{location_label}</b>: %{{customdata[0]}}<br>"
+                + frame_hover_attrs
+                + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+            )
+
+            frames.append(
+                go.Frame(
+                    data=[
+                        go.Choropleth(
+                            z=z_data[:, i],
+                            customdata=frame_customdata,
+                            hovertemplate=frame_hovertemplate,
+                        )
+                    ],
+                    name=str(time),
+                )
+            )
+
         fig.frames = frames
-        
+
         # Add play button and slider
         fig.update_layout(
-            updatemenus=[{
-                "type": "buttons",
-                "buttons": [
-                    {
-                        "args": [None, {"frame": {"duration": 500, "redraw": True}, 
-                                "fromcurrent": True, "transition": {"duration": 300}}],
-                        "label": "Play",
-                        "method": "animate"
-                    },
-                    {
-                        "args": [[None], {"frame": {"duration": 0, "redraw": True}, 
-                                "mode": "immediate", "transition": {"duration": 0}}],
-                        "label": "Pause",
-                        "method": "animate"
-                    }
-                ],
-                "direction": "left",
-                "pad": {"r": 10, "t": 87},
-                "showactive": False,
-                "type": "buttons",
-                "x": 0.1,
-                "xanchor": "right",
-                "y": 0,
-                "yanchor": "top"
-            }],
-            sliders=[{
-                "active": 0,
-                "yanchor": "top",
-                "xanchor": "left",
-                "currentvalue": {
-                    "font": {"size": 14},
-                    "prefix": f"{self._time_id}: ",
-                    "visible": True,
-                    "xanchor": "right"
-                },
-                "transition": {"duration": 300, "easing": "cubic-in-out"},
-                "pad": {"b": 10, "t": 50},
-                "len": 0.9,
-                "x": 0.1,
-                "y": 0,
-                "steps": [{
-                    "args": [
-                        [str(time)],
-                        {"frame": {"duration": 300, "redraw": True}, "mode": "immediate"}
+            updatemenus=[
+                {
+                    "type": "buttons",
+                    "buttons": [
+                        {
+                            "args": [
+                                None,
+                                {
+                                    "frame": {"duration": 500, "redraw": True},
+                                    "fromcurrent": True,
+                                    "transition": {"duration": 300},
+                                },
+                            ],
+                            "label": "Play",
+                            "method": "animate",
+                        },
+                        {
+                            "args": [
+                                [None],
+                                {
+                                    "frame": {"duration": 0, "redraw": True},
+                                    "mode": "immediate",
+                                    "transition": {"duration": 0},
+                                },
+                            ],
+                            "label": "Pause",
+                            "method": "animate",
+                        },
                     ],
-                    "label": str(time),
-                    "method": "animate"
-                } for time in all_times]
-            }]
+                    "direction": "left",
+                    "pad": {"r": 10, "t": 87},
+                    "showactive": False,
+                    "type": "buttons",
+                    "x": 0.1,
+                    "xanchor": "right",
+                    "y": 0,
+                    "yanchor": "top",
+                }
+            ],
+            sliders=[
+                {
+                    "active": 0,
+                    "yanchor": "top",
+                    "xanchor": "left",
+                    "currentvalue": {
+                        "font": {"size": 14},
+                        "prefix": f"{self._time_id}: ",
+                        "visible": True,
+                        "xanchor": "right",
+                    },
+                    "transition": {"duration": 300, "easing": "cubic-in-out"},
+                    "pad": {"b": 10, "t": 50},
+                    "len": 0.9,
+                    "x": 0.1,
+                    "y": 0,
+                    "steps": [
+                        {
+                            "args": [
+                                [str(time)],
+                                {
+                                    "frame": {"duration": 300, "redraw": True},
+                                    "mode": "immediate",
+                                },
+                            ],
+                            "label": str(time),
+                            "method": "animate",
+                        }
+                        for time in all_times
+                    ],
+                }
+            ],
         )
-        
+
         # Layout adjustments with increased padding
         fig.update_layout(
             height=900,
@@ -469,7 +531,7 @@ class MappingManager:
                     xref="paper",
                     yref="paper",
                 )
-            ]
+            ],
         )
 
         fig.update_geos(
@@ -488,7 +550,7 @@ class MappingManager:
         # Free memory
         del pivot_df, z_data, fixed_props, base_customdata
         gc.collect()
-        
+
         return fig
 
     def _plot_static_map(
@@ -596,9 +658,9 @@ class MappingManager:
             if as_html:
                 html_str = fig.to_html(
                     full_html=True,
-                    include_plotlyjs="cdn",  # Use CDN for plotly.js
+                    include_plotlyjs=True,  # Should work offline
                     default_height=900,
-                    div_id="map-container"
+                    div_id="map-container",
                 )
                 # Free memory after generating HTML
                 del fig
