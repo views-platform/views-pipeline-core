@@ -1,6 +1,9 @@
 from typing import Optional, List
 import re
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_conflict_type_from_feature_name(feature_name: str) -> Optional[str]:
@@ -124,6 +127,8 @@ def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: st
         columns=target_metric_keys,
         index=[model_name]
     )
+    logger.debug(f"Filtered metrics DataFrame:\n{metric_dataframe}")
+    
     return metric_dataframe
 
 

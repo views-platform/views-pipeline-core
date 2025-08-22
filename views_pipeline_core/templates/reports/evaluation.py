@@ -42,7 +42,7 @@ class EvaluationReportTemplate:
         self.config = config
         self.model_path = model_path
         self.run_type = run_type
-        self.eval_types = ["time-series-wise"] # "step-wise", "month-wise"
+        self.eval_types = ("time-series-wise") # "step-wise", "month-wise"
         self.cm_baseline_models = ["zero_cmbaseline", "locf_cmbaseline", "average_cmbaseline"]
         self.pgm_baseline_models = ["zero_pgmbaseline", "locf_pgmbaseline", "average_pgmbaseline"]
         self.views_models_url = "https://github.com/views-platform/views-models"
@@ -70,7 +70,7 @@ class EvaluationReportTemplate:
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
         conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
         priority_metrics = ["MSLE", "MSE", "y_hat_bar"]
-        metrics = list(set(metadata_dict.get("metrics", [])).intersection(priority_metrics))
+        metrics = set(metadata_dict.get("metrics", [])).intersection(priority_metrics)
 
         report_manager = ReportManager()
         report_manager.add_heading(
@@ -144,6 +144,55 @@ class EvaluationReportTemplate:
         logger.info(f"Exported report to {report_path}")
         return report_path
 
+    def _add_model_report_content(
+        self,
+        report_manager: ReportManager,
+        metadata_dict: Dict,
+        evaluation_dict: Dict,
+        conflict_code: str,
+        metrics: List[str],
+    ) -> None:
+        """Add model-specific content to the evaluation report."""
+        # try:
+        #     partition_metadata = {
+        #         k: v
+        #         for k, v in metadata_dict.items()
+        #         if k.lower() in {"calibration", "validation", "forecasting"}
+        #     }
+        #     report_manager.add_heading("Data Partitions", level=2)
+        #     report_manager.add_table(partition_metadata)
+        # except Exception:
+        #     logger.warning("Could not find partition metadata in the run summary")
+
+        report_manager.add_heading("Model Metrics", level=2)
+        # full_metric_dataframe = None
+        # for metric in metrics:
+        #     # report_manager.add_heading(f"{str(metric).upper()}", level=3)
+        #     metric_dataframe = filter_metrics_from_dict(
+        #         evaluation_dict=evaluation_dict,
+        #         metrics=[metric, "mean"],
+        #         conflict_code=conflict_code,
+        #         model_name=metadata_dict.get("name", None),
+        #     )
+        #     report_manager.add_table(data=metric_dataframe)
+        for eval_type in self.eval_types:
+            metric_dataframe = filter_metrics_by_eval_type_and_metrics(
+                evaluation_dict=evaluation_dict,
+                eval_type=eval_type,
+                metrics=metrics,
+                conflict_code=conflict_code,
+                model_name=metadata_dict.get("name", None),
+                keywords=["mean"],
+            )
+            # if "y_hat_bar" in metric_dataframe.columns:
+            #     metric_dataframe.rename(
+            #         columns={"y_hat_bar": r"$\bar{\hat{y}}$"},
+            #         inplace=True,
+            #     )
+            report_manager.add_table(
+                data=metric_dataframe,
+                header=f"{eval_type.replace('-', ' ').title()}",
+            )
 
     def _add_report_content(
         self,
@@ -200,8 +249,8 @@ class EvaluationReportTemplate:
                     constituent_model_runs.append(latest_run)
             except Exception as e:
                 logger.warning(
-                    f"Error finding latest run for model '{model}'. Skipping...",
-                    exc_info=False,
+                    f"Error retrieving latest run for model '{model}': {e}. Skipping...",
+                    exc_info=True,
                 )
 
         # Verify partition metadata consistency
@@ -277,19 +326,13 @@ class EvaluationReportTemplate:
 
                 if full_metric_dataframe is not None and not full_metric_dataframe.empty:
                     # Sort by metric name
-                    try:
-                        target_metric_to_sort = search_for_item_name(
-                                    searchspace=full_metric_dataframe.columns.tolist(),
-                                    keywords=["MSLE"] if "MSLE" in metrics else list(metrics)[0],
-                        )
-                        full_metric_dataframe = full_metric_dataframe.sort_values(
-                            by=target_metric_to_sort, ascending=True
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Error sorting metrics by target metric '{target_metric_to_sort}'. Defaulting to no sorting."
-                        )
-
+                    target_metric_to_sort = search_for_item_name(
+                        searchspace=full_metric_dataframe.columns.tolist(),
+                        keywords=["MSLE"] if "MSLE" in metrics else list(metrics)[0],
+                    )
+                    full_metric_dataframe = full_metric_dataframe.sort_values(
+                        by=target_metric_to_sort, ascending=True
+                    )
                     # if "y_hat_bar" in full_metric_dataframe.columns:
                     #     full_metric_dataframe.rename(
                     #         columns={"y_hat_bar": r"$\bar{\hat{y}}$"},
