@@ -70,7 +70,7 @@ class EvaluationReportTemplate:
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
         conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
         priority_metrics = ["MSLE", "MSE", "y_hat_bar"]
-        metrics = set(metadata_dict.get("metrics", [])).intersection(priority_metrics)
+        metrics = list(set(metadata_dict.get("metrics", [])).intersection(priority_metrics))
 
         report_manager = ReportManager()
         report_manager.add_heading(
@@ -250,8 +250,9 @@ class EvaluationReportTemplate:
             except Exception as e:
                 logger.warning(
                     f"Error retrieving latest run for model '{model}': {e}. Skipping...",
-                    exc_info=True,
+                    exc_info=False,
                 )
+                continue
 
         # Verify partition metadata consistency
         try:
