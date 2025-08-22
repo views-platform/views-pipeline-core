@@ -1,8 +1,6 @@
 import pandas as pd
 import numpy as np
 from ..data.handlers import (
-    PGMDataset,
-    CMDataset,
     _CDataset,
     _PGDataset,
 )
@@ -21,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class MappingManager:
+    _COUNTRY_HOVER_COLS = ['country_name']
+    _PRIOGRID_HOVER_COLS = ['gid', 'row', 'col', 'country_name', 'isoab', 'xcoord', 'ycoord']
     def __init__(self, views_dataset: Union[_PGDataset, _CDataset]):
         """
         Initializes the mapping manager with the provided dataset, setting up internal references
@@ -43,12 +43,14 @@ class MappingManager:
             self._featureidkey = "properties.gid"
             # Get all available priogrid attributes (excluding geometry)
             self._priogrid_attributes = [col for col in self._world.columns if col != 'geometry']
+            self._hover_columns = self._PRIOGRID_HOVER_COLS
         elif isinstance(views_dataset, _CDataset):
             self._world = self.__get_country_shapefile()
             self._location_col = 'ADM0_A3'
             self._featureidkey = "properties.ADM0_A3"
             # Get all available country attributes (excluding geometry)
             self._country_attributes = [col for col in self._world.columns if col != 'geometry']
+            self._hover_columns = self._COUNTRY_HOVER_COLS
         else:
             raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
 
@@ -79,7 +81,7 @@ class MappingManager:
             
         # Simplify geometries to reduce file size
         base_gdf['geometry'] = base_gdf.geometry.simplify(
-            tolerance=0.3,
+            tolerance=0.01,
             preserve_topology=True
         )
         
@@ -324,9 +326,8 @@ class MappingManager:
         # Precompute fixed properties for hover data
         fixed_props = mapping_dataframe.drop_duplicates(self._location_col).set_index(self._location_col)
         
-        # Define columns to exclude from hover (geometry, index columns, and the target column)
         exclude_cols = ['geometry', self._time_id, self._entity_id, target]
-        hover_columns = [col for col in fixed_props.columns if col not in exclude_cols]
+        hover_columns = [col for col in self._hover_columns if col in fixed_props.columns and col not in exclude_cols]
         
         # Determine location label based on dataset type
         if isinstance(self._dataset, _PGDataset):
