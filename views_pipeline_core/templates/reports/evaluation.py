@@ -226,15 +226,17 @@ class EvaluationReportTemplate:
         models = self.config.get(
             "models", []
         )  # will only be populated for ensemble runs
+        models.append(self.model_path.model_name)
         if metadata_dict.get("level", None) == "cm":
-            models = set(models).union(self.cm_baseline_models)
+            models = list(set(models).union(self.cm_baseline_models))
         elif metadata_dict.get("level", None) == "pgm":
-            models = set(models).union(self.pgm_baseline_models)
+            models = list(set(models).union(self.pgm_baseline_models))
         else:
             logger.warning(
                 f"Unknown level '{metadata_dict.get('level', None)}'. No baseline models added."
             )
         # models = set(models).union(self.baseline_models)
+        logger.info(f"Models to evaluate: {models}")
         verified_partition_dict = None
         verified_level = metadata_dict.get("level", None)
 

@@ -100,7 +100,73 @@ def search_for_item_name(searchspace: List[str], keywords: List[str]) -> Optiona
     print(f"Warning: Multiple matches found for {keywords}: {matches}. Returning first match.")
     return matches[0]
 
+def search_for_item_name2(searchspace: List[str], keywords: List[str]) -> Optional[str]:
+    """
+    Searches for an item name that contains all keyword parts. Returns the first match
+    if unique, warns about multiple matches, and returns None if no matches found.
+
+    Args:
+        searchspace: List of strings to search through
+        keywords: List of keywords/phrases to match
+
+    Returns:
+        First matching item if unique match found, otherwise None
+    """
+    # Handle empty keywords upfront
+    if not keywords:
+        return None
+
+    # Preprocess keywords: split, normalize, and remove empties
+    keyword_parts = []
+    for kw in keywords:
+        parts = re.split(r"[_/\-]", kw.lower())
+        keyword_parts.extend(p for p in parts if p)
+    # print(keyword_parts)
+    
+    # Handle case where keywords only contained separators
+    if not keyword_parts:
+        return None
+
+    matches = []
+    for item in searchspace:
+        # Tokenize item and remove empty tokens
+        tokens = [t for t in re.split(r"[_/\-]", item.lower()) if t]
+        # print(f"tokens: {tokens}")
+
+        # Check if all keyword parts are present
+        # Count how many keyword parts are present in tokens
+        match_count = sum(kw_part in tokens for kw_part in keyword_parts)
+        if match_count > 0:
+            matches.append((item, match_count))
+            # print(f"Match found: {item} ({match_count} keyword parts matched)")
+
+    # Handle results
+    if not matches:
+        return None
+    # Return the matches with the highest count
+    max_match = max(matches, key=lambda x: x[1])
+    
+    # raise warning if all match values are the same
+    if all(m[1] == max_match[1] for m in matches):
+        logger.warning(f"Warning: All matches have the same count for {keywords}: {matches}. Returning first match.")
+    return max_match[0]
+
 def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: str, metrics: list, conflict_code: str, model_name: str, keywords: list = []) -> pd.DataFrame:
+    """
+    Filters metrics from an evaluation dictionary based on evaluation type, metric names, conflict code, and optional keywords, 
+    and returns the results as a pandas DataFrame indexed by the model name.
+    Args:
+        evaluation_dict (dict): Dictionary containing evaluation results, where keys are metric identifiers.
+        eval_type (str): The evaluation type to filter by (e.g., "classification", "regression").
+        metrics (list): List of metric names (strings) to filter for.
+        conflict_code (str): Conflict code to further filter metric keys.
+        model_name (str): Name of the model, used as the index in the resulting DataFrame.
+        keywords (list, optional): Additional keywords to refine the search for metric keys. Defaults to an empty list.
+    Returns:
+        pd.DataFrame: A DataFrame containing the filtered metrics, with columns as metric keys and a single row indexed by model_name.
+    Raises:
+        ValueError: If any of the input arguments are of incorrect type.
+    """
     if not isinstance(metrics, list):
         raise ValueError(f"Metrics should be a list. Got {type(metrics)} instead.")
     if not all(isinstance(m, str) for m in metrics):
@@ -118,7 +184,7 @@ def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: st
 
     target_metric_keys = []
     for metric in metrics:
-        result = search_for_item_name(searchspace=list(evaluation_dict.keys()), keywords=[eval_type, metric, conflict_code, *keywords])
+        result = search_for_item_name2(searchspace=list(evaluation_dict.keys()), keywords=[eval_type, metric, conflict_code, *keywords])
         if result:
             target_metric_keys.append(result)
     
