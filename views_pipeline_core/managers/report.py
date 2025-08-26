@@ -6,8 +6,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from html import escape
 from datetime import datetime
-from ..configs.pipeline import PipelineConfig
-from ..reports.styles.tailwind import get_css
+from views_pipeline_core.configs.pipeline import PipelineConfig
+from views_pipeline_core.reports.styles.tailwind import get_css
 
 
 class ReportManager:

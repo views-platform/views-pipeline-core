@@ -1,9 +1,9 @@
 import sys
-from ..data.handlers import _CDataset, _PGDataset
+from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 import torch
 import logging
-from ..data.statistics import ForecastReconciler
-from ..wandb.utils import wandb_alert
+from views_pipeline_core.data.statistics import ForecastReconciler
+from views_pipeline_core.wandb.utils import wandb_alert
 
 logger = logging.getLogger(__name__)
 

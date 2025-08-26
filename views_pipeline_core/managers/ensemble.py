@@ -8,17 +8,17 @@ import pandas as pd
 import traceback
 import tqdm
 
-from ..managers.model import (
+from views_pipeline_core.managers.model import (
     ModelPathManager,
     ModelManager,
     ForecastingModelManager,
 )
-from ..wandb.utils import add_wandb_metrics, wandb_alert
-from ..ensembles.check import validate_ensemble_model
-from ..files.utils import handle_ensemble_log_creation, read_dataframe
-from ..configs.pipeline import PipelineConfig
-from ..managers.reconciliation import ReconciliationManager
-from ..data.handlers import _PGDataset, _CDataset
+from views_pipeline_core.wandb.utils import add_wandb_metrics, wandb_alert
+from views_pipeline_core.ensembles.check import validate_ensemble_model
+from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
+from views_pipeline_core.configs.pipeline import PipelineConfig
+from views_pipeline_core.managers.reconciliation import ReconciliationManager
+from views_pipeline_core.data.handlers import _PGDataset, _CDataset
 
 logger = logging.getLogger(__name__)
 

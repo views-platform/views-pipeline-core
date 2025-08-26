@@ -15,7 +15,7 @@ from pathlib import Path
 import random
 import json
 
-from ..wandb.utils import (
+from views_pipeline_core.wandb.utils import (
     add_wandb_metrics,
     log_wandb_log_dict,
     wandb_alert,
@@ -24,7 +24,7 @@ from ..wandb.utils import (
     get_latest_run,
     timestamp_to_date,
 )
-from ..files.utils import (
+from views_pipeline_core.files.utils import (
     read_dataframe,
     save_dataframe,
     handle_single_log_creation,
@@ -34,8 +34,8 @@ from ..files.utils import (
     generate_evaluation_report_name,
 )
 
-from ..configs.pipeline import PipelineConfig
-from ..models.check import (
+from views_pipeline_core.configs.pipeline import PipelineConfig
+from views_pipeline_core.models.check import (
     validate_prediction_dataframe,
     validate_config,
 )
