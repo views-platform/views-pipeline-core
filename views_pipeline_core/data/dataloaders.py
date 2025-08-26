@@ -23,7 +23,7 @@ import views_transformation_library.views_2 as views2
 import views_transformation_library.missing as missing
 from viewser import Queryset
 import traceback
-import views_transformation_library.splag_country as splag_country
+# import views_transformation_library.splag_country as splag_country
 import views_transformation_library.spatial_tree as spatial_tree
 import views_transformation_library.spacetime_distance as spacetime_distance
 
@@ -37,7 +37,7 @@ transformation_mapping = {
     "temporal.time_since": views2.time_since,
     "temporal.decay": views2.decay,
     "missing.replace_na": missing.replace_na,
-    "spatial.countrylag": splag_country.get_splag_country,
+    # "spatial.countrylag": splag_country.get_splag_country,
     "temporal.tlag": views2.tlag,
     # "spatial.lag": splag4d.get_splag4d,
     "spatial.treelag": spatial_tree.get_tree_lag,
