@@ -19,7 +19,7 @@ from ingester3.ViewsMonth import ViewsMonth
 
 # import views_transformation_library as vtl
 import views_transformation_library.views_2 as views2
-import views_transformation_library.splag4d as splag4d
+# import views_transformation_library.splag4d as splag4d
 import views_transformation_library.missing as missing
 from viewser import Queryset
 import traceback
@@ -39,7 +39,7 @@ transformation_mapping = {
     "missing.replace_na": missing.replace_na,
     "spatial.countrylag": splag_country.get_splag_country,
     "temporal.tlag": views2.tlag,
-    "spatial.lag": splag4d.get_splag4d,
+    # "spatial.lag": splag4d.get_splag4d,
     "spatial.treelag": spatial_tree.get_tree_lag,
     "spatial.sptime_dist": spacetime_distance.get_spacetime_distances,
     "temporal.moving_sum": views2.moving_sum,
