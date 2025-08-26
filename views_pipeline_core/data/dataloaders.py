@@ -24,7 +24,7 @@ import views_transformation_library.missing as missing
 from viewser import Queryset
 import traceback
 # import views_transformation_library.splag_country as splag_country
-import views_transformation_library.spatial_tree as spatial_tree
+# import views_transformation_library.spatial_tree as spatial_tree
 import views_transformation_library.spacetime_distance as spacetime_distance
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ transformation_mapping = {
     # "spatial.countrylag": splag_country.get_splag_country,
     "temporal.tlag": views2.tlag,
     # "spatial.lag": splag4d.get_splag4d,
-    "spatial.treelag": spatial_tree.get_tree_lag,
+    # "spatial.treelag": spatial_tree.get_tree_lag,
     "spatial.sptime_dist": spacetime_distance.get_spacetime_distances,
     "temporal.moving_sum": views2.moving_sum,
     "temporal.moving_average": views2.moving_sum,
