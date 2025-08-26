@@ -29,6 +29,22 @@ import traceback
 
 logger = logging.getLogger(__name__)
 
+# Ingester dependent imports. Breaks tests on github because no certs
+def _get_splag_country(*args, **kwargs):
+    import views_transformation_library.splag_country as splag_country
+    return splag_country.get_splag_country(*args, **kwargs)
+
+def _get_splag4d(*args, **kwargs):
+    import views_transformation_library.splag4d as splag4d
+    return splag4d.get_splag4d(*args, **kwargs)
+
+def _get_spatial_tree(*args, **kwargs):
+    import views_transformation_library.spatial_tree as spatial_tree
+    return spatial_tree.get_tree_lag(*args, **kwargs)
+
+def _get_spacetime_distance(*args, **kwargs):
+    import views_transformation_library.spacetime_distance as spacetime_distance
+    return spacetime_distance.get_spacetime_distances(*args, **kwargs)
 
 transformation_mapping = {
     "ops.ln": views2.ln,
@@ -37,11 +53,11 @@ transformation_mapping = {
     "temporal.time_since": views2.time_since,
     "temporal.decay": views2.decay,
     "missing.replace_na": missing.replace_na,
-    # "spatial.countrylag": splag_country.get_splag_country,
+    "spatial.countrylag": _get_splag_country,
     "temporal.tlag": views2.tlag,
-    # "spatial.lag": splag4d.get_splag4d,
-    # "spatial.treelag": spatial_tree.get_tree_lag,
-    # "spatial.sptime_dist": spacetime_distance.get_spacetime_distances,
+    "spatial.lag": _get_splag4d,
+    "spatial.treelag": _get_spatial_tree,
+    "spatial.sptime_dist": _get_spacetime_distance,
     "temporal.moving_sum": views2.moving_sum,
     "temporal.moving_average": views2.moving_sum,
 }
