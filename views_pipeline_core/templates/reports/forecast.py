@@ -9,10 +9,10 @@ from ...data.handlers import (
     _CDataset,
     _PGDataset,
 )
-from ...managers.report import ReportManager
-from ...managers.mapping import MappingManager
-from ...visualizations.historical import HistoricalLineGraph
-from ...files.utils import generate_model_file_name
+from views_pipeline_core.managers.report import ReportManager
+from views_pipeline_core.managers.mapping import MappingManager
+from views_pipeline_core.visualizations.historical import HistoricalLineGraph
+from views_pipeline_core.files.utils import generate_model_file_name
 import logging
 
 logger = logging.getLogger(__name__)

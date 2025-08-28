@@ -2,24 +2,24 @@ from typing import Dict, List
 from pathlib import Path
 import wandb
 import pandas as pd
-from ...managers.model import ModelPathManager, ForecastingModelManager
-from ...wandb.utils import (
+from views_pipeline_core.managers.model import ModelPathManager, ForecastingModelManager
+from views_pipeline_core.wandb.utils import (
     get_latest_run,
     format_evaluation_dict,
     format_metadata_dict,
     timestamp_to_date,
 )
-from ...reports.utils import (
+from views_pipeline_core.reports.utils import (
     get_conflict_type_from_feature_name,
     # filter_metrics_from_dict,
     search_for_item_name,
     filter_metrics_by_eval_type_and_metrics,
 )
-from ...files.utils import (
+from views_pipeline_core.files.utils import (
     generate_model_file_name,
 )
-from ...managers.report import ReportManager
-from ...configs.pipeline import PipelineConfig
+from views_pipeline_core.managers.report import ReportManager
+from views_pipeline_core.configs.pipeline import PipelineConfig
 import logging
 
 logger = logging.getLogger(__name__)
