@@ -2,8 +2,8 @@ from typing import Dict
 from pathlib import Path
 import tqdm
 import pandas as pd
-from ...managers.model import ModelPathManager
-from ...data.handlers import (
+from views_pipeline_core.managers.model import ModelPathManager
+from views_pipeline_core.data.handlers import (
     CMDataset,
     PGMDataset,
     _CDataset,
