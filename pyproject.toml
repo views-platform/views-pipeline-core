@@ -19,6 +19,7 @@ wandb = "^0.18.7"
 pyprojroot="^0.3.0"
 views-evaluation="^0.3.0" 
 views-forecasts = "^0.5.5"
+views-transformation-library = "^2.7.2"
 geopandas = "^1.0.1"
 seaborn = "^0.13.2"
 plotly = "^6.0.0"
@@ -26,6 +27,7 @@ plotly-express = "^0.4.1"
 scipy = "^1.15.1"
 art = "^6.4"
 torch = "^2.6.0"
+markdown = "^3.8.2"
 
 [build-system]
 requires = ["poetry-core"]
