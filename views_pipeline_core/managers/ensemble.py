@@ -129,7 +129,7 @@ class EnsembleManager(ForecastingModelManager):
     def __init__(
         self,
         ensemble_path: EnsemblePathManager,
-        wandb_notifications: bool = True,
+        wandb_notifications: bool = False,
         use_prediction_store: bool = False,
     ) -> None:
         """
@@ -143,7 +143,6 @@ class EnsembleManager(ForecastingModelManager):
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
         self.config = {}
         self.__activate_reconciliation = True
-        self._use_prediction_store = use_prediction_store
 
     def __reconcile_pg_with_c(
         self, pg_dataframe: pd.DataFrame = None, c_dataframe: pd.DataFrame = None

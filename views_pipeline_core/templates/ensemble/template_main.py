@@ -49,6 +49,13 @@ if __name__ == "__main__":
     args = parse_args()
     validate_arguments(args)
 
-    EnsembleManager(ensemble_path=ensemble_path).execute_single_run(args)
+    manager = EnsembleManager(
+        ensemble_path=ensemble_path,
+        wandb_notifications=args.wandb_notifications,
+        use_prediction_store=args.prediction_store,
+    )
+
+    manager.execute_single_run(args)
+
 """
     return save_python_script(script_path, code)
