@@ -125,14 +125,12 @@ def validate_arguments(args):
     #     )
     #     sys.exit(1)
 
-    if (
-        args.report
-        and args.run_type not in ("forecasting", "calibration", "validation")
-        and args.train
-    ):
-        print(
-            "Error: --report flag can only be used with --run_type forecasting and calibration. Exiting."
-        )
+    if args.report and args.run_type not in ("forecasting", "validation"):
+        print("Error: --report can only be used with --run_type forecasting or validation. Exiting.")
+        sys.exit(1)
+
+    if args.report and not (args.evaluate or args.forecast):
+        print("Error: --report requires either --evaluate or --forecast to be set. Exiting.")
         sys.exit(1)
 
     if args.sweep and args.run_type != "calibration":
