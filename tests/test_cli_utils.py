@@ -153,3 +153,12 @@ def test_validate_arguments_no_train_no_saved():
     args = parse_args()
     with pytest.raises(SystemExit):
         validate_arguments(args)
+
+def test_validate_arguments_prediction_store_with_non_forecast():
+    """
+    Test validate_arguments with --prediction_store and non-forecast flag.
+    """
+    sys.argv = ["main.py", "--prediction_store"]
+    args = parse_args()
+    with pytest.raises(SystemExit):
+        validate_arguments(args)
