@@ -277,6 +277,8 @@ class EnsembleManager(ForecastingModelManager):
         use_saved: bool = False,
         eval_type: str = "standard",
         update_viewser: bool = False,
+        prediction_store: bool = False,
+        wandb_notifications: bool = False,
     ) -> list:
         """
         Constructs a shell command for running a model script with specified options.
@@ -309,6 +311,10 @@ class EnsembleManager(ForecastingModelManager):
             shell_command.append("--saved")
         if update_viewser:
             shell_command.append("--update_viewser")
+        if prediction_store:
+            shell_command.append("--prediction_store")
+        if wandb_notifications:
+            shell_command.append("--wandb_notifications")
 
         shell_command.append("--eval_type")
         shell_command.append(eval_type)
