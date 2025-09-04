@@ -195,7 +195,7 @@ class EvaluationReportTemplate:
         for model in models:
             try:
                 latest_run = get_latest_run(
-                    entity="views_pipeline", model_name=model, run_type="calibration"
+                    entity="views_pipeline", model_name=model, run_type=self.run_type
                 )
                 if latest_run:
                     constituent_model_runs.append(latest_run)
@@ -225,6 +225,7 @@ class EvaluationReportTemplate:
                 if verified_partition_dict is None:
                     verified_partition_dict = partition_metadata_dict
                 elif verified_partition_dict != partition_metadata_dict:
+                    print(verified_partition_dict, partition_metadata_dict)
                     raise ValueError(
                         f"Partition metadata mismatch between models: Offending model: {model_name}"
                     )

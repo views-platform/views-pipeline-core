@@ -1828,7 +1828,7 @@ class ForecastingModelManager(ModelManager):
         latest_run = get_latest_run(
             entity=self._entity,
             model_name=self._model_path.model_name,
-            run_type="calibration",
+            run_type=self._args.run_type,
         )
 
         # Use the latest run summary to generate the evaluation report
