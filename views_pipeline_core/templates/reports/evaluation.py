@@ -101,10 +101,10 @@ class EvaluationReportTemplate:
             f"    - **Minimum forecast lead time**: {metadata_dict.get('steps', [None, None])[0]}\n"
             f"    - **Maximum forecast lead time**: {metadata_dict.get('steps', [None, None])[-1]}\n"
             f"    - **Number of Rolling Origins**: {ForecastingModelManager._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())}\n"
-            f"    - **Context Window Origin**: {metadata_dict.get('calibration', {'train': [None, None], 'test': [None, None]}).get('train')[0]}\n"
+            f"    - **Context Window Origin**: {metadata_dict.get(self.run_type, {'train': [None, None], 'test': [None, None]}).get('train')[0]}\n"
             f"    - **Context Window Schedule**: Fixed-origin, Expanding\n"
             f"    - **Target Window Schedule**: Rolling-origin, Fixed-length\n"
-            f"    - **Target Window First Origin**: {metadata_dict.get('calibration', {'train': [None, None], 'test': [None, None]}).get('train')[1]}\n"
+            f"    - **Target Window First Origin**: {metadata_dict.get(self.run_type, {'train': [None, None], 'test': [None, None]}).get('train')[1]}\n"
             f"    - **Training Schedule**: Frozen trained model artifact\n"
         )
         report_manager.add_heading("Task Description", level=2)
