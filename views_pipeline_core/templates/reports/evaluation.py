@@ -104,7 +104,7 @@ class EvaluationReportTemplate:
             f"    - **Context Window Origin**: {metadata_dict.get(self.run_type, {'train': [None, None], 'test': [None, None]}).get('train')[0]}\n"
             f"    - **Context Window Schedule**: Fixed-origin, Expanding\n"
             f"    - **Target Window Schedule**: Rolling-origin, Fixed-length\n"
-            f"    - **Target Window First Origin**: {metadata_dict.get(self.run_type, {'train': [None, None], 'test': [None, None]}).get('train')[1]}\n"
+            f"    - **Target Window First Origin**: {metadata_dict.get(self.run_type, {'train': [None, None], 'test': [None, None]}).get('test')[0]}\n"
             f"    - **Training Schedule**: Frozen trained model artifact\n"
         )
         report_manager.add_heading("Task Description", level=2)
