@@ -2,7 +2,14 @@ import numpy as np
 import pandas as pd
 from viewser import Queryset, Column
 
+import warnings
+
 class ReconcilePgmWithCmPoint():
+    warnings.warn(
+        "ReconcilePgmWithCmPoint is deprecated and may be removed in future versions. Use views_pipeline_core.managers.reconciliation.ReconciliationManager instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
 
     """
     ReconcilePgmWithCmPoint

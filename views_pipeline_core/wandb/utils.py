@@ -1,10 +1,11 @@
-from typing import Dict, Union
+from typing import Union
 from statistics import mean
 import re
 from dataclasses import asdict
 import wandb
 import logging
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -250,3 +251,111 @@ def wandb_alert(
             logger.error(f"Usage error sending WandB alert: {e}")
         except Exception as e:
             logger.error(f"Unexpected error sending WandB alert: {e}")
+
+def timestamp_to_date(timestamp):
+    from datetime import datetime
+    return datetime.fromtimestamp(float(timestamp)).strftime('%Y-%m-%d %H:%M:%S')
+
+def format_evaluation_dict(evaluation_dict):
+    """
+    Formats an evaluation dictionary by processing its keys and values according to specific rules.
+
+    - Removes leading underscores from keys.
+    - Skips the "timestamp" key.
+    - Converts "runtime" values (in seconds) to a human-readable string format (e.g., "1h 2m 3s").
+    - Skips values that are instances of `wandb.old.summary.SummarySubDict`.
+    - Converts string values that represent digits to floats.
+    - Preserves integer and float values as-is.
+    - Sorts the resulting dictionary by key.
+
+    Args:
+        evaluation_dict (dict): The input dictionary containing evaluation metrics.
+
+    Returns:
+        dict: A formatted and sorted dictionary with processed keys and values.
+    """
+    formatted_dict = {}
+    for key, value in evaluation_dict.items():
+        orig_key = key
+        if key.startswith("_"):
+            key = key[1:]
+
+        if key == "timestamp":
+            # try:
+            #     formatted_dict[key] = timestamp_to_date(float(value))
+            # except (ValueError, TypeError):
+            #     formatted_dict[key] = value
+            continue
+        elif key == "runtime":
+            # convert seconds to hours, minutes, and seconds
+            if isinstance(value, (int, float)):
+                hours, remainder = divmod(int(value), 3600)
+                formatted_dict[key] = f"{hours}h {remainder // 60}m {remainder % 60}s"
+            else:
+                formatted_dict[key] = value
+        elif isinstance(value, wandb.old.summary.SummarySubDict):
+            continue
+        elif isinstance(value, (int, float)):
+            formatted_dict[key] = value
+        elif isinstance(value, str) and value.isdigit():
+            formatted_dict[key] = float(value)
+        else:
+            formatted_dict[key] = value
+
+    formatted_dict = dict(sorted(formatted_dict.items(), key=lambda item: item[0]))
+    return formatted_dict
+
+def format_metadata_dict(metadata_dict):
+    """
+    Formats a metadata dictionary by processing its keys and values.
+
+    - Removes leading underscores from keys.
+    - Converts string values that represent digits to integers.
+    - Keeps integer and float values as-is.
+    - Leaves other types of values unchanged.
+    - Returns a new dictionary with keys sorted alphabetically.
+
+    Args:
+        metadata_dict (dict): The input dictionary containing metadata.
+
+    Returns:
+        dict: A formatted and sorted dictionary with processed keys and values.
+    """
+    formatted_dict = {}
+    for key, value in metadata_dict.items():
+        # if key == "steps" and isinstance(value, (list, tuple)):
+        #     value = len(value)
+
+        if key.startswith("_"):
+            # remove the underscore prefix
+            key = key[1:]
+        if isinstance(value, (int, float)):
+            formatted_dict[key] = value
+        elif isinstance(value, str) and value.isdigit():
+            formatted_dict[key] = int(value)
+        else:
+            formatted_dict[key] = value
+    formatted_dict = dict(sorted(formatted_dict.items(), key=lambda item: item[0]))
+    return formatted_dict
+
+def get_latest_run(entity: str, model_name: str, run_type: str) -> Optional['wandb.apis.public.runs.Run']:
+    """
+    Retrieves the latest WandB run from the current session.
+
+    Returns:
+        Optional[wandb.Run]: The latest run object if available, otherwise None.
+    """
+    from wandb import Api
+    api = Api()
+    wandb_runs = sorted(
+        api.runs(f"{entity}/{model_name}_{run_type}", include_sweeps=False),
+        key=lambda run: run.created_at,
+        reverse=True,
+    )
+    # Pick the latest successfully finished run
+    latest_run = next(
+        run
+        for run in wandb_runs
+        if run.state == "finished" and len(dict(run.summary)) > 1
+    )
+    return latest_run if len(dict(latest_run.summary)) > 1 else None
