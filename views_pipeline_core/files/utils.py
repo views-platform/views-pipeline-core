@@ -178,7 +178,7 @@ def handle_ensemble_log_creation(model_path, config: dict) -> None:
         None
     """
     path_generated_e = model_path.data_generated
-    data_generation_timestamp = datetime.now().strftime("%Y%m%d")
+    data_generation_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     config["timestamp"] = data_generation_timestamp
 
     # How to define an ensemble model timestamp? Currently set as data_generation_timestamp.

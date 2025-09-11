@@ -56,6 +56,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "-p",
+        "--prediction_store",
+        action="store_true",
+        help="Flag to indicate if the model should use the prediction store.",
+    )
+
+    parser.add_argument(
         "-a",
         "--artifact_name",
         type=str,
@@ -64,13 +71,6 @@ def parse_args():
         "The artifact name should be in the format: <run_type>_model_<timestamp>.pt."
         "where <run_type> is calibration, validation, or forecasting, and <timestamp> is in the format YMD_HMS."
         "If not provided, the latest artifact will be used by default.",
-    )
-
-    parser.add_argument(
-        "-en",
-        "--ensemble",
-        action="store_true",
-        help="Flag to indicate if the model is an ensemble.",
     )
 
     parser.add_argument(
@@ -108,6 +108,13 @@ def parse_args():
         help="Update the viewser dataframe for a set of months where viewser returns only zeros.",
     )
 
+    parser.add_argument(
+        "-wn",
+        "--wandb_notifications",
+        action="store_true",
+        help="Enable Weights & Biases notifications.",
+    )
+
     return parser.parse_args()
 
 
@@ -118,14 +125,12 @@ def validate_arguments(args):
     #     )
     #     sys.exit(1)
 
-    if (
-        args.report
-        and args.run_type not in ("forecasting", "calibration", "validation")
-        and args.train
-    ):
-        print(
-            "Error: --report flag can only be used with --run_type forecasting and calibration. Exiting."
-        )
+    if args.report and args.run_type not in ("forecasting", "validation"):
+        print("Error: --report can only be used with --run_type forecasting or validation. Exiting.")
+        sys.exit(1)
+
+    if args.report and not (args.evaluate or args.forecast):
+        print("Error: --report requires either --evaluate or --forecast to be set. Exiting.")
         sys.exit(1)
 
     if args.sweep and args.run_type != "calibration":
@@ -180,11 +185,6 @@ def validate_arguments(args):
         print("To fix: Set --run_type to forecasting if --forecast is flagged.")
         sys.exit(1)
 
-    if args.ensemble and args.sweep:
-        # This is a temporary solution. In the future we might need to train and sweep the ensemble models.
-        print("Error: --aggregation flag cannot be used with --sweep. Exiting.")
-        sys.exit(1)
-
     if (not args.train and not args.sweep) and not args.saved:
         # if not training or sweeping, then we need to use saved data
         print(
@@ -198,4 +198,9 @@ def validate_arguments(args):
             "Error: --eval_type should be one of 'standard', 'long', 'complete', or 'live'. Exiting."
         )
         print("To fix: Set --eval_type to one of the above options.")
+        sys.exit(1)
+
+    if args.prediction_store and not args.forecast:
+        print("Error: --prediction_store flag can only be used with --forecast flag. Exiting.")
+        print("To fix: Set --forecast flag if --prediction_store is flagged.")
         sys.exit(1)

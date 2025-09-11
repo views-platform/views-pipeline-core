@@ -145,20 +145,20 @@ def test_validate_arguments_forecast_with_non_forecasting():
     with pytest.raises(SystemExit):
         validate_arguments(args)
 
-def test_validate_arguments_ensemble_with_sweep():
-    """
-    Test validate_arguments with --ensemble and --sweep flags.
-    """
-    sys.argv = ["main.py", "--ensemble", "--sweep"]
-    args = parse_args()
-    with pytest.raises(SystemExit):
-        validate_arguments(args)
-
 def test_validate_arguments_no_train_no_saved():
     """
     Test validate_arguments with neither --train nor --saved flags.
     """
     sys.argv = ["main.py"]
+    args = parse_args()
+    with pytest.raises(SystemExit):
+        validate_arguments(args)
+
+def test_validate_arguments_prediction_store_with_non_forecast():
+    """
+    Test validate_arguments with --prediction_store and non-forecast flag.
+    """
+    sys.argv = ["main.py", "--prediction_store"]
     args = parse_args()
     with pytest.raises(SystemExit):
         validate_arguments(args)

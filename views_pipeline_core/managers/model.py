@@ -712,7 +712,7 @@ class ModelManager:
         self,
         model_path: ModelPathManager,
         wandb_notifications: bool = False,
-        use_prediction_store: bool = True,
+        use_prediction_store: bool = False,
     ) -> None:
         """
         Initializes the ModelManager with the given model path.
@@ -757,10 +757,7 @@ class ModelManager:
                 partition_dict=self._partition_dict,
             )
 
-        if self._use_prediction_store:
-            from views_forecasts.extensions import ForecastsStore, ViewsMetadata
-
-            self._pred_store_name = self.__get_pred_store_name()
+        self._pred_store_name = self.__get_pred_store_name()
 
         self.set_dataframe_format(format=".parquet")
         if self.__class__.__instances__ == 1:
@@ -823,6 +820,7 @@ class ModelManager:
             str: The prediction store name.
         """
         if self._use_prediction_store:
+            from views_forecasts.extensions import ForecastsStore, ViewsMetadata
             from views_pipeline_core.managers.package import PackageManager
             from views_forecasts.extensions import ViewsMetadata
 
@@ -894,7 +892,7 @@ class ForecastingModelManager(ModelManager):
         self,
         model_path: ModelPathManager,
         wandb_notifications: bool = False,
-        use_prediction_store: bool = True,
+        use_prediction_store: bool = False,
     ) -> None:
         """
         Manages the lifecycle of a machine learning model, including training, evaluation, and forecasting.
@@ -1134,8 +1132,6 @@ class ForecastingModelManager(ModelManager):
         Args:
             config (dict): Configuration object containing parameters and settings.
         """
-        # if config is None:
-        #     config = self.config
         with wandb.init(
             project=self._project, entity=self._entity, config=config, job_type="train"
         ):
@@ -1770,20 +1766,6 @@ class ForecastingModelManager(ModelManager):
                     conflict_type,
                 )
 
-            # from views_evaluation.reports.generator import EvalReportGenerator
-            # eval_report_generator = EvalReportGenerator(self.config, target, conflict_type)
-            # eval_report = eval_report_generator.generate_eval_report_dict(df_predictions, df_time_series_wise_evaluation)
-            # if ensemble:
-            #     for model_name in self.config["models"]:
-            #         pm = ModelPathManager(model_name)
-            #         rolling_origin_number = self._resolve_evaluation_sequence_number(self.config["eval_type"])
-            #         paths = pm._get_generated_predictions_data_file_paths(self.config["run_type"])[:rolling_origin_number]
-            #         # print(paths)
-            #         df_preds = [read_dataframe(path) for path in paths]
-            #         df_eval_ts = read_dataframe(pm._get_eval_file_paths(self.config["run_type"], conflict_type)[0])
-            #         eval_report = eval_report_generator.update_ensemble_eval_report(model_name, df_preds, df_eval_ts)
-            # self._save_eval_report(eval_report, self._model_path.reports, conflict_type)
-
         wandb_alert(
             title=f"Metrics for {self._model_path.model_name}",
             text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
@@ -1819,7 +1801,6 @@ class ForecastingModelManager(ModelManager):
         print(result)
         return f"```\n{result}\n```"
 
-
     def _execute_evaluation_reporting(self, config: Dict) -> None:
         """
         Executes the reporting process.
@@ -1847,7 +1828,7 @@ class ForecastingModelManager(ModelManager):
         latest_run = get_latest_run(
             entity=self._entity,
             model_name=self._model_path.model_name,
-            run_type="calibration",
+            run_type=self._args.run_type,
         )
 
         # Use the latest run summary to generate the evaluation report

@@ -20,12 +20,16 @@ This CLI tool supports three types of model runs with various operational modes:
 | `-t`       | `--train`        | Train new model                                                            | Boolean flag               | False       | Conflicts with artifact_name                                               |
 | `-e`       | `--evaluate`     | Evaluate model performance                                                 | Boolean flag               | False       | Incompatible with forecasting run_type                                     |
 | `-f`       | `--forecast`     | Generate predictions                                                       | Boolean flag               | False       | Requires run_type=forecasting                                              |
+| `-re`       | `--report`     | Generate reports                                                       | Boolean flag               | False       |                                              |
 | `-a`       | `--artifact_name`| Load specific model artifact                                                | String                     | None        | Format: `<run_type>_model_<YMD_HMS>.pt`                                   |
-| `-en`      | `--ensemble`     | Use ensemble model                                                         | Boolean flag               | False       | Incompatible with sweeps                                                   |
 | `-sa`      | `--saved`        | Use locally stored data                                                    | Boolean flag               | False       | Required for non-training runs                                             |
 | `-o`       | `--override_month`| Override current month context                                            | Integer                    | None        | Forces specific month                                                      |
 | `-dd`      | `--drift_self_test`| Enable data drift detection                                               | Boolean flag               | False       | Performs data integrity checks                                            |
 | `-et`      | `--eval_type`    | Evaluation mode                                                            | standard/long/complete/live | standard    | Controls evaluation depth                                                  |
+| `-p`      | `--prediction_store`| Use the prediction store                                              | Boolean flag               | False       | Only be used with --forecast flag                                            |
+| `-u`      | `--update_viewser`| Update the viewser dataframe for a set of months where viewser returns only zeros  | Boolean flag               | False       | Only when ingester doesn't work                                    |
+| `-wn`      | `--wandb_notifications`| Enable Weights & Biases notifications  | Boolean flag               | False       | Control notifications                                  |
+ 
 
 ## Argument Validation Rules
 
