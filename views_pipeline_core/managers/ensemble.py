@@ -851,7 +851,6 @@ class EnsembleManager(ForecastingModelManager):
             train=True,
             use_saved=use_saved,
             update_viewser=update_viewser,
-            prediction_store=self._use_prediction_store,
             wandb_notifications=self._wandb_notifications,
         )
 
