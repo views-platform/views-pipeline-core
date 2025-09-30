@@ -908,7 +908,6 @@ class EnsembleManager(ForecastingModelManager):
                         evaluate=True,
                         eval_type=eval_type,
                         update_viewser=update_viewser,
-                        prediction_store=self._use_prediction_store,
                         wandb_notifications=self._wandb_notifications,
                     )
                     pred = pd.DataFrame.forecasts.read_store(
@@ -933,7 +932,6 @@ class EnsembleManager(ForecastingModelManager):
                         evaluate=True,
                         eval_type=eval_type,
                         update_viewser=update_viewser,
-                        prediction_store=self._use_prediction_store,
                         wandb_notifications=self._wandb_notifications,
                     )
                     pred = read_dataframe(
