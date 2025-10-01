@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 class MockArgs:
-    def __init__(self, train, evaluate, forecast, saved, run_type, eval_type, report, sweep=False, update_viewser=False):
+    def __init__(self, train, evaluate, forecast, saved, run_type, eval_type, report, sweep=False, update_viewser=False, override_timestep=None):
         self.train = train
         self.evaluate = evaluate
         self.forecast = forecast
@@ -27,6 +27,7 @@ class MockArgs:
         self.report = report
         self.sweep = sweep
         self.update_viewser = update_viewser
+        self.override_timestep = override_timestep
 
 @pytest.fixture
 def mock_model_path():
@@ -63,7 +64,8 @@ def mock_constituent_model_path():
                 run_type="test",
                 eval_type="standard",
                 report=False,
-                update_viewser=False
+                update_viewser=False,
+                override_timestep=None
             ),
             [
                 "/path/to/models/test_model/run.sh",
@@ -84,7 +86,8 @@ def mock_constituent_model_path():
                 run_type="forecast",
                 eval_type="detailed",
                 report=False,
-                update_viewser=False
+                update_viewser=False,
+                override_timestep=None
             ),
             [
                 "/path/to/models/test_model/run.sh",
@@ -106,7 +109,8 @@ def mock_constituent_model_path():
                 run_type="calibration",
                 eval_type="minimal",
                 report=False,
-                update_viewser=False
+                update_viewser=False,
+                override_timestep=None
             ),
             [
                 "/path/to/models/test_model/run.sh",
@@ -156,7 +160,8 @@ class TestParametrized:
             args.forecast,
             args.saved,
             args.eval_type,
-            args.update_viewser
+            args.update_viewser,
+            args.override_timestep
         )
         assert command == expected_command
 
@@ -224,6 +229,7 @@ class TestParametrized:
                 use_saved=args.saved,
                 report=args.report,
                 update_viewser=args.update_viewser,
+                override_timestep=args.override_timestep
             )
 
             # Test exception handling
@@ -294,7 +300,8 @@ class TestParametrized:
                 forecast=args.forecast,
                 use_saved=args.saved,
                 report=args.report,
-                update_viewser=args.update_viewser
+                update_viewser=args.update_viewser,
+                override_timestep=args.override_timestep
             )
 
             # Validate W&B metrics (allow multiple calls)
@@ -309,7 +316,7 @@ class TestParametrized:
                 mock_logger.info.assert_any_call(
                     "Training model test_model..."
                 )
-                mock_train_ensemble.assert_called_once_with(use_saved=args.saved, update_viewser=args.update_viewser)
+                mock_train_ensemble.assert_called_once_with(use_saved=args.saved, update_viewser=args.update_viewser, override_timestep=args.override_timestep)
             else:
                 mock_train_ensemble.assert_not_called()
                 # Check for any call with these arguments, ignoring others
@@ -331,7 +338,7 @@ class TestParametrized:
                 mock_logger.info.assert_any_call(
                     "Evaluating model test_model..."
                 )
-                mock_evaluate_ensemble.assert_called_once_with(manager._eval_type, args.update_viewser)
+                mock_evaluate_ensemble.assert_called_once_with(manager._eval_type, args.update_viewser, args.override_timestep)
                 mock_handle_ensemble_log_creation.assert_called()
             else:
                 mock_evaluate_ensemble.assert_not_called()
@@ -346,7 +353,7 @@ class TestParametrized:
                 mock_logger.info.assert_any_call(
                     "Forecasting model test_model..."
                 )
-                mock_forecast_ensemble.assert_called_once_with(update_viewser=args.update_viewser)
+                mock_forecast_ensemble.assert_called_once_with(update_viewser=args.update_viewser, override_timestep=args.override_timestep)
                 mock_handle_ensemble_log_creation.assert_called()
                 mock_save_predictions.assert_called_once_with(
                     mock_forecast_ensemble.return_value,
@@ -386,7 +393,8 @@ class TestParametrized:
                     forecast=args.forecast,
                     use_saved=args.saved,
                     report=args.report,
-                    update_viewser=args.update_viewser
+                    update_viewser=args.update_viewser,
+                    override_timestep=args.override_timestep
                 )
             
             # Validate appropriate error is raised

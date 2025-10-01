@@ -75,7 +75,8 @@ def get_deployment_config():
         mock_module.return_value.get_meta_config.return_value = {"meta_key": "meta_value"}
         mm = ModelManager(mock_model_path.return_value, use_prediction_store=False, wandb_notifications=False)
         mm.config = {
-            "targets": "target_variable"
+            "targets": "target_variable",
+            "steps": [*range(1, 36 + 1, 1)],
         }
     return mm
 
@@ -132,7 +133,7 @@ def get_deployment_config():
 """
     mock_config_hyperparameters_content = """
 def get_hp_config():
-    hp_config = {'hp_key': 'hp_value'}
+    hp_config = {'hp_key': 'hp_value', "steps": [*range(1, 36 + 1, 1)]}
     return hp_config
 """
     mock_config_meta_content = """
@@ -205,7 +206,7 @@ def get_deployment_config():
         mock_spec.return_value.loader = MagicMock()
         mock_module.return_value.get_deployment_config.return_value = {"deployment_status": "shadow"}
         manager = ForecastingModelManager(mock_model_instance, use_prediction_store=False)
-        manager._config_hyperparameters = {"hp_key": "hp_value"}
+        manager._config_hyperparameters = {"hp_key": "hp_value", "steps": [*range(1, 36 + 1, 1)]}
         manager._config_meta = {"meta_key": "meta_value", "targets": "test_targets_dep"}
         manager._config_deployment = {"deployment_status": "deploy_value"}
         args = MagicMock(run_type="test_run")
