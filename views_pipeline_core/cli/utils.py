@@ -115,15 +115,35 @@ def parse_args():
         help="Enable Weights & Biases notifications.",
     )
 
+    parser.add_argument(
+        "-m",
+        "--monthly",
+        action="store_true",
+        help="Shorthand flag for monthly production runs. "
+        "Automatically sets: --run_type forecasting, --train, --forecast, --report, --prediction_store, --wandb_notifications.",
+    )
+
     return parser.parse_args()
 
 
 def validate_arguments(args):
-    # if args.report and not args.forecast and not args.evaluate:
-    #     print(
-    #         "Error: --report flag requires either --forecast or --evaluate to be set. Exiting."
-    #     )
-    #     sys.exit(1)
+    if args.monthly:
+        if args.sweep:
+            print("Error: --monthly flag cannot be used with --sweep flag. Exiting.")
+            print("To fix: Remove --sweep flag when using --monthly.")
+            sys.exit(1)
+        
+        if args.evaluate:
+            print("Error: --monthly flag cannot be used with --evaluate flag (monthly runs do forecasting, not evaluation). Exiting.")
+            print("To fix: Remove --evaluate flag when using --monthly.")
+            sys.exit(1)
+        
+        args.run_type = "forecasting"
+        args.train = True
+        args.forecast = True
+        args.report = True
+        args.prediction_store = True
+        args.wandb_notifications = True
 
     if args.report and args.run_type not in ("forecasting", "validation"):
         print("Error: --report can only be used with --run_type forecasting or validation. Exiting.")

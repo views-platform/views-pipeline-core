@@ -773,6 +773,8 @@ class EnsembleManager(ForecastingModelManager):
         use_saved: bool = True,
         eval_type: str = "standard",
         update_viewser: bool = False,
+        prediction_store: bool = False,
+        wandb_notifications: bool = False,
     ) -> None:
         """
         Executes a shell script for a model artifact.
@@ -787,6 +789,8 @@ class EnsembleManager(ForecastingModelManager):
             use_saved (bool, optional): Whether to use saved data. Defaults to True.
             eval_type (str, optional): The type of evaluation to perform. Defaults to "standard".
             update_viewser (bool, optional): Whether to update the viewser dataframe. Defaults to False.
+            prediction_store (bool, optional): Whether to use the prediction store. Defaults to False.
+            wandb_notifications (bool, optional): Whether to send notifications to Weights & Biases. Defaults to False.
 
         Raises:
             Exception: If an error occurs during the execution of the shell command.
@@ -805,6 +809,8 @@ class EnsembleManager(ForecastingModelManager):
             use_saved=use_saved,
             eval_type=eval_type,
             update_viewser=update_viewser,
+            prediction_store=prediction_store,
+            wandb_notifications=wandb_notifications,
         )
 
         try:
@@ -845,6 +851,7 @@ class EnsembleManager(ForecastingModelManager):
             train=True,
             use_saved=use_saved,
             update_viewser=update_viewser,
+            wandb_notifications=self._wandb_notifications,
         )
 
     def _evaluate_model_artifact(
@@ -901,6 +908,7 @@ class EnsembleManager(ForecastingModelManager):
                         evaluate=True,
                         eval_type=eval_type,
                         update_viewser=update_viewser,
+                        wandb_notifications=self._wandb_notifications,
                     )
                     pred = pd.DataFrame.forecasts.read_store(
                         run=self._pred_store_name, name=name
@@ -924,6 +932,7 @@ class EnsembleManager(ForecastingModelManager):
                         evaluate=True,
                         eval_type=eval_type,
                         update_viewser=update_viewser,
+                        wandb_notifications=self._wandb_notifications,
                     )
                     pred = read_dataframe(
                         f"{path_generated}/predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}{PipelineConfig().dataframe_format}"
@@ -980,6 +989,8 @@ class EnsembleManager(ForecastingModelManager):
                     model_name,
                     forecast=True,
                     update_viewser=update_viewser,
+                    prediction_store=self._use_prediction_store,
+                    wandb_notifications=self._wandb_notifications,
                 )
                 pred = pd.DataFrame.forecasts.read_store(
                     run=self._pred_store_name, name=name
@@ -1002,6 +1013,8 @@ class EnsembleManager(ForecastingModelManager):
                     model_name,
                     forecast=True,
                     update_viewser=update_viewser,
+                    prediction_store=self._use_prediction_store,
+                    wandb_notifications=self._wandb_notifications,
                 )
                 pred = read_dataframe(
                     f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}"
