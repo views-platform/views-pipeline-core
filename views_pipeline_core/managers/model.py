@@ -1086,6 +1086,7 @@ class ForecastingModelManager(ModelManager):
                 validate=True,
                 self_test=args.drift_self_test,
                 partition=args.run_type,
+                override_month=args.override_timestep
             )
 
             current_month = datetime.now().strftime("%Y-%m")
@@ -1116,11 +1117,11 @@ class ForecastingModelManager(ModelManager):
                         "created_at": datetime.now().isoformat(),
                     },
                 )
-                artifact_raw_data.add_file(
-                    self._model_path.data_raw
-                    / f"{args.run_type}_viewser_df{PipelineConfig().dataframe_format}"
-                )
-                wandb.run.log_artifact(artifact_raw_data)
+                # artifact_raw_data.add_file(
+                #     self._model_path.data_raw
+                #     / f"{args.run_type}_viewser_df{PipelineConfig().dataframe_format}"
+                # )
+                # wandb.run.log_artifact(artifact_raw_data)
 
             finally:
                 wandb.finish()
