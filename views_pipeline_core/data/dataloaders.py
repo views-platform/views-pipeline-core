@@ -89,7 +89,7 @@ class ViewsDataLoader:
                     }
             case "forecasting":
                 month_last = (
-                    ViewsMonth.now().id - 2
+                    ViewsMonth.now().id - 1
                 )  # minus 2 because the current month is not yet available. Verified but can be tested by changing this and running the check_data notebook.
                 return {
                     "train": (121, month_last),
@@ -131,7 +131,7 @@ class ViewsDataLoader:
         try:
             df, alerts = queryset_base.publish().fetch_with_drift_detection(
                 start_date=self.month_first,
-                end_date=self.month_last - 1,
+                end_date=self.month_last,
                 drift_config_dict=self.drift_config_dict,
                 self_test=self_test,
             )
@@ -147,7 +147,7 @@ class ViewsDataLoader:
             logger.error(f"\033[91mError fetching data from viewser: {e}. Trying to fetch without drift detection.\033[0m", exc_info=True)
             df = queryset_base.publish().fetch(
                 start_date=self.month_first,
-                end_date=self.month_last - 1,
+                end_date=self.month_last,
             )
             df = ensure_float64(df)
             return df, None
@@ -156,7 +156,6 @@ class ViewsDataLoader:
             raise RuntimeError(
                 f"Error fetching data from viewser: {e}"
             )
-
 
     def _get_month_range(self) -> tuple[int, int]:
         """
@@ -171,9 +170,9 @@ class ViewsDataLoader:
         month_first = self.partition_dict["train"][0]
 
         if self.partition == "forecasting":
-            month_last = self.partition_dict["train"][1] + 1
+            month_last = self.partition_dict["train"][1]
         elif self.partition in ["calibration", "validation"]:
-            month_last = self.partition_dict["test"][1] + 1
+            month_last = self.partition_dict["test"][1]
         else:
             raise ValueError(
                 'partition should be either "calibration", "validation" or "forecasting"'
@@ -215,27 +214,27 @@ class ViewsDataLoader:
             first_month = self.partition_dict["train"][0]
             last_month = self.partition_dict["train"][1]
             if self.override_month is not None:
-                last_month = self.override_month - 1
+                last_month = self.override_month
         if [np.min(df_time_units), np.max(df_time_units)] != [first_month, last_month]:
             return False
         else:
             return True
 
-    @staticmethod
-    def filter_dataframe_by_month_range(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Filters the DataFrame to include only the specified month range.
+    # @staticmethod
+    # def filter_dataframe_by_month_range(self, df: pd.DataFrame) -> pd.DataFrame:
+    #     """
+    #     Filters the DataFrame to include only the specified month range.
 
-        Args:
-            df (pd.DataFrame): The input DataFrame to be filtered.
-            month_first (int): The first month ID to include.
-            month_last (int): The last month ID to include.
+    #     Args:
+    #         df (pd.DataFrame): The input DataFrame to be filtered.
+    #         month_first (int): The first month ID to include.
+    #         month_last (int): The last month ID to include.
 
-        Returns:
-            pd.DataFrame: The filtered DataFrame.
-        """
-        month_range = np.arange(self.month_first, self.month_last)
-        return df[df["month_id"].isin(month_range)].copy()
+    #     Returns:
+    #         pd.DataFrame: The filtered DataFrame.
+    #     """
+    #     month_range = np.arange(self.month_first, self.month_last)
+    #     return df[df["month_id"].isin(month_range)].copy()
 
     def get_data(
         self,

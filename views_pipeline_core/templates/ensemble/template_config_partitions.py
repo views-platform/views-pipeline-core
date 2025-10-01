@@ -39,11 +39,11 @@ def generate(steps: int = 36) -> dict:
     """
 
     def forecasting_train_range():
-        month_last = ViewsMonth.now().id - 2
+        month_last = ViewsMonth.now().id - 1
         return (121, month_last)
 
     def forecasting_test_range(steps):
-        month_last = ViewsMonth.now().id - 2
+        month_last = ViewsMonth.now().id - 1
         return (month_last + 1, month_last + 1 + steps)
 
     return {

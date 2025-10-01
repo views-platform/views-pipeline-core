@@ -1442,6 +1442,11 @@ class ForecastingModelManager(ModelManager):
             **self._config_deployment,
         }
         if hasattr(self, "_partition_dict") and self._partition_dict is not None:
+            if args.override_timestep is not None:
+                self._partition_dict["forecasting"] = {
+                    "train": (121, args.override_timestep),
+                    "test": (args.override_timestep + 1, args.override_timestep + 1 + len(config["steps"])),
+                } # Refactor this later
             config.update(self._partition_dict)
         config["run_type"] = args.run_type
         config["eval_type"] = args.eval_type
