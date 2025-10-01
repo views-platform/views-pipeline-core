@@ -78,7 +78,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        "-o", "--override_month", help="Over-ride use of current month", type=int
+        "-o", "--override_timestep", help="Override use of current time (year/month/week/day depending on your LoA)", type=int
     )
 
     parser.add_argument(
