@@ -322,7 +322,7 @@ class EnsembleManager(ForecastingModelManager):
 
         if override_timestep is not None:
             shell_command.append("--override_timestep")
-            shell_command.append(int(override_timestep))
+            shell_command.append(str(override_timestep))
 
         return shell_command
 
@@ -421,6 +421,7 @@ class EnsembleManager(ForecastingModelManager):
                 use_saved=args.saved,
                 report=args.report,
                 update_viewser=args.update_viewser,
+                override_timestep=args.override_timestep,
             )
         except Exception as e:
             logger.error(
@@ -445,6 +446,7 @@ class EnsembleManager(ForecastingModelManager):
         use_saved: bool,
         report: bool,
         update_viewser: bool,
+        override_timestep: Optional[int] = None,
     ) -> None:
         """
         Executes various model-related tasks including training, evaluation, and forecasting.
@@ -455,7 +457,9 @@ class EnsembleManager(ForecastingModelManager):
             eval (bool): Flag to indicate if the model should be evaluated.
             forecast (bool): Flag to indicate if forecasting should be performed.
             use_saved (bool): Flag to indicate if saved models should be used.
-
+            report (bool): Flag to indicate if reporting should be performed.
+            update_viewser (bool): Flag to indicate if the viewser should be updated.
+            override_timestep (int): If provided, overrides the timestamp for the last available data.
         Raises:
         Exception: If any error occurs during training, evaluation, or forecasting, it is logged and re-raised.
 
@@ -466,11 +470,11 @@ class EnsembleManager(ForecastingModelManager):
         start_t = time.time()
 
         if train:
-            self._execute_model_training(config, use_saved, update_viewser)
+            self._execute_model_training(config, use_saved, update_viewser, override_timestep)
         if eval:
-            self._execute_model_evaluation(config, update_viewser)
+            self._execute_model_evaluation(config, update_viewser, override_timestep)
         if forecast:
-            self._execute_model_forecasting(config, update_viewser)
+            self._execute_model_forecasting(config, update_viewser, override_timestep)
         if report and forecast:
             self._execute_forecast_reporting(config)
         if report and eval:
@@ -483,7 +487,7 @@ class EnsembleManager(ForecastingModelManager):
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
 
     def _execute_model_training(
-        self, config: dict, use_saved: bool, update_viewser: bool
+        self, config: dict, use_saved: bool, update_viewser: bool, override_timestep: Optional[int] = None
     ) -> None:
         """
         Executes the model training process.
@@ -491,7 +495,8 @@ class EnsembleManager(ForecastingModelManager):
         Args:
             config (dict): Configuration object containing parameters and settings.
             use_saved (bool): Flag to indicate if saved data should be used.
-
+            update_viewser (bool): Flag to indicate if the viewser should be updated.
+            override_timestep (int): If provided, overrides the timestamp for the last available data.
         Returns:
             None
         """
@@ -501,7 +506,7 @@ class EnsembleManager(ForecastingModelManager):
             add_wandb_metrics()
             try:
                 logger.info(f"Training model {config['name']}...")
-                self._train_ensemble(use_saved=use_saved, update_viewser=update_viewser)
+                self._train_ensemble(use_saved=use_saved, update_viewser=update_viewser, override_timestep=override_timestep)
 
                 wandb_alert(
                     title=f"Training for {self._model_path.target} {config['name']} completed successfully.",
@@ -523,7 +528,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 raise
 
-    def _execute_model_evaluation(self, config: dict, update_viewser: bool) -> None:
+    def _execute_model_evaluation(self, config: dict, update_viewser: bool, override_timestep: Optional[int] = None) -> None:
         """
         Executes the model evaluation process within a Weights & Biases (wandb) run context.
 
@@ -533,7 +538,7 @@ class EnsembleManager(ForecastingModelManager):
 
             config (dict): Configuration object containing parameters and settings for the evaluation.
             update_viewser (bool): Flag indicating whether to update the viewser during evaluation.
-
+            override_timestep (int): If provided, overrides the timestamp for the last available data.
         Raises:
             Exception: Propagates any exception that occurs during the evaluation process after logging and sending an alert.
 
@@ -556,7 +561,7 @@ class EnsembleManager(ForecastingModelManager):
             try:
                 logger.info(f"Evaluating model {config['name']}...")
                 df_predictions = self._evaluate_ensemble(
-                    self._eval_type, update_viewser
+                    self._eval_type, update_viewser, override_timestep
                 )
 
                 handle_ensemble_log_creation(model_path=self._model_path, config=config)
@@ -585,7 +590,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 raise
 
-    def _execute_model_forecasting(self, config: dict, update_viewser: bool) -> None:
+    def _execute_model_forecasting(self, config: dict, update_viewser: bool, override_timestep: Optional[int] = None) -> None:
         """
         Executes the model forecasting process within a Weights & Biases (wandb) run context.
 
@@ -594,6 +599,8 @@ class EnsembleManager(ForecastingModelManager):
         In case of errors during forecasting, it logs the error, sends an alert, and re-raises the exception.
 
             config (dict): Configuration object containing parameters and settings for the forecasting process.
+            update_viewser (bool): Flag indicating whether to update the viewser during forecasting.
+            override_timestep (int): If provided, overrides the timestamp for the last available data.
 
 
         Raises:
@@ -615,7 +622,7 @@ class EnsembleManager(ForecastingModelManager):
             add_wandb_metrics()
             try:
                 logger.info(f"Forecasting model {config['name']}...")
-                df_prediction = self._forecast_ensemble(update_viewser=update_viewser)
+                df_prediction = self._forecast_ensemble(update_viewser=update_viewser, override_timestep=override_timestep)
 
                 wandb_alert(
                     title=f"Forecasting for {self._model_path.target} {config['name']} completed successfully.",

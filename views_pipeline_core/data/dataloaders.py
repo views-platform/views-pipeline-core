@@ -181,7 +181,7 @@ class ViewsDataLoader:
         if self.partition == "forecasting" and self.override_month is not None:
             month_last = self.override_month
             logger.warning(
-                f"Overriding end month in forecasting partition to {month_last} ***\n"
+                f"Overriding end month in forecasting partition to {month_last}\n"
             )
 
         return month_first, month_last
