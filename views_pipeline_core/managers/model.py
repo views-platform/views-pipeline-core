@@ -145,7 +145,7 @@ class ModelPathManager:
 
         # Define valid parent directories and check for exactly one occurrence
 
-        valid_parents = {"models", "ensembles", "preprocessors", "postprocessors"}
+        valid_parents = {"models", "ensembles", "preprocessors", "postprocessors", "extractors"}
 
         found_parents = [parent for parent in valid_parents if parent in path.parts]
 
