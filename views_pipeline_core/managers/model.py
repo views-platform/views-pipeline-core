@@ -145,7 +145,7 @@ class ModelPathManager:
 
         # Define valid parent directories and check for exactly one occurrence
 
-        valid_parents = {"models", "ensembles", "preprocessors", "postprocessors", "extractors"}
+        valid_parents = {"models", "ensembles", "preprocessors", "postprocessors", "extractors", "apis"}
 
         found_parents = [parent for parent in valid_parents if parent in path.parts]
 
@@ -269,7 +269,7 @@ class ModelPathManager:
         self._instance_hash = self.generate_hash(
             self.model_name, self._validate, self.target
         )
-
+        self.dotenv = self.root / ".env"
         self._initialize_directories()
         self._initialize_scripts()
         logger.debug(
@@ -877,13 +877,21 @@ class ModelManager:
             dict: The configuration object.
         """
 
-        config = {
-            **self._config_hyperparameters,
-            **self._config_meta,
-            **self._config_deployment,
-        }
+        # config = {
+        #     **self._config_hyperparameters,
+        #     **self._config_meta,
+        #     **self._config_deployment,
+        # }
+        config = {}
         if hasattr(self, "_partition_dict") and self._partition_dict is not None:
             config.update(self._partition_dict)
+        if hasattr(self, "_config_hyperparameters") and self._config_hyperparameters is not None:
+            config.update(self._config_hyperparameters)
+        if hasattr(self, "_config_deployment") and self._config_deployment is not None:
+            config.update(self._config_deployment)
+        if hasattr(self, "_config_meta") and self._config_meta is not None:
+            config.update(self._config_meta)
+
         return config
 
 
@@ -1436,11 +1444,18 @@ class ForecastingModelManager(ModelManager):
         Returns:
             dict: The updated configuration object.
         """
-        config = {
-            **self._config_hyperparameters,
-            **self._config_meta,
-            **self._config_deployment,
-        }
+        # config = {
+        #     **self._config_hyperparameters,
+        #     **self._config_meta,
+        #     **self._config_deployment,
+        # }
+        config = {}
+        if hasattr(self, "_config_hyperparameters") and self._config_hyperparameters is not None:
+            config.update(self._config_hyperparameters)
+        if hasattr(self, "_config_deployment") and self._config_deployment is not None:
+            config.update(self._config_deployment)
+        if hasattr(self, "_config_meta") and self._config_meta is not None:
+            config.update(self._config_meta)
         if hasattr(self, "_partition_dict") and self._partition_dict is not None:
             if args.override_timestep is not None:
                 self._partition_dict["forecasting"] = {
@@ -1448,6 +1463,7 @@ class ForecastingModelManager(ModelManager):
                     "test": (args.override_timestep + 1, args.override_timestep + 1 + len(config["steps"])),
                 } # Refactor this later
             config.update(self._partition_dict)
+            self.configs.update(self._partition_dict)
         config["run_type"] = args.run_type
         config["eval_type"] = args.eval_type
         config["sweep"] = args.sweep
@@ -1466,13 +1482,20 @@ class ForecastingModelManager(ModelManager):
         Returns:
             dict: The updated configuration object.
         """
-        config = {
-            **wandb_config,
-            **self._config_meta,
-            **self._config_deployment,
-        }
+        # config = {
+        #     **wandb_config,
+        #     **self._config_meta,
+        #     **self._config_deployment,
+        # }
+        config = {}
         if hasattr(self, "_partition_dict") and self._partition_dict is not None:
             config.update(self._partition_dict)
+        if hasattr(self, "_config_hyperparameters") and self._config_hyperparameters is not None:
+            config.update(self._config_hyperparameters)
+        if hasattr(self, "_config_deployment") and self._config_deployment is not None:
+            config.update(self._config_deployment)
+        if hasattr(self, "_config_meta") and self._config_meta is not None:
+            config.update(self._config_meta)
         config["run_type"] = self._args.run_type
         config["eval_type"] = self._args.eval_type
         config["sweep"] = self._args.sweep
