@@ -173,7 +173,7 @@ class EnsembleManager(ForecastingModelManager):
                 from views_forecasts.extensions import ForecastsStore, ViewsMetadata
 
                 logger.info(
-                    f"Fetching latest C dataset for model {cm_model} from prediction store."
+                    f"Fetching latest dataset for model {cm_model} from prediction store."
                 )
                 run_id = ViewsMetadata().get_run_id_from_name(self._pred_store_name)
                 all_runs = ViewsMetadata().with_name(cm_model).fetch()["name"].to_list()
@@ -925,6 +925,7 @@ class EnsembleManager(ForecastingModelManager):
                         eval_type=eval_type,
                         update_viewser=update_viewser,
                         wandb_notifications=self._wandb_notifications,
+                        override_timestep=override_timestep
                     )
                     pred = pd.DataFrame.forecasts.read_store(
                         run=self._pred_store_name, name=name
@@ -1033,6 +1034,7 @@ class EnsembleManager(ForecastingModelManager):
                     update_viewser=update_viewser,
                     prediction_store=self._use_prediction_store,
                     wandb_notifications=self._wandb_notifications,
+                    override_timestep=override_timestep
                 )
                 pred = read_dataframe(
                     f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}"
