@@ -1,4 +1,9 @@
-import sys
+import concurrent
+from collections import defaultdict
+from concurrent.futures import as_completed
+import os
+from tqdm import tqdm
+import wandb
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 import torch
 import logging
@@ -75,87 +80,197 @@ class ReconciliationManager:
         else:
             return torch.device("cpu")  # Fallback to CPU
 
-    def _reconcile_single_timestep(
-        self,
-        country_id: int,
-        time_id: int,
-        feature: str,
-        lr: float,
-        max_iters: int,
-        tol=float,
-    ):
-        """
-        Reconciles the forecast for a given country and time ID.
-        """
-        # Validate inputs
-        if country_id not in self._valid_cids:
-            raise ValueError(f"Invalid country ID: {country_id}")
-        if time_id not in self._valid_time_ids:
-            raise ValueError(f"Invalid time ID: {time_id}")
-        if feature not in self._valid_targets:
-            raise ValueError(f"Invalid feature: {feature}")
+    # def _reconcile_single_timestep(
+    #     self,
+    #     country_id: int,
+    #     time_id: int,
+    #     feature: str,
+    #     lr: float,
+    #     max_iters: int,
+    #     tol=float,
+    # ):
+    #     """
+    #     Reconciles the forecast for a given country and time ID.
+    #     """
+    #     # Validate inputs
+    #     if country_id not in self._valid_cids:
+    #         raise ValueError(f"Invalid country ID: {country_id}")
+    #     if time_id not in self._valid_time_ids:
+    #         raise ValueError(f"Invalid time ID: {time_id}")
+    #     if feature not in self._valid_targets:
+    #         raise ValueError(f"Invalid feature: {feature}")
 
-        pg_subset = self._pg_dataset.get_subset_by_country_id(country_ids=[country_id])
-        c_subset = self._c_dataset.get_subset_dataframe(entity_ids=[country_id])
+    #     pg_subset = self._pg_dataset.get_subset_by_country_id(country_ids=[country_id])
+    #     c_subset = self._c_dataset.get_subset_dataframe(entity_ids=[country_id])
+
+    #     c_subset_dataset = _CDataset(source=c_subset)
+    #     pg_subset_dataset = _PGDataset(source=pg_subset)
+
+    #     # Get the tensors for reconciliation
+    #     pg_tensor = pg_subset_dataset.to_reconciler(feature=feature, time_id=time_id)
+    #     c_tensor = c_subset_dataset.to_reconciler(
+    #         feature=feature, time_id=time_id
+    #     )
+
+    #     # Perform reconciliation
+    #     reconciled_tensor = self._reconciler.reconcile_forecast(
+    #         grid_forecast=pg_tensor,
+    #         country_forecast=c_tensor,
+    #         lr=lr,
+    #         max_iters=max_iters,
+    #         tol=tol,
+    #     )
+
+    #     # Return the reconciled dataframe
+    #     return reconciled_tensor
+
+    # def reconcile(self, lr=0.01, max_iters=500, tol=1e-6):
+    #     """
+    #     Reconciles the forecast for all valid country and time IDs.
+    #     """
+    #     for country_idx, country_id in enumerate(self._valid_cids, start=1):
+    #         for time_idx, time_id in enumerate(self._valid_time_ids, start=1):
+    #             for feature_idx, feature in enumerate(self._valid_targets, start=1):
+    #                 # Update log in place
+    #                 sys.stdout.write(
+    #                     f"\r{' ' * 80}\r"  # Clear the previous line
+    #                     f"Reconciling country {country_idx}/{len(self._valid_cids)}, "
+    #                     f"time {time_idx}/{len(self._valid_time_ids)}, "
+    #                     f"feature {feature_idx}/{len(self._valid_targets)}..."
+    #                 )
+    #                 sys.stdout.flush()
+                    
+    #                 self._pg_dataset.reconcile(
+    #                     country_id=country_id, 
+    #                     time_id=time_id, 
+    #                     reconciled_tensor=self._reconcile_single_timestep(
+    #                         country_id, time_id, feature, lr, max_iters, tol
+    #                     ), 
+    #                     feature=feature
+    #                 )
+
+    #         if country_idx % 10 == 0 or country_idx == len(self._valid_cids):
+    #             # logger.info(
+    #             #     f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})"
+    #             # )
+    #             wandb_alert(
+    #                 title=self.__class__.__name__,
+    #                 text=f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})",
+    #             )
+        
+    #     # Clear the line after completion
+    #     sys.stdout.write("\rReconciliation complete.\n")
+    #     sys.stdout.flush()
+    #     wandb_alert(
+    #         title=self.__class__.__name__,
+    #         text="All reconciliations have been successfully completed."
+    #     )
+    #     return self._pg_dataset.reconciled_dataframe
+
+    @staticmethod
+    def _reconcile_country_worker(args):
+        """
+        Performs reconciliation for a single task. 
+        """
+        country_id, time_id, feature, lr, max_iters, tol, c_subset, pg_subset, device_str = args
+        
+        device = torch.device(device_str)
+        reconciler = ForecastReconciler(device=device)
 
         c_subset_dataset = _CDataset(source=c_subset)
         pg_subset_dataset = _PGDataset(source=pg_subset)
 
-        # Get the tensors for reconciliation
         pg_tensor = pg_subset_dataset.to_reconciler(feature=feature, time_id=time_id)
-        c_tensor = c_subset_dataset.to_reconciler(
-            feature=feature, time_id=time_id
-        )
-
-        # Perform reconciliation
-        reconciled_tensor = self._reconciler.reconcile_forecast(
+        c_tensor = c_subset_dataset.to_reconciler(feature=feature, time_id=time_id)
+        
+        reconciled_tensor = reconciler.reconcile_forecast(
             grid_forecast=pg_tensor,
             country_forecast=c_tensor,
             lr=lr,
             max_iters=max_iters,
             tol=tol,
         )
-
-        # Return the reconciled dataframe
-        return reconciled_tensor
-
-    def reconcile(self, lr=0.01, max_iters=500, tol=1e-6):
-        """
-        Reconciles the forecast for all valid country and time IDs.
-        """
-        for country_idx, country_id in enumerate(self._valid_cids, start=1):
-            for time_idx, time_id in enumerate(self._valid_time_ids, start=1):
-                for feature_idx, feature in enumerate(self._valid_targets, start=1):
-                    # Update log in place
-                    sys.stdout.write(
-                        f"\r{' ' * 80}\r"  # Clear the previous line
-                        f"Reconciling country {country_idx}/{len(self._valid_cids)}, "
-                        f"time {time_idx}/{len(self._valid_time_ids)}, "
-                        f"feature {feature_idx}/{len(self._valid_targets)}..."
-                    )
-                    sys.stdout.flush()
-                    
-                    self._pg_dataset.reconcile(
-                        country_id=country_id, 
-                        time_id=time_id, 
-                        reconciled_tensor=self._reconcile_single_timestep(
-                            country_id, time_id, feature, lr, max_iters, tol
-                        ), 
-                        feature=feature
-                    )
-
-            if country_idx % 10 == 0 or country_idx == len(self._valid_cids):
-                # logger.info(
-                #     f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})"
-                # )
-                wandb_alert(
-                    title=self.__class__.__name__,
-                    text=f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})",
-                )
         
-        # Clear the line after completion
-        sys.stdout.write("\rReconciliation complete.\n")
-        sys.stdout.flush()
+        return country_id, time_id, feature, reconciled_tensor.cpu()
+    
+    def reconcile(self, lr=0.01, max_iters=500, tol=1e-6, max_workers=None):
+        """
+        Reconciles the forecast for all valid country and time IDs using multiprocessing.
+        
+        Args:
+            lr (float): Learning rate for the optimization.
+            max_iters (int): Maximum iterations for the optimization.
+            tol (float): Tolerance for the optimization.
+            max_workers (int, optional): The maximum number of processes to use. 
+                                         If None, it defaults to the number of CPUs.
+        """
+
+        device_str = str(self._device)
+        num_total_tasks = len(self._valid_cids) * len(self._valid_time_ids) * len(self._valid_targets)
+        country_task_counts = {cid: len(self._valid_time_ids) * len(self._valid_targets) for cid in self._valid_cids}
+
+        results = []
+        failed_tasks = []
+        country_completion_progress = defaultdict(int)
+        completed_countries = set()
+
+        num_of_workers = max_workers if max_workers is not None else min(32, os.cpu_count() + 4) # for version >=3.8 and <3.13
+        logger.info(f"Start multiprocessing reconciliation with {num_of_workers} workers...")
+
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_to_task_info = {}
+
+            for country_id in self._valid_cids:
+                c_subset = self._c_dataset.get_subset_dataframe(entity_ids=[country_id])
+                pg_subset = self._pg_dataset.get_subset_by_country_id(country_ids=[country_id])
+
+                for time_id in self._valid_time_ids:
+                    for feature in self._valid_targets:
+                        task_args = (
+                            country_id, time_id, feature, lr, max_iters, tol, 
+                            c_subset, pg_subset, device_str
+                        )
+                        future = executor.submit(ReconciliationManager._reconcile_country_worker, task_args)
+                        future_to_task_info[future] = (country_id, time_id, feature)
+
+            logger.info(f"All {num_total_tasks} tasks have been submitted. Awaiting completion...")
+
+            for future in tqdm(as_completed(future_to_task_info), desc="Reconciling Tasks", total=num_total_tasks):
+                country_id, time_id, feature = future_to_task_info[future]
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    logger.error(f"Task failed for country {country_id}, time {time_id}, feature {feature}: {e}")
+                    failed_tasks.append((country_id, time_id, feature))
+                    wandb_alert(
+                        title=self.__class__.__name__,
+                        text=f"Task failed for country {country_id}, time {time_id}, feature {feature}: {e}",
+                        level=wandb.AlertLevel.ERROR,
+                    )
+
+                country_completion_progress[country_id] += 1
+
+                if country_completion_progress[country_id] == country_task_counts[country_id]:
+                    completed_countries.add(country_id)
+                    num_done = len(completed_countries)
+                    if num_done % 10 == 0 or num_done == len(self._valid_cids):
+                        logger.info(f"Reconciliation complete for {num_done}/{len(self._valid_cids)} countries")
+
+        if failed_tasks:
+            logger.warning(f"{len(failed_tasks)} tasks failed during reconciliation. See logs for details.")
+            # Depending on requirements, you might want to raise an error here.
+            # raise RuntimeError(f"{len(failed_tasks)} reconciliation tasks failed.")
+        
+        logger.info(f"Updating dataset with {len(results)} successful results...")
+        for country_id, time_id, feature, reconciled_tensor in tqdm(results, desc="Updating dataset"):
+            self._pg_dataset.reconcile(
+                country_id=country_id, 
+                time_id=time_id, 
+                reconciled_tensor=reconciled_tensor, 
+                feature=feature
+            )
+        
+        logger.info("All reconciliations have been successfully completed.")
         wandb_alert(
             title=self.__class__.__name__,
             text="All reconciliations have been successfully completed."

@@ -1302,7 +1302,7 @@ class _ViewsDataset:
         pred_tensor = self.to_tensor()
 
         if "ln" in feature.split("_"):
-            logger.info(
+            logger.debug(
                 f"Unlogging tensor for feature '{feature}' for time_id '{time_id}' before reconciliation."
             )
             # Shape (time, entity, samples, vars)
@@ -1310,11 +1310,11 @@ class _ViewsDataset:
             pred_tensor = np.exp(pred_tensor) - 1
         elif "lx" in feature.split("_"):
             pred_tensor = np.exp(pred_tensor) - np.exp(100)
-            logger.info(
+            logger.debug(
                 f"Unlogging tensor with offset for feature '{feature}' for time_id '{time_id}' before reconciliation."
             )
         else:
-            logger.info(
+            logger.debug(
                 f"No transformation required for feature '{feature}' for time_id '{time_id}'."
             )
 
@@ -1566,17 +1566,17 @@ class _PGDataset(_ViewsDataset):
         reconciled_np = reconciled_tensor.cpu().numpy()
         if "ln" in feature.split("_"):
             # take the natural log of the tensor if it starts with 'ln_'
-            logger.info(
+            logger.debug(
                 f"Applying log transformation to reconciled tensor for feature '{feature}' at time_id '{time_id}'."
             )
             reconciled_np = np.log(reconciled_np + 1)
         elif "lx" in feature.split("_"):
             reconciled_np = np.log(reconciled_np + np.exp(-100))
-            logger.info(
+            logger.debug(
                 f"Applying log transformation with offset to reconciled tensor for feature '{feature}' at time_id '{time_id}'."
             )
         else:
-            logger.info(
+            logger.debug(
                 f"No transformation required for feature '{feature}' for time_id '{time_id}'."
             )
 
