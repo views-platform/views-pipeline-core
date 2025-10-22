@@ -747,6 +747,7 @@ class ModelManager:
                 "config_sweep.py", "get_sweep_config"
             )
 
+        try:
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
 
             self._data_loader = ViewsDataLoader(
@@ -756,8 +757,14 @@ class ModelManager:
                 ),
                 partition_dict=self._partition_dict,
             )
+        except Exception as e:
+            logger.error(f"No Queryset detected for ViewsDataLoader. Skipping...", exc_info=False)
+            self._data_loader = None
 
-        self._pred_store_name = self.__get_pred_store_name()
+        if use_prediction_store:
+            self._pred_store_name = self.__get_pred_store_name()
+        else:
+            self._pred_store_name = None
 
         self.set_dataframe_format(format=".parquet")
         if self.__class__.__instances__ == 1:
