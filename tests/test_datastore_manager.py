@@ -24,6 +24,7 @@ class TestPredictionMetadata:
             name="test_model",
             type="fatalities",
             targets=["target1", "target2"],
+            category="forecast",
             description="Test description"
         )
         
@@ -31,6 +32,7 @@ class TestPredictionMetadata:
         assert metadata.name == "test_model"
         assert metadata.type == "fatalities"
         assert metadata.targets == ["target1", "target2"]
+        assert metadata.category == "forecast"
         assert metadata.description == "Test description"
 
     def test_initialization_without_description(self):
@@ -39,10 +41,12 @@ class TestPredictionMetadata:
             loa="country",
             name="test_model",
             type="fatalities",
-            targets=["target1"]
+            targets=["target1"],
+            category="historical"
         )
         
         assert metadata.description is None
+        assert metadata.category == "historical"
 
     def test_invalid_loa_type(self):
         """Test that non-string loa raises TypeError"""
@@ -51,7 +55,8 @@ class TestPredictionMetadata:
                 loa=123,
                 name="test_model",
                 type="fatalities",
-                targets=["target1"]
+                targets=["target1"],
+                category="forecast"
             )
 
     def test_invalid_name_type(self):
@@ -61,7 +66,8 @@ class TestPredictionMetadata:
                 loa="country",
                 name=["invalid"],
                 type="fatalities",
-                targets=["target1"]
+                targets=["target1"],
+                category="forecast"
             )
 
     def test_invalid_type_type(self):
@@ -71,7 +77,8 @@ class TestPredictionMetadata:
                 loa="country",
                 name="test_model",
                 type=123,
-                targets=["target1"]
+                targets=["target1"],
+                category="forecast"
             )
 
     def test_invalid_targets_not_list(self):
@@ -81,7 +88,8 @@ class TestPredictionMetadata:
                 loa="country",
                 name="test_model",
                 type="fatalities",
-                targets="target1"
+                targets="target1",
+                category="forecast"
             )
 
     def test_invalid_targets_non_string_elements(self):
@@ -91,7 +99,8 @@ class TestPredictionMetadata:
                 loa="country",
                 name="test_model",
                 type="fatalities",
-                targets=[1, 2, 3]
+                targets=[1, 2, 3],
+                category="forecast"
             )
 
     def test_invalid_description_type(self):
@@ -102,7 +111,19 @@ class TestPredictionMetadata:
                 name="test_model",
                 type="fatalities",
                 targets=["target1"],
+                category="forecast",
                 description=123
+            )
+
+    def test_invalid_category_value(self):
+        """Test that invalid category value raises ValueError"""
+        with pytest.raises(ValueError, match="category must be either 'forecast' or 'historical'"):
+            PredictionMetadata(
+                loa="country",
+                name="test_model",
+                type="fatalities",
+                targets=["target1"],
+                category="invalid_category"
             )
 
     def test_to_dict_with_description(self):
@@ -112,6 +133,7 @@ class TestPredictionMetadata:
             name="test_model",
             type="fatalities",
             targets=["target1", "target2"],
+            category="forecast",
             description="Test description"
         )
         
@@ -122,6 +144,7 @@ class TestPredictionMetadata:
             "name": "test_model",
             "type": "fatalities",
             "targets": ["target1", "target2"],
+            "category": "forecast",
             "description": "Test description"
         }
 
@@ -131,7 +154,8 @@ class TestPredictionMetadata:
             loa="country",
             name="test_model",
             type="fatalities",
-            targets=["target1"]
+            targets=["target1"],
+            category="historical"
         )
         
         result = metadata.to_dict()
@@ -140,7 +164,8 @@ class TestPredictionMetadata:
             "loa": "country",
             "name": "test_model",
             "type": "fatalities",
-            "targets": ["target1"]
+            "targets": ["target1"],
+            "category": "historical"
         }
         assert "description" not in result
 
@@ -224,6 +249,7 @@ class TestPredictionStoreManager:
             name="test_model",
             type="fatalities",
             targets=["target1", "target2"],
+            category="forecast",
             description="Test upload"
         )
         
@@ -237,6 +263,7 @@ class TestPredictionStoreManager:
         assert call_args[1]["metadata"]["name"] == "test_model"
         assert call_args[1]["metadata"]["type"] == "fatalities"
         assert call_args[1]["metadata"]["targets"] == ["target1", "target2"]
+        assert call_args[1]["metadata"]["category"] == "forecast"
 
     def test_upload_predictions_from_string_path(self, prediction_store, mock_appwrite_manager, tmp_path):
         """Test upload from string path"""
@@ -255,7 +282,8 @@ class TestPredictionStoreManager:
             loa="country",
             name="test_model",
             type="fatalities",
-            targets=["target1"]
+            targets=["target1"],
+            category="historical"
         )
         
         assert result.success
@@ -271,7 +299,8 @@ class TestPredictionStoreManager:
                 loa="country",
                 name="test_model",
                 type="fatalities",
-                targets=["target1"]
+                targets=["target1"],
+                category="forecast"
             )
 
     def test_upload_predictions_invalid_file_type(self, prediction_store):
@@ -283,7 +312,8 @@ class TestPredictionStoreManager:
                 loa="country",
                 name="test_model",
                 type="fatalities",
-                targets=["target1"]
+                targets=["target1"],
+                category="forecast"
             )
 
     def test_upload_predictions_bucket_not_found_creates_bucket(self, prediction_store, mock_appwrite_manager, tmp_path):
@@ -318,7 +348,8 @@ class TestPredictionStoreManager:
             loa="country",
             name="test_model",
             type="fatalities",
-            targets=["target1"]
+            targets=["target1"],
+            category="forecast"
         )
         
         assert result.success
@@ -345,7 +376,8 @@ class TestPredictionStoreManager:
             loa="country",
             name="test_model",
             type="fatalities",
-            targets=["target1"]
+            targets=["target1"],
+            category="forecast"
         )
         
         assert not result.success
@@ -708,6 +740,7 @@ class TestPredictionStoreManagerIntegration:
             name="test_model",
             type="fatalities",
             targets=["target1", "target2"],
+            category="forecast",
             description="Full workflow test"
         )
         

@@ -84,15 +84,16 @@ class AppwriteConfig:
     # Cache settings
     cache_dir: Optional[str] = None
     cache_ttl_hours: int = DEFAULT_CACHE_TTL_HOURS
+    allow_metadata_only_updates: bool = True  # Whether to update metadata only when file hash exists
     
     # Storage settings
     bucket_id: str = "production_forecasts"
     bucket_name: Optional[str] = None  # Will default to bucket_id with spaces if not provided
     
     # Metadata settings
-    collection_name: str = "Pipeline Forecasts"
+    collection_name: str = "Pipeline Forecasts"  #"Pipeline Forecasts"
     collection_id: Optional[str] = "pipeline_forecasts"  # Custom collection ID override
-    database_name: Optional[str] = "File Metadata"  # Will default to bucket_name + " Metadata" if not provided
+    database_name: Optional[str] = "File Metadata" #"File Metadata"  # Will default to bucket_name + " Metadata" if not provided
     database_id: Optional[str] = "file_metadata"  # Custom database ID override
     
     # Path manager
@@ -107,7 +108,7 @@ class AppwriteConfig:
             self.bucket_name = self.bucket_id.replace("_", " ").title()
         
         if not self.database_name:
-            self.database_name = f"{self.bucket_name} Metadata"
+            self.database_name = self.collection_id.replace("_", " ").title()
 
 # Authentication Classes
 class AuthManager(ABC):
@@ -921,22 +922,77 @@ class AppWriteFileManager:
         
         return sha256_hash.hexdigest()
     
+    # def _file_exists_by_hash(
+    #     self,
+    #     bucket_id: str,
+    #     file_hash: str,
+    #     filename: str = None
+    # ) -> OperationResult:
+    #     try:
+    #         # First try to find by hash in metadata
+    #         # bucket_info = self.get_bucket(bucket_id)
+    #         # if not bucket_info.success:
+    #         #     return OperationResult(success=False, error="Bucket not found")
+            
+    #         # bucket_name = bucket_info.data["name"]
+    #         # search_result = self.metadata_manager.check_file_exists_by_hash(
+    #         #     bucket_name, file_hash, self.config.collection_name, self.config.collection_id, self.config.database_id
+    #         # )
+    #         search_result = self.metadata_manager.check_file_exists_by_hash(
+    #             file_hash, 
+    #             self.config.collection_name, 
+    #             self.config.collection_id, 
+    #             self.config.database_id
+    #         )
+            
+    #         if search_result.success:
+    #             return OperationResult(
+    #                 success=True,
+    #                 data=search_result.data,
+    #                 code="FOUND_BY_HASH"
+    #             )
+            
+    #         # Fallback to filename check if hash not found
+    #         if filename:
+    #             all_files = []
+    #             offset = 0
+    #             limit = DEFAULT_PAGE_LIMIT
+                
+    #             while True:
+    #                 result = self.storage.list_files(
+    #                     bucket_id, [Query.limit(limit), Query.offset(offset)]
+    #                 )
+    #                 files_chunk = result.get("files", [])
+    #                 all_files.extend(files_chunk)
+                    
+    #                 if len(files_chunk) < limit:
+    #                     break
+    #                 offset += limit
+                
+    #             for file in all_files:
+    #                 if file["name"] == filename:
+    #                     return OperationResult(
+    #                         success=True,
+    #                         data=file,
+    #                         code="FOUND_BY_NAME"
+    #                     )
+            
+    #         return OperationResult(success=False, code="NOT_FOUND")
+        
+    #     except AppwriteException as e:
+    #         return OperationResult(
+    #             success=False,
+    #             error=e.message,
+    #             code=e.type
+    #         )
     def _file_exists_by_hash(
-        self,
-        bucket_id: str,
-        file_hash: str,
-        filename: str = None
-    ) -> OperationResult:
+    self,
+    bucket_id: str,
+    file_hash: str,
+    filename: str = None
+) -> OperationResult:
         try:
             # First try to find by hash in metadata
-            # bucket_info = self.get_bucket(bucket_id)
-            # if not bucket_info.success:
-            #     return OperationResult(success=False, error="Bucket not found")
-            
-            # bucket_name = bucket_info.data["name"]
-            # search_result = self.metadata_manager.check_file_exists_by_hash(
-            #     bucket_name, file_hash, self.config.collection_name, self.config.collection_id, self.config.database_id
-            # )
             search_result = self.metadata_manager.check_file_exists_by_hash(
                 file_hash, 
                 self.config.collection_name, 
@@ -951,30 +1007,47 @@ class AppWriteFileManager:
                     code="FOUND_BY_HASH"
                 )
             
-            # Fallback to filename check if hash not found
+            # Fallback to filename check if hash not found - but use efficient query
             if filename:
-                all_files = []
-                offset = 0
-                limit = DEFAULT_PAGE_LIMIT
-                
-                while True:
+                try:
+                    # Use query instead of listing all files
                     result = self.storage.list_files(
-                        bucket_id, [Query.limit(limit), Query.offset(offset)]
+                        bucket_id, 
+                        [Query.equal("name", filename), Query.limit(1)]
                     )
-                    files_chunk = result.get("files", [])
-                    all_files.extend(files_chunk)
                     
-                    if len(files_chunk) < limit:
-                        break
-                    offset += limit
-                
-                for file in all_files:
-                    if file["name"] == filename:
+                    files = result.get("files", [])
+                    if files:
                         return OperationResult(
                             success=True,
-                            data=file,
+                            data=files[0],
                             code="FOUND_BY_NAME"
                         )
+                except AppwriteException as query_error:
+                    logger.warning(f"Filename query failed, falling back to list: {query_error}")
+                    # Fallback to original list-based approach if query fails
+                    all_files = []
+                    offset = 0
+                    limit = DEFAULT_PAGE_LIMIT
+                    
+                    while True:
+                        result = self.storage.list_files(
+                            bucket_id, [Query.limit(limit), Query.offset(offset)]
+                        )
+                        files_chunk = result.get("files", [])
+                        all_files.extend(files_chunk)
+                        
+                        if len(files_chunk) < limit:
+                            break
+                        offset += limit
+                    
+                    for file in all_files:
+                        if file["name"] == filename:
+                            return OperationResult(
+                                success=True,
+                                data=file,
+                                code="FOUND_BY_NAME"
+                            )
             
             return OperationResult(success=False, code="NOT_FOUND")
         
@@ -1155,18 +1228,18 @@ class AppWriteFileManager:
                 error=f"Upload from bytes failed: {e.message}",
                 code=e.type
             )
-    
+        
     def upload_file_with_metadata(
-        self,
-        bucket_id: str,
-        file_path: str,
-        filename: str,
-        metadata: Dict[str, Any],
-        file_id: str = None,
-        permissions: List[str] = None,
-        collection_name: str = None,
-        collection_id: str = None
-    ) -> OperationResult:
+    self,
+    bucket_id: str,
+    file_path: str,
+    filename: str,
+    metadata: Dict[str, Any],
+    file_id: str = None,
+    permissions: List[str] = None,
+    collection_name: str = None,
+    collection_id: str = None
+) -> OperationResult:
         # Use defaults from config if not provided
         if collection_name is None:
             collection_name = self.config.collection_name
@@ -1181,8 +1254,13 @@ class AppWriteFileManager:
             file_hash, collection_name, collection_id, self.config.database_id
         )
         
-        if existing_metadata.success and not file_id:
-            # File already exists - update its metadata instead of uploading again
+        # CRITICAL FIX: Always upload new file if file_id is provided or if we want to keep both versions
+        # Only use metadata-only update when explicitly intended
+        should_update_metadata_only = (existing_metadata.success and 
+                                    not file_id and 
+                                    self.config.allow_metadata_only_updates)
+        
+        if should_update_metadata_only:
             logger.info(f"File with hash {file_hash} already exists, updating metadata only")
             
             existing_file_id = existing_metadata.data.get("fileId")
@@ -1245,8 +1323,16 @@ class AppWriteFileManager:
         # Add file_hash to metadata
         metadata["file_hash"] = file_hash
         
-        # Upload file
-        upload_result = self.upload_file(bucket_id, file_path, file_id, permissions)
+        # Upload file (this will handle duplicates based on check_duplicates parameter)
+        upload_result = self.upload_file(
+            bucket_id, 
+            file_path, 
+            file_id, 
+            permissions, 
+            check_duplicates=True,  # Let the base method handle duplicates
+            overwrite=False  # Don't overwrite by default in metadata flow
+        )
+        
         if not upload_result.success:
             return upload_result
         
@@ -1276,24 +1362,242 @@ class AppWriteFileManager:
         
         except AppwriteException as e:
             logger.error(f"Metadata handling failed: {e.message}")
+            # Rollback: delete the uploaded file if metadata fails
+            try:
+                self.delete_file(bucket_id, file_id)
+            except Exception as delete_error:
+                logger.error(f"Failed to rollback file upload after metadata error: {delete_error}")
+            
             return OperationResult(
-                success=True,
-                data=upload_result.data,
+                success=False,
                 error=f"Metadata handling failed: {e.message}",
                 code="METADATA_ERROR"
             )
     
+    # def upload_file_with_metadata(
+    #     self,
+    #     bucket_id: str,
+    #     file_path: str,
+    #     filename: str,
+    #     metadata: Dict[str, Any],
+    #     file_id: str = None,
+    #     permissions: List[str] = None,
+    #     collection_name: str = None,
+    #     collection_id: str = None
+    # ) -> OperationResult:
+    #     # Use defaults from config if not provided
+    #     if collection_name is None:
+    #         collection_name = self.config.collection_name
+    #     if collection_id is None:
+    #         collection_id = self.config.collection_id
+        
+    #     # Calculate file hash for metadata
+    #     file_hash = self._calculate_file_hash(file_path=file_path)
+        
+    #     # Check if file already exists by hash
+    #     existing_metadata = self.metadata_manager.check_file_exists_by_hash(
+    #         file_hash, collection_name, collection_id, self.config.database_id
+    #     )
+        
+    #     if existing_metadata.success and not file_id:
+    #         # File already exists - update its metadata instead of uploading again
+    #         logger.info(f"File with hash {file_hash} already exists, updating metadata only")
+            
+    #         existing_file_id = existing_metadata.data.get("fileId")
+            
+    #         # Ensure collection exists with new metadata fields
+    #         collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
+    #             metadata, collection_name, collection_id, self.config.database_id
+    #         )
+    #         if not collection_result.success:
+    #             return OperationResult(
+    #                 success=False,
+    #                 error=collection_result.error,
+    #                 code=collection_result.code
+    #             )
+            
+    #         # Update the metadata
+    #         metadata_update = metadata.copy()
+    #         metadata_update["file_hash"] = file_hash
+    #         metadata_update["filename"] = filename
+    #         metadata_update["uploaded_at"] = datetime.now().isoformat()
+            
+    #         update_result = self.metadata_manager.update_file_metadata(
+    #             file_id=existing_file_id,
+    #             metadata_updates=metadata_update,
+    #             collection_name=collection_name,
+    #             collection_id=collection_id,
+    #             database_id=self.config.database_id
+    #         )
+            
+    #         if update_result.success:
+    #             # Get the full file info to return
+    #             file_info = self.get_file(bucket_id, existing_file_id)
+    #             return OperationResult(
+    #                 success=True,
+    #                 data={
+    #                     **(file_info.data if file_info.success else {}),
+    #                     "metadata": update_result.data,
+    #                     "metadata_action": "UPDATED"
+    #                 },
+    #                 code="EXISTS_METADATA_UPDATED"
+    #             )
+    #         else:
+    #             return OperationResult(
+    #                 success=False,
+    #                 error=f"Failed to update metadata: {update_result.error}",
+    #                 code="METADATA_UPDATE_FAILED"
+    #             )
+        
+    #     # Ensure metadata infrastructure exists
+    #     collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
+    #         metadata, collection_name, collection_id, self.config.database_id
+    #     )
+    #     if not collection_result.success:
+    #         return OperationResult(
+    #             success=False,
+    #             error=collection_result.error,
+    #             code=collection_result.code
+    #         )
+        
+    #     # Add file_hash to metadata
+    #     metadata["file_hash"] = file_hash
+        
+    #     # Upload file
+    #     upload_result = self.upload_file(bucket_id, file_path, file_id, permissions)
+    #     if not upload_result.success:
+    #         return upload_result
+        
+    #     file_id = upload_result.data["$id"]
+    #     database_id = collection_result.data["database_id"]
+    #     coll_id = collection_result.data["collection_id"]
+        
+    #     # Create and store metadata
+    #     try:
+    #         metadata_document = self._build_metadata_document(
+    #             file_id, bucket_id, filename, {"data": upload_result.data}, metadata, file_hash
+    #         )
+            
+    #         metadata_result = self._store_metadata_document(
+    #             database_id, coll_id, file_id, metadata_document
+    #         )
+            
+    #         if metadata_result.success:
+    #             upload_result.data["metadata"] = metadata_result.data
+    #             upload_result.data["metadata_action"] = metadata_result.code
+            
+    #         return OperationResult(
+    #             success=True,
+    #             data=upload_result.data,
+    #             code="CREATED_WITH_METADATA"
+    #         )
+        
+    #     except AppwriteException as e:
+    #         logger.error(f"Metadata handling failed: {e.message}")
+    #         return OperationResult(
+    #             success=True,
+    #             data=upload_result.data,
+    #             error=f"Metadata handling failed: {e.message}",
+    #             code="METADATA_ERROR"
+    #         )
+    
+#     def upload_file_from_bytes_with_metadata(
+#     self,
+#     bucket_id: str,
+#     file_bytes: bytes,
+#     filename: str,
+#     metadata: Dict[str, Any],
+#     file_id: str = None,
+#     permissions: List[str] = None,
+#     collection_name: str = None,
+#     collection_id: str = None
+# ) -> OperationResult:
+#         # Use defaults from config if not provided
+#         if collection_name is None:
+#             collection_name = self.config.collection_name
+#         if collection_id is None:
+#             collection_id = self.config.collection_id
+        
+#         # Calculate file hash for metadata
+#         file_hash = self._calculate_file_hash(file_bytes=file_bytes)
+        
+#         # Check if file already exists by hash - REMOVED bucket_name parameter
+#         existing_metadata = self.metadata_manager.check_file_exists_by_hash(
+#             file_hash, collection_name, collection_id, self.config.database_id
+#         )
+        
+#         if existing_metadata.success and not file_id:
+#             # File already exists, return existing metadata
+#             return OperationResult(
+#                 success=True,
+#                 data=existing_metadata.data,
+#                 code="EXISTS"
+#             )
+        
+#         # Ensure metadata infrastructure exists - REMOVED bucket_name parameter
+#         collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
+#             metadata, collection_name, collection_id, self.config.database_id
+#         )
+#         if not collection_result.success:
+#             return OperationResult(
+#                 success=False,
+#                 error=collection_result.error,
+#                 code=collection_result.code
+#             )
+        
+#         # Add file_hash to metadata
+#         metadata["file_hash"] = file_hash
+        
+#         # Upload file
+#         upload_result = self.upload_file_from_bytes(
+#             bucket_id, file_bytes, filename, file_id, permissions
+#         )
+#         if not upload_result.success:
+#             return upload_result
+        
+#         file_id = upload_result.data["$id"]
+#         database_id = collection_result.data["database_id"]
+#         coll_id = collection_result.data["collection_id"]
+        
+#         # Create and store metadata
+#         try:
+#             metadata_document = self._build_metadata_document(
+#                 file_id, bucket_id, filename, {"data": upload_result.data}, metadata, file_hash
+#             )
+            
+#             metadata_result = self._store_metadata_document(
+#                 database_id, coll_id, file_id, metadata_document
+#             )
+            
+#             if metadata_result.success:
+#                 upload_result.data["metadata"] = metadata_result.data
+#                 upload_result.data["metadata_action"] = metadata_result.code
+            
+#             return OperationResult(
+#                 success=True,
+#                 data=upload_result.data,
+#                 code="CREATED_WITH_METADATA"
+#             )
+        
+#         except AppwriteException as e:
+#             logger.error(f"Metadata handling failed: {e.message}")
+#             return OperationResult(
+#                 success=True,
+#                 data=upload_result.data,
+#                 error=f"Metadata handling failed: {e.message}",
+#                 code="METADATA_ERROR"
+#             )
     def upload_file_from_bytes_with_metadata(
-    self,
-    bucket_id: str,
-    file_bytes: bytes,
-    filename: str,
-    metadata: Dict[str, Any],
-    file_id: str = None,
-    permissions: List[str] = None,
-    collection_name: str = None,
-    collection_id: str = None
-) -> OperationResult:
+        self,
+        bucket_id: str,
+        file_bytes: bytes,
+        filename: str,
+        metadata: Dict[str, Any],
+        file_id: str = None,
+        permissions: List[str] = None,
+        collection_name: str = None,
+        collection_id: str = None
+    ) -> OperationResult:
         # Use defaults from config if not provided
         if collection_name is None:
             collection_name = self.config.collection_name
@@ -1303,20 +1607,66 @@ class AppWriteFileManager:
         # Calculate file hash for metadata
         file_hash = self._calculate_file_hash(file_bytes=file_bytes)
         
-        # Check if file already exists by hash - REMOVED bucket_name parameter
+        # Check if file already exists by hash
         existing_metadata = self.metadata_manager.check_file_exists_by_hash(
             file_hash, collection_name, collection_id, self.config.database_id
         )
         
-        if existing_metadata.success and not file_id:
-            # File already exists, return existing metadata
-            return OperationResult(
-                success=True,
-                data=existing_metadata.data,
-                code="EXISTS"
-            )
+        # Use same logic as upload_file_with_metadata for consistency
+        should_update_metadata_only = (existing_metadata.success and 
+                                    not file_id and 
+                                    self.config.allow_metadata_only_updates)
         
-        # Ensure metadata infrastructure exists - REMOVED bucket_name parameter
+        if should_update_metadata_only:
+            logger.info(f"File with hash {file_hash} already exists, updating metadata only")
+            
+            existing_file_id = existing_metadata.data.get("fileId")
+            
+            # Ensure collection exists with new metadata fields
+            collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
+                metadata, collection_name, collection_id, self.config.database_id
+            )
+            if not collection_result.success:
+                return OperationResult(
+                    success=False,
+                    error=collection_result.error,
+                    code=collection_result.code
+                )
+            
+            # Update the metadata
+            metadata_update = metadata.copy()
+            metadata_update["file_hash"] = file_hash
+            metadata_update["filename"] = filename
+            metadata_update["uploaded_at"] = datetime.now().isoformat()
+            
+            update_result = self.metadata_manager.update_file_metadata(
+                file_id=existing_file_id,
+                metadata_updates=metadata_update,
+                collection_name=collection_name,
+                collection_id=collection_id,
+                database_id=self.config.database_id
+            )
+            
+            if update_result.success:
+                # Get the full file info to return
+                file_info = self.get_file(bucket_id, existing_file_id)
+                return OperationResult(
+                    success=True,
+                    data={
+                        **(file_info.data if file_info.success else {}),
+                        "metadata": update_result.data,
+                        "metadata_action": "UPDATED"
+                    },
+                    code="EXISTS_METADATA_UPDATED"
+                )
+            else:
+                return OperationResult(
+                    success=False,
+                    error=f"Failed to update metadata: {update_result.error}",
+                    code="METADATA_UPDATE_FAILED"
+                )
+        
+        # Ensure metadata infrastructure exists
         collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
             metadata, collection_name, collection_id, self.config.database_id
         )
@@ -1330,10 +1680,17 @@ class AppWriteFileManager:
         # Add file_hash to metadata
         metadata["file_hash"] = file_hash
         
-        # Upload file
+        # Upload file (this will handle duplicates based on check_duplicates parameter)
         upload_result = self.upload_file_from_bytes(
-            bucket_id, file_bytes, filename, file_id, permissions
+            bucket_id, 
+            file_bytes, 
+            filename, 
+            file_id, 
+            permissions, 
+            check_duplicates=True,  # Let the base method handle duplicates
+            overwrite=False  # Don't overwrite by default in metadata flow
         )
+        
         if not upload_result.success:
             return upload_result
         
@@ -1363,9 +1720,14 @@ class AppWriteFileManager:
         
         except AppwriteException as e:
             logger.error(f"Metadata handling failed: {e.message}")
+            # Rollback: delete the uploaded file if metadata fails
+            try:
+                self.delete_file(bucket_id, file_id)
+            except Exception as delete_error:
+                logger.error(f"Failed to rollback file upload after metadata error: {delete_error}")
+            
             return OperationResult(
-                success=True,
-                data=upload_result.data,
+                success=False,
                 error=f"Metadata handling failed: {e.message}",
                 code="METADATA_ERROR"
             )

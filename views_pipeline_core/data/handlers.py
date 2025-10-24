@@ -1927,6 +1927,7 @@ class _PGDataset(_ViewsDataset):
 
     def get_lat_lon(self) -> pd.DataFrame:
         """Get latitude and longitude for each priogrid"""
+        self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
                 "lat": self._entity_metadata_cache["lat"].reindex(self.dataframe.index),
@@ -1938,6 +1939,7 @@ class _PGDataset(_ViewsDataset):
 
     def get_row_col(self) -> pd.DataFrame:
         """Get row and column indices for each priogrid"""
+        self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
                 "row": self._entity_metadata_cache["row"].reindex(self.dataframe.index),

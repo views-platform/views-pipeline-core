@@ -25,6 +25,7 @@ class PredictionMetadata:
         name: str,
         type: str,
         targets: List[str],
+        category: str,
         description: Optional[str] = None,
     ):
         if not isinstance(loa, str):
@@ -39,12 +40,15 @@ class PredictionMetadata:
             raise TypeError("targets must be a list of strings")
         if description is not None and not isinstance(description, str):
             raise TypeError("description must be a string or None")
+        if category not in ["forecast", "historical"]:
+            raise ValueError(f"category must be either 'forecast' or 'historical'. Got: {category}")
 
         self.loa = loa
         self.name = name
         self.type = type
         self.targets = targets
         self.description = description
+        self.category = category
 
     def to_dict(self) -> Dict[str, Any]:
         data = {
@@ -52,6 +56,7 @@ class PredictionMetadata:
             "name": self.name,
             "type": self.type,
             "targets": self.targets,
+            "category": self.category,
         }
         if self.description:
             data["description"] = self.description
@@ -74,11 +79,12 @@ class PredictionStoreManager:
         name: str,
         type: str,
         targets: List[str],
+        category: str,
         description: Optional[str] = None,
     ) -> OperationResult:
 
         metadata = PredictionMetadata(
-            loa=loa, name=name, type=type, targets=targets, description=description
+            loa=loa, name=name, type=type, targets=targets, description=description, category=category
         ).to_dict()
         if isinstance(file, pd.DataFrame):
             raise NotImplementedError(
