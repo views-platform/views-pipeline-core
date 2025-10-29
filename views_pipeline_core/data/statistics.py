@@ -345,7 +345,7 @@ class ForecastReconciler:
         self.logger = logging.getLogger(__name__)  # Class-specific logger
         logging.basicConfig(level=logging.INFO)  # Configure logging format
         self.device = device
-        self.logger.info(f"Using device: {self.device}")
+        self.logger.debug(f"Using device: {self.device}")
 
 
     def reconcile_forecast(self, grid_forecast, country_forecast, lr=0.01, max_iters=500, tol=1e-6):
@@ -387,32 +387,38 @@ class ForecastReconciler:
         sum_nonzero = nonzero_values.sum(dim=1, keepdim=True)
         scaling_factors = country_forecast.view(-1, 1) / (sum_nonzero + 1e-8)
         adjusted_values = nonzero_values * scaling_factors
-        adjusted_values = adjusted_values.clone().detach().requires_grad_(True)
 
-        # Optimizer (L-BFGS)
-        optimizer = torch.optim.LBFGS([adjusted_values], lr=lr, max_iter=max_iters, tolerance_grad=tol)
+        adjusted_values.clamp_(min=0)
+        return adjusted_values.squeeze(0) if is_point_forecast else adjusted_values
 
-        def closure():
-            optimizer.zero_grad()
-            loss = torch.sum((adjusted_values - nonzero_values) ** 2)
-            loss.backward()
-            return loss
+        # adjusted_values = adjusted_values.clone().detach().requires_grad_(True)
 
-        optimizer.step(closure)
+        # # Optimizer (L-BFGS)
+        # optimizer = torch.optim.LBFGS(
+        #     [adjusted_values], lr=lr, max_iter=max_iters, tolerance_grad=tol
+        # )
 
-        # Projection Step: Enforce sum constraint
-        with torch.no_grad():
-            sum_adjusted = adjusted_values.sum(dim=1, keepdim=True)
-            scaling_factors = country_forecast.view(-1, 1) / (sum_adjusted + 1e-8)
-            adjusted_values *= scaling_factors
-            adjusted_values.clamp_(min=0)
+        # def closure():
+        #     optimizer.zero_grad()
+        #     loss = torch.sum((adjusted_values - nonzero_values) ** 2)
+        #     loss.backward()
+        #     return loss
 
-        # Preserve zero values
-        final_adjusted = grid_forecast.clone()
-        final_adjusted[mask_nonzero] = adjusted_values[mask_nonzero].detach()
+        # optimizer.step(closure)
 
-        # Convert back to original shape if it was a point forecast
-        return final_adjusted.squeeze(0) if is_point_forecast else final_adjusted
+        # # Projection Step: Enforce sum constraint
+        # with torch.no_grad():
+        #     sum_adjusted = adjusted_values.sum(dim=1, keepdim=True)
+        #     scaling_factors = country_forecast.view(-1, 1) / (sum_adjusted + 1e-8)
+        #     adjusted_values *= scaling_factors
+        #     adjusted_values.clamp_(min=0)
+
+        # # Preserve zero values
+        # final_adjusted = grid_forecast.clone()
+        # final_adjusted[mask_nonzero] = adjusted_values[mask_nonzero].detach()
+
+        # # Convert back to original shape if it was a point forecast
+        # return final_adjusted.squeeze(0) if is_point_forecast else final_adjusted
 
 
     def run_tests(self):

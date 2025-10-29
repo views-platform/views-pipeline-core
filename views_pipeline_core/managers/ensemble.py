@@ -18,7 +18,7 @@ from views_pipeline_core.ensembles.check import validate_ensemble_model
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.managers.reconciliation import ReconciliationManager
-from views_pipeline_core.data.handlers import _PGDataset, _CDataset
+from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ class EnsembleManager(ForecastingModelManager):
                 from views_forecasts.extensions import ForecastsStore, ViewsMetadata
 
                 logger.info(
-                    f"Fetching latest C dataset for model {cm_model} from prediction store."
+                    f"Fetching latest dataset for model {cm_model} from prediction store."
                 )
                 run_id = ViewsMetadata().get_run_id_from_name(self._pred_store_name)
                 all_runs = ViewsMetadata().with_name(cm_model).fetch()["name"].to_list()
@@ -733,6 +733,7 @@ class EnsembleManager(ForecastingModelManager):
         df_prediction = EnsembleManager._get_aggregated_df(
             dfs, self.configs["aggregation"]
         )
+        df_prediction = _ViewsDataset(source=df_prediction).dataframe
 
         if self.__activate_reconciliation:
             reconciliation_type = self.configs.get("reconciliation", None)
@@ -925,6 +926,7 @@ class EnsembleManager(ForecastingModelManager):
                         eval_type=eval_type,
                         update_viewser=update_viewser,
                         wandb_notifications=self._wandb_notifications,
+                        override_timestep=override_timestep
                     )
                     pred = pd.DataFrame.forecasts.read_store(
                         run=self._pred_store_name, name=name
@@ -1033,6 +1035,7 @@ class EnsembleManager(ForecastingModelManager):
                     update_viewser=update_viewser,
                     prediction_store=self._use_prediction_store,
                     wandb_notifications=self._wandb_notifications,
+                    override_timestep=override_timestep
                 )
                 pred = read_dataframe(
                     f"{path_generated}/predictions_{run_type}_{ts}{PipelineConfig().dataframe_format}"

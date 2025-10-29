@@ -508,7 +508,7 @@ class ViewsDataLoader:
             case "forecasting":
                 month_last = (
                     ViewsMonth.now().id - 1
-                )  # minus 2 because the current month is not yet available. Verified but can be tested by changing this and running the check_data notebook.
+                )  # minus 1 because the current month is not yet available. Verified but can be tested by changing this and running the check_data notebook.
                 return {
                     "train": (121, month_last),
                     "test": (month_last + 1, month_last + 1 + steps),
@@ -635,8 +635,6 @@ class ViewsDataLoader:
 
         if queryset_base is None:
             raise RuntimeError(f"Could not find queryset for {self._model_name}")
-
-
         else:
             logger.info(f"Found queryset for {self._model_name}")
 
@@ -646,7 +644,7 @@ class ViewsDataLoader:
         try:
             df, alerts = queryset_base.publish().fetch_with_drift_detection(
                 start_date=self.month_first,
-                end_date=self.month_last - 1,
+                end_date=self.month_last,
                 drift_config_dict=self.drift_config_dict,
                 self_test=self_test,
             )
@@ -671,7 +669,7 @@ class ViewsDataLoader:
             )
             df = queryset_base.publish().fetch(
                 start_date=self.month_first,
-                end_date=self.month_last - 1,
+                end_date=self.month_last,
             )
 
 
@@ -743,6 +741,7 @@ class ViewsDataLoader:
             if self.override_month is not None:
                 last_month = self.override_month
         if [np.min(df_time_units), np.max(df_time_units)] != [first_month, last_month]:
+            logger.error(f"Dataframe time units do not match partition time units. Got {np.min(df_time_units)}, {np.max(df_time_units)} but expected {first_month}, {last_month}.")
             return False
         else:
             return True
