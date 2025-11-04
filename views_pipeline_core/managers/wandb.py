@@ -122,6 +122,14 @@ class WandBManager:
             wandb.finish()
             self._active_run = None
 
+    def save(self, path: str) -> None:
+        """Save a file to WandB."""
+        wandb.save(path)
+
+    def log(self, data: Any) -> None:
+        """Log data to WandB."""
+        wandb.log(data)
+
     @staticmethod
     def login() -> None:
         """Login to WandB."""
