@@ -18,7 +18,7 @@ from views_pipeline_core.reports.utils import (
 from views_pipeline_core.files.utils import (
     generate_model_file_name,
 )
-from views_pipeline_core.managers.report import ReportManager
+from views_pipeline_core.managers.report import ReportModule
 from views_pipeline_core.configs.pipeline import PipelineConfig
 import logging
 
@@ -72,7 +72,7 @@ class EvaluationReportTemplate:
         priority_metrics = ["MSLE", "MSE", "y_hat_bar"]
         metrics = list(set(metadata_dict.get("metrics", [])).intersection(priority_metrics))
 
-        report_manager = ReportManager()
+        report_manager = ReportModule()
         report_manager.add_heading(
             f"Evaluation report for {self.model_path.target} {self.model_path.model_name}",
             level=1,
@@ -146,7 +146,7 @@ class EvaluationReportTemplate:
 
     def _add_report_content(
         self,
-        report_manager: ReportManager,
+        report_manager: ReportModule,
         metadata_dict: Dict,
         evaluation_dict: Dict,
         conflict_code: str,
@@ -163,7 +163,7 @@ class EvaluationReportTemplate:
         5. Sorts the combined metrics by the specified metric and adds them as tables to the report.
 
         Args:
-            report_manager (ReportManager): The report manager instance used to add content to the report.
+            report_manager (ReportModule): The report manager instance used to add content to the report.
             metadata_dict (Dict): Metadata dictionary for the ensemble run.
             evaluation_dict (Dict): Evaluation results dictionary for the ensemble run.
             conflict_code (str): Code used to resolve metric conflicts.

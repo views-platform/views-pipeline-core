@@ -6,7 +6,7 @@ import warnings
 
 class ReconcilePgmWithCmPoint():
     warnings.warn(
-        "ReconcilePgmWithCmPoint is deprecated and may be removed in future versions. Use views_pipeline_core.managers.reconciliation.ReconciliationManager instead.",
+        "ReconcilePgmWithCmPoint is deprecated and may be removed in future versions. Use views_pipeline_core.managers.reconciliation.ReconciliationModule instead.",
         DeprecationWarning,
         stacklevel=2
     )

@@ -30,7 +30,7 @@
   - [Uncertainty Representation](#uncertainty-representation)
   - [Validation Checks](#validation-checks)
   - [Full Examples](#full-examples)
-- [LoggingManager Documentation](#loggingmanager-documentation)
+- [LoggingModule Documentation](#LoggingModule-documentation)
   - [Overview](#overview)
   - [Features](#features)
   - [Class Definition](#class-definition)
@@ -562,10 +562,10 @@ df_forecast = pd.DataFrame(data, index=index)
 
 This structure ensures compatibility with the VIEWS evaluation framework while allowing efficient storage and processing of both point estimates and probabilistic predictions.
 
-# LoggingManager Documentation
+# LoggingModule Documentation
 
 ## Overview
-The `LoggingManager` class provides a centralized logging solution for machine learning pipelines. It handles:
+The `LoggingModule` class provides a centralized logging solution for machine learning pipelines. It handles:
 - Custom logging configuration via YAML
 - Dynamic log path management
 - Error handling and fallback configurations

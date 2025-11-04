@@ -8,6 +8,7 @@ import logging
 from abc import abstractmethod
 from argparse import Namespace
 from views_pipeline_core.managers.model import ModelManager, ModelPathManager
+import polars as pl
 
 
 logger = logging.getLogger(__name__)
@@ -63,15 +64,15 @@ class ExtractorManager(ModelManager):
         
     @abstractmethod
     def _download(self, args: Namespace, dataframe: pl.DataFrame = None):
-        pass
+        raise NotImplementedError("Subclasses must implement the _download method.")
 
     @abstractmethod
     def _preprocess(self, args: Namespace):
-        pass
+        raise NotImplementedError("Subclasses must implement the _preprocess method.")
 
     @abstractmethod
     def _save(self, args: Namespace):
-        pass
+        raise NotImplementedError("Subclasses must implement the _save method.")
 
     def run(self, args: Namespace):
         self._download(args)

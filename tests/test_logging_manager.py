@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 import logging
-from views_pipeline_core.managers.log import LoggingManager
+from views_pipeline_core.managers.log import LoggingModule
 from views_pipeline_core.managers.model import ModelPathManager
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def mock_model_path_manager():
 
 def test_logging_manager_initialization(mock_model_path_manager):
     """
-    Test the initialization of LoggingManager.
+    Test the initialization of LoggingModule.
 
     Args:
         mock_model_path_manager (MagicMock): A mock instance of ModelPathManager.
@@ -31,7 +31,7 @@ def test_logging_manager_initialization(mock_model_path_manager):
         - The logging path is set correctly.
         - The logger is initially None.
     """
-    logging_manager = LoggingManager(mock_model_path_manager)
+    logging_manager = LoggingModule(mock_model_path_manager)
     assert logging_manager.model_path == mock_model_path_manager
     assert logging_manager._default_level == logging.INFO
     assert logging_manager._logging_is_active is True
@@ -51,12 +51,12 @@ def test_setup_logging_creates_log_directory(mock_mkdir, mock_model_path_manager
         - The mkdir method is called with the correct parameters.
     """
     mock_model_path_manager.logging = Path("/tmp/logs")
-    logging_manager = LoggingManager(mock_model_path_manager)
+    logging_manager = LoggingModule(mock_model_path_manager)
     logging_manager._setup_logging()
     mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
 
 @patch("views_pipeline_core.managers.log.logging.config.dictConfig")
-@patch("views_pipeline_core.managers.log.LoggingManager._load_logging_config")
+@patch("views_pipeline_core.managers.log.LoggingModule._load_logging_config")
 def test_setup_logging_loads_config(mock_load_config, mock_dict_config, mock_model_path_manager):
     """
     Test that the setup_logging method loads the logging configuration correctly.
@@ -79,7 +79,7 @@ def test_setup_logging_loads_config(mock_load_config, mock_dict_config, mock_mod
         }
     }
     mock_model_path_manager.logging = Path("/tmp/logs")
-    logging_manager = LoggingManager(mock_model_path_manager)
+    logging_manager = LoggingModule(mock_model_path_manager)
     logger = logging_manager._setup_logging()
     mock_load_config.assert_called_once()
     mock_dict_config.assert_called_once()
@@ -98,7 +98,7 @@ def test_ensure_log_directory_creates_directory(mock_makedirs, mock_model_path_m
         - The makedirs method is called with the correct parameters.
     """
     mock_model_path_manager.logging = Path("/tmp/logs")
-    logging_manager = LoggingManager(mock_model_path_manager)
+    logging_manager = LoggingModule(mock_model_path_manager)
     # Delete the existing log directory created by other tests
     if mock_model_path_manager.logging.exists():
         for child in mock_model_path_manager.logging.iterdir():
@@ -124,6 +124,6 @@ def test_get_logger_initializes_logger(mock_model_path_manager):
         - The returned logger is an instance of logging.Logger.
     """
     mock_model_path_manager.logging = Path("/tmp/logs")
-    logging_manager = LoggingManager(mock_model_path_manager)
+    logging_manager = LoggingModule(mock_model_path_manager)
     logger = logging_manager.get_logger()
     assert isinstance(logger, logging.Logger)

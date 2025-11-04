@@ -6,7 +6,7 @@ import json
 import hashlib
 from typing import Dict, Any
 
-from views_pipeline_core.managers.appwrite import (
+from views_pipeline_core.modules.appwrite.file import (
     AppWriteFileManager,
     AppwriteConfig,
     AuthMethod,

@@ -57,14 +57,14 @@ class ConfigurationManager:
     def update_for_single_run(
         self,
         args: ForecastingModelArgs,
-        wandb_manager: Optional['WandBManager'] = None,
+        wandb_manager: Optional['WandBModule'] = None,
     ) -> None:
         """
         Update configuration for a single run with validated arguments.
         
         Args:
             args (ForecastingModelArgs): Validated pipeline arguments
-            wandb_manager (Optional[WandBManager]): WandB manager for error reporting
+            wandb_manager (Optional[WandBModule]): WandB manager for error reporting
             
         Raises:
             ConfigurationException: If configuration validation fails
@@ -117,7 +117,7 @@ class ConfigurationManager:
         self,
         wandb_config: Dict,
         args: ForecastingModelArgs,
-        wandb_manager: Optional['WandBManager'] = None,
+        wandb_manager: Optional['WandBModule'] = None,
     ) -> None:
         """
         Update configuration for a sweep run.
@@ -125,7 +125,7 @@ class ConfigurationManager:
         Args:
             wandb_config (Dict): Configuration from WandB sweep
             args (ForecastingModelArgs): Validated pipeline arguments
-            wandb_manager (Optional[WandBManager]): WandB manager for error reporting
+            wandb_manager (Optional[WandBModule]): WandB manager for error reporting
             
         Raises:
             ConfigurationException: If configuration validation fails

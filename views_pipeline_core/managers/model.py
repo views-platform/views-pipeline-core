@@ -16,7 +16,7 @@ import pandas as pd
 from pathlib import Path
 import random
 import json
-from views_pipeline_core.managers.wandb import WandBManager
+from views_pipeline_core.managers.wandb import WandBModule
 from views_pipeline_core.managers.configuration import ConfigurationManager
 from views_pipeline_core.exceptions import (
     DataFetchException,
@@ -1124,7 +1124,7 @@ class ModelPathManager:
 
         See Also:
             - :func:`generate_output_file_name`: Filename generation
-            - :class:`ReconciliationManager`: Uses this to load predictions
+            - :class:`ReconciliationModule`: Uses this to load predictions
             - :class:`EnsembleManager`: Uses this for aggregation
         """
         pattern = f"predictions_{run_type}_*{PipelineConfig.dataframe_format}"
@@ -1214,7 +1214,7 @@ class ModelManager:
         _model_path (ModelPathManager): Path manager for model directories
         _wandb_notifications (bool): Enable/disable WandB notifications
         _use_prediction_store (bool): Enable/disable prediction store
-        _wandb_manager (WandBManager): WandB integration manager
+        _wandb_manager (WandBModule): WandB integration manager
         _config_manager (ConfigurationManager): Configuration management
         _args (ForecastingModelArgs): Parsed command line arguments
         _project (str): WandB project name
@@ -1244,7 +1244,7 @@ class ModelManager:
         - :class:`ForecastingModelManager`: Forecasting-specific manager
         - :class:`EnsembleManager`: Ensemble-specific manager
         - :class:`ModelPathManager`: Path management
-        - :class:`WandBManager`: WandB integration
+        - :class:`WandBModule`: WandB integration
         - :class:`ConfigurationManager`: Configuration management
 
     """
@@ -1276,7 +1276,7 @@ class ModelManager:
         Side Effects:
             - Increments class instance counter
             - Loads environment variables from .env
-            - Initializes WandBManager
+            - Initializes WandBModule
             - Logs initialization message
 
         Example:
@@ -1301,11 +1301,11 @@ class ModelManager:
 
         See Also:
             - :class:`ModelPathManager`: Path management
-            - :class:`WandBManager`: WandB integration
+            - :class:`WandBModule`: WandB integration
             - :meth:`execute_single_run`: Main execution method
         """
         self.__class__.__instances__ += 1
-        from views_pipeline_core.managers.log import LoggingManager
+        from views_pipeline_core.managers.log import LoggingModule
 
         self._model_repo = "views-models"
         self._entity = "views_pipeline"
@@ -1315,8 +1315,8 @@ class ModelManager:
         self._use_prediction_store = use_prediction_store
         self._sweep = False
         self._args = None
-        self._logger = LoggingManager(model_path=self._model_path).get_logger()
-        self._wandb_manager = WandBManager(
+        self._logger = LoggingModule(model_path=self._model_path).get_logger()
+        self._wandb_manager = WandBModule(
             entity=self._entity,
             notifications_enabled=wandb_notifications,
             models_path=self._model_path.models,
@@ -1513,7 +1513,7 @@ class ForecastingModelManager(ModelManager):
         _model_path (ModelPathManager): Path manager
         _wandb_notifications (bool): Notification flag
         _use_prediction_store (bool): Prediction store flag
-        _wandb_manager (WandBManager): WandB manager
+        _wandb_manager (WandBModule): WandB manager
         _config_manager (ConfigurationManager): Config manager
         _args (ForecastingModelArgs): Arguments
         _project (str): WandB project name
@@ -1577,7 +1577,7 @@ class ForecastingModelManager(ModelManager):
         - :class:`ModelManager`: Base class
         - :class:`EnsembleManager`: Ensemble-specific manager
         - :class:`ViewsDataLoader`: Data loading utility
-        - :class:`WandBManager`: WandB integration
+        - :class:`WandBModule`: WandB integration
     """
 
     def __init__(

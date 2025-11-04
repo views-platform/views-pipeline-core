@@ -383,7 +383,7 @@ class CacheManager:
         }
 
 # Metadata Management
-class MetadataManager:
+class AppwriteMetadataHandler:
     def __init__(self, databases: Databases, config: AppwriteConfig):
         self.databases = databases
         self.config = config
@@ -865,7 +865,7 @@ class MetadataManager:
             )
 
 # Main File Manager
-class AppWriteFileManager:
+class AppWriteFileModule:
     def __init__(self, config: AppwriteConfig):
         # if not isinstance(config.path_manager, ModelPathManager):
         #     raise ValueError("path_manager must be an instance of ModelPathManager")
@@ -886,7 +886,7 @@ class AppWriteFileManager:
         self.databases = Databases(self.client)
         
         # Initialize managers
-        self.metadata_manager = MetadataManager(self.databases, config)
+        self.metadata_manager = AppwriteMetadataHandler(self.databases, config)
         self.cache_manager = self._setup_cache()
     
     def _setup_cache(self) -> CacheManager:

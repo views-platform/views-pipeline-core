@@ -7,7 +7,7 @@ import os
 from views_pipeline_core.managers.model import ModelPathManager
 
 
-class LoggingManager:
+class LoggingModule:
     """
     A manager class to handle logging setup and configuration.
 

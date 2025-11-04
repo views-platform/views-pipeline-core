@@ -18,7 +18,7 @@ import gc
 logger = logging.getLogger(__name__)
 
 
-class MappingManager:
+class MappingModule:
     _COUNTRY_HOVER_COLS = ["country_name"]
     _PRIOGRID_HOVER_COLS = [
         "gid",
@@ -117,7 +117,7 @@ class MappingManager:
         """
         path = (
             Path(__file__).parent.parent
-            / "mapping"
+            / "assets"
             / "shapefiles"
             / "country"
             / "ne_110m_admin_0_countries.shp"
@@ -149,7 +149,7 @@ class MappingManager:
         """
         path = (
             Path(__file__).parent.parent
-            / "mapping"
+            / "assets"
             / "shapefiles"
             / "priogrid"
             / "priogrid_cell.shp"

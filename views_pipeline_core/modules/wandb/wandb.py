@@ -7,7 +7,7 @@ from dataclasses import asdict
 logger = logging.getLogger(__name__)
 
 
-class WandBManager:
+class WandBModule:
     """
     Centralized manager for all Weights & Biases operations.
     Handles initialization, logging, alerts, and artifact management.

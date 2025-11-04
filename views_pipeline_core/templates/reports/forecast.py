@@ -9,7 +9,7 @@ from views_pipeline_core.data.handlers import (
     _CDataset,
     _PGDataset,
 )
-from views_pipeline_core.managers.report import ReportManager
+from views_pipeline_core.managers.report import ReportModule
 from views_pipeline_core.managers.mapping import MappingManager
 from views_pipeline_core.visualizations.historical import HistoricalLineGraph
 from views_pipeline_core.files.utils import generate_model_file_name
@@ -36,7 +36,7 @@ class ForecastReportTemplate:
             """Helper function to create and export report."""
             forecast_dataset = dataset_cls(forecast_dataframe)
 
-            report_manager = ReportManager()
+            report_manager = ReportModule()
             # Build report content
             report_manager.add_heading(
                 f"Forecast report for {self.model_path.target} {self.model_path.model_name}",

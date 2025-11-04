@@ -10,7 +10,7 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.reports.styles.tailwind import get_css
 
 
-class ReportManager:
+class ReportModule:
     # Threshold for splitting tables
     TABLE_SPLIT_THRESHOLD = 8
     TABLE_SPLIT_THRESHOLD_COLS = 6

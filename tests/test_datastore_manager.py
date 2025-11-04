@@ -4,11 +4,11 @@ from pathlib import Path
 from typing import Dict, Any
 import pandas as pd
 
-from views_pipeline_core.managers.prediction import (
+from views_pipeline_core.modules.datastore.prediction import (
     PredictionMetadata,
     PredictionStoreManager,
 )
-from views_pipeline_core.managers.appwrite import (
+from views_pipeline_core.modules.appwrite.file import (
     AppwriteConfig,
     OperationResult,
     AuthMethod,

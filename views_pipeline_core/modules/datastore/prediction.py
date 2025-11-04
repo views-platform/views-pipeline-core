@@ -18,7 +18,7 @@ logger.setLevel(logging.INFO)
 # APPWRITE_DATASTORE_API_KEY = os.getenv("APPWRITE_DATASTORE_API_KEY")
 
 
-class PredictionMetadata:
+class FileMetadata:
     def __init__(
         self,
         loa: str,
@@ -63,7 +63,7 @@ class PredictionMetadata:
         return data
 
 
-class PredictionStoreManager:
+class DatastoreModule:
     def __init__(self, appwrite_file_manager_config: AppwriteConfig):
         self.model_path = appwrite_file_manager_config.path_manager
         self.__appwrite_file_manager_config = appwrite_file_manager_config
@@ -83,7 +83,7 @@ class PredictionStoreManager:
         description: Optional[str] = None,
     ) -> OperationResult:
 
-        metadata = PredictionMetadata(
+        metadata = FileMetadata(
             loa=loa, name=name, type=type, targets=targets, description=description, category=category
         ).to_dict()
         if isinstance(file, pd.DataFrame):

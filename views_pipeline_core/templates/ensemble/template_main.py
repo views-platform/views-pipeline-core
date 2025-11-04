@@ -25,14 +25,14 @@ def generate(script_path: Path) -> bool:
 import warnings
 from pathlib import Path
 from views_pipeline_core.cli.utils import parse_args, validate_arguments
-from views_pipeline_core.managers.log import LoggingManager
+from views_pipeline_core.managers.log import LoggingModule
 from views_pipeline_core.managers.ensemble import EnsemblePathManager, EnsembleManager
 
 warnings.filterwarnings("ignore")
 
 try:
     ensemble_path = EnsemblePathManager(Path(__file__))
-    logger = LoggingManager(ensemble_path).get_logger()
+    logger = LoggingModule(ensemble_path).get_logger()
 except FileNotFoundError as fnf_error:
     raise RuntimeError(
         f"File not found: {fnf_error}. Check the file path and try again."

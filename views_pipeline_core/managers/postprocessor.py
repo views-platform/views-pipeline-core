@@ -85,54 +85,28 @@ class PostprocessorManager(ModelManager):
         )
         self._args = None
 
-
-    # @abstractmethod
-    # def _execute_ensemble(self):
-    #     ensemble = self.configs.get("ensemble", None)
-    #     if ensemble is None:
-    #         logger.info("No ensemble found to execute. Skipping...")
-    #         return
-    #     ensemble_path_manager = EnsemblePathManager(ensemble_name_or_path=ensemble)
-    #     ensemble_manager = EnsembleManager(
-    #         ensemble_path=ensemble_path_manager,
-    #         wandb_notifications=True,
-    #         use_prediction_store=True,
-    #     )
-    #     try:
-    #         self._args = parse_args()
-    #         validate_arguments(self._args)
-    #         ensemble_manager.execute_single_run(
-    #             args=self._args
-    #         )
-    #     except Exception as e:
-    #         logger.error(
-    #             f"Encountered an error while trying to run the ensemble {ensemble} during postprocessing: {e}",
-    #             exc_info=True,
-    #         )
-    #         raise
-
     def _execute_model(self):
-        pass
+        raise NotImplementedError("Postprocessor does not implement _execute_model.")
 
     @abstractmethod
     def _read(self):
         """Read and preprocess data for the postprocessor."""
-        pass
+        raise NotImplementedError("Subclasses must implement the _read method.")
 
     @abstractmethod
     def _transform(self):
         """Transform the data for the postprocessor."""
-        pass
+        raise NotImplementedError("Subclasses must implement the _transform method.")
 
     @abstractmethod
     def _validate(self):
         """Perform validation checks on the postprocessor."""
-        pass
+        raise NotImplementedError("Subclasses must implement the _validate method.")
 
     @abstractmethod
     def _save(self):
         """Save the processed data for the postprocessor."""
-        pass
+        raise NotImplementedError("Subclasses must implement the _save method.")
 
     def run(self, args: Namespace):
         """

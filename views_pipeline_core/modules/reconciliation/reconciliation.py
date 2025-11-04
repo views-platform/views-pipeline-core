@@ -12,7 +12,7 @@ from views_pipeline_core.wandb.utils import wandb_alert
 
 logger = logging.getLogger(__name__)
 
-class ReconciliationManager:
+class ReconciliationModule:
     def __init__(self, c_dataset: _CDataset, pg_dataset: _PGDataset):
         self._c_dataset = c_dataset
         self._pg_dataset = pg_dataset
@@ -230,7 +230,7 @@ class ReconciliationManager:
                             country_id, time_id, feature, lr, max_iters, tol, 
                             c_subset, pg_subset, device_str
                         )
-                        future = executor.submit(ReconciliationManager._reconcile_country_worker, task_args)
+                        future = executor.submit(ReconciliationModule._reconcile_country_worker, task_args)
                         future_to_task_info[future] = (country_id, time_id, feature)
 
             logger.info(f"All {num_total_tasks} tasks have been submitted. Awaiting completion...")

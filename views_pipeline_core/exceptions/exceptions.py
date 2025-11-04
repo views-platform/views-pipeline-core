@@ -11,7 +11,7 @@ class PipelineException(Exception):
     def __init__(
         self,
         message: str,
-        wandb_manager: Optional['WandBManager'] = None,
+        wandb_manager: Optional['WandBModule'] = None,
         alert_level: wandb.AlertLevel = wandb.AlertLevel.ERROR,
     ):
         super().__init__(message)
