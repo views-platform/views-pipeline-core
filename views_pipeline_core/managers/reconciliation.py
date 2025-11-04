@@ -217,7 +217,7 @@ class ReconciliationManager:
         num_of_workers = max_workers if max_workers is not None else min(32, os.cpu_count() + 4) # for version >=3.8 and <3.13
         logger.info(f"Start multiprocessing reconciliation with {num_of_workers} workers...")
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
             future_to_task_info = {}
 
             for country_id in self._valid_cids:

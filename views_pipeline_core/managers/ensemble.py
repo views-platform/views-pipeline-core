@@ -20,6 +20,7 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.managers.reconciliation import ReconciliationManager
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
 from views_pipeline_core.exceptions import PipelineException
+import wandb
 
 logger = logging.getLogger(__name__)
 

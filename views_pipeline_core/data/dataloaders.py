@@ -552,7 +552,7 @@ class ViewsDataLoader:
 
         # months_to_update = PipelineConfig().months_to_update #read from .env
         months_to_update_str = os.getenv("month_to_update")
-        if not months_to_update_str or months_to_update_str is "":
+        if not months_to_update_str or months_to_update_str == "":
             raise ValueError("Could not find months to update in the .env file. Add the line: month_to_update=[123, 124, 125]")
 
         months_to_update = ast.literal_eval(months_to_update_str)
