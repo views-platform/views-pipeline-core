@@ -675,47 +675,92 @@ class MetadataManager:
                 error=f"Collection creation failed: {e.message}",
                 code=e.type
             )
-    
-    def check_file_exists_by_hash(
-        self,
-        file_hash: str,
-        collection_name: str = None,
-        collection_id: str = None,
-        database_id: str = None
-    ) -> OperationResult:
+        
+    def search_files_by_metadata(
+    self,
+    filters: Dict[str, Any] = None,
+    array_filters: Dict[str, Any] = None,
+    collection_name: str = None,
+    collection_id: str = None,
+    database_id: str = None,
+) -> OperationResult:
         # Use config values as defaults
         db_id = database_id or self.config.database_id
         coll_id = collection_id or self.config.collection_id
-        
+
         if not db_id or not coll_id:
             return OperationResult(
                 success=False,
                 error="Database ID and collection ID must be provided in config or as parameters",
-                code="MISSING_CONFIG"
+                code="MISSING_CONFIG",
+            )
+
+        try:
+            queries = []
+
+            if filters:
+                for attribute, value in filters.items():
+                    if value is not None:
+                        queries.append(Query.equal(attribute, value))
+
+            if array_filters:
+                for attribute, value in array_filters.items():
+                    if value is not None:
+                        queries.append(Query.contains(attribute, value))
+
+            result = self.databases.list_documents(db_id, coll_id, queries=queries)
+
+            return OperationResult(
+                success=True,
+                data={"documents": result["documents"], "total": result["total"]},
+            )
+
+        except AppwriteException as e:
+            logger.error(f"Search failed: {e.message}")
+            return OperationResult(
+                success=False, error=f"Search failed: {e.message}", code=e.type
+            )
+    
+    def check_file_exists_by_hash(
+    self,
+    file_hash: str,
+    collection_name: str = None,
+    collection_id: str = None,
+    database_id: str = None,
+) -> OperationResult:
+        # Use config values as defaults
+        db_id = database_id or self.config.database_id
+        coll_id = collection_id or self.config.collection_id
+
+        if not db_id or not coll_id:
+            return OperationResult(
+                success=False,
+                error="Database ID and collection ID must be provided in config or as parameters",
+                code="MISSING_CONFIG",
             )
         try:
             # First ensure the collection exists
             collection_result = self.create_metadata_collection_if_not_exists(
                 {}, collection_name, collection_id, database_id
             )
-            
+
             if not collection_result.success:
                 return collection_result
-            
+
             # Now search for the file by hash
             search_result = self.databases.list_documents(
                 db_id, coll_id, queries=[Query.equal("file_hash", file_hash)]
             )
-            
+
             if search_result["total"] > 0:
                 return OperationResult(
-                    success=True,
-                    data=search_result["documents"][0],
-                    code="FOUND"
+                    success=True, 
+                    data=search_result["documents"][0], 
+                    code="FOUND_BY_HASH"  # <-- CHANGED from "FOUND" to "FOUND_BY_HASH"
                 )
-            
+
             return OperationResult(success=False, code="NOT_FOUND")
-        
+
         except AppwriteException as e:
             # If the file_hash attribute doesn't exist, create it and try again
             if "Attribute not found in schema: file_hash" in e.message:
@@ -724,91 +769,45 @@ class MetadataManager:
                     self._create_attribute_by_type(
                         db_id, coll_id, "file_hash", "string", False
                     )
-                    
+
                     # Try the search again
                     try:
                         search_result = self.databases.list_documents(
-                            db_id, coll_id, queries=[Query.equal("file_hash", file_hash)]
+                            db_id,
+                            coll_id,
+                            queries=[Query.equal("file_hash", file_hash)],
                         )
-                        
+
                         if search_result["total"] > 0:
                             return OperationResult(
                                 success=True,
                                 data=search_result["documents"][0],
-                                code="FOUND"
+                                code="FOUND_BY_HASH"  # <-- CHANGED here too
                             )
-                        
+
                         return OperationResult(success=False, code="NOT_FOUND")
                     except AppwriteException as retry_e:
-                        logger.error(f"Search failed after creating attribute: {retry_e.message}")
+                        logger.error(
+                            f"Search failed after creating attribute: {retry_e.message}"
+                        )
                         return OperationResult(
                             success=False,
                             error=f"Search failed: {retry_e.message}",
-                            code=retry_e.type
+                            code=retry_e.type,
                         )
                 except AppwriteException as create_e:
-                    logger.error(f"Failed to create file_hash attribute: {create_e.message}")
+                    logger.error(
+                        f"Failed to create file_hash attribute: {create_e.message}"
+                    )
                     return OperationResult(
                         success=False,
                         error=f"Attribute creation failed: {create_e.message}",
-                        code=create_e.type
+                        code=create_e.type,
                     )
-            
+
             logger.error(f"Search failed: {e.message}")
             return OperationResult(
-                success=False,
-                error=f"Search failed: {e.message}",
-                code=e.type
-            )
-    
-    def search_files_by_metadata(
-        self,
-        filters: Dict[str, Any] = None,
-        array_filters: Dict[str, Any] = None,
-        collection_name: str = None,
-        collection_id: str = None,
-        database_id: str = None
-    ) -> OperationResult:
-        # Use config values as defaults
-        db_id = database_id or self.config.database_id
-        coll_id = collection_id or self.config.collection_id
-        
-        if not db_id or not coll_id:
-            return OperationResult(
-                success=False,
-                error="Database ID and collection ID must be provided in config or as parameters",
-                code="MISSING_CONFIG"
-            )
-        
-        try:
-            queries = []
-            
-            if filters:
-                for attribute, value in filters.items():
-                    if value is not None:
-                        queries.append(Query.equal(attribute, value))
-            
-            if array_filters:
-                for attribute, value in array_filters.items():
-                    if value is not None:
-                        queries.append(Query.contains(attribute, value))
-            
-            result = self.databases.list_documents(db_id, coll_id, queries=queries)
-            
-            return OperationResult(
-                success=True,
-                data={
-                    "documents": result["documents"],
-                    "total": result["total"]
-                }
-            )
-        
-        except AppwriteException as e:
-            logger.error(f"Search failed: {e.message}")
-            return OperationResult(
-                success=False,
-                error=f"Search failed: {e.message}",
-                code=e.type
+                success=False, error=f"Search failed: {e.message}", code=e.type
             )
     
     def update_file_metadata(
@@ -1240,75 +1239,126 @@ class AppWriteFileManager:
     collection_name: str = None,
     collection_id: str = None
 ) -> OperationResult:
+        """
+        Upload a file to Appwrite storage and store its metadata in a database collection.
+
+        Args:
+            bucket_id: The ID of the bucket to upload to
+            file_path: Path to the file to upload
+            filename: Name to give the file in storage
+            metadata: Dictionary of metadata to store
+            file_id: Optional file ID (if None, one will be generated)
+            permissions: Optional list of permissions for the file
+            collection_name: Optional collection name (defaults to config)
+            collection_id: Optional collection ID (defaults to config)
+
+        Returns:
+            OperationResult with success status and data/error information
+        """
         # Use defaults from config if not provided
         if collection_name is None:
             collection_name = self.config.collection_name
         if collection_id is None:
             collection_id = self.config.collection_id
-        
+
         # Calculate file hash for metadata
         file_hash = self._calculate_file_hash(file_path=file_path)
-        
-        # Check if file already exists by hash
+
+        # Check if file already exists by hash in metadata
         existing_metadata = self.metadata_manager.check_file_exists_by_hash(
             file_hash, collection_name, collection_id, self.config.database_id
         )
-        
-        # CRITICAL FIX: Always upload new file if file_id is provided or if we want to keep both versions
-        # Only use metadata-only update when explicitly intended
-        should_update_metadata_only = (existing_metadata.success and 
-                                    not file_id and 
-                                    self.config.allow_metadata_only_updates)
-        
-        if should_update_metadata_only:
-            logger.info(f"File with hash {file_hash} already exists, updating metadata only")
-            
+
+        # CRITICAL FIX: Verify file exists in BOTH metadata AND storage
+        should_update_metadata_only = False
+        if existing_metadata.success and existing_metadata.code == "FOUND_BY_HASH" and not file_id:
             existing_file_id = existing_metadata.data.get("fileId")
             
-            # Ensure collection exists with new metadata fields
-            collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
-                metadata, collection_name, collection_id, self.config.database_id
-            )
-            if not collection_result.success:
-                return OperationResult(
-                    success=False,
-                    error=collection_result.error,
-                    code=collection_result.code
-                )
-            
-            # Update the metadata
-            metadata_update = metadata.copy()
-            metadata_update["file_hash"] = file_hash
-            metadata_update["filename"] = filename
-            metadata_update["uploaded_at"] = datetime.now().isoformat()
-            
-            update_result = self.metadata_manager.update_file_metadata(
-                file_id=existing_file_id,
-                metadata_updates=metadata_update,
-                collection_name=collection_name,
-                collection_id=collection_id,
-                database_id=self.config.database_id
-            )
-            
-            if update_result.success:
-                # Get the full file info to return
-                file_info = self.get_file(bucket_id, existing_file_id)
-                return OperationResult(
-                    success=True,
-                    data={
-                        **(file_info.data if file_info.success else {}),
-                        "metadata": update_result.data,
-                        "metadata_action": "UPDATED"
-                    },
-                    code="EXISTS_METADATA_UPDATED"
-                )
+            # Verify the file actually exists in storage
+            if existing_file_id:
+                file_check = self.get_file(bucket_id, existing_file_id)
+                
+                if file_check.success:
+                    # File exists in both metadata and storage
+                    should_update_metadata_only = self.config.allow_metadata_only_updates
+                    logger.info(f"File {existing_file_id} exists in both metadata and storage")
+                else:
+                    # Metadata exists but file missing from storage - clean up metadata
+                    logger.warning(f"File {existing_file_id} found in metadata but missing from storage, will re-upload")
+                    existing_doc_id = existing_metadata.data.get("$id")
+                    if existing_doc_id:
+                        try:
+                            self.databases.delete_document(
+                                database_id=self.config.database_id,
+                                collection_id=collection_id,
+                                document_id=existing_doc_id
+                            )
+                            logger.info(f"Deleted orphaned metadata document: {existing_doc_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to delete orphaned metadata: {str(e)}")
+
+        if should_update_metadata_only:
+            logger.info(f"File with hash {file_hash} already exists, updating metadata only")
+
+            # Get existing document ID
+            existing_doc_id = existing_metadata.data.get("$id")
+            existing_file_id = existing_metadata.data.get("fileId")
+
+            if not existing_doc_id:
+                logger.warning("Existing metadata found but no document ID available")
+                # Fall through to normal upload
             else:
-                return OperationResult(
-                    success=False,
-                    error=f"Failed to update metadata: {update_result.error}",
-                    code="METADATA_UPDATE_FAILED"
+                # Update the metadata document
+                updated_metadata = {**metadata, "file_hash": file_hash}
+
+                update_result = self.metadata_manager.update_file_metadata(
+                    file_id=existing_file_id,
+                    metadata_updates=updated_metadata,
+                    collection_name=collection_name,
+                    collection_id=collection_id,
+                    database_id=self.config.database_id
                 )
-        
+
+                if update_result.success:
+                    return OperationResult(
+                        success=True,
+                        data={
+                            "file_id": existing_file_id,
+                            "document_id": existing_doc_id,
+                            "metadata": updated_metadata,
+                            "message": "Metadata updated for existing file"
+                        },
+                        code="METADATA_UPDATED"
+                    )
+                else:
+                    logger.warning(f"Failed to update metadata: {update_result.error}")
+                    # Fall through to normal upload
+
+        # CRITICAL: If file exists by NAME but different hash, DELETE the old one
+        if existing_metadata.success and existing_metadata.code == "FOUND_BY_NAME":
+            logger.info(f"File '{filename}' exists with different hash, deleting old version")
+            old_file_id = existing_metadata.data.get("fileId")
+            old_doc_id = existing_metadata.data.get("$id")
+
+            if old_file_id:
+                # Delete the old file from storage
+                delete_result = self.delete_file(bucket_id, old_file_id)
+                if not delete_result.success:
+                    logger.warning(f"Failed to delete old file from storage: {delete_result.error}")
+                    # Continue anyway - the upload might still work
+
+            if old_doc_id:
+                # Delete the old metadata document
+                try:
+                    self.databases.delete_document(
+                        database_id=self.config.database_id,
+                        collection_id=collection_id,
+                        document_id=old_doc_id
+                    )
+                    logger.info(f"Deleted old metadata document: {old_doc_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete old metadata: {str(e)}")
+
         # Ensure metadata infrastructure exists
         collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
             metadata, collection_name, collection_id, self.config.database_id
@@ -1319,60 +1369,76 @@ class AppWriteFileManager:
                 error=collection_result.error,
                 code=collection_result.code
             )
-        
+
         # Add file_hash to metadata
         metadata["file_hash"] = file_hash
-        
-        # Upload file (this will handle duplicates based on check_duplicates parameter)
+
+        # Upload file - DISABLE duplicate checking since we already handled it above
         upload_result = self.upload_file(
             bucket_id, 
             file_path, 
             file_id, 
             permissions, 
-            check_duplicates=True,  # Let the base method handle duplicates
-            overwrite=False  # Don't overwrite by default in metadata flow
+            check_duplicates=False,  # Don't check again - we already handled it
+            overwrite=False
         )
-        
+
         if not upload_result.success:
-            return upload_result
-        
-        file_id = upload_result.data["$id"]
-        database_id = collection_result.data["database_id"]
-        coll_id = collection_result.data["collection_id"]
-        
-        # Create and store metadata
-        try:
-            metadata_document = self._build_metadata_document(
-                file_id, bucket_id, filename, {"data": upload_result.data}, metadata, file_hash
-            )
-            
-            metadata_result = self._store_metadata_document(
-                database_id, coll_id, file_id, metadata_document
-            )
-            
-            if metadata_result.success:
-                upload_result.data["metadata"] = metadata_result.data
-                upload_result.data["metadata_action"] = metadata_result.code
-            
-            return OperationResult(
-                success=True,
-                data=upload_result.data,
-                code="CREATED_WITH_METADATA"
-            )
-        
-        except AppwriteException as e:
-            logger.error(f"Metadata handling failed: {e.message}")
-            # Rollback: delete the uploaded file if metadata fails
-            try:
-                self.delete_file(bucket_id, file_id)
-            except Exception as delete_error:
-                logger.error(f"Failed to rollback file upload after metadata error: {delete_error}")
-            
             return OperationResult(
                 success=False,
-                error=f"Metadata handling failed: {e.message}",
-                code="METADATA_ERROR"
+                error=upload_result.error,
+                code=upload_result.code
             )
+
+        # Get the uploaded file ID
+        uploaded_file_id = upload_result.data.get("$id")
+        
+        # Get database and collection IDs from the collection result
+        database_id = collection_result.data.get("database_id") or self.config.database_id
+        coll_id = collection_result.data.get("collection_id") or collection_id
+
+        # Prepare metadata with file reference
+        metadata_with_file_ref = {
+            **metadata,
+            "fileId": uploaded_file_id,
+            "filename": filename,
+            "bucketId": bucket_id,
+            "uploaded_at": datetime.now().isoformat()
+        }
+
+        # Store metadata in database using _store_metadata_document
+        metadata_result = self._store_metadata_document(
+            database_id=database_id,
+            collection_id=coll_id,
+            file_id=uploaded_file_id,
+            metadata_document=metadata_with_file_ref
+        )
+
+        if not metadata_result.success:
+            # Metadata storage failed, but file was uploaded
+            logger.error(f"File uploaded but metadata storage failed: {metadata_result.error}")
+            return OperationResult(
+                success=False,
+                error=f"File uploaded but metadata storage failed: {metadata_result.error}",
+                data={
+                    "file_id": uploaded_file_id,
+                    "file_data": upload_result.data
+                },
+                code="PARTIAL_SUCCESS"
+            )
+
+        # Success - both file and metadata stored
+        return OperationResult(
+            success=True,
+            data={
+                "file_id": uploaded_file_id,
+                "document_id": metadata_result.data.get("$id"),
+                "file_data": upload_result.data,
+                "metadata": metadata_with_file_ref
+            },
+            code="UPLOAD_SUCCESS"
+        )
+
     
     # def upload_file_with_metadata(
     #     self,

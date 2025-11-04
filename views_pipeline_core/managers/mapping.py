@@ -382,7 +382,7 @@ class MappingManager:
         )
 
         # Calculate global color range
-        z_min, z_max = np.nanquantile(z_data, [0.05, 1.00])
+        z_min, z_max = np.nanquantile(z_data, [0.5, 0.95])
 
         # Create figure with graph objects for better control
         fig = go.Figure(
@@ -588,8 +588,8 @@ class MappingManager:
             ax=ax,
             legend=True,
             cmap="OrRd",
-            vmin=mapping_dataframe[target].quantile(0.05),
-            vmax=mapping_dataframe[target].quantile(1.00),
+            vmin=mapping_dataframe[target].quantile(0.5),
+            vmax=mapping_dataframe[target].quantile(0.95),
             linewidth=0.1,
             edgecolor="#404040",
             alpha=0.9,

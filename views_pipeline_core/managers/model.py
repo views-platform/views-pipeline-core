@@ -9,11 +9,16 @@ from abc import abstractmethod
 import hashlib
 from datetime import datetime
 import traceback
+from views_pipeline_core.exceptions.exceptions import ModelForecastingException
 import wandb
 import pandas as pd
 from pathlib import Path
 import random
 import json
+from views_pipeline_core.managers.wandb import WandBManager
+from views_pipeline_core.managers.configuration import ConfigurationManager
+from views_pipeline_core.exceptions import DataFetchException, ModelForecastingException, ModelTrainingException, ValidationException, ModelEvaluationException, PipelineException, ConfigurationException
+
 
 from views_pipeline_core.wandb.utils import (
     add_wandb_metrics,
@@ -731,6 +736,11 @@ class ModelManager:
         self._use_prediction_store = use_prediction_store
         self._sweep = False
         self._logger = LoggingManager(model_path=self._model_path).get_logger()
+        self._wandb_manager = WandBManager(
+            entity=self._entity,
+            notifications_enabled=wandb_notifications,
+            models_path=self._model_path.models,
+        )
 
         self._script_paths = self._model_path.get_scripts()
         self._config_deployment = self.__load_config(
@@ -746,6 +756,15 @@ class ModelManager:
             self._config_sweep = self.__load_config(
                 "config_sweep.py", "get_sweep_config"
             )
+
+        # Initialize configuration manager
+        self._config_manager = ConfigurationManager(
+            config_hyperparameters=self._config_hyperparameters,
+            config_deployment=self._config_deployment,
+            config_meta=self._config_meta,
+            partition_dict=self._partition_dict,
+            config_sweep=self._config_sweep,
+        )
 
         try:
             from views_pipeline_core.data.dataloaders import ViewsDataLoader
@@ -877,29 +896,9 @@ class ModelManager:
 
     @property
     def configs(self) -> Dict:
-        """
-        Get the combined meta, deployment and hyperparameters configuration.
+        """Get combined configuration."""
+        return self._config_manager.get_combined_config()
 
-        Returns:
-            dict: The configuration object.
-        """
-
-        # config = {
-        #     **self._config_hyperparameters,
-        #     **self._config_meta,
-        #     **self._config_deployment,
-        # }
-        config = {}
-        if hasattr(self, "_partition_dict") and self._partition_dict is not None:
-            config.update(self._partition_dict)
-        if hasattr(self, "_config_hyperparameters") and self._config_hyperparameters is not None:
-            config.update(self._config_hyperparameters)
-        if hasattr(self, "_config_deployment") and self._config_deployment is not None:
-            config.update(self._config_deployment)
-        if hasattr(self, "_config_meta") and self._config_meta is not None:
-            config.update(self._config_meta)
-
-        return config
 
 
 class ForecastingModelManager(ModelManager):
@@ -916,28 +915,6 @@ class ForecastingModelManager(ModelManager):
             model_path (ModelPathManager): The path manager for the model.
         """
         super().__init__(model_path, wandb_notifications, use_prediction_store)
-
-    @staticmethod
-    def _resolve_evaluation_sequence_number(eval_type: str) -> int:
-        """
-        Resolve the evaluation length based on the evaluation type.
-
-        Args:
-            eval_type (str): The type of evaluation to perform (e.g., standard, long, complete, live).
-
-        Returns:
-            int: The evaluation length.
-        """
-        if eval_type == "standard":
-            return 12
-        elif eval_type == "long":
-            return 36
-        elif eval_type == "complete":
-            return None  # currently set as None because sophisticated calculation is needed
-        elif eval_type == "live":
-            return 12
-        else:
-            raise ValueError(f"Invalid evaluation type: {eval_type}")
 
     @staticmethod
     def _get_conflict_type(target: str) -> str:
@@ -1013,8 +990,12 @@ class ForecastingModelManager(ModelManager):
         Args:
             args: Command line arguments.
         """
-        wandb.login()
-        self.config = self._update_single_config(args)
+        self._wandb_manager.login()
+        
+        self.config = self._config_manager.update_for_single_run(
+            args,
+            wandb_manager=self._wandb_manager,
+        )
         self._project = f"{self.config['name']}_{args.run_type}"
         self._eval_type = args.eval_type
         self.config["eval_type"] = args.eval_type
@@ -1022,6 +1003,7 @@ class ForecastingModelManager(ModelManager):
 
         # Fetch data
         self._execute_data_fetching(args)
+        
         # Execute model tasks
         self._execute_model_tasks(
             config=self.config,
@@ -1039,18 +1021,22 @@ class ForecastingModelManager(ModelManager):
         Args:
             args: Command line arguments.
         """
-        # self.config = self._update_sweep_config(args)
-        wandb.login()
-        self._project = f"{self._config_sweep['name']}_sweep"
+        import wandb
+        
+        self._wandb_manager.login()
+        self._project = f"{self._config_manager.config_sweep['name']}_sweep"
         self._eval_type = args.eval_type
         self._args = args
         self._sweep = True
 
         # Fetch data
         self._execute_data_fetching(args)
-        # Execute model sweep
+        
+        # Execute sweep
         sweep_id = wandb.sweep(
-            self._config_sweep, project=self._project, entity=self._entity
+            self._config_manager.config_sweep,
+            project=self._project,
+            entity=self._entity,
         )
         wandb.agent(sweep_id, self._execute_model_tasks, entity=self._entity)
 
@@ -1073,7 +1059,10 @@ class ForecastingModelManager(ModelManager):
             forecast (bool, optional): Flag to indicate if forecasting should be performed.
             artifact_name (str, optional): Specific name of the model artifact to load for evaluation or forecasting.
         """
+        import time
+        
         start_t = time.time()
+        
         if self._sweep:
             self._execute_model_sweeping(config)
         else:
@@ -1093,53 +1082,37 @@ class ForecastingModelManager(ModelManager):
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
 
     def _execute_data_fetching(self, args):
-        with wandb.init(
-            project=self._project, entity=self._entity, job_type="fetch_data"
+        import wandb
+        
+        with self._wandb_manager.initialize_run(
+            project=self._project,
+            config={},
+            job_type="fetch_data",
         ):
-            self._data_loader.get_data(
-                use_saved=args.saved,
-                validate=True,
-                self_test=args.drift_self_test,
-                partition=args.run_type,
-                override_month=args.override_timestep
-            )
-
-            current_month = datetime.now().strftime("%Y-%m")
-            artifact_name = f"{args.run_type}_viewser_df_{current_month}"
-
-            wandb_alert(
-                title=f"Queryset Fetch Complete ({str(args.run_type)})",
-                text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully. Drift self test is set to {args.drift_self_test}.",
-                wandb_notifications=self._wandb_notifications,
-                models_path=self._model_path.models,
-            )
-
-            # Log the raw data artifact
             try:
-                # Check if an artifact with this name already exists
-                existing_artifact = wandb.Api().artifact(
-                    f"{self._project}/{artifact_name}:latest"
+                self._data_loader.get_data(
+                    use_saved=args.saved,
+                    validate=True,
+                    self_test=args.drift_self_test,
+                    partition=args.run_type,
+                    override_month=args.override_timestep
                 )
 
-            except wandb.errors.CommError:
-                artifact_raw_data = wandb.Artifact(
-                    name=artifact_name,
-                    type="raw_data",
-                    description=f"Raw data for {self._model_path.target} {self._model_path.model_name} for {current_month}",
-                    metadata={
-                        "run_type": args.run_type,
-                        "drift_self_test": args.drift_self_test,
-                        "created_at": datetime.now().isoformat(),
-                    },
-                )
-                # artifact_raw_data.add_file(
-                #     self._model_path.data_raw
-                #     / f"{args.run_type}_viewser_df{PipelineConfig().dataframe_format}"
-                # )
-                # wandb.run.log_artifact(artifact_raw_data)
+                current_month = datetime.now().strftime("%Y-%m")
+                artifact_name = f"{args.run_type}_viewser_df_{current_month}"
 
+                self._wandb_manager.send_alert(
+                    title=f"Queryset Fetch Complete ({str(args.run_type)})",
+                    text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully.",
+                )
+
+            except Exception as e:
+                raise DataFetchException(
+                    f"Data fetching failed: {e}",
+                    wandb_manager=self._wandb_manager,
+                )
             finally:
-                wandb.finish()
+                self._wandb_manager.finish_run()
 
     def _execute_model_training(self, config: Dict) -> None:
         """
@@ -1148,37 +1121,38 @@ class ForecastingModelManager(ModelManager):
         Args:
             config (dict): Configuration object containing parameters and settings.
         """
-        with wandb.init(
-            project=self._project, entity=self._entity, config=config, job_type="train"
+        import traceback
+        from views_pipeline_core.files.utils import handle_single_log_creation
+        
+        with self._wandb_manager.initialize_run(
+            project=self._project,
+            config=config,
+            job_type="train",
         ):
-            add_wandb_metrics()
             try:
-                logger.info(
-                    f"Training {self._model_path.target} {self.config['name']}..."
-                )
-                self._train_model_artifact()  # Train the model
+                logger.info(f"Training {self._model_path.target} {self.config['name']}...")
+                self._train_model_artifact()
+                
                 handle_single_log_creation(
-                    model_path=self._model_path, config=self.config, train=True
+                    model_path=self._model_path,
+                    config=self.config,
+                    train=True,
                 )
-                wandb_alert(
-                    title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
+                
+                # self._wandb_manager.send_alert(
+                #     title=f"Training for {self._model_path.target} {self.config['name']} completed successfully."
+                # )
+                self._wandb_manager.send_alert(
+                title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
+                text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```",
+            )
 
             except Exception as e:
-                logger.error(
-                    f"{self._model_path.target.title()} training model: {e}",
-                    exc_info=True,
+                logger.error(f"{self._model_path.target.title()} training model: {e}", exc_info=True)
+                raise ModelTrainingException(
+                    f"Training failed: {traceback.format_exc()}",
+                    wandb_manager=self._wandb_manager,
                 )
-                wandb_alert(
-                    title=f"{self._model_path.target.title()} Training Error",
-                    text=f"An error occurred during training of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
-                    level=wandb.AlertLevel.ERROR,
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
-                raise
 
     def _execute_model_evaluation(self, config: Dict, artifact_name: str) -> None:
         """
@@ -1188,61 +1162,48 @@ class ForecastingModelManager(ModelManager):
             config (dict): Configuration object containing parameters and settings.
             artifact_name (str): The name of the artifact to evaluate.
         """
-        with wandb.init(
+        import traceback
+        import pandas as pd
+        from views_pipeline_core.models.check import validate_prediction_dataframe
+        from views_pipeline_core.files.utils import handle_single_log_creation
+        
+        with self._wandb_manager.initialize_run(
             project=self._project,
-            entity=self._entity,
             config=config,
             job_type="evaluate",
         ):
-            add_wandb_metrics()
             try:
-                logger.info(
-                    f"Evaluating {self._model_path.target} {self.config['name']}..."
-                )
+                logger.info(f"Evaluating {self._model_path.target} {self.config['name']}...")
                 list_df_predictions = self._evaluate_model_artifact(
                     self._eval_type, artifact_name
                 )
+                
                 for i, df in enumerate(list_df_predictions):
-                    print(
-                        f"\nValidating evaluation dataframe of sequence {i+1}/{len(list_df_predictions)}"
-                    )
-                    validate_prediction_dataframe(
-                        dataframe=df, target=self.config["targets"]
-                    )
+                    print(f"\nValidating evaluation dataframe of sequence {i+1}/{len(list_df_predictions)}")
+                    validate_prediction_dataframe(dataframe=df, target=self.config["targets"])
                     self._save_predictions(df, self._model_path.data_generated, i)
 
                 handle_single_log_creation(
-                    model_path=self._model_path, config=self.config, train=False
+                    model_path=self._model_path,
+                    config=self.config,
+                    train=False,
                 )
 
-                if self.config["metrics"]:
-                    self._evaluate_prediction_dataframe(
-                        list_df_predictions, self._eval_type
-                    )
+                if self.config.get("metrics"):
+                    self._evaluate_prediction_dataframe(list_df_predictions, self._eval_type)
                 else:
-                    raise ValueError(
-                        'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
-                    )
+                    logger.warning("No metrics specified in config")
 
-                wandb_alert(
-                    title=f"Evaluating for {self._model_path.target} {self.config['name']} completed successfully.",
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
+                self._wandb_manager.send_alert(
+                    title=f"Evaluation for {self._model_path.target} {self.config['name']} completed successfully."
                 )
 
             except Exception as e:
-                logger.error(
-                    f"{self._model_path.target.title()} evaluating model: {e}",
-                    exc_info=True,
+                logger.error(f"{self._model_path.target.title()} evaluating model: {e}", exc_info=True)
+                raise ModelEvaluationException(
+                    f"Evaluation failed: {traceback.format_exc()}",
+                    wandb_manager=self._wandb_manager,
                 )
-                wandb_alert(
-                    title=f"{self._model_path.target.title()} Evaluation Error",
-                    text=f"An error occurred during evaluation of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
-                    level=wandb.AlertLevel.ERROR,
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
-                raise
 
     def _execute_model_forecasting(self, config: Dict, artifact_name: str) -> None:
         """
@@ -1252,47 +1213,41 @@ class ForecastingModelManager(ModelManager):
             config (dict): Configuration object containing parameters and settings.
             artifact_name (str): The name of the artifact to forecast.
         """
-        with wandb.init(
+        import traceback
+        from views_pipeline_core.models.check import validate_prediction_dataframe
+        from views_pipeline_core.files.utils import handle_single_log_creation
+        
+        with self._wandb_manager.initialize_run(
             project=self._project,
-            entity=self._entity,
             config=config,
             job_type="forecast",
         ):
-            add_wandb_metrics()
             try:
-                logger.info(
-                    f"Forecasting {self._model_path.target} {self.config['name']}..."
-                )
+                logger.info(f"Forecasting {self._model_path.target} {self.config['name']}...")
                 df_predictions = self._forecast_model_artifact(artifact_name)
                 validate_prediction_dataframe(
-                    dataframe=df_predictions, target=self.config["targets"]
+                    dataframe=df_predictions,
+                    target=self.config["targets"]
                 )
 
                 handle_single_log_creation(
-                    model_path=self._model_path, config=self.config, train=False
+                    model_path=self._model_path,
+                    config=self.config,
+                    train=False,
                 )
 
                 self._save_predictions(df_predictions, self._model_path.data_generated)
 
-                wandb_alert(
-                    title=f"Forecasting for {self._model_path.target} {self.config['name']} completed successfully.",
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
+                self._wandb_manager.send_alert(
+                    title=f"Forecasting for {self._model_path.target} {self.config['name']} completed successfully."
                 )
 
             except Exception as e:
-                logger.error(
-                    f"Error forecasting {self._model_path.target}: {e}",
-                    exc_info=True,
+                logger.error(f"Error forecasting {self._model_path.target}: {e}", exc_info=True)
+                raise ModelForecastingException(
+                    f"Forecasting failed: {traceback.format_exc()}",
+                    wandb_manager=self._wandb_manager,
                 )
-                wandb_alert(
-                    title="Model Forecasting Error",
-                    text=f"An error occurred during forecasting of {self._model_path.target} {self.config['name']}: {traceback.format_exc()}",
-                    level=wandb.AlertLevel.ERROR,
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
-                raise
 
     def _execute_model_sweeping(self, config: Dict) -> None:
         """
@@ -1301,41 +1256,39 @@ class ForecastingModelManager(ModelManager):
         Args:
             config (dict): Configuration object containing parameters and settings.
         """
-        with wandb.init(
-            project=self._project, entity=self._entity, config=config, job_type="sweep"
+        import wandb
+        
+        with self._wandb_manager.initialize_run(
+            project=self._project,
+            config=config,
+            job_type="sweep",
         ):
-            add_wandb_metrics()
-            self.config = self._update_sweep_config(wandb.config)
+            self.config = self._config_manager.update_for_sweep_run(
+                wandb.config,
+                self._args,
+                wandb_manager=self._wandb_manager,
+            )
 
             logger.info(f"Sweeping {self._model_path.target} {self.config['name']}...")
             model = self._train_model_artifact()
-            wandb_alert(
+            
+            self._wandb_manager.send_alert(
                 title=f"Training for {self._model_path.target} {self.config['name']} completed successfully.",
-                text=(
-                    f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```"
-                ),
-                wandb_notifications=self._wandb_notifications,
-                models_path=self._model_path.models,
+                text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```",
             )
-            logger.info(
-                f"Evaluating {self._model_path.target} {self.config['name']}..."
-            )
+            
+            logger.info(f"Evaluating {self._model_path.target} {self.config['name']}...")
             df_predictions = self._evaluate_sweep(self._eval_type, model)
 
             for i, df in enumerate(df_predictions):
-                print(
-                    f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
-                )
-                validate_prediction_dataframe(
-                    dataframe=df, target=self.config["targets"]
-                )
+                print(f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}")
+                from views_pipeline_core.models.check import validate_prediction_dataframe
+                validate_prediction_dataframe(dataframe=df, target=self.config["targets"])
 
-            if self.config["metrics"]:
+            if self.config.get("metrics"):
                 self._evaluate_prediction_dataframe(df_predictions, self._eval_type)
             else:
-                raise ValueError(
-                    'No evaluation metrics specified in config_meta.py. Add a field "metrics" with a list of metrics to calculate. E.g "metrics": ["RMSLE", "CRPS"]'
-                )
+                raise ValueError('No evaluation metrics specified in config_meta.py')
 
     def _execute_forecast_reporting(self, config: Dict) -> None:
         """
@@ -1344,10 +1297,15 @@ class ForecastingModelManager(ModelManager):
         Args:
             config (dict): Configuration object containing parameters and settings.
         """
-        with wandb.init(
-            project=self._project, entity=self._entity, config=config, job_type="report"
+        import wandb
+        import pandas as pd
+        from views_pipeline_core.files.utils import read_dataframe
+        
+        with self._wandb_manager.initialize_run(
+            project=self._project,
+            config=config,
+            job_type="report",
         ):
-            add_wandb_metrics()
             try:
                 logger.info(
                     f"Generating forecast report for {self._model_path.target} {self.config['name']}..."
@@ -1431,85 +1389,81 @@ class ForecastingModelManager(ModelManager):
                     models_path=self._model_path.models,
                 )
             except Exception as e:
-                logger.error(f"Error generating forecast report: {e}", exc_info=True)
-                wandb_alert(
-                    title="Forecast Report Generation Error",
-                    text=f"An error occurred during the generation of the forecast report for {self.config['name']}: {e}",
-                    level=wandb.AlertLevel.ERROR,
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
+                # logger.error(f"Error generating forecast report: {e}", exc_info=True)
+                raise PipelineException(
+                    f"Forecast report generation failed: {traceback.format_exc()}",
+                    wandb_manager=self._wandb_manager,
                 )
-                raise
 
-    def _update_single_config(self, args) -> Dict:
-        """
-        Updates the configuration object with hyperparameters, metadata, deployment settings, and command line arguments.
+    # def _update_single_config(self, args) -> Dict:
+    #     """
+    #     Updates the configuration object with hyperparameters, metadata, deployment settings, and command line arguments.
 
-        Args:
-            args: Command line arguments.
+    #     Args:
+    #         args: Command line arguments.
 
-        Returns:
-            dict: The updated configuration object.
-        """
-        # config = {
-        #     **self._config_hyperparameters,
-        #     **self._config_meta,
-        #     **self._config_deployment,
-        # }
-        config = {}
-        if hasattr(self, "_config_hyperparameters") and self._config_hyperparameters is not None:
-            config.update(self._config_hyperparameters)
-        if hasattr(self, "_config_deployment") and self._config_deployment is not None:
-            config.update(self._config_deployment)
-        if hasattr(self, "_config_meta") and self._config_meta is not None:
-            config.update(self._config_meta)
-        if hasattr(self, "_partition_dict") and self._partition_dict is not None:
-            if args.override_timestep is not None:
-                self._partition_dict["forecasting"] = {
-                    "train": (121, args.override_timestep),
-                    "test": (args.override_timestep + 1, args.override_timestep + 1 + len(config["steps"])),
-                } # Refactor this later
-            config.update(self._partition_dict)
-            self.configs.update(self._partition_dict)
-        config["run_type"] = args.run_type
-        config["eval_type"] = args.eval_type
-        config["sweep"] = args.sweep
+    #     Returns:
+    #         dict: The updated configuration object.
+    #     """
+    #     # config = {
+    #     #     **self._config_hyperparameters,
+    #     #     **self._config_meta,
+    #     #     **self._config_deployment,
+    #     # }
+    #     config = {}
+    #     if hasattr(self, "_config_hyperparameters") and self._config_hyperparameters is not None:
+    #         config.update(self._config_hyperparameters)
+    #     if hasattr(self, "_config_deployment") and self._config_deployment is not None:
+    #         config.update(self._config_deployment)
+    #     if hasattr(self, "_config_meta") and self._config_meta is not None:
+    #         config.update(self._config_meta)
+    #     if hasattr(self, "_partition_dict") and self._partition_dict is not None:
+    #         if args.override_timestep is not None:
+    #             self._partition_dict["forecasting"] = {
+    #                 "train": (121, args.override_timestep),
+    #                 "test": (args.override_timestep + 1, args.override_timestep + 1 + len(config["steps"])),
+    #             } # Refactor this later
+    #         config.update(self._partition_dict)
+    #         self.configs.update(self._partition_dict)
+    #     config["run_type"] = args.run_type
+    #     config["eval_type"] = args.eval_type
+    #     config["sweep"] = args.sweep
 
-        validate_config(config)
+    #     validate_config(config)
 
-        return config
+    #     return config
 
-    def _update_sweep_config(self, wandb_config) -> Dict:
-        """
-        Updates the configuration object for a sweep run with hyperparameters, metadata, and command line arguments.
+    # def _update_sweep_config(self, wandb_config) -> Dict:
+    #     """
+    #     Updates the configuration object for a sweep run with hyperparameters, metadata, and command line arguments.
 
-        Args:
-            args: Command line arguments.
+    #     Args:
+    #         args: Command line arguments.
 
-        Returns:
-            dict: The updated configuration object.
-        """
-        # config = {
-        #     **wandb_config,
-        #     **self._config_meta,
-        #     **self._config_deployment,
-        # }
-        config = {}
-        if hasattr(self, "_partition_dict") and self._partition_dict is not None:
-            config.update(self._partition_dict)
-        if hasattr(self, "_config_hyperparameters") and self._config_hyperparameters is not None:
-            config.update(self._config_hyperparameters)
-        if hasattr(self, "_config_deployment") and self._config_deployment is not None:
-            config.update(self._config_deployment)
-        if hasattr(self, "_config_meta") and self._config_meta is not None:
-            config.update(self._config_meta)
-        config["run_type"] = self._args.run_type
-        config["eval_type"] = self._args.eval_type
-        config["sweep"] = self._args.sweep
+    #     Returns:
+    #         dict: The updated configuration object.
+    #     """
+    #     # config = {
+    #     #     **wandb_config,
+    #     #     **self._config_meta,
+    #     #     **self._config_deployment,
+    #     # }
+    #     config = {}
+    #     if hasattr(self, "_partition_dict") and self._partition_dict is not None:
+    #         config.update(self._partition_dict)
+    #     if hasattr(self, "_config_hyperparameters") and self._config_hyperparameters is not None:
+    #         config.update(self._config_hyperparameters)
+    #     if hasattr(self, "_config_deployment") and self._config_deployment is not None:
+    #         config.update(self._config_deployment)
+    #     if hasattr(self, "_config_meta") and self._config_meta is not None:
+    #         config.update(self._config_meta)
+    #     config["run_type"] = self._args.run_type
+    #     config["eval_type"] = self._args.eval_type
+    #     config["sweep"] = self._args.sweep
 
-        validate_config(config)
+    #     validate_config(config)
 
-        return config
+    #     return config
 
     def _save_model_artifact(self, run_type: str) -> None:
         """
@@ -1530,53 +1484,50 @@ class ForecastingModelManager(ModelManager):
         """
         # Save the artifact to WandB
         try:
-            artifact = wandb.Artifact(
-                name=f"{run_type}_{self._model_path.target}_artifact",
-                type=f"{self._model_path.target}",
+            _latest_model_artifact_path = self._model_path.get_latest_model_artifact_path(
+                run_type=run_type
+            )
+            
+            self._wandb_manager.log_artifact(
+                artifact_path=_latest_model_artifact_path,
+                artifact_name=f"{run_type}_{self._model_path.target}_artifact",
+                artifact_type=self._model_path.target,
                 description=f"Latest {run_type} {self._model_path.target} artifact",
             )
-            _latest_model_artifact_path = (
-                self._model_path.get_latest_model_artifact_path(run_type=run_type)
-            )
-            artifact.add_file()
-            wandb.run.log_artifact(artifact)
-            logger.info(
-                f"Artifact for run type: {run_type}, {_latest_model_artifact_path.relative_to(self._model_path.root)} saved to WandB successfully."
-            )
+            
+            logger.info(f"Artifact for run type: {run_type} saved to WandB successfully.")
+            
         except Exception as e:
-            logger.error(f"Error saving artifact to WandB: {e}", exc_info=True)
-            wandb_alert(
-                title="Artifact Saving Error",
-                text=f"An error occurred while saving the artifact {_latest_model_artifact_path.relative_to(self._model_path.root)} to WandB: {traceback.format_exc()}",
-                level=wandb.AlertLevel.ERROR,
-                wandb_notifications=self._wandb_notifications,
-                models_path=self._model_path.models,
+            # logger.error(f"Error saving artifact to WandB: {e}", exc_info=True)
+            raise PipelineException(
+                f"Error saving artifact to WandB: {e}",
+                wandb_manager=self._wandb_manager,
             )
-            raise
 
     def _save_eval_report(self, eval_report, path_reports, conflict_type):
+        import json
+        from views_pipeline_core.files.utils import generate_evaluation_report_name
+        
         try:
             path_reports = Path(path_reports)
             path_reports.mkdir(parents=True, exist_ok=True)
+            
             eval_report_path = generate_evaluation_report_name(
                 self.config["run_type"],
                 conflict_type,
                 self.config["timestamp"],
                 file_extension=".json",
             )
+            
             with open(path_reports / eval_report_path, "w") as f:
                 json.dump(eval_report, f)
 
         except Exception as e:
-            logger.error(f"Error saving evaluation report: {e}", exc_info=True)
-            wandb_alert(
-                title="Evaluation Report Saving Error",
-                text=f"An error occurred while saving the evaluation report for {self.config['name']} at {path_reports.relative_to(self._model_path.root)}: {traceback.format_exc()}",
-                level=wandb.AlertLevel.ERROR,
-                wandb_notifications=self._wandb_notifications,
-                models_path=self._model_path.models,
+            # logger.error(f"Error saving evaluation report: {e}", exc_info=True)
+            raise PipelineException(
+                f"Error saving evaluation report: {e}",
+                wandb_manager=self._wandb_manager,
             )
-            raise
 
     def _save_evaluations(
         self,
@@ -1596,75 +1547,56 @@ class ForecastingModelManager(ModelManager):
             path_generated (str or Path): The path where the outputs should be saved.
             conflict_type (str): The conflict type (e.g., 'sb', 'os', 'ns').
         """
+        import pandas as pd
+        import wandb
+        from views_pipeline_core.files.utils import (
+            save_dataframe,
+            generate_evaluation_file_name,
+        )
+        
         try:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
             eval_step_path = generate_evaluation_file_name(
-                "step",
-                conflict_type,
-                self.config["run_type"],
-                self.config["timestamp"],
-                file_extension=PipelineConfig().dataframe_format,
+                "step", conflict_type, self.config["run_type"],
+                self.config["timestamp"], PipelineConfig().dataframe_format,
             )
-
             eval_ts_path = generate_evaluation_file_name(
-                "ts",
-                conflict_type,
-                self.config["run_type"],
-                self.config["timestamp"],
-                file_extension=PipelineConfig().dataframe_format,
+                "ts", conflict_type, self.config["run_type"],
+                self.config["timestamp"], PipelineConfig().dataframe_format,
             )
-
             eval_month_path = generate_evaluation_file_name(
-                "month",
-                conflict_type,
-                self.config["run_type"],
-                self.config["timestamp"],
-                file_extension=PipelineConfig().dataframe_format,
+                "month", conflict_type, self.config["run_type"],
+                self.config["timestamp"], PipelineConfig().dataframe_format,
             )
 
             save_dataframe(df_month_wise_evaluation, path_generated / eval_month_path)
-            save_dataframe(
-                df_time_series_wise_evaluation, path_generated / eval_ts_path
-            )
+            save_dataframe(df_time_series_wise_evaluation, path_generated / eval_ts_path)
             save_dataframe(df_step_wise_evaluation, path_generated / eval_step_path)
 
-            # Log outputs and evaluation metrics to WandB
+            # Log to WandB
             wandb.save(str(path_generated / eval_month_path))
             wandb.save(str(path_generated / eval_ts_path))
             wandb.save(str(path_generated / eval_step_path))
 
-            wandb.log(
-                {
-                    "evaluation_metrics_month": wandb.Table(
-                        dataframe=df_month_wise_evaluation
-                    ),
-                    "evaluation_metrics_ts": wandb.Table(
-                        dataframe=df_time_series_wise_evaluation
-                    ),
-                    "evaluation_metrics_step": wandb.Table(
-                        dataframe=df_step_wise_evaluation
-                    ),
-                }
-            )
+            wandb.log({
+                "evaluation_metrics_month": wandb.Table(dataframe=df_month_wise_evaluation),
+                "evaluation_metrics_ts": wandb.Table(dataframe=df_time_series_wise_evaluation),
+                "evaluation_metrics_step": wandb.Table(dataframe=df_step_wise_evaluation),
+            })
 
-            wandb_alert(
-                title=f"{self._model_path.target.title} Outputs Saved",
-                text=f"{self._model_path.target.title} evaluation metrics for {self.config['name']} have been successfully saved and logged to WandB at {path_generated.relative_to(self._model_path.root)}.",
-                wandb_notifications=self._wandb_notifications,
-                models_path=self._model_path.models,
+            self._wandb_manager.send_alert(
+                title=f"{self._model_path.target.title()} Outputs Saved",
+                text=f"Evaluation metrics saved at {path_generated.relative_to(self._model_path.root)}.",
             )
+            
         except Exception as e:
             logger.error(f"Error saving model outputs: {e}", exc_info=True)
-            wandb_alert(
-                title=f"{self._model_path.target.title} Outputs Saving Error",
-                text=f"An error occurred while saving and logging {self._model_path.target} outputs for {self.config['name']} at {path_generated.relative_to(self._model_path.root)}: {traceback.format_exc()}",
-                level=wandb.AlertLevel.ERROR,
-                wandb_notifications=self._wandb_notifications,
-                models_path=self._model_path.models,
+            raise PipelineException(
+                f"Error saving model outputs: {e}",
+                wandb_manager=self._wandb_manager,
             )
-            raise
 
     def _save_predictions(
         self,
@@ -1680,6 +1612,11 @@ class ForecastingModelManager(ModelManager):
             path_generated (str or Path): The path where the predictions should be saved.
             sequence_number (int): The sequence number.
         """
+        from views_pipeline_core.files.utils import (
+            save_dataframe,
+            generate_output_file_name,
+        )
+        
         try:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
@@ -1691,38 +1628,26 @@ class ForecastingModelManager(ModelManager):
                 sequence_number,
                 file_extension=PipelineConfig().dataframe_format,
             )
+            
             save_dataframe(df_predictions, path_generated / self._predictions_name)
 
-            # Save to prediction store
+            # Save to prediction store if enabled
             if self._use_prediction_store:
-                name = (
-                    self._model_path.model_name
-                    + "_"
-                    + self._predictions_name.split(".")[0]
-                )  # remove extension
+                name = f"{self._model_path.model_name}_{self._predictions_name.split('.')[0]}"
                 df_predictions.forecasts.set_run(self._pred_store_name)
                 df_predictions.forecasts.to_store(name=name, overwrite=True)
 
-            # Log predictions to WandB
-            # wandb.save(str(path_generated / self._predictions_name)) # Temporarily disabled to avoid saving large files to WandB
-            # wandb.log({"predictions": wandb.Table(dataframe=df_predictions)})
-
-            wandb_alert(
+            self._wandb_manager.send_alert(
                 title="Predictions Saved",
-                text=f"Predictions for {self._model_path.target} {self.config['name']} have been successfully saved and logged to WandB and locally at {path_generated.relative_to(self._model_path.root)}.",
-                wandb_notifications=self._wandb_notifications,
-                models_path=self._model_path.models,
+                text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
             )
+            
         except Exception as e:
-            logger.error(f"Error saving predictions: {e}", exc_info=True)
-            wandb_alert(
-                title="Prediction Saving Error",
-                text=f"An error occurred while saving predictions for {self.config['name']} at {path_generated.relative_to(self._model_path.root)}: {traceback.format_exc()}",
-                level=wandb.AlertLevel.ERROR,
-                wandb_notifications=self._wandb_notifications,
-                models_path=self._model_path.models,
+            # logger.error(f"Error saving predictions: {e}", exc_info=True)
+            raise PipelineException(
+                f"Error saving predictions: {e}",
+                wandb_manager=self._wandb_manager,
             )
-            raise
 
     def _evaluate_prediction_dataframe(
         self, df_predictions, eval_type, ensemble=False
@@ -1750,19 +1675,18 @@ class ForecastingModelManager(ModelManager):
         Raises:
             None
         """
+        import pandas as pd
         from views_evaluation.evaluation.evaluation_manager import EvaluationManager
-
+        from views_pipeline_core.files.utils import read_dataframe
+        
         evaluation_manager = EvaluationManager(self.config["metrics"])
+        
         if not ensemble:
             df_path = self._model_path._get_raw_data_file_paths(
                 run_type=self._args.run_type
-            )[
-                0
-            ]  # get the latest i.e first file
+            )[0]
             df_viewser = read_dataframe(df_path)
         else:
-            # If the predictions are from an ensemble model, the actual values are not available in the forecast store
-            # So we use the actual values from one of the single models
             df_path = (
                 ModelPathManager(self.config["models"][0]).data_raw
                 / f"{self.config['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
@@ -1770,8 +1694,8 @@ class ForecastingModelManager(ModelManager):
             df_viewser = read_dataframe(df_path)
 
         logger.info(f"df_viewser read from {df_path}")
-        # Multiple targets
         df_actual = df_viewser[self.config["targets"]]
+        
         for target in self.config["targets"]:
             logger.info(f"Calculating evaluation metrics for {target}")
             conflict_type = ForecastingModelManager._get_conflict_type(target)
@@ -1779,21 +1703,19 @@ class ForecastingModelManager(ModelManager):
             eval_result_dict = evaluation_manager.evaluate(
                 df_actual, df_predictions, target, self.config
             )
+            
             step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
-            time_series_wise_evaluation, df_time_series_wise_evaluation = (
-                eval_result_dict["time_series"]
-            )
+            time_series_wise_evaluation, df_time_series_wise_evaluation = eval_result_dict["time_series"]
             month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
 
-            log_wandb_log_dict(
+            self._wandb_manager.log_evaluation_results(
                 step_wise_evaluation,
-                time_series_wise_evaluation,
                 month_wise_evaluation,
+                time_series_wise_evaluation,
                 conflict_type,
             )
 
             if not self.config["sweep"]:
-                # Save evaluation metrics and predictions
                 self._save_evaluations(
                     df_step_wise_evaluation,
                     df_time_series_wise_evaluation,
@@ -1802,10 +1724,10 @@ class ForecastingModelManager(ModelManager):
                     conflict_type,
                 )
 
-        wandb_alert(
+        import wandb
+        self._wandb_manager.send_alert(
             title=f"Metrics for {self._model_path.model_name}",
             text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
-            wandb_notifications=self._wandb_notifications,
         )
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
@@ -1869,10 +1791,11 @@ class ForecastingModelManager(ModelManager):
 
         # Use the latest run summary to generate the evaluation report
 
-        with wandb.init(
-            project=self._project, entity=self._entity, config=config, job_type="report"
+        with self._wandb_manager.initialize_run(
+            project=self._project,
+            config=config,
+            job_type="report",
         ):
-            add_wandb_metrics()
             try:
                 from views_pipeline_core.templates.reports.evaluation import (
                     EvaluationReportTemplate,
@@ -1897,12 +1820,15 @@ class ForecastingModelManager(ModelManager):
                     models_path=self._model_path.models,
                 )
             except Exception as e:
-                logger.error(f"Error generating evaluation report: {e}", exc_info=True)
-                wandb_alert(
-                    title="Evaluation Report Generation Error",
-                    text=f"An error occurred during the generation of the evaluation report for {self.config['name']}: {traceback.format_exc()}",
-                    level=wandb.AlertLevel.ERROR,
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
+                # logger.error(f"Error generating evaluation report: {e}", exc_info=True)
+                # wandb_alert(
+                #     title="Evaluation Report Generation Error",
+                #     text=f"An error occurred during the generation of the evaluation report for {self.config['name']}: {traceback.format_exc()}",
+                #     level=wandb.AlertLevel.ERROR,
+                #     wandb_notifications=self._wandb_notifications,
+                #     models_path=self._model_path.models,
+                # )
+                raise PipelineException(
+                    f"Evaluation report generation failed: {traceback.format_exc()}",
+                    wandb_manager=self._wandb_manager,
                 )
-                raise

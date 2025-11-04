@@ -66,9 +66,9 @@ class PredictionMetadata:
 class PredictionStoreManager:
     def __init__(self, appwrite_file_manager_config: AppwriteConfig):
         self.model_path = appwrite_file_manager_config.path_manager
-        self.__appwrite_file_managerconfig = appwrite_file_manager_config
+        self.__appwrite_file_manager_config = appwrite_file_manager_config
         self.__appwrite_file_manager = AppWriteFileManager(
-            self.__appwrite_file_managerconfig
+            self.__appwrite_file_manager_config
         )
 
     def upload_predictions(
@@ -93,43 +93,43 @@ class PredictionStoreManager:
         elif isinstance(file, (Path, str)):
             file_path = str(file)
             upload_result = self.__appwrite_file_manager.upload_file_with_metadata(
-                bucket_id=self.__appwrite_file_managerconfig.bucket_id,
+                bucket_id=self.__appwrite_file_manager_config.bucket_id,
                 filename=filename,
                 file_path=file_path,
                 metadata=metadata,
-                collection_name=self.__appwrite_file_managerconfig.collection_name,
-                collection_id=self.__appwrite_file_managerconfig.collection_id,
+                collection_name=self.__appwrite_file_manager_config.collection_name,
+                collection_id=self.__appwrite_file_manager_config.collection_id,
             ).to_dict()
         else:
             raise TypeError("file must be a Path, str, or pd.DataFrame")
 
         if upload_result.get("code") == "storage_bucket_not_found":
             logger.info(
-                f"Bucket '{self.__appwrite_file_managerconfig.bucket_id}' not found. Creating it..."
+                f"Bucket '{self.__appwrite_file_manager_config.bucket_id}' not found. Creating it..."
             )
             try:
                 self.__appwrite_file_manager.create_bucket(
-                    bucket_id=self.__appwrite_file_managerconfig.bucket_id,
-                    name=self.__appwrite_file_managerconfig.bucket_name,
+                    bucket_id=self.__appwrite_file_manager_config.bucket_id,
+                    name=self.__appwrite_file_manager_config.bucket_name,
                 )
             except Exception as e:
                 logger.error(f"Failed to create bucket: {e}")
                 return OperationResult(success=False, error=str(e))
 
             upload_result = self.__appwrite_file_manager.upload_file_with_metadata(
-                bucket_id=self.__appwrite_file_managerconfig.bucket_id,
+                bucket_id=self.__appwrite_file_manager_config.bucket_id,
                 file_path=file_path,
                 filename=filename,
                 metadata=metadata,
-                collection_name=self.__appwrite_file_managerconfig.collection_name,
-                collection_id=self.__appwrite_file_managerconfig.collection_id,
+                collection_name=self.__appwrite_file_manager_config.collection_name,
+                collection_id=self.__appwrite_file_manager_config.collection_id,
             ).to_dict()
         
         return OperationResult(**upload_result)
 
     def get_predictions_by_metadata(
-    self, filters: Dict[str, Any] = None
-) -> List[Dict[str, Any]]:
+        self, filters: Dict[str, Any] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get predictions by metadata filters.
         
@@ -150,13 +150,13 @@ class PredictionStoreManager:
         
         logger.info(f"Searching for predictions with filters: {filters}")
         
-        # Use config values directly instead of fetching bucket name
+        # FIXED: Use correct attribute name
         search_result = (
             self.__appwrite_file_manager.metadata_manager.search_files_by_metadata(
-                filters=filters if filters else None,  # Pass None if no filters
-                collection_name=self.__appwrite_file_managerconfig.collection_name,
-                collection_id=self.__appwrite_file_managerconfig.collection_id,
-                database_id=self.__appwrite_file_managerconfig.database_id,
+                filters=filters if filters else None,
+                collection_name=self.__appwrite_file_manager_config.collection_name,  
+                collection_id=self.__appwrite_file_manager_config.collection_id,      
+                database_id=self.__appwrite_file_manager_config.database_id,          
             ).to_dict()
         )
 
@@ -187,7 +187,7 @@ class PredictionStoreManager:
         validate_cache: bool = True,
     ) -> OperationResult:
         download_result = self.__appwrite_file_manager.download_file(
-            bucket_id=self.__appwrite_file_managerconfig.bucket_id,
+            bucket_id=self.__appwrite_file_manager_config.bucket_id,
             file_id=file_id,
             save_path=save_path,
             use_cache=use_cache,
@@ -246,9 +246,9 @@ class PredictionStoreManager:
         try:
             search_result = self.__appwrite_file_manager.metadata_manager.search_files_by_metadata(
                 filters={"fileId": file_id},
-                collection_name=self.__appwrite_file_managerconfig.collection_name,
-                collection_id=self.__appwrite_file_managerconfig.collection_id,
-                database_id=self.__appwrite_file_managerconfig.database_id,
+                collection_name=self.__appwrite_file_manager_config.collection_name,
+                collection_id=self.__appwrite_file_manager_config.collection_id,
+                database_id=self.__appwrite_file_manager_config.database_id,
             )
             
             if not search_result.success:
@@ -298,9 +298,9 @@ class PredictionStoreManager:
         return self.__appwrite_file_manager.metadata_manager.update_file_metadata(
             file_id=file_id,
             metadata_updates=metadata_updates,
-            collection_name=self.__appwrite_file_managerconfig.collection_name,
-            collection_id=self.__appwrite_file_managerconfig.collection_id,
-            database_id=self.__appwrite_file_managerconfig.database_id,
+            collection_name=self.__appwrite_file_manager_config.collection_name,
+            collection_id=self.__appwrite_file_manager_config.collection_id,
+            database_id=self.__appwrite_file_manager_config.database_id,
         )
     
     def delete_prediction(self, file_id: str) -> OperationResult:
@@ -315,7 +315,7 @@ class PredictionStoreManager:
         """
         # Delete the file from storage
         delete_result = self.__appwrite_file_manager.delete_file(
-            bucket_id=self.__appwrite_file_managerconfig.bucket_id,
+            bucket_id=self.__appwrite_file_manager_config.bucket_id,
             file_id=file_id
         )
         
@@ -350,9 +350,9 @@ class PredictionStoreManager:
         search_result = (
             self.__appwrite_file_manager.metadata_manager.search_files_by_metadata(
                 filters=None,  # No filters
-                collection_name=self.__appwrite_file_managerconfig.collection_name,
-                collection_id=self.__appwrite_file_managerconfig.collection_id,
-                database_id=self.__appwrite_file_managerconfig.database_id,
+                collection_name=self.__appwrite_file_manager_config.collection_name,
+                collection_id=self.__appwrite_file_manager_config.collection_id,
+                database_id=self.__appwrite_file_manager_config.database_id,
             ).to_dict()
         )
 
