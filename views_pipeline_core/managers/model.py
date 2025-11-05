@@ -45,7 +45,7 @@ from views_pipeline_core.files.utils import (
 )
 
 from views_pipeline_core.configs import PipelineConfig
-from views_pipeline_core.models.check import (
+from views_pipeline_core.modules.validation.model import (
     validate_prediction_dataframe,
     validate_config,
 )
