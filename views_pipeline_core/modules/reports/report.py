@@ -11,11 +11,28 @@ from views_pipeline_core.modules.reports.styles.tailwind import get_css
 
 
 class ReportModule:
+    """
+    HTML report generator with Tailwind CSS styling and component library.
+    
+    Provides methods for building rich, interactive HTML reports with headings,
+    tables, images, visualizations, and custom layouts.
+    """
     # Threshold for splitting tables
     TABLE_SPLIT_THRESHOLD = 8
     TABLE_SPLIT_THRESHOLD_COLS = 6
     
     def __init__(self):
+        """
+        Initialize a new report with VIEWS header and default styling.
+
+        Creates an empty report with the VIEWS branding header image already
+        added and styled.
+
+        Example:
+            >>> report = ReportModule()
+            >>> report.add_heading("Model Results")
+            >>> report.export_as_html("report.html")
+        """
         self.content = []
         self._plotly_js_loaded = False
         self.add_image(image=str(Path(__file__).parent.parent.parent / "assets/views_header.png"), caption=None)
@@ -25,13 +42,29 @@ class ReportModule:
 
     def add_heading(self, text: str, level: int = 1, link: Optional[str] = None) -> None:
         """
-        Adds a heading to the report content with customizable level, styling, and optional hyperlink.
+        Add styled heading to report with optional hyperlink.
+
+        Creates a heading with level-specific styling (H1, H2, or H3) and
+        optionally wraps it in a clickable link.
+
         Args:
-            text (str): The heading text to display.
-            level (int, optional): The heading level (1, 2, or 3). Defaults to 1.
-            link (Optional[str], optional): An optional URL to wrap the heading text in a hyperlink. Defaults to None.
-        Returns:
-            None
+            text: Heading text to display
+            level: Heading level (1=largest, 2=medium, 3=smallest). Default: 1
+            link: Optional URL to make heading clickable
+
+        Example:
+            >>> report.add_heading("Evaluation Results", level=1)
+            >>> report.add_heading("Model Configuration", level=2)
+            >>> report.add_heading(
+            ...     "WandB Dashboard",
+            ...     level=2,
+            ...     link="https://wandb.ai/views/project"
+            ... )
+
+        Note:
+            - Level 1: 3xl text, primary color, for main sections
+            - Level 2: 2xl text, secondary color, for subsections
+            - Level 3: xl text, tertiary color, for minor sections
         """
         classes = {
             1: "text-3xl font-bold text-primary mb-6 mt-8",
@@ -46,14 +79,26 @@ class ReportModule:
 
     def add_paragraph(self, text: str, link: Optional[str] = None) -> None:
         """
-        Adds a paragraph of text to the report content, optionally embedding a hyperlink.
-        If a link is provided, the text will be wrapped in an anchor tag pointing to the specified URL.
-        The paragraph is styled with predefined CSS classes for consistent appearance.
+        Add styled paragraph to report with optional hyperlink.
+
+        Creates a paragraph with consistent styling and optionally wraps the
+        entire text in a clickable link.
+
         Args:
-            text (str): The paragraph text to add.
-            link (Optional[str], optional): The URL to link the text to. Defaults to None.
-        Returns:
-            None
+            text: Paragraph text to display
+            link: Optional URL to make paragraph clickable
+
+        Example:
+            >>> report.add_paragraph("Model training completed successfully.")
+            >>> report.add_paragraph(
+            ...     "View detailed metrics in WandB",
+            ...     link="https://wandb.ai/views/project/runs/abc123"
+            ... )
+
+        Note:
+            - Uses large font size (text-lg) for readability
+            - Max width of 3xl for optimal line length
+            - Opens links in new tab (_blank)
         """
         if link:
             text = f'<a href="{escape(link)}" target="_blank">{text}</a>'
@@ -67,14 +112,26 @@ class ReportModule:
         link: Optional[str] = None
     ) -> None:
         """
-        Adds an HTML visualization to the report content, optionally wrapped in a hyperlink and displayed within a styled container.
-        If Plotly.js has not been loaded, it inserts the Plotly script before adding the visualization.
+        Add interactive HTML visualization to report.
+
+        Embeds custom HTML (e.g., Plotly charts) in a styled container with
+        scrolling and optional hyperlink wrapper.
+
         Args:
-            html (str): The HTML string representing the visualization to be added.
-            height (Optional[int], optional): The height of the visualization container in pixels. Defaults to 600.
-            link (Optional[str], optional): An optional URL to wrap the visualization in a hyperlink. Defaults to None.
-        Returns:
-            None
+            html: HTML string to embed (e.g., Plotly figure HTML)
+            height: Container height in pixels. Default: 600
+            link: Optional URL to wrap visualization
+
+        Example:
+            >>> import plotly.express as px
+            >>> fig = px.scatter(df, x='x', y='y')
+            >>> report.add_html(fig.to_html(), height=500)
+
+        Note:
+            - Automatically loads Plotly.js on first use
+            - Container has gradient accent bar at top
+            - Scrollable if content exceeds height
+            - Hover effect on container
         """
         if not self._plotly_js_loaded:
             self.content.insert(0, self._get_plotly_script())
@@ -96,23 +153,43 @@ class ReportModule:
         self.content.append(container)
 
     def _get_plotly_script(self):
+        """
+        Get Plotly.js CDN script tag.
+
+        Internal Use:
+            Called by add_html() to load Plotly.js library on first use.
+
+        Returns:
+            Script tag HTML string
+        """
         return """<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>\n"""
     
     def add_markdown(self, markdown_text: str) -> None:
         """
-        Adds Markdown-formatted text to the report, rendering it as HTML.
-        Attempts to convert the provided Markdown text to HTML using the `markdown` library
-        with support for tables, fenced code blocks, line breaks, and sane lists. The rendered
-        HTML is wrapped in a styled container and appended to the report content. If the
-        `markdown` library is not available, the method falls back to displaying the raw
-        Markdown text as plain paragraphs.
-            markdown_text (str): Markdown formatted text to render in the report.
-         
+        Add Markdown-formatted content to report.
+
+        Converts Markdown to HTML with support for tables, code blocks,
+        and other common Markdown features.
+
         Args:
             markdown_text: Markdown formatted text to render
 
-        Returns:
-            None
+        Example:
+            >>> markdown = '''
+            ... # Results
+            ... 
+            ... | Metric | Value |
+            ... |--------|-------|
+            ... | MSE    | 0.045 |
+            ... | MAE    | 0.123 |
+            ... '''
+            >>> report.add_markdown(markdown)
+
+        Note:
+            - Requires 'markdown' package to be installed
+            - Falls back to plain text if package unavailable
+            - Supports tables, fenced code, line breaks
+            - Content wrapped in styled container
         """
         try:
             import markdown
@@ -140,11 +217,29 @@ class ReportModule:
     
     def add_key_value_list(self, data: dict, title: Optional[str] = None) -> None:
         """
-        Add a formatted list of key-value pairs with optional title
+        Add formatted list of key-value pairs to report.
+
+        Creates a two-column layout displaying dictionary contents with
+        automatic link detection and responsive design.
 
         Args:
             data: Dictionary of key-value pairs to display
-            title: Optional title for the list
+            title: Optional title for the list section
+
+        Example:
+            >>> config = {
+            ...     'Model': 'RandomForest',
+            ...     'Features': 42,
+            ...     'Accuracy': 0.87,
+            ...     'WandB': 'https://wandb.ai/views/project'
+            ... }
+            >>> report.add_key_value_list(config, title="Configuration")
+
+        Note:
+            - URLs automatically detected and made clickable
+            - Two-column grid on desktop, single column on mobile
+            - Keys shown in bold, values in regular weight
+            - Links open in new tab
         """
         html = []
         if title:
@@ -180,20 +275,40 @@ class ReportModule:
         link: Optional[str] = None
     ) -> None:
         """
-        Adds an image to the report, supporting matplotlib figures, axes, or image file paths.
+        Add image to report from file path or matplotlib figure.
 
-        Parameters:
-            image (Union[str, plt.Figure, plt.Axes]): The image to add. Can be a file path (str), a matplotlib Figure, or Axes.
-            caption (Optional[str], optional): Caption text to display below the image. Defaults to None.
-            as_html (bool, optional): If True, returns the HTML string for the image card instead of appending to content. Defaults to False.
-            link (Optional[str], optional): Optional hyperlink to wrap the image. Defaults to None.
+        Embeds image with optional caption and hyperlink wrapper. Supports
+        matplotlib figures/axes or file paths.
+
+        Args:
+            image: Image source. Either:
+                - File path (str): Path to image file
+                - plt.Figure: Matplotlib figure object
+                - plt.Axes: Matplotlib axes object
+            caption: Optional caption text displayed below image
+            as_html: If True, returns HTML string instead of adding to report
+            link: Optional URL to make image clickable
 
         Returns:
-            None or str: Returns None if the image is appended to the report content, or the HTML string if as_html is True.
+            None, or HTML string if as_html=True
 
         Raises:
-            FileNotFoundError: If the provided image path does not exist.
-            ValueError: If the image type is unsupported.
+            FileNotFoundError: If image path doesn't exist
+            ValueError: If image type is unsupported
+
+        Example:
+            >>> # From file
+            >>> report.add_image('results/plot.png', caption='Loss curve')
+            
+            >>> # From matplotlib
+            >>> fig, ax = plt.subplots()
+            >>> ax.plot([1, 2, 3], [1, 4, 9])
+            >>> report.add_image(fig, caption='Quadratic function')
+
+        Note:
+            - Images embedded as base64 (no external files needed)
+            - Matplotlib figures saved at 150 DPI
+            - Lazy loading enabled for performance
         """
         if isinstance(image, (plt.Figure, plt.Axes)):
             buf = BytesIO()
@@ -242,14 +357,39 @@ class ReportModule:
         split_col_threshold: int = TABLE_SPLIT_THRESHOLD_COLS
     ) -> None:
         """
-        Add a table from DataFrame or dictionary with splitting for large tables
-        
+        Add table to report with automatic splitting for large tables.
+
+        Displays DataFrame or dictionary as styled HTML table. Automatically
+        splits tables that exceed row or column thresholds.
+
         Args:
-            data: DataFrame or dictionary to display as table
-            header: Optional header text for the table
-            link: Optional hyperlink to wrap the table
-            split_threshold: Split tables with more rows than this threshold
-            split_col_threshold: Split tables with more columns than this threshold
+            data: Data to display. Either:
+                - pd.DataFrame: Rendered with styled columns
+                - dict: Converted to two-column key-value table
+            header: Optional header text displayed above table
+            as_html: If True, returns HTML string instead of adding to report
+            link: Optional URL to wrap table
+            split_threshold: Split tables with more rows than this. Default: 8
+            split_col_threshold: Split tables with more columns than this. Default: 6
+
+        Returns:
+            None, or HTML string if as_html=True
+
+        Raises:
+            TypeError: If data is not DataFrame or dict
+
+        Example:
+            >>> df = pd.DataFrame({'A': [1, 2], 'B': [3, 4]})
+            >>> report.add_table(df, header="Results")
+            
+            >>> config = {'model': 'rf', 'accuracy': 0.87}
+            >>> report.add_table(config, header="Configuration")
+
+        Note:
+            - Large tables split side-by-side or stacked vertically
+            - Alternating row colors for readability
+            - Nested dictionaries rendered recursively
+            - DataFrames support hyperlink rendering
         """
         if isinstance(data, pd.DataFrame):
             # Handle both row and column splitting
@@ -285,7 +425,21 @@ class ReportModule:
         row_threshold: int, 
         col_threshold: int
     ) -> str:
-        """Split a DataFrame into smaller tables based on rows and columns"""
+        """
+        Split DataFrame into smaller tables based on rows and columns.
+
+        Internal Use:
+            Called by add_table() when DataFrame exceeds thresholds.
+
+        Args:
+            df: DataFrame to split
+            header: Optional header text
+            row_threshold: Maximum rows per table section
+            col_threshold: Maximum columns per table section
+
+        Returns:
+            HTML string with split tables in grid layout
+        """
         # First handle row splitting
         if len(df) > row_threshold:
             half = len(df) // 2
@@ -326,7 +480,19 @@ class ReportModule:
         df: pd.DataFrame, 
         col_threshold: int
     ) -> str:
-        """Split a DataFrame into multiple tables based on columns"""
+        """
+        Split DataFrame vertically by columns into multiple tables.
+
+        Internal Use:
+            Called by _split_dataframe() for column-based splitting.
+
+        Args:
+            df: DataFrame to split by columns
+            col_threshold: Maximum columns per table chunk
+
+        Returns:
+            HTML string with column-split tables stacked vertically
+        """
         if len(df.columns) <= col_threshold:
             return self._style_dataframe(df)
             
@@ -350,7 +516,20 @@ class ReportModule:
 
 
     def _split_dictionary(self, data: dict, header: Optional[str], split_threshold: int) -> str:
-        """Split a dictionary into two halves and display side-by-side"""
+        """
+        Split dictionary into two side-by-side tables.
+
+        Internal Use:
+            Called by add_table() when dictionary exceeds threshold.
+
+        Args:
+            data: Dictionary to split
+            header: Optional header text
+            split_threshold: Maximum items before splitting
+
+        Returns:
+            HTML string with two tables in grid layout
+        """
         items = list(data.items())
         half = len(items) // 2
         dict1 = dict(items[:half])
@@ -381,7 +560,19 @@ class ReportModule:
             return split_html
 
     def _wrap_table_with_header(self, table_html: str, header: Optional[str] = None) -> str:
-        """Wrap table HTML with optional header"""
+        """
+        Wrap table HTML with optional header.
+
+        Internal Use:
+            Called by add_table() to add container and header.
+
+        Args:
+            table_html: HTML string of table content
+            header: Optional header text
+
+        Returns:
+            Wrapped HTML string with container styling
+        """
         if header:
             return f'''
             <div class="table-container mb-7">
@@ -394,14 +585,23 @@ class ReportModule:
 
     def _dict_to_html_table(self, data: dict, nested: bool = False) -> str:
         """
-        Convert dictionary to HTML table with nested tables for dictionary values
-        
+        Convert dictionary to styled HTML table with nested support.
+
+        Internal Use:
+            Called by add_table() for dictionary rendering.
+
         Args:
             data: Dictionary to convert
-            nested: Indicates if this is a nested table (affects styling)
-            
+            nested: Whether this is a nested table (affects styling)
+
         Returns:
-            HTML table string
+            HTML table string with styled rows and columns
+
+        Note:
+            - Recursively handles nested dictionaries
+            - Detects and renders DataFrames within dict values
+            - Preserves newlines in multi-line values
+            - Alternating row colors for readability
         """
         table_class = "text-sm" if nested else "w-full"
         html = [f'<table class="{table_class}">']
@@ -443,13 +643,23 @@ class ReportModule:
 
     def _style_dataframe(self, df: pd.DataFrame) -> str:
         """
-        Apply styling to DataFrame and convert to HTML
-        
+        Apply consistent styling to DataFrame and convert to HTML.
+
+        Internal Use:
+            Called by add_table() for DataFrame rendering.
+
         Args:
             df: DataFrame to style
-            
+
         Returns:
             Styled HTML table string
+
+        Note:
+            - Alternating row colors (white/light gray)
+            - Hover effect on rows
+            - Header with gray background
+            - Clickable links automatically styled
+            - No index column displayed
         """
         # Added alternating row colors
         return df.style\
@@ -472,19 +682,51 @@ class ReportModule:
 
     def start_grid(self, columns: int = 2) -> None:
         """
-        Start a new grid container
-        
+        Begin a new grid layout container.
+
+        Creates a responsive grid that stacks vertically on mobile and displays
+        multiple columns on desktop.
+
         Args:
-            columns: Number of columns in the grid
+            columns: Number of columns on desktop. Default: 2
+
+        Example:
+            >>> report.start_grid(columns=3)
+            >>> report.add_to_grid(table1)
+            >>> report.add_to_grid(table2)
+            >>> report.add_to_grid(table3)
+            >>> report.end_grid()
+
+        Note:
+            - Single column on mobile (md breakpoint)
+            - Must call end_grid() to close container
+            - Items added with add_to_grid()
         """
         self.content.append(f'<div class="grid grid-cols-1 md:grid-cols-{columns} gap-6 mb-7">')
 
     def add_to_grid(self, item: Union[str, pd.DataFrame, dict]) -> None:
         """
-        Add an item to the current grid
-        
+        Add item to current grid layout.
+
+        Adds content to the most recently opened grid container. Automatically
+        wraps tables and dictionaries in styled cards.
+
         Args:
-            item: Content to add (can be HTML string, DataFrame, or dict)
+            item: Content to add. Either:
+                - HTML string: Raw HTML
+                - pd.DataFrame: Styled table
+                - dict: Key-value table
+
+        Example:
+            >>> report.start_grid(columns=2)
+            >>> report.add_to_grid("<p>Custom HTML</p>")
+            >>> report.add_to_grid(df)
+            >>> report.end_grid()
+
+        Note:
+            - Must be called between start_grid() and end_grid()
+            - Tables automatically get card styling
+            - Raw HTML inserted as-is within card container
         """
         if isinstance(item, (pd.DataFrame, dict)):
             # Handle tables
@@ -496,29 +738,66 @@ class ReportModule:
             self.content.append(f'<div class="bg-white rounded-xl shadow-card transition-all duration-300 hover:shadow-card-hover overflow-hidden">{item}</div>')
 
     def end_grid(self) -> None:
-        """Close the current grid container"""
+        """
+        Close the current grid layout container.
+
+        Completes the grid started with start_grid(). Must be called to
+        properly close the HTML grid container.
+
+        Example:
+            >>> report.start_grid(columns=2)
+            >>> report.add_to_grid(item1)
+            >>> report.add_to_grid(item2)
+            >>> report.end_grid()  # Required!
+
+        Note:
+            - Always pair with start_grid()
+            - Missing this call will break HTML structure
+        """
         self.content.append('</div>')
 
     def add_footer(self, text: str) -> None:
         """
-        Add a footer to the report with custom text
-        
+        Set custom footer text for report.
+
+        Adds a footer that appears at the bottom of the exported HTML with
+        timestamp and version information.
+
         Args:
-            text: Footer text (default shows system name)
+            text: Footer message text
+
+        Example:
+            >>> report.add_footer("Generated by VIEWS Forecasting System")
+
+        Note:
+            - Replaces any previous footer
+            - Automatically includes timestamp and package version
+            - Displayed only in exported HTML
         """
         self.footer = text
 
     def export_as_html(self, file_path: str) -> None:
         """
-        Exports the report content as an HTML file.
-        This method generates a complete HTML document containing the report's content,
-        applies custom CSS styles, and includes a footer with an optional message,
-        timestamp, and the current version of views-pipeline-core. The generated HTML
-        is saved to the specified file path.
+        Export complete report as standalone HTML file.
+
+        Generates a self-contained HTML file with all content, styling, and
+        embedded images. No external dependencies required.
+
         Args:
-            file_path (str): The path to the file where the HTML report will be saved.
-        Returns:
-            None
+            file_path: Path where HTML file will be saved
+
+        Example:
+            >>> report = ReportModule()
+            >>> report.add_heading("Model Results")
+            >>> report.add_table(results_df)
+            >>> report.export_as_html("outputs/report.html")
+
+        Note:
+            - All images embedded as base64
+            - Tailwind CSS inlined (no CDN required)
+            - File opens directly in any browser
+            - Includes automatic timestamp and version
+            - Footer added if set via add_footer()
         """
         css = get_css()
 

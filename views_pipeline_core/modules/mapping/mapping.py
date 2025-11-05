@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 
 
 class MappingModule:
+    """
+    Geographic visualization module for VIEWS datasets.
+    
+    Provides interactive and static choropleth mapping for both country-level
+    and priogrid-level datasets with automatic shapefile handling and optimized
+    rendering.
+    """
     _COUNTRY_HOVER_COLS = ["country_name"]
     _PRIOGRID_HOVER_COLS = [
         "gid",
@@ -32,14 +39,34 @@ class MappingModule:
 
     def __init__(self, views_dataset: Union[_PGDataset, _CDataset]):
         """
-        Initializes the mapping manager with the provided dataset, setting up internal references
-        to the dataset's dataframe, entity and time identifiers, and loading the appropriate
-        shapefile and location metadata based on the dataset type.
+        Initialize mapping module with VIEWS dataset and load appropriate shapefiles.
+
+        Sets up geographic infrastructure including shapefile loading, coordinate
+        reference system configuration, and GeoJSON preparation for efficient
+        rendering.
+
         Args:
-            views_dataset (Union[_PGDataset, _CDataset]): The dataset to be managed, either a
-                priogrid dataset (_PGDataset) or a country dataset (_CDataset).
+            views_dataset: Dataset to visualize. Either:
+                - _PGDataset: Priogrid-level data with cell-based geography
+                - _CDataset: Country-level data with national boundaries
+
         Raises:
-            ValueError: If the provided dataset is not an instance of _PGDataset or _CDataset.
+            ValueError: If dataset is not _PGDataset or _CDataset instance
+            FileNotFoundError: If required shapefile is missing
+
+        Example:
+            >>> from views_pipeline_core.data.handlers import PGMDataset
+            >>> dataset = PGMDataset(predictions_df)
+            >>> mapper = MappingModule(dataset)
+            >>> print(mapper._location_col)
+            'gid'
+
+        Note:
+            - Automatically detects dataset type and loads correct shapefile
+            - Simplifies geometries to reduce file size
+            - Prepares base GeoJSON for faster subsequent renders
+            - For PGM: Uses priogrid_cell.shp with ~260k cells
+            - For CM: Uses Natural Earth 1:110m country boundaries
         """
         self._dataset = views_dataset
         self._dataframe = self._dataset.dataframe
@@ -73,13 +100,18 @@ class MappingModule:
 
     def _prepare_base_geojson(self):
         """
-        Creates a simplified base GeoJSON representation of the world dataset with only essential properties.
-        This method transforms the world GeoDataFrame to WGS84 (EPSG:4326), retains only the necessary columns
-        (depending on the dataset type), and simplifies the geometries to reduce file size. The resulting
-        GeoJSON is stored in the `_base_geojson` attribute. Memory used by intermediate objects is released
-        after processing.
-        Returns:
-            None
+        Create optimized GeoJSON representation for efficient map rendering.
+
+        Converts shapefile to WGS84 projection, retains only essential properties,
+        and simplifies geometries to reduce file size while preserving topology.
+
+        Internal Use:
+            Called by __init__() during module initialization.
+
+        Note:
+            - Converts to EPSG:4326 (WGS84) for web compatibility
+            - Simplifies geometries with 0.01 degree tolerance
+            - Memory freed immediately after processing
         """
         base_gdf = self._world.to_crs(epsg=4326).copy()
 
@@ -105,15 +137,25 @@ class MappingModule:
 
     def __get_country_shapefile(self):
         """
-        Loads and returns the country shapefile as a GeoDataFrame.
+        Load Natural Earth country boundaries shapefile.
+
+        Internal Use:
+            Called by __init__() for country-level datasets.
 
         Returns:
-            geopandas.GeoDataFrame: A GeoDataFrame containing the country boundaries
-            from the 'ne_110m_admin_0_countries.shp' shapefile.
+            geopandas.GeoDataFrame: Country boundaries with attributes:
+                - ADM0_A3: ISO 3-letter country code
+                - geometry: Country polygon/multipolygon
+                - Additional Natural Earth attributes
 
         Raises:
-            FileNotFoundError: If the shapefile does not exist at the specified path.
-            OSError: If there is an issue reading the shapefile.
+            FileNotFoundError: If shapefile doesn't exist at expected path
+            OSError: If shapefile cannot be read
+
+        Note:
+            - Uses Natural Earth 1:110m resolution (simplified)
+            - Suitable for global-scale visualization
+            - Path: assets/shapefiles/country/ne_110m_admin_0_countries.shp
         """
         path = (
             Path(__file__).parent.parent.parent
@@ -138,14 +180,26 @@ class MappingModule:
 
     def __get_priogrid_shapefile(self):
         """
-        Loads and returns the PrioGrid shapefile as a GeoDataFrame.
+        Load PRIO-GRID cell boundaries shapefile.
+
+        Internal Use:
+            Called by __init__() for priogrid-level datasets.
 
         Returns:
-            geopandas.GeoDataFrame: A GeoDataFrame containing the PrioGrid cell shapefile data.
+            geopandas.GeoDataFrame: Grid cell boundaries with attributes:
+                - gid: Grid cell identifier
+                - row, col: Grid coordinates
+                - geometry: Cell polygon (0.5° × 0.5°)
+                - Additional PRIO-GRID attributes
 
         Raises:
-            FileNotFoundError: If the shapefile does not exist at the specified path.
-            OSError: If there is an issue reading the shapefile.
+            FileNotFoundError: If shapefile doesn't exist at expected path
+            OSError: If shapefile cannot be read
+
+        Note:
+            - PRIO-GRID cells are 0.5° × 0.5° (~55km at equator)
+            - Global coverage with ~260,000 cells
+            - Path: assets/shapefiles/priogrid/priogrid_cell.shp
         """
         path = (
             Path(__file__).parent.parent.parent
@@ -160,18 +214,29 @@ class MappingModule:
         self, mapping_dataframe: pd.DataFrame, drop_missing_geometries: bool = True
     ):
         """
-        Checks for missing geometries in the provided GeoDataFrame and optionally drops rows with missing geometries.
+        Validate geometries and optionally remove invalid rows.
+
+        Identifies rows with missing or empty geometries and either removes them
+        or logs warnings about their presence.
+
+        Internal Use:
+            Called by __init_mapping_dataframe() during data preparation.
 
         Args:
-            mapping_dataframe (pd.DataFrame): The DataFrame containing geometry data to check.
-            drop_missing_geometries (bool, optional): If True, rows with missing or empty geometries are dropped from the DataFrame. Defaults to True.
+            mapping_dataframe: GeoDataFrame to validate
+            drop_missing_geometries: If True, removes rows with invalid geometries.
+                If False, only logs warnings.
 
         Returns:
-            pd.DataFrame: The cleaned DataFrame with missing geometries removed if `drop_missing_geometries` is True; otherwise, returns the original DataFrame.
+            pd.DataFrame: Cleaned GeoDataFrame (or original if drop=False)
 
-        Logs:
-            - Warns if any missing geometries are found, listing their unique 'isoab' values.
-            - Warns about the number of rows dropped and the IDs of missing geometries if any rows are removed.
+        Note:
+            - Logs unique ISO codes for missing geometries
+            - Reports number of dropped rows and their IDs
+            - Missing geometries typically indicate:
+              - Data outside shapefile coverage
+              - Mismatched entity IDs
+              - Corrupt geometry data
         """
         missing = mapping_dataframe[
             mapping_dataframe.geometry.is_empty | mapping_dataframe.geometry.isna()
@@ -197,23 +262,35 @@ class MappingModule:
 
     def __init_mapping_dataframe(self, dataframe: pd.DataFrame) -> gpd.GeoDataFrame:
         """
-        Initializes and returns a GeoDataFrame for mapping purposes based on the provided DataFrame and the dataset type.
+        Prepare GeoDataFrame by merging data with geometries and metadata.
 
-        This method processes the input DataFrame by:
-        - Resetting its index and selecting relevant columns (targets, entity ID, and time ID).
-        - Casting all numeric columns to float32 for consistency.
-        - Depending on the dataset type (`_CDataset` or `_PGDataset`), it adds ISO country codes and merges with a world geometry DataFrame (`self._world`) using appropriate keys.
-        - Constructs a GeoDataFrame with the merged data and checks for missing geometries.
+        Processes input DataFrame by selecting relevant columns, adding geographic
+        identifiers (ISO codes, country names), merging with shapefiles, and
+        validating geometries.
+
+        Internal Use:
+            Called by get_subset_mapping_dataframe() to prepare visualization data.
 
         Args:
-            dataframe (pd.DataFrame): The input DataFrame containing the data to be mapped.
+            dataframe: Input DataFrame with predictions/data to visualize
 
         Returns:
-            gpd.GeoDataFrame: A GeoDataFrame ready for mapping, with geometries merged and validated.
+            gpd.GeoDataFrame: Visualization-ready GeoDataFrame with:
+                - Original target/feature columns
+                - geometry: Polygon/MultiPolygon
+                - isoab: ISO country code
+                - country_name: Country name
+                - Additional shapefile attributes
 
         Raises:
-            KeyError: If required columns for merging are missing in the input DataFrame or `self._world`.
-            ValueError: If geometries are missing after merging.
+            KeyError: If required merge columns missing
+            ValueError: If geometries missing after merge
+
+        Note:
+            - Converts numeric columns to float32 for memory efficiency
+            - Filters to entities present in last time period
+            - For PGM: Merges on priogrid_id
+            - For CM: Merges on ISO code (isoab)
         """
         _dataframe = dataframe.reset_index()[
             self._dataset.targets + [self._entity_id, self._time_id]
@@ -260,13 +337,26 @@ class MappingModule:
 
     def __add_isoab(self, dataframe: pd.DataFrame):
         """
-        Adds 'isoab' and 'country_name' columns to the given DataFrame by merging with ISO and name datasets.
+        Enrich DataFrame with ISO country codes and names.
 
-        Parameters:
-            dataframe (pd.DataFrame): The input DataFrame to which 'isoab' and 'country_name' columns will be added.
+        Merges country identification data (ISO codes and names) from the
+        dataset's metadata into the working DataFrame.
+
+        Internal Use:
+            Called by __init_mapping_dataframe() during data preparation.
+
+        Args:
+            dataframe: DataFrame to enrich with geographic identifiers
 
         Returns:
-            pd.DataFrame: The input DataFrame with additional 'isoab' and 'country_name' columns merged in.
+            pd.DataFrame: Input DataFrame with added columns:
+                - isoab: ISO 3-letter country code
+                - country_name: Country name
+
+        Note:
+            - Uses dataset's get_isoab() and get_name() methods
+            - Merges on time_id and entity_id
+            - Left join preserves all input rows
         """
         iso_df = self._dataset.get_isoab().reset_index()
         name_df = self._dataset.get_name(with_id=True).reset_index()
@@ -290,14 +380,42 @@ class MappingModule:
         entity_ids: Optional[Union[int, List[int]]] = None,
     ) -> pd.DataFrame:
         """
-        Retrieves a subset of the mapping DataFrame based on specified time and entity IDs.
+        Extract geographically-enabled subset of dataset for visualization.
 
-        Parameters:
-            time_ids (Optional[Union[int, List[int]]]): An integer or list of integers specifying the time IDs to filter the DataFrame. If None, no filtering is applied on time IDs.
-            entity_ids (Optional[Union[int, List[int]]]): An integer or list of integers specifying the entity IDs to filter the DataFrame. If None, no filtering is applied on entity IDs.
+        Retrieves filtered data and merges with appropriate shapefiles to create
+        a GeoDataFrame ready for mapping.
+
+        Args:
+            time_ids: Time periods to include. Either:
+                - Single integer: 528 (one month)
+                - List of integers: [528, 529, 530]
+                - None: All time periods
+            entity_ids: Entities to include. Either:
+                - Single integer: 180 (one country/grid)
+                - List of integers: [180, 181, 182]
+                - None: All entities
 
         Returns:
-            pd.DataFrame: A DataFrame containing the subset of mapping data filtered by the provided time and entity IDs.
+            pd.DataFrame: GeoDataFrame containing:
+                - Filtered data rows
+                - geometry column with polygons
+                - Geographic metadata (ISO codes, names)
+                - Original target/feature columns
+
+        Example:
+            >>> mapper = MappingModule(dataset)
+            >>> # Get data for specific month and countries
+            >>> gdf = mapper.get_subset_mapping_dataframe(
+            ...     time_ids=528,
+            ...     entity_ids=[180, 181, 182]
+            ... )
+            >>> print(gdf.columns)
+            Index(['pred_ged_sb', 'geometry', 'isoab', 'country_name', ...])
+
+        Note:
+            - Automatically handles single values or lists
+            - Uses dataset's get_subset_dataframe() for filtering
+            - Returns GeoDataFrame with valid geometries
         """
         _dataframe = self._dataset.get_subset_dataframe(
             time_ids=time_ids, entity_ids=entity_ids
@@ -307,18 +425,31 @@ class MappingModule:
 
     def _plot_interactive_map(self, mapping_dataframe: gpd.GeoDataFrame, target: str):
         """
-        Generates an interactive animated choropleth map using Plotly, visualizing the temporal evolution of a target variable across geographic locations.
+        Generate animated Plotly choropleth with temporal controls.
+
+        Creates interactive web-based map with play/pause controls, time slider,
+        and hover tooltips showing location details and values.
+
+        Internal Use:
+            Called by plot_map() when interactive=True.
+
         Args:
-            mapping_dataframe (gpd.GeoDataFrame): A GeoDataFrame containing geographic features, time identifiers, and the target variable to visualize.
-            target (str): The name of the column in `mapping_dataframe` representing the variable to be visualized on the map.
+            mapping_dataframe: GeoDataFrame with data to visualize
+            target: Column name to visualize on the map
+
         Returns:
-            plotly.graph_objs._figure.Figure: A Plotly Figure object containing the interactive animated choropleth map.
-        Details:
-            - The map animates over the time dimension, allowing users to explore changes in the target variable across locations.
-            - Hover tooltips display location-specific metadata, excluding geometry and index columns.
-            - The color scale is globally normalized based on quantiles of the target variable.
-            - Includes play/pause controls and a time slider for animation.
-            - Memory usage is optimized by converting data to float32 and cleaning up intermediate variables.
+            plotly.graph_objs._figure.Figure: Interactive Plotly figure with:
+                - Animated time slider
+                - Play/pause buttons
+                - Hover tooltips with metadata
+                - Color scale based on 50th-95th quantiles
+
+        Note:
+            - Optimizes memory by using float32 and pivot tables
+            - Color scale fixed globally across all frames
+            - Hover shows location ID, metadata, time, and value
+            - Animation duration: 500ms per frame
+            - Typical render time: 2-10 seconds for full dataset
         """
         # Create pivot table for efficient data storage
         all_locations = mapping_dataframe[self._location_col].unique()
@@ -557,23 +688,36 @@ class MappingModule:
         self, mapping_dataframe: gpd.GeoDataFrame, target: str, time_unit: int
     ):
         """
-        Plots a static choropleth map for a specified target column in a GeoDataFrame.
+        Generate static matplotlib choropleth for single time period.
 
-        Parameters
-        mapping_dataframe : gpd.GeoDataFrame
-            The GeoDataFrame containing the geometries and data to plot.
-        target : str
-            The name of the column in `mapping_dataframe` to visualize.
-        time_unit : int
-            The time unit to display in the plot title.
+        Creates publication-quality static map with customizable styling and
+        color scale for a single snapshot in time.
 
-        Raises
-        ValueError
-            If the target column is not found in the dataframe or contains only null values.
+        Internal Use:
+            Called by plot_map() when interactive=False.
 
-        Returns
-        matplotlib.figure.Figure
-            The matplotlib Figure object containing the generated map.
+        Args:
+            mapping_dataframe: GeoDataFrame with data to visualize
+            target: Column name to visualize on the map
+            time_unit: Time period identifier for title
+
+        Returns:
+            matplotlib.figure.Figure: Matplotlib figure object with:
+                - Choropleth with OrRd color scheme
+                - Color scale: 50th-95th quantile
+                - Black boundaries (0.3pt width)
+                - Horizontal colorbar with label
+                - Axis labels (Longitude, Latitude)
+
+        Raises:
+            ValueError: If target column not found or contains only null values
+
+        Note:
+            - Figure size: 15" × 10"
+            - Suitable for publication and reports
+            - Color range optimized to highlight variation
+            - Edge color: #404040 (dark gray)
+            - Alpha: 0.9 for slight transparency
         """
         if target not in mapping_dataframe.columns:
             raise ValueError(f"Target column '{target}' not found")
@@ -623,25 +767,54 @@ class MappingModule:
         as_html: bool = False,
     ):
         """
-        Plots a map visualization of the provided mapping DataFrame for a specified target variable.
+        Generate choropleth map visualization for specified target variable.
 
-        Depending on the parameters, the map can be rendered as either an interactive Plotly map or a static Matplotlib plot.
-        The output can also be returned as an HTML string for embedding in web pages.
+        Creates either interactive (Plotly) or static (Matplotlib) map showing
+        geographic distribution of values. Supports temporal animation and
+        HTML export.
 
         Args:
-            mapping_dataframe (pd.DataFrame): The DataFrame containing mapping data to plot.
-            target (str): The name of the target variable or feature to visualize. Must be present in the dataset's targets or features.
-            interactive (bool, optional): If True, generates an interactive Plotly map. If False, generates a static Matplotlib plot. Defaults to False.
-            as_html (bool, optional): If True, returns the plot as an HTML string (either Plotly HTML or base64-encoded PNG). If False, returns the figure object. Defaults to False.
+            mapping_dataframe: GeoDataFrame from get_subset_mapping_dataframe()
+            target: Variable to visualize. Must be in dataset's targets or features.
+            interactive: If True, creates animated Plotly map with controls.
+                If False, creates static Matplotlib plot. Default: False
+            as_html: If True, returns HTML string instead of figure object.
+                Useful for embedding in reports. Default: False
 
         Returns:
             Union[str, matplotlib.figure.Figure, plotly.graph_objs.Figure]:
-                - If as_html is True: HTML string representation of the plot.
-                - If as_html is False: The figure object (Plotly or Matplotlib) for further manipulation or display.
+                - If as_html=True: HTML string for web embedding
+                - If as_html=False and interactive=True: Plotly Figure
+                - If as_html=False and interactive=False: Matplotlib Figure
 
         Raises:
-            ValueError: If the target is not a valid dependent variable or feature.
-            ValueError: If a static plot is requested for multiple time units in the data.
+            ValueError: If target not in dataset's targets or features
+            ValueError: If static plot requested with multiple time periods
+
+        Example:
+            >>> # Interactive map for report
+            >>> mapper = MappingModule(dataset)
+            >>> gdf = mapper.get_subset_mapping_dataframe(time_ids=[520, 521, 522])
+            >>> html = mapper.plot_map(
+            ...     gdf,
+            ...     target='pred_ged_sb',
+            ...     interactive=True,
+            ...     as_html=True
+            ... )
+            >>> with open('map.html', 'w') as f:
+            ...     f.write(html)
+
+            >>> # Static map for publication
+            >>> gdf_single = mapper.get_subset_mapping_dataframe(time_ids=520)
+            >>> fig = mapper.plot_map(gdf_single, 'pred_ged_sb', interactive=False)
+            >>> fig.savefig('conflict_map.png', dpi=300)
+
+        Note:
+            - Interactive maps require single target across multiple times
+            - Static maps require single time period
+            - HTML output includes Plotly.js (works offline)
+            - Array values automatically extracted if single-element
+            - Memory optimized for large datasets (float32, garbage collection)
         """
         target_options = set(self._dataset.targets).union(set(self._dataset.features))
         if target not in target_options:

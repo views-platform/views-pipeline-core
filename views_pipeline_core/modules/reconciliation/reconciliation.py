@@ -13,7 +13,48 @@ from views_pipeline_core.modules.wandb import WandBModule
 logger = logging.getLogger(__name__)
 
 class ReconciliationModule:
+    """
+    Hierarchical forecast reconciliation between country and grid levels.
+    
+    Reconciles predictions across geographic hierarchies using proportional
+    scaling to ensure country-level totals match while preserving grid-level
+    spatial patterns. Supports parallel processing for large-scale datasets.
+    """
     def __init__(self, c_dataset: _CDataset, pg_dataset: _PGDataset, wandb_notifications: bool = True):
+        """
+        Initialize reconciliation module with country and grid datasets.
+
+        Sets up reconciliation infrastructure including device detection,
+        validation of dataset compatibility, and identification of valid
+        reconciliation targets.
+
+        Args:
+            c_dataset: Country-level dataset with predictions to reconcile to
+            pg_dataset: Grid-level dataset with predictions to reconcile from
+            wandb_notifications: Whether to send WandB alerts during processing
+
+        Raises:
+            TypeError: If datasets are not correct types (_CDataset, _PGDataset)
+            ValueError: If datasets have incompatible structures:
+                - Different number of time steps
+                - Different time units (e.g., month_id vs year_id)
+                - No overlapping time periods
+                - No common prediction targets
+
+        Example:
+            >>> from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+            >>> c_ds = CMDataset(country_predictions)
+            >>> pg_ds = PGMDataset(grid_predictions)
+            >>> reconciler = ReconciliationModule(c_ds, pg_ds)
+            Using device: cuda
+            All checks passed. Starting reconciliation with 180 valid countries...
+
+        Note:
+            - Automatically detects and uses GPU if available
+            - Pre-builds country-to-grid mapping cache
+            - Validates temporal and spatial alignment
+            - Only reconciles targets present in both datasets
+        """
         self._c_dataset = c_dataset
         self._pg_dataset = pg_dataset
         self._wandb_notifications = wandb_notifications
@@ -72,8 +113,18 @@ class ReconciliationModule:
         """
         Detect the best available PyTorch device.
 
+        Internal Use:
+            Called during initialization to select computation device.
+
         Returns:
-            torch.device: The best available device (GPU, MPS, or CPU).
+            torch.device: The best available device:
+                - 'cuda': NVIDIA GPU if available
+                - 'mps': Apple Silicon GPU if available
+                - 'cpu': CPU as fallback
+
+        Note:
+            - Prioritizes GPU acceleration when available
+            - Automatically handles device compatibility
         """
         if torch.cuda.is_available():
             return torch.device("cuda")  # NVIDIA GPU
@@ -155,7 +206,7 @@ class ReconciliationModule:
     #             # logger.info(
     #             #     f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})"
     #             # )
-    #             wandb_alert(
+    #             WandBModule.send_alert(
     #                 title=self.__class__.__name__,
     #                 text=f"Reconciliation complete for country {country_id} ({country_idx}/{len(self._valid_cids)})",
     #             )
@@ -163,7 +214,7 @@ class ReconciliationModule:
     #     # Clear the line after completion
     #     sys.stdout.write("\rReconciliation complete.\n")
     #     sys.stdout.flush()
-    #     wandb_alert(
+    #     WandBModule.send_alert(
     #         title=self.__class__.__name__,
     #         text="All reconciliations have been successfully completed."
     #     )
@@ -172,7 +223,34 @@ class ReconciliationModule:
     @staticmethod
     def _reconcile_country_worker(args):
         """
-        Performs reconciliation for a single task. 
+        Perform reconciliation for a single country-time-feature task.
+
+        Internal Use:
+            Worker function called by parallel executor in reconcile().
+
+        Args:
+            args: Tuple containing:
+                - country_id (int): Country to reconcile
+                - time_id (int): Time step to reconcile
+                - feature (str): Target variable to reconcile
+                - lr (float): Learning rate (currently unused)
+                - max_iters (int): Max iterations (currently unused)
+                - tol (float): Tolerance (currently unused)
+                - c_subset (pd.DataFrame): Country data subset
+                - pg_subset (pd.DataFrame): Grid data subset
+                - device_str (str): Device string ('cuda', 'mps', 'cpu')
+
+        Returns:
+            Tuple of (country_id, time_id, feature, reconciled_tensor):
+                - country_id: Input country ID
+                - time_id: Input time ID
+                - feature: Input feature name
+                - reconciled_tensor: Reconciled grid predictions on CPU
+
+        Note:
+            - Creates new ForecastReconciler instance per task
+            - Converts tensors to CPU before returning
+            - Handles log transformations automatically
         """
         country_id, time_id, feature, lr, max_iters, tol, c_subset, pg_subset, device_str = args
         
@@ -197,14 +275,42 @@ class ReconciliationModule:
     
     def reconcile(self, lr=0.01, max_iters=500, tol=1e-6, max_workers=None):
         """
-        Reconciles the forecast for all valid country and time IDs using multiprocessing.
-        
+        Reconcile forecasts for all valid countries, time periods, and targets.
+
+        Performs hierarchical reconciliation using parallel processing to ensure
+        grid-level predictions sum to country-level totals while preserving
+        spatial patterns and zero-inflation.
+
         Args:
-            lr (float): Learning rate for the optimization.
-            max_iters (int): Maximum iterations for the optimization.
-            tol (float): Tolerance for the optimization.
-            max_workers (int, optional): The maximum number of processes to use. 
-                                         If None, it defaults to the number of CPUs.
+            lr: Learning rate for optimization (currently unused). Default: 0.01
+            max_iters: Maximum optimization iterations (currently unused). Default: 500
+            tol: Convergence tolerance (currently unused). Default: 1e-6
+            max_workers: Maximum parallel processes. If None, uses CPU count + 4.
+                Recommended: Leave as None for automatic optimization.
+
+        Returns:
+            pd.DataFrame: Reconciled grid-level predictions with same structure
+                as input pg_dataset, but with adjusted values that sum to
+                country totals.
+
+        Raises:
+            RuntimeError: If too many tasks fail (currently logs but doesn't raise)
+
+        Example:
+            >>> reconciler = ReconciliationModule(country_ds, grid_ds)
+            >>> reconciled = reconciler.reconcile(max_workers=16)
+            Start multiprocessing reconciliation with 16 workers...
+            All 54000 tasks have been submitted. Awaiting completion...
+            Reconciling Tasks: 100%|██████████| 54000/54000
+            Reconciliation complete for 10/180 countries
+            ...
+            All reconciliations have been successfully completed.
+
+        Note:
+            - Processes all combinations of (country, time, target)
+            - Sends WandB alerts every 10 countries
+            - Logs failed tasks but continues processing
+            - Updates pg_dataset.reconciled_dataframe in-place
         """
 
         device_str = str(self._device)
@@ -244,7 +350,7 @@ class ReconciliationModule:
                 except Exception as e:
                     logger.error(f"Task failed for country {country_id}, time {time_id}, feature {feature}: {e}")
                     failed_tasks.append((country_id, time_id, feature))
-                    wandb_alert(
+                    WandBModule.send_alert(
                         title=self.__class__.__name__,
                         text=f"Task failed for country {country_id}, time {time_id}, feature {feature}: {e}",
                         level=wandb.AlertLevel.ERROR,
@@ -273,7 +379,7 @@ class ReconciliationModule:
             )
         
         logger.info("All reconciliations have been successfully completed.")
-        wandb_alert(
+        WandBModule.send_alert(
             title=self.__class__.__name__,
             text="All reconciliations have been successfully completed."
         )

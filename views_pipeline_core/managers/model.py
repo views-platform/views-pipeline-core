@@ -1231,90 +1231,38 @@ class ModelManager:
 
 class ForecastingModelManager(ModelManager):
     """
-    Manager for forecasting model pipeline operations.
-
-    Orchestrates complete forecasting model lifecycle including data fetching,
-    training, evaluation, forecasting, and reporting. Handles both single runs
-    and hyperparameter sweep runs with comprehensive monitoring and error handling.
-
-    Extends ModelManager with forecasting-specific functionality:
-    - Time-series data loading and preprocessing
-    - Sequential model training with checkpointing
-    - Multi-horizon evaluation (step-wise, time-series-wise, month-wise)
-    - Future forecasting with optional reconciliation
-    - Automated reporting and visualization
-    - WandB experiment tracking
-    - Prediction store integration
-
-    Attributes (inherited from ModelManager):
-        _model_path (ModelPathManager): Path manager
-        _wandb_notifications (bool): Notification flag
-        _use_prediction_store (bool): Prediction store flag
-        _wandb_manager (WandBModule): WandB manager
-        _config_manager (ConfigurationManager): Config manager
-        _args (ForecastingModelArgs): Arguments
-        _project (str): WandB project name
-        _entity (str): WandB entity name
-        _pred_store_name (str): Prediction store run name
-
-    Attributes (ForecastingModelManager-specific):
+    Orchestrate forecasting model pipeline operations.
+    
+    Manages complete lifecycle of forecasting models including data loading,
+    training, evaluation, future forecasting, and reporting. Supports both
+    single runs and hyperparameter sweeps with WandB integration.
+    
+    Pipeline Stages:
+        - data_fetch: Load and validate time-series data
+        - train: Train model with hyperparameters
+        - evaluate: Multi-horizon performance evaluation
+        - forecast: Generate future predictions
+        - report: Create evaluation/forecast reports
+    
+    Attributes:
         _data_loader (ViewsDataLoader): Data loading utility
         _eval_type (str): Current evaluation type
-        _sweep (bool): Whether this is a sweep run
+        _sweep (bool): Whether running as sweep
         _predictions_name (str): Current predictions filename
-
-    Pipeline Stages Supported:
-        1. data_fetch: Load and preprocess data
-        2. train: Train model with hyperparameters
-        3. evaluate: Multi-level model evaluation
-        4. forecast: Generate future predictions
-        5. report: Create evaluation/forecast reports
-
+    
     Example:
-        >>> # Basic usage
         >>> model_path = ModelPathManager("purple_alien")
         >>> manager = ForecastingModelManager(
         ...     model_path=model_path,
         ...     wandb_notifications=True
         ... )
-        >>>
-        >>> # Execute single run
         >>> args = ForecastingModelArgs.parse_args()
         >>> manager.execute_single_run(args)
-        >>>
-        >>> # Execute hyperparameter sweep
-        >>> sweep_args = ForecastingModelArgs(
-        ...     run_type="calibration",
-        ...     train=True,
-        ...     evaluate=True
-        ... )
-        >>> manager.execute_sweep_run(sweep_args)
-
-    WandB Integration:
-        - Automatic run initialization per stage
-        - Real-time metrics logging
-        - Model artifact versioning
-        - Evaluation report uploads
-        - Error notifications
-        - Hyperparameter tracking
-
-    Data Flow:
-        Raw Data → DataLoader → Preprocessed Data → Model → Predictions → Reports
-        ↓
-        WandB Artifacts
-
-    Notes:
-        - Supports calibration, validation, and forecasting run types
-        - Handles both probabilistic and point forecasts
-        - Automatically manages checkpoints and artifacts
-        - Integrates with VIEWS prediction store
-        - Thread-safe for single pipeline execution
-
-    See Also:
-        - :class:`ModelManager`: Base class
-        - :class:`EnsembleManager`: Ensemble-specific manager
-        - :class:`ViewsDataLoader`: Data loading utility
-        - :class:`WandBModule`: WandB integration
+    
+    Note:
+        - Inherits core functionality from ModelManager
+        - Requires queryset configuration for data loading
+        - Supports both probabilistic and point forecasts
     """
 
     def __init__(
@@ -1324,112 +1272,62 @@ class ForecastingModelManager(ModelManager):
         use_prediction_store: bool = False,
     ) -> None:
         """
-        Initialize the ForecastingModelManager.
-
-        Sets up forecasting-specific components on top of base ModelManager
-        initialization, including data loader configuration and model-specific
-        settings.
-
+        Initialize forecasting model manager.
+        
+        Sets up forecasting-specific pipeline infrastructure including
+        data loader, evaluation settings, and prediction store integration.
+        
         Args:
-            model_path (ModelPathManager): The ModelPathManager instance
-                Must point to valid forecasting model directory
-            wandb_notifications (bool, optional): Enable WandB notifications
-                Sends alerts for training/evaluation/forecasting completion
-                Defaults to False.
-            use_prediction_store (bool, optional): Enable prediction store
-                Reads/writes predictions to central ViEWS store
-                Defaults to False.
-
+            model_path: Path manager for model directories.
+                Must point to valid forecasting model.
+            wandb_notifications: Enable WandB alerts.
+                Sends notifications for stage completion and errors.
+            use_prediction_store: Enable prediction store.
+                Reads/writes predictions to central ViEWS store.
+        
         Side Effects:
-            - Calls parent __init__
-            - Logs initialization message
+            - Calls parent ModelManager.__init__()
+            - Inherits data loader initialization
             - Sets up model-specific configurations
-
+        
         Example:
             >>> model_path = ModelPathManager("purple_alien")
             >>> manager = ForecastingModelManager(
             ...     model_path=model_path,
-            ...     wandb_notifications=True,
-            ...     use_prediction_store=False
+            ...     wandb_notifications=True
             ... )
-
-        Notes:
-            - DataLoader initialized in parent __init__
-            - WandB login deferred until execution
-            - Supports context manager protocol
-
-        See Also:
-            - :class:`ModelManager.__init__`: Parent initialization
-            - :meth:`execute_single_run`: Main execution entry point
         """
+
         super().__init__(model_path, wandb_notifications, use_prediction_store)
 
     @staticmethod
     def _get_conflict_type(target: str) -> str:
         """
-        Determine conflict type from target variable name.
-
-        Extracts the conflict type identifier from a target variable string
-        by checking for known conflict type codes in the variable name parts.
-        Used for organizing evaluation results and reports by conflict category.
-
-        Algorithm:
-            1. Split target string by underscore
-            2. Check each part for conflict type code
-            3. Return first match found
-            4. Raise error if no match
-
-        Valid Conflict Types:
+        Extract conflict type code from target variable name.
+        
+        Identifies conflict category by searching for known type codes
+        in the target variable string. Used for organizing evaluation
+        results and reports.
+        
+        Valid Types:
             - 'sb': State-based conflict
             - 'os': One-sided violence
             - 'ns': Non-state conflict
-
+        
         Args:
-            target (str): Target variable name containing conflict type
-                Expected format: var_{conflict_type}_... or similar
-                Examples: "var_sb", "ged_best_sb", "ln_ged_sb_dep"
-
+            target: Target variable name.
+                Examples: 'ged_best_sb', 'ln_ged_os_tlag_1'
+        
         Returns:
-            str: Conflict type code ('sb', 'os', or 'ns')
-
+            Conflict type code ('sb', 'os', or 'ns')
+        
         Raises:
-            ValueError: If none of the valid conflict types are found in target
-                Error message includes the invalid target and valid types
-
+            ValueError: If no valid conflict type found in target
+        
         Example:
-            >>> conflict = ForecastingModelManager._get_conflict_type("var_sb")
+            >>> conflict = ForecastingModelManager._get_conflict_type("ln_ged_sb")
             >>> print(conflict)
             'sb'
-            >>>
-            >>> conflict = ForecastingModelManager._get_conflict_type("ged_best_os")
-            >>> print(conflict)
-            'os'
-            >>>
-            >>> # Invalid target raises error
-            >>> conflict = ForecastingModelManager._get_conflict_type("var_invalid")
-            ValueError: Conflict type not found in 'var_invalid'...
-
-        Usage Context:
-            Called by:
-            - _evaluate_prediction_dataframe(): For organizing metrics
-            - _save_evaluations(): For file naming
-            - Reporting methods: For report organization
-
-        Performance:
-            O(n) where n is number of parts in target string
-            Typical: <1ms per call
-
-        Thread Safety:
-            Thread-safe (static method, no shared state)
-
-        Notes:
-            - Case-sensitive matching
-            - Returns on first match (order: sb, os, ns)
-            - Does not validate target format beyond conflict type presence
-
-        See Also:
-            - :meth:`_evaluate_prediction_dataframe`: Primary caller
-            - :meth:`_save_evaluations`: Uses for file naming
         """
         parts = target.split("_")
         for conflict in ("sb", "os", "ns"):
@@ -1492,71 +1390,25 @@ class ForecastingModelManager(ModelManager):
     @property
     def configs(self) -> Dict[str, Any]:
         """
-        Get the combined runtime configuration.
-
-        Returns merged configuration from all sources: hyperparameters,
-        deployment settings, metadata, partition info, and runtime values.
-        Must be set via execute_single_run() or execute_sweep_run() before access.
-
-        Configuration Sources (merge order):
-            1. Partition configuration (train/test/val splits)
-            2. Hyperparameters (model-specific settings)
-            3. Deployment configuration (runtime settings)
-            4. Meta configuration (project metadata)
-            5. Runtime configuration (args, timestamps) - highest priority
-
+        Get merged runtime configuration.
+        
+        Combines hyperparameters, deployment settings, metadata, partition
+        info, and runtime values. Later sources override earlier ones.
+        
         Returns:
-            Dict[str, Any]: Merged configuration dictionary containing:
-                From hyperparameters:
-                - "algorithm" (str): Model algorithm name
-                - "hyperparameters" (Dict): Algorithm-specific parameters
-                - "features" (List[str]): Feature column names
-                - "targets" (List[str]): Target column names
-                - "steps" (List[int]): Prediction horizon steps
-
-                From deployment:
-                - "name" (str): Model/pipeline name
-                - "environment" (str): Deployment environment
-                - "version" (str): Model version
-
-                From meta:
-                - "description" (str): Pipeline description
-                - "author" (str): Pipeline author
-                - "metrics" (List[str]): Evaluation metrics
-
-                From partition:
-                - "train" (Tuple[int, int]): Training time range
-                - "test" (Tuple[int, int]): Testing time range
-
-                From runtime:
-                - "run_type" (str): Current run type
-                - "eval_type" (str): Evaluation type
-                - "timestamp" (str): Run timestamp
-                - "sweep" (bool): Whether this is a sweep run
-
+            Merged configuration dictionary with keys:
+                - 'algorithm', 'features', 'targets' (hyperparameters)
+                - 'name', 'version' (deployment)
+                - 'run_type', 'timestamp' (runtime)
+        
         Raises:
-            AttributeError: If accessed before execute_single_run() called
-
+            AttributeError: If accessed before execute_single_run()
+        
         Example:
-            >>> manager = ForecastingModelManager(model_path)
-            >>> args = ForecastingModelArgs.parse_args()
             >>> manager.execute_single_run(args)
-            >>> # Now configs property is available
             >>> config = manager.configs
-            >>> print(f"Model: {config['name']}")
-            >>> print(f"Algorithm: {config['algorithm']}")
-            >>> print(f"Features: {config['features']}")
-
-        Notes:
-            - Recomputed on each access (not cached)
-            - Later sources override earlier ones
-            - None values are overridden
-            - Modifications don't affect stored configs
-
-        See Also:
-            - :class:`ConfigurationManager`: Configuration management
-            - :meth:`args`: Arguments property
-            - :meth:`execute_single_run`: Initializes configuration
+            >>> print(config['algorithm'])
+            'random_forest'
         """
         if not hasattr(self, "_config_manager"):
             raise AttributeError(

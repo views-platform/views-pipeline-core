@@ -73,20 +73,56 @@ TRANSFORMATIONS_EXPECTING_DF = {"spatial.lag", "spatial.sptime_dist"}
 
 class UpdateViewser:
     """
-    A class to update VIEWSER dataframes with new GED and ACLED values.
+    Update VIEWSER dataframes with latest GED and ACLED data.
 
-    This class parses a queryset to extract base variable names, transformation sequences, and output variable names.
-    It preprocesses an external update dataframe to align columns and rows with the viewser dataframe, updates raw values,
-    and applies all required transformations as specified in the queryset.
+    Applies queryset transformations to update existing VIEWSER data with
+    new values from external sources. Handles raw variable updates and
+    recomputes all downstream transformations to maintain consistency.
 
     The workflow:
-    1. Extracts variable and transformation metadata from the queryset.
-    2. Loads and preprocesses the external update dataframe for the specified months.
-    3. Updates the raw columns in the viewser dataframe with new values.
-    4. Applies all transformations to produce the final variables.
+    1. Parses queryset to extract base variables, transformations, and output names
+    2. Loads and preprocesses external update data
+    3. Updates raw columns in VIEWSER dataframe
+    4. Reapplies all transformations in correct sequence
+    5. Returns updated dataframe ready for model consumption
 
-    This ensures the viewser dataframe is up-to-date and consistent with the latest external data and transformation logic.
+    Supports:
+    - Temporal transformations (lags, moving averages, decay)
+    - Spatial transformations (country lags, grid lags, spatial trees)
+    - Missing value handling and imputation
+    - Mathematical operations (log transforms, boolean operations)
+
+    Attributes:
+        queryset (Queryset): Model queryset defining transformations
+        viewser_df (pd.DataFrame): VIEWSER data to update
+        data_path (Path): Path to external update data
+        months_to_update (List[int]): Month IDs to update
+        base_variables (List[str]): Raw input variable names
+        var_names (List[str]): Final output variable names
+        transformation_list (List[List[Dict]]): Transformation sequences
+        df_external (pd.DataFrame): External update data
+        result (Optional[pd.DataFrame]): Cached update result
+
+    Example:
+        >>> from viewser import Queryset
+        >>> queryset = Queryset.from_file('config_queryset.py')
+        >>> viewser_df = pd.read_parquet('viewser_data.parquet')
+        >>> updater = UpdateViewser(
+        ...     queryset=queryset,
+        ...     viewser_df=viewser_df,
+        ...     data_path='updates/ged_acled_latest.parquet',
+        ...     months_to_update=[528, 529, 530]
+        ... )
+        >>> updated_df = updater.run()
+        >>> print(f"Updated {len(updated_df)} rows")
+
+    Note:
+        - Requires at least one raw_ variable in queryset
+        - External data must cover specified months_to_update
+        - Updates applied in-place to viewser_df
+        - Safe to call run() multiple times (result cached)
     """
+
 
     def __init__(
         self,
@@ -96,21 +132,43 @@ class UpdateViewser:
         months_to_update: List[int],
     ):
         """
-        Initializes the UpdateViewser class with a queryset, a dataframe from viewser (with missed updated),
-        a path to the dataframe with updates from GED & Acled and a list of months to update.
+        Initialize UpdateViewser with queryset, data, and update configuration.
+
+        Sets up update infrastructure by parsing queryset, loading external data,
+        and validating temporal alignment between VIEWSER and update data.
 
         Args:
-            queryset: The queryset for the respective model.
-            viewser_df: a dataframe from VIEWSER that does not contain the latest updates for GED & Acled data.
-            data_path: the path to the update dataframe with updates for GED and Acled data.
-            months_to_update: A list of months
+            queryset: Model queryset defining variables and transformations.
+                Must contain at least one variable starting with 'raw_'
+            viewser_df: VIEWSER DataFrame to update. Should have MultiIndex
+                with 'month_id' and entity ID (country_id or priogrid_id)
+            data_path: Path to external update file (parquet format).
+                Must contain columns matching queryset base variables
+            months_to_update: Month IDs to update (e.g., [528, 529, 530]).
+                Must be present in both viewser_df and external data
 
-        This class initializes by extracting the following information from the queryset:
-        - Base_Variables: A list of column names based on the 'from_column' e.g.: 'country_month.ged_sb_best_sum_nokgi'.
-          Columns in the update df have the last part of base_variables as their column names e.g. 'ged_sb_best_sum_nokgi'.
-        - Var_Names: A list of column names after transformations have been applied.
-          Columns in the VIEWSER df have var_names as their column names e.g. 'raw_ged_sb'.
-        - Transformation_list: A list of lists of transformations applied to Base_Variables to produce
+        Raises:
+            ValueError: If queryset doesn't contain any raw_ variables
+            ValueError: If max month_id in viewser_df exceeds external data
+                (indicates outdated update file)
+            FileNotFoundError: If data_path doesn't exist
+
+        Example:
+            >>> queryset = Queryset.from_file('configs/config_queryset.py')
+            >>> viewser_df = pd.read_parquet('data/viewser.parquet')
+            >>> updater = UpdateViewser(
+            ...     queryset=queryset,
+            ...     viewser_df=viewser_df,
+            ...     data_path='data/ged_acled_updates.parquet',
+            ...     months_to_update=[528, 529]
+            ... )
+            INFO: Max month_id: viewser_df=527
+            INFO: Max month_id: update_df=529
+
+        Note:
+            - External data should be newer than VIEWSER data
+            - Result is None until run() is called
+            - Parses queryset immediately to validate structure
         """
 
         self.queryset = queryset
@@ -149,8 +207,48 @@ class UpdateViewser:
 
     def run(self) -> pd.DataFrame:
         """
-        Function executes all frunctions in the right order to update the dataframe from VIEWSER. Safe to call twice:
-        we memorise the result after first run.
+        Execute complete update workflow to refresh VIEWSER data.
+
+        Applies external updates to raw variables and recomputes all
+        downstream transformations. Safe to call multiple times as
+        result is cached after first execution.
+
+        Execution Flow:
+            1. Check if already run (return cached result)
+            2. Preprocess external data to match queryset structure
+            3. Update raw variables in VIEWSER dataframe
+            4. Reapply all queryset transformations in sequence
+            5. Drop temporary raw_ columns
+            6. Cache and return updated dataframe
+
+        Returns:
+            Updated VIEWSER DataFrame with:
+                - Raw variables updated for specified months
+                - All transformations recomputed
+                - Original structure preserved
+                - Raw columns removed (only transformed remain)
+
+        Example:
+            >>> updater = UpdateViewser(queryset, viewser_df, data_path, [528, 529])
+            >>> # First call executes update
+            >>> df1 = updater.run()
+            INFO: Fetched and updated from viewser
+            INFO: All transformations done
+            >>> # Second call returns cached result
+            >>> df2 = updater.run()
+            DEBUG: Use saved dataframe
+            >>> assert df1 is df2  # Same object
+
+        Performance:
+            - First run: Depends on data size and transformation count
+                Typical: 10-60 seconds for full dataset
+            - Subsequent runs: <1ms (cached result)
+
+        Note:
+            - Updates applied in-place to self.viewser_df
+            - Result cached in self.result
+            - Raw columns dropped from final output
+            - Transformations applied in queryset order
         """
         if self.result is not None:
             logger.debug("Use saved dataframe")  # already done
@@ -180,12 +278,42 @@ class UpdateViewser:
         self,
     ) -> Tuple[List[str], List[str], List[List[Dict[str, Any]]]]:
         """
-        Extracts core information from the queryset that are needed later on for the
-        transformations. For every line in the queryset it records the 'from_column' as
-        Base Variable, 'Column' as Variable Name and all Transformations applied to the Base
-        Variable.
+        Parse queryset to extract variables and transformations.
 
-        Outputs: Base Variable, Variable Name and Transformations applied to the Base Variable.
+        Analyzes queryset operations to build three parallel lists that
+        define the complete transformation pipeline for each variable.
+
+        Internal Use:
+            Called by __init__() to parse queryset structure.
+
+        Returns:
+            Tuple of three lists (same length):
+                - base_variables: Source column names from 'base' namespace
+                    Example: ['country_month.ged_sb_best_sum_nokgi']
+                - var_names: Output column names after rename
+                    Example: ['raw_ged_sb', 'ln_ged_sb_tlag_1']
+                - transformation_list: List of transformation sequences
+                    Example: [[{'name': 'ops.ln', 'arguments': []}]]
+
+        Parsing Rules:
+            - 'base' operations → base_variables
+            - 'trf.util.rename' → var_names
+            - Other 'trf' operations → transformation_list
+            - Operations processed in reverse queryset order
+
+        Example:
+            >>> base_vars, names, transforms = self._extract_from_queryset()
+            >>> print(base_vars[0])
+            'country_month.ged_sb_best_sum_nokgi'
+            >>> print(names[0])
+            'raw_ged_sb'
+            >>> print(transforms[0])
+            [{'name': 'ops.ln', 'arguments': []}]
+
+        Note:
+            - Each queryset line produces one entry in each list
+            - Transformations stored in application order
+            - 'util.base' operations skipped (metadata only)
         """
         ops = self.queryset.model_dump()["operations"]
 
@@ -225,26 +353,50 @@ class UpdateViewser:
         self, *, overwrite_external: bool = False
     ) -> pd.DataFrame:
         """
-        Processes the external update dataframe (`self.df_external`) to align it with the variables and months required for updating the viewser dataframe.
+        Prepare external update data to match VIEWSER structure.
 
-        Steps:
-        1. Extracts the base variable names from the queryset, removing any LOA prefixes (e.g., 'country_month.ged_sb_best_sum_nokgi' → 'ged_sb_best_sum_nokgi').
-        2. Identifies which base variables have corresponding updates in the external dataframe (overlap).
-        3. Filters the external dataframe to retain only the overlapping columns.
-        4. Selects only the rows for the specified `months_to_update`.
-        5. Builds a mapping from base variable names to their corresponding raw variable names in the viewser dataframe (e.g., 'ged_sb_best_sum_nokgi' → 'raw_ged_sb').
-        6. Renames the columns in the update dataframe using this mapping so they match the viewser dataframe.
-        7. Optionally replaces `self.df_external` with the processed dataframe if `overwrite_external` is True.
+        Filters external data to relevant columns and months, then renames
+        columns to match VIEWSER's raw_ variable naming convention.
 
-        Parameters
-        ----------
-        overwrite_external : bool, default False
-            If True, replaces self.df_external with the processed result.
+        Internal Use:
+            Called by run() to preprocess external updates before merging.
 
-        Returns
-        -------
-        pd.DataFrame
-            The processed and aligned update dataframe, ready to be used for updating the viewser dataframe.
+        Args:
+            overwrite_external: If True, replaces self.df_external with result.
+                Use with caution - mainly for testing. Default: False
+
+        Returns:
+            Preprocessed DataFrame with:
+                - Only overlapping columns from base_variables
+                - Only rows for months_to_update
+                - Columns renamed to match raw_ variable names
+                - Same index structure as viewser_df
+
+        Processing Steps:
+            1. Extract base names from fully-qualified variables
+                'country_month.ged_sb' → 'ged_sb'
+            2. Find overlap between base names and external columns
+            3. Filter to overlapping columns only
+            4. Filter to specified months_to_update
+            5. Build mapping: base_name → raw_variable_name
+            6. Rename columns using mapping
+            7. Optionally overwrite self.df_external
+
+        Example:
+            >>> df_update = self._preprocess_update_df()
+            >>> print(df_update.columns)
+            Index(['raw_ged_sb', 'raw_ged_os', 'raw_acled_count'])
+            >>> print(df_update.index.names)
+            ['month_id', 'country_id']
+
+        Raises:
+            ValueError: If no overlapping columns found between
+                queryset variables and external data
+
+        Note:
+            - Only processes raw_ variables (transformations computed later)
+            - Preserves MultiIndex structure from external data
+            - Column overlap determined by suffix matching
         """
 
         df_new = self.df_external
@@ -301,18 +453,36 @@ class UpdateViewser:
 
     def _smart_cast(self, arg):
         """
-        Safely converts a string representation of a Python literal to its corresponding Python object.
+        Safely convert string arguments to Python literals.
 
-        Attempts to evaluate the input `arg` using `ast.literal_eval`, which can parse valid Python literals
-        such as numbers, lists, dictionaries, booleans, etc. If the evaluation is successful, returns the
-        resulting Python object. If the input is not a valid literal or is already a non-string type,
-        returns the original argument unchanged.
+        Attempts to parse string representations of Python objects
+        (numbers, lists, dicts, etc.) into actual Python types.
+
+        Internal Use:
+            Called during transformation argument processing.
 
         Args:
-            arg: The input to be converted, typically a string representation of a Python literal.
+            arg: Input to convert, typically transformation argument.
+                Can be any type; strings attempted for conversion.
 
         Returns:
-            The evaluated Python object if conversion is successful; otherwise, the original input.
+            Evaluated Python object if conversion successful,
+            otherwise original input unchanged.
+
+        Example:
+            >>> self._smart_cast("123")
+            123
+            >>> self._smart_cast("[1, 2, 3]")
+            [1, 2, 3]
+            >>> self._smart_cast("{'key': 'value'}")
+            {'key': 'value'}
+            >>> self._smart_cast("not_a_literal")
+            'not_a_literal'
+
+        Note:
+            - Uses ast.literal_eval for safe evaluation
+            - No arbitrary code execution (safe)
+            - Returns original on conversion failure
         """
         try:
             return ast.literal_eval(arg)
@@ -322,16 +492,46 @@ class UpdateViewser:
     # 3. ------------  APPLY THE TRANSFORMATIONS  ------------------------- #
     def _apply_all_transformations(self, df_old: pd.DataFrame) -> pd.DataFrame:
         """
-        Applies all required transformations to GED/ACLED variables as described in the queryset.
+        Apply all queryset transformations to updated data.
 
-        For each variable:
-        - Skips non-GED/ACLED and raw variables.
-        - Applies the sequence of transformations in the correct order.
-        - Handles special cases (e.g., spatial.countrylag).
-        - Ensures index alignment after transformation.
-        - Assigns the final transformed series to the output DataFrame.
+        Recomputes all derived variables by applying transformation sequences
+        to updated raw variables. Handles special cases like spatial lags and
+        ensures index alignment throughout.
 
-        Operates in-place on `df_old` and returns it.
+        Internal Use:
+            Called by run() after raw variable updates.
+
+        Args:
+            df_old: VIEWSER DataFrame with updated raw values.
+                Must have MultiIndex (month_id, entity_id)
+
+        Returns:
+            DataFrame with all transformations applied.
+            Contains both raw and transformed variables.
+
+        Transformation Handling:
+            - Skips non-GED/ACLED variables (untouched)
+            - Skips raw_ variables (already updated)
+            - Applies transformations in queryset order
+            - Special handling for spatial.countrylag (forward fill)
+            - Reindexes after each transformation for alignment
+
+        Example:
+            >>> df_updated = self._apply_all_transformations(viewser_df)
+            INFO: Applying transformation ops.ln to ln_ged_sb
+            INFO: Applying transformation temporal.tlag to ln_ged_sb_tlag_1
+            >>> print(df_updated.columns)
+            Index(['raw_ged_sb', 'ln_ged_sb', 'ln_ged_sb_tlag_1'])
+
+        Raises:
+            RuntimeError: If transformation fails to apply
+            ValueError: If unknown transformation name encountered
+
+        Note:
+            - Operates in-place on df_old
+            - Uses transformation_mapping for function lookup
+            - Handles both Series and DataFrame inputs per transformation
+            - Index alignment crucial for spatial transformations
         """
         ix = pd.IndexSlice
 
@@ -436,28 +636,108 @@ class UpdateViewser:
 
 class ViewsDataLoader:
     """
-    A class to handle data loading, fetching, and processing for different partitions.
+    Handle data loading, fetching, and preprocessing for VIEWS forecasting models.
 
-    This class provides methods to fetch data from viewser, validate data partitions,
-    create or load volumes, and handle drift detection configurations.
+    Manages complete data pipeline from VIEWSER fetch to model-ready DataFrames.
+    Supports partition-based splitting (calibration/validation/forecasting),
+    drift detection, optional VIEWSER updates, and automatic validation.
+
+    Key Features:
+        - Fetches data from VIEWSER with queryset filters
+        - Partitions data by time for train/test splits
+        - Validates temporal alignment and completeness
+        - Applies drift detection for production runs
+        - Updates VIEWSER data with latest GED/ACLED
+        - Caches fetched data for reuse
+
+    Partition Types:
+        - calibration: Training period for model development
+            Train: 1990-2012, Test: 2013-2015
+        - validation: Holdout period for final evaluation
+            Train: 1990-2015, Test: 2016-2018
+        - forecasting: Production mode with live data
+            Train: 1990-present, Test: future months
+
+    Attributes:
+        _model_path (ModelPathManager): Path manager for data directories
+        _model_name (str): Model name for logging
+        _path_raw (Path): Raw data directory
+        _path_processed (Path): Processed data directory
+        partition (Optional[str]): Current partition type
+        partition_dict (Optional[Dict]): Partition time ranges
+        drift_config_dict (Optional[Dict]): Drift detection config
+        override_month (Optional[int]): Override end month
+        month_first (Optional[int]): Start month ID
+        month_last (Optional[int]): End month ID
+        steps (int): Forecast horizon in months
+
+    Example:
+        >>> from views_pipeline_core.managers import ModelPathManager
+        >>> model_path = ModelPathManager("purple_alien")
+        >>> loader = ViewsDataLoader(
+        ...     model_path=model_path,
+        ...     steps=36
+        ... )
+        >>> # Fetch calibration data
+        >>> df, alerts = loader.get_data(
+        ...     self_test=False,
+        ...     partition='calibration',
+        ...     use_saved=False
+        ... )
+        INFO: Fetching data from viewser...
+        INFO: Data validation complete.
+        >>> print(df.shape)
+        (180000, 45)
+
+    Note:
+        - Queryset must be defined in model configs
+        - Raw data cached in data/raw/
+        - Drift detection only on forecasting runs
+        - VIEWSER updates require .env configuration
     """
 
     def __init__(self, model_path: ModelPathManager, partition_dict: Dict = None, steps: int = 36, **kwargs):
         """
-        Initializes the DataLoaders class with a ModelPathManager object and optional keyword arguments.
+        Initialize ViewsDataLoader with model paths and configuration.
+
+        Sets up data loading infrastructure including paths, partition settings,
+        and optional configurations from kwargs.
 
         Args:
-            model_path (ModelPathManager): An instance of the ModelPathManager class.
-            **kwargs: Additional keyword arguments to set instance attributes.
+            model_path: ModelPathManager instance for the model.
+                Must have valid data_raw and data_processed directories
+            partition_dict: Custom partition configuration.
+                If None, uses default partitions from _get_partition_dict().
+                Format: {'train': (start, end), 'test': (start, end)}
+            steps: Forecast horizon in months. Default: 36
+                Used for forecasting partition end date calculation
+            **kwargs: Additional configuration options:
+                - partition (str): Set initial partition
+                - drift_config_dict (Dict): Custom drift detection config
+                - override_month (int): Override forecasting end month
+                - month_first (int): Override start month
+                - month_last (int): Override end month
 
-        Attributes:
-            partition (str, optional): The partition type. Defaults to None.
-            partition_dict (dict, optional): The dictionary containing partition information. Defaults to None.
-            drift_config_dict (dict, optional): The dictionary containing drift detection configuration. Defaults to None.
-            override_month (str, optional): The override month. Defaults to None.
-            month_first (str, optional): The first month in the range. Defaults to None.
-            month_last (str, optional): The last month in the range. Defaults to None.
-            steps (int, optional): The step size for the forecasting partition. Defaults to 36.
+        Example:
+            >>> model_path = ModelPathManager("purple_alien")
+            >>> # Basic initialization
+            >>> loader = ViewsDataLoader(model_path, steps=36)
+            >>>
+            >>> # With custom partition
+            >>> custom_part = {
+            ...     'train': (121, 400),
+            ...     'test': (401, 450)
+            ... }
+            >>> loader = ViewsDataLoader(
+            ...     model_path,
+            ...     partition_dict={'calibration': custom_part},
+            ...     steps=48
+            ... )
+
+        Note:
+            - Partition dict can be provided later via get_data()
+            - Steps determines forecasting test range
+            - Override options mainly for debugging/testing
         """
         self._model_path = model_path
         self._model_name = model_path.model_name
@@ -476,22 +756,55 @@ class ViewsDataLoader:
 
     def _get_partition_dict(self, steps) -> Dict:
         """
-        Returns the partitioner dictionary for the given partition.
+        Generate default partition dictionary for data splitting.
+
+        Creates standard time ranges for calibration, validation, and
+        forecasting partitions. Uses fixed historical ranges for
+        calibration/validation and dynamic ranges for forecasting.
+
+        Internal Use:
+            Called by get_data() when partition_dict not provided.
 
         Args:
-            steps (int, optional): The step size for the forecasting partition. Defaults to 36.
+            steps: Forecast horizon in months for forecasting partition.
+                Determines how far into future the test range extends.
 
         Returns:
-            dict: A dictionary containing the train and predict ranges for the specified partition.
+            Dictionary with train/test ranges for requested partition:
+                {
+                    'train': (start_month_id, end_month_id),
+                    'test': (start_month_id, end_month_id)
+                }
+
+        Partition Definitions:
+            calibration:
+                Train: 121-396 (1990-01 to 2012-12)
+                Test: 397-444 (2013-01 to 2015-12)
+
+            validation:
+                Train: 121-444 (1990-01 to 2015-12)
+                Test: 445-492 (2016-01 to 2018-12)
+
+            forecasting:
+                Train: 121 to (current_month - 2)
+                Test: (current_month - 1) to (current_month + steps)
+
+        Example:
+            >>> # Current month is 530 (2024-02)
+            >>> part_dict = loader._get_partition_dict(steps=36)
+            >>> print(part_dict)
+            {
+                'train': (121, 528),
+                'test': (529, 565)
+            }
 
         Raises:
-            ValueError: If the partition attribute is not one of "calibration", "validation", or "forecast".
+            ValueError: If partition not in ('calibration', 'validation', 'forecasting')
 
-        Notes:
-            - For the "calibration" partition, the train range is (121, 396) and the test range is (397, 444).
-            - For the "validation" partition, the train range is (121, 444) and the test range is (445, 492).
-            - For the "forecasting" partition, the train range starts at 121 and ends at the current month minus 2.
-              The predict range starts at the current month minus 1 and extends by the step size.
+        Note:
+            - Month IDs are months since 1980-01
+            - Forecasting uses ViewsMonth.now() for current time
+            - Warns about using default instead of config file
         """
         logger.warning("Did not use config_partitions.py, using default partition dictionary instead...")
         match self.partition:
@@ -521,23 +834,47 @@ class ViewsDataLoader:
 
     def _get_viewser_update_config(self, queryset_base: Queryset) -> tuple[int, str]:
         """
-        Retrieves the update configuration for the viewser dataset based on the provided queryset.
+        Extract VIEWSER update configuration from environment.
 
-        This method:
-        - Locates and loads the `.env` file from the project root.
-        - Extracts the list of months to update from the environment variable.
-        - Determines the update file path according to the queryset's level of analysis (LOA).
+        Loads .env file and retrieves months to update and update file path
+        based on queryset's level of analysis (LOA).
+
+        Internal Use:
+            Called by _overwrite_viewser() to get update parameters.
 
         Args:
-            queryset_base (Queryset): The queryset object, expected to have a `model_dump()` method with an 'loa' key.
+            queryset_base: Queryset with LOA specification.
+                LOA must be 'priogrid_month' or 'country_month'
 
         Returns:
-            tuple[list[int], str | None]: A tuple containing the months to update (as a list of ints)
-                          and the update file path (str or None if LOA is unknown).
+            Tuple of (months_to_update, update_file_path):
+                - months_to_update: List of month IDs to update (e.g., [528, 529])
+                - update_file_path: Path to update data file or None if LOA unknown
+
+        Environment Variables Required:
+            - month_to_update: List of month IDs as string (e.g., "[528, 529, 530]")
+            - pgm_path: Path to priogrid update file (if LOA is priogrid_month)
+            - cm_path: Path to country update file (if LOA is country_month)
+
+        Example:
+            >>> # .env file contains:
+            >>> # month_to_update=[528, 529, 530]
+            >>> # pgm_path=/data/updates/pgm_latest.parquet
+            >>> months, path = loader._get_viewser_update_config(queryset)
+            >>> print(months)
+            [528, 529, 530]
+            >>> print(path)
+            '/data/updates/pgm_latest.parquet'
 
         Raises:
-            FileNotFoundError: If the `.env` file is not found.
-            RuntimeError: If the `.env` file cannot be loaded.
+            FileNotFoundError: If .env file not found in project root
+            RuntimeError: If .env file cannot be loaded
+            ValueError: If month_to_update not found or invalid in .env
+
+        Note:
+            - Searches for .env in project root (using find_project_root)
+            - Uses ast.literal_eval for safe parsing of month list
+            - Returns None for update_path if LOA is unknown
         """
         dotenv_path = self._model_path.find_project_root() / ".env"
         logger.debug(f"Path to dotenv file: {dotenv_path}")
@@ -576,20 +913,43 @@ class ViewsDataLoader:
         self, df: pd.DataFrame, queryset_base: Queryset, args: argparse.Namespace
     ) -> pd.DataFrame:
         """
-        Updates the provided DataFrame using the Viewser update process if specified in the arguments.
+        Update VIEWSER DataFrame with latest GED and ACLED values.
 
-        If `args.update_viewser` is True, this method retrieves the update configuration,
-        initializes an UpdateViewser instance, and updates the DataFrame accordingly.
-        Logs the update process and the number of NaN values after transformation.
-        If updating is not requested, logs that the DataFrame has not been updated.
+        Applies external updates to raw variables and recomputes all
+        transformations if update_viewser flag is set in arguments.
+
+        Internal Use:
+            Called by _fetch_data_from_viewser() after initial data fetch.
 
         Args:
-            df (pd.DataFrame): The DataFrame to potentially update.
-            queryset_base (Any): The base queryset used for configuration and updating.
-            args (Namespace): Arguments containing the `update_viewser` flag.
+            df: VIEWSER DataFrame to potentially update.
+                Must have MultiIndex (month_id, entity_id)
+            queryset_base: Model queryset defining transformations.
+                Used to determine which variables to update
+            args: Command line arguments with update_viewser flag.
+                If False, returns df unchanged
 
         Returns:
-            pd.DataFrame: The (possibly updated) DataFrame.
+            Updated DataFrame with:
+                - Raw variables updated for specified months
+                - All transformations recomputed
+                - NaN values handled according to queryset
+                Or original df if args.update_viewser=False
+
+        Example:
+            >>> args = parse_args()  # update_viewser=True
+            >>> df_updated = loader._overwrite_viewser(df, queryset, args)
+            INFO: Overwriting Viewser dataframe with new values...
+            INFO: Viewser dataframe updated
+            DEBUG: NaNs in df after transformations: 0
+            >>> print(df_updated.equals(df))
+            False  # df was updated
+
+        Note:
+            - Requires months_to_update and update path in .env
+            - Logs NaN count after transformations for debugging
+            - Updates applied in-place to df
+            - Original df returned if updates disabled
         """
         if args.update_viewser:
             logger.info(
@@ -614,18 +974,49 @@ class ViewsDataLoader:
 
     def _fetch_data_from_viewser(self, self_test: bool) -> tuple[pd.DataFrame, list]:
         """
-        Fetches and prepares the initial DataFrame from viewser.
+        Fetch data from VIEWSER with queryset filters and drift detection.
+
+        Downloads or loads data using model's queryset, applies transformations,
+        optionally performs drift detection, and updates with latest GED/ACLED.
+
+        Internal Use:
+            Core data fetching method called by get_data().
 
         Args:
-            self_test (bool): Flag indicating whether to perform self-testing.
-            target (str): The target variable.
+            self_test: Whether to perform drift detection self-testing.
+                If True, runs drift checks against historical data
 
         Returns:
-            pd.DataFrame: The prepared DataFrame with initial processing done.
-            list: List of alerts generated during data fetching.
+            Tuple of (dataframe, alerts):
+                - dataframe: Fetched and processed DataFrame
+                - alerts: List of drift detection alerts (if any)
+
+        Pipeline Steps:
+            1. Load queryset from model configs
+            2. Fetch data via queryset.publish().fetch_with_drift_detection()
+            3. Log any drift detection alerts
+            4. On KeyError: Retry without drift detection
+            5. Apply VIEWSER updates if enabled
+            6. Convert to float64 for numerical stability
+
+        Example:
+            >>> df, alerts = loader._fetch_data_from_viewser(self_test=False)
+            INFO: Beginning file download through viewser...
+            INFO: Found queryset for purple_alien
+            >>> print(f"Fetched {len(df)} rows")
+            Fetched 180000 rows
+            >>> if alerts:
+            ...     print(f"Drift alerts: {len(alerts)}")
 
         Raises:
-            RuntimeError: If the queryset for the model is not found.
+            RuntimeError: If queryset not found or fetch fails
+            Exception: If data fetching fails (logged and re-raised)
+
+        Note:
+            - Uses month_first, month_last from instance
+            - Drift detection config from self.drift_config_dict
+            - Updates applied based on args.update_viewser flag
+            - Alerts logged as warnings if drift detected
         """
         logger.info(
             f"Beginning file download through viewser with month range {self.month_first},{self.month_last}"
@@ -684,13 +1075,46 @@ class ViewsDataLoader:
 
     def _get_month_range(self) -> tuple[int, int]:
         """
-        Determines the month range based on the partition type.
+        Determine month range based on partition type.
+
+        Calculates start and end month IDs from partition configuration,
+        with optional override for forecasting runs.
+
+        Internal Use:
+            Called by get_data() to set month_first and month_last.
 
         Returns:
-            tuple: The start and end month IDs for the partition.
+            Tuple of (month_first, month_last):
+                - month_first: Start month ID from partition train range
+                - month_last: End month ID based on partition type:
+                    - calibration/validation: End of test range
+                    - forecasting: End of train range (or override)
+
+        Example:
+            >>> loader.partition = 'calibration'
+            >>> loader.partition_dict = {
+            ...     'train': (121, 396),
+            ...     'test': (397, 444)
+            ... }
+            >>> first, last = loader._get_month_range()
+            >>> print(first, last)
+            121 444
+
+            >>> # Forecasting with override
+            >>> loader.partition = 'forecasting'
+            >>> loader.override_month = 530
+            >>> first, last = loader._get_month_range()
+            WARNING: Overriding end month in forecasting partition to 530
+            >>> print(first, last)
+            121 530
 
         Raises:
-            ValueError: If partition is not 'calibration', 'validation', or 'forecasting'.
+            ValueError: If partition not in ('calibration', 'validation', 'forecasting')
+
+        Note:
+            - Forecasting range includes only training data (test is future)
+            - Override only applies to forecasting partition
+            - Logs warning when override is used
         """
         month_first = self.partition_dict["train"][0]
 
@@ -714,18 +1138,51 @@ class ViewsDataLoader:
         self, df: pd.DataFrame
     ) -> bool:
         """
-        Checks to see if the min and max months in the input dataframe are the same as the min
-        month in the train and max month in the predict portions (or min and max months in the train portion for
-        the forecasting partition).
+        Validate DataFrame temporal alignment with partition.
+
+        Checks that DataFrame's month range exactly matches the expected
+        range from partition configuration, ensuring data completeness.
+
+        Internal Use:
+            Called by get_data() when validate=True.
 
         Args:
-            df (pd.DataFrame): The dataframe to be checked.
-            partition_dict (Dict): The partition dictionary.
-            override_month (int, optional): If user has overridden the end month of the forecasting partition, this value
-                                            is substituted for the last month in the forecasting train portion.
+            df: DataFrame to validate.
+                Must have 'month_id' in index or columns
 
         Returns:
-            bool: True if the dataframe is valid for the partition, False otherwise.
+            True if month range matches partition, False otherwise
+
+        Validation Logic:
+            For calibration/validation:
+                - first_expected = partition['train'][0]
+                - last_expected = partition['test'][1]
+
+            For forecasting:
+                - first_expected = partition['train'][0]
+                - last_expected = partition['train'][1] or override_month
+
+        Example:
+            >>> loader.partition = 'calibration'
+            >>> loader.partition_dict = {
+            ...     'train': (121, 396),
+            ...     'test': (397, 444)
+            ... }
+            >>> # Valid DataFrame
+            >>> is_valid = loader._validate_df_partition(df)
+            >>> print(is_valid)
+            True
+            >>>
+            >>> # Invalid DataFrame (wrong range)
+            >>> is_valid = loader._validate_df_partition(df_wrong)
+            ERROR: Dataframe time units do not match partition time units...
+            >>> print(is_valid)
+            False
+
+        Note:
+            - Checks min and max month_id in DataFrame
+            - Logs detailed error if validation fails
+            - Override_month respected for forecasting
         """
         if "month_id" in df.columns:
             df_time_units = df["month_id"].values
@@ -771,26 +1228,89 @@ class ViewsDataLoader:
         override_month: int = None,
     ) -> tuple[pd.DataFrame, list]:
         """
-        Fetches or loads a DataFrame for a given partition from viewser.
+        Fetch or load model data for specified partition.
 
-        This function handles the retrieval or loading of raw data for the specified partition.
-
-        The default behaviour is to fetch fresh data via viewser. This can be overridden by setting the
-        used_saved flag to True, in which case saved data is returned, if it can be found.
+        Main data loading interface. Handles complete workflow from VIEWSER
+        fetch to validated, partition-aligned DataFrame ready for modeling.
 
         Args:
-            self_test (bool): Flag indicating whether to perform self-testing.
-            partition (str): The partition type.
-            use_saved (bool, optional): Flag indicating whether to use saved data if available.
-            validate (bool, optional): Flag indicating whether to validate the fetched data. Defaults to True.
-            override_month (int, optional): If provided, overrides the end month for the forecasting partition.
+            self_test: Whether to run drift detection self-tests.
+                Recommended False for normal use, True for validation
+            partition: Data partition type:
+                - 'calibration': Development data (1990-2015)
+                - 'validation': Holdout data (2016-2018)
+                - 'forecasting': Production data (1990-present)
+            use_saved: Whether to use cached data if available.
+                True: Load from disk if exists, fetch if missing
+                False: Always fetch fresh data from VIEWSER
+            validate: Whether to validate temporal alignment.
+                Recommended True to catch data issues. Default: True
+            override_month: Override end month for forecasting.
+                Mainly for debugging/testing. Default: None
 
         Returns:
-            pd.DataFrame: The DataFrame fetched or loaded from viewser, with minimum preprocessing applied.
-            list: List of alerts generated during data fetching.
+            Tuple of (dataframe, alerts):
+                - dataframe: Model-ready DataFrame with:
+                    - MultiIndex (month_id, entity_id)
+                    - Feature columns from queryset
+                    - Target columns from queryset
+                    - Validated time range
+                - alerts: List of drift detection alerts (empty if none)
+
+        Data Flow:
+            If use_saved=True and file exists:
+                1. Load cached data from data/raw/
+                2. Validate partition alignment
+                3. Return cached data
+
+            If use_saved=False or file missing:
+                1. Fetch from VIEWSER via queryset
+                2. Apply drift detection
+                3. Update with latest GED/ACLED
+                4. Save to data/raw/
+                5. Create fetch log
+                6. Validate partition alignment
+                7. Return fresh data
+
+        Example:
+            >>> loader = ViewsDataLoader(model_path, steps=36)
+            >>> # Fetch fresh calibration data
+            >>> df, alerts = loader.get_data(
+            ...     self_test=False,
+            ...     partition='calibration',
+            ...     use_saved=False,
+            ...     validate=True
+            ... )
+            INFO: Fetching data from viewser...
+            INFO: Saving data to data/raw/calibration_viewser_df.parquet
+            >>> print(df.shape)
+            (180000, 45)
+            >>>
+            >>> # Use cached data
+            >>> df_cached, _ = loader.get_data(
+            ...     self_test=False,
+            ...     partition='calibration',
+            ...     use_saved=True
+            ... )
+            INFO: Reading saved data from data/raw/calibration_viewser_df.parquet
 
         Raises:
-            RuntimeError: If the saved data file is not found or if the data is incompatible with the partition.
+            RuntimeError: If use_saved=True but file loading fails
+            RuntimeError: If fetched data incompatible with partition
+            ValueError: If partition type is invalid
+
+        File Naming:
+            Cached files: {partition}_viewser_df{extension}
+            Examples:
+            - calibration_viewser_df.parquet
+            - validation_viewser_df.parquet
+            - forecasting_viewser_df.parquet
+
+        Note:
+            - Always validates unless validate=False
+            - Creates data fetch log for provenance
+            - Drift config from drift_detection module
+            - Alerts logged even if no drift detected
         """
         self.partition = partition #if self.partition is None else self.partition
         self.partition_dict = self._get_partition_dict(steps=self.steps) if self.partition_dict is None else self.partition_dict.get(partition, None)
