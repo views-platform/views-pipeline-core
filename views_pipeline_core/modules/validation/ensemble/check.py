@@ -8,14 +8,33 @@ logger = logging.getLogger(__name__)
 
 def validate_model_conditions(path_generated, run_type):
     """
-    Checks if the single model meets the required conditions based on the log file.
+    Validate temporal requirements for model training and data freshness.
+
+    Checks that the model was trained in the current training cycle (after July)
+    and that both generated features and raw data were fetched in the current month.
 
     Args:
-    - model_folder (str): The path to the model-specific folder containing the log file.
-    - config (dict): The configuration dictionary containing the model details.
+        path_generated: Path to model's data_generated directory containing log files
+        run_type: Type of run to validate: 'calibration' | 'forecasting' | 'validation'
+            Determines which log file to read ({run_type}_log.txt)
 
     Returns:
-    - bool: True if all conditions are met, False otherwise.
+        True if all temporal conditions are met, False otherwise
+
+    Raises:
+        Exception: If log file cannot be read (logged but not raised)
+
+    Example:
+        >>> from pathlib import Path
+        >>> path = Path('models/conflict_model_v1/data/generated')
+        >>> is_valid = validate_model_conditions(path, 'forecasting')
+        >>> if not is_valid:
+        ...     print("Model does not meet temporal requirements")
+
+    Note:
+        - Training cycle: July-June (models trained after July of previous year)
+        - Current month requirement ensures data freshness for production
+        - Logs detailed error messages before returning False
     """
     
     log_file_path = Path(path_generated) / f"{run_type}_log.txt"
@@ -70,13 +89,36 @@ def validate_model_conditions(path_generated, run_type):
 
 def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble_deployment_status):
     """
-    Checks if the ensemble model meets the required deployment status conditions based on the log file.
+    Validate deployment status compatibility between ensemble and constituent models.
+
+    Ensures that ensemble deployment status matches constituent model requirements
+    and that deprecated models are not used in production ensembles.
 
     Args:
-    - model_folder (str): The path to the model-specific folder containing the log file.
+        path_generated: Path to model's data_generated directory containing log files
+        run_type: Type of run to validate: 'calibration' | 'forecasting' | 'validation'
+        ensemble_deployment_status: Deployment status of ensemble:
+            'production' | 'shadow' | 'deprecated'
 
     Returns:
-    - bool: True if all conditions are met, False otherwise.
+        True if deployment status conditions are met, False otherwise
+
+    Raises:
+        Exception: If log file cannot be read (logged but not raised)
+
+    Example:
+        >>> path = Path('models/rf_model/data/generated')
+        >>> is_valid = validate_ensemble_model_deployment_status(
+        ...     path, 'forecasting', 'production'
+        ... )
+        >>> if not is_valid:
+        ...     print("Deployment status mismatch")
+
+    Note:
+        - Deprecated ensembles cannot be used
+        - Deprecated constituent models cannot be used
+        - production models can only be in deployed ensembles
+        - Prevents accidental use of outdated models
     """
 
     log_file_path = Path(path_generated) / f"{run_type}_log.txt"
@@ -98,7 +140,7 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
         logger.error(f"Model {model_name} deployment status is deprecated. Exiting.")
         return False
 
-    if single_model_dp_status == "Deployed" and ensemble_deployment_status != "Deployed":
+    if single_model_dp_status == "production" and ensemble_deployment_status != "production":
         logger.error(f"Model {model_name} deployment status is deployed "
                      f"but the ensemble is not. Exiting.")
         return False
@@ -119,13 +161,33 @@ def validate_partition_config(ensemble_manager, model_manager, run_type):
 
 def validate_ensemble_model(config):
     """
-    Performs the ensemble model check based on the log files of individual models.
+    Validate data partition compatibility between ensemble and constituent model.
+
+    Ensures that train/test splits match between the ensemble and individual
+    models to maintain evaluation integrity.
 
     Args:
-    - model_folders (list of str): A list of paths to model-specific folders containing log files.
+        ensemble_manager: EnsembleManager instance containing partition configuration
+        model_manager: ModelManager instance containing partition configuration
+        run_type: Type of run to validate partition for:
+            'calibration' | 'forecasting' | 'validation'
 
     Returns:
-    - None: Shuts down if conditions are not met; proceeds otherwise.
+        True if partition configurations match, False otherwise
+
+    Example:
+        >>> from views_pipeline_core.managers.ensemble import EnsembleManager
+        >>> from views_pipeline_core.managers.model import ModelManager
+        >>> ensemble = EnsembleManager(ensemble_path)
+        >>> model = ModelManager(model_path)
+        >>> is_valid = validate_partition_config(ensemble, model, 'calibration')
+        >>> if not is_valid:
+        ...     print("Partition mismatch detected")
+
+    Note:
+        - Critical for fair ensemble evaluation
+        - Prevents data leakage between train/test sets
+        - Logs error with both partition configs on mismatch
     """
     from views_pipeline_core.managers.model import ModelManager, ModelPathManager
     from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager

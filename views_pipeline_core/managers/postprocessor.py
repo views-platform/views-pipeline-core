@@ -1,6 +1,3 @@
-# from views_pipeline_core.wandb.utils import (
-#     wandb_alert,
-# )
 import wandb
 from typing import Union
 from pathlib import Path
@@ -12,8 +9,6 @@ from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathM
 
 logger = logging.getLogger(__name__)
 
-import wandb
-from pathlib import Path
 from views_pipeline_core.cli.utils import parse_args, validate_arguments
 import logging
 from abc import abstractmethod
@@ -135,14 +130,7 @@ class PostprocessorManager(ModelManager):
 
             except Exception as e:
                 logger.error(f"Error during postprocessor run: {e}")
-                self._wandb_module.send_alert(
-                    level=wandb.AlertLevel.ERROR,
-                    title=f"Postprocessor Run Failed",
-                    text=f"Error details: {e}",
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
                 raise PipelineException(message=f"Error occurred during postprocessor run. Error details: {e}", wandb_manager=self._wandb_module)
-
             finally:
-                wandb.finish()
+                self._wandb_module.finish_run()
+

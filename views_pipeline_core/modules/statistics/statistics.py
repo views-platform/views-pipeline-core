@@ -11,10 +11,10 @@ logger = logging.getLogger(__name__)
 
 class PosteriorDistributionAnalyzer:
     """
-    A lightweight, fast posterior analyzer using empirical summaries:
-    - MAP detection with optional zero-dominance logic
-    - Empirical HDI via sorted samples (shortest interval)
-    - Optional HDI nesting and MAP containment enforcement
+    Posterior analyzer using empirical summaries and HDI computation.
+    
+    Provides MAP detection with optional zero-dominance logic, empirical HDI
+    via sorted samples, and optional HDI nesting enforcement.
     """
 
     def __init__(
@@ -29,6 +29,21 @@ class PosteriorDistributionAnalyzer:
 
     @staticmethod
     def _validate_samples(samples: Union[List[float], np.ndarray]) -> np.ndarray:
+        """
+        Validate and clean sample array by removing invalid values.
+
+        Internal Use:
+            Called by analyze() before processing samples.
+
+        Args:
+            samples: Raw posterior samples that may contain NaN or infinite values
+
+        Returns:
+            Cleaned numpy array with only finite values
+
+        Raises:
+            ValueError: If all samples are NaN or infinite
+        """
         arr = np.asarray(samples)
         arr = arr[np.isfinite(arr)]
         if arr.size == 0:
@@ -38,6 +53,21 @@ class PosteriorDistributionAnalyzer:
 
     @staticmethod
     def _validate_credible_masses(masses: Tuple[float, ...]) -> Tuple[float, ...]:
+        """
+        Validate and sort credible mass values.
+
+        Internal Use:
+            Called by analyze() to validate HDI mass parameters.
+
+        Args:
+            masses: Tuple of credible mass values (e.g., (0.5, 0.95, 0.99))
+
+        Returns:
+            Sorted tuple of validated mass values
+
+        Raises:
+            ValueError: If any mass is not in range (0, 1)
+        """
         if not all(0 < m < 1 for m in masses):
             logger.error(f"Invalid credible_masses: {masses}. Must be between 0 and 1.")
             raise ValueError("All credible masses must be between 0 and 1.")
@@ -45,6 +75,21 @@ class PosteriorDistributionAnalyzer:
 
     @staticmethod
     def _validate_zero_mass_threshold(threshold: float) -> float:
+        """
+        Validate zero-mass threshold parameter.
+
+        Internal Use:
+            Called by analyze() to validate MAP detection threshold.
+
+        Args:
+            threshold: Proportion of samples that must be zero to force MAP to 0.0
+
+        Returns:
+            Validated threshold value
+
+        Raises:
+            ValueError: If threshold not in range [0, 1]
+        """
         if not (0 <= threshold <= 1):
             logger.error(f"Invalid zero_mass_threshold: {threshold}. Must be between 0 and 1.")
             raise ValueError("zero_mass_threshold must be between 0 and 1.")
@@ -52,6 +97,21 @@ class PosteriorDistributionAnalyzer:
 
     @staticmethod
     def _validate_bins(bins: int) -> int:
+        """
+        Validate histogram bin count.
+
+        Internal Use:
+            Called by analyze() to validate histogram parameters.
+
+        Args:
+            bins: Number of bins for histogram-based MAP estimation
+
+        Returns:
+            Validated bin count
+
+        Raises:
+            ValueError: If bins is not positive
+        """
         if bins <= 0:
             logger.error(f"Invalid bins value: {bins}. Must be positive.")
             raise ValueError("bins must be a positive integer.")
@@ -60,7 +120,43 @@ class PosteriorDistributionAnalyzer:
     def analyze(self, samples: np.array, credible_masses: Tuple[float, ...] = (0.5, 0.95, 0.99),
         zero_mass_threshold: float = 0.3,
         bins: int = 100,) -> dict:
-        """Manually trigger summary analysis."""
+        """
+        Compute posterior summary statistics including MAP and HDIs.
+
+        Analyzes posterior samples to extract maximum a posteriori (MAP) estimate,
+        highest density intervals (HDI) at multiple credible levels, and basic
+        statistics.
+
+        Args:
+            samples: Posterior samples to analyze (1D array)
+            credible_masses: Tuple of HDI credible levels (e.g., (0.5, 0.95, 0.99)).
+                Each value must be in (0, 1).
+            zero_mass_threshold: If proportion of samples ≈ 0 exceeds this,
+                force MAP to 0.0. Range: [0, 1]
+            bins: Number of histogram bins for MAP estimation via density peak
+
+        Returns:
+            Dictionary containing:
+                - 'map' (float): Maximum a posteriori estimate
+                - 'min' (float): Minimum sample value
+                - 'max' (float): Maximum sample value
+                - 'mass_at_zero' (float): Proportion of samples ≈ 0
+                - 'hdis' (list): List of (lower, upper) HDI tuples
+
+        Example:
+            >>> samples = np.random.normal(5, 2, 10000)
+            >>> analyzer = PosteriorDistributionAnalyzer()
+            >>> result = analyzer.analyze(samples, credible_masses=(0.5, 0.95))
+            >>> print(f"MAP: {result['map']:.2f}")
+            MAP: 5.01
+            >>> print(f"95% HDI: [{result['hdis'][1][0]:.2f}, {result['hdis'][1][1]:.2f}]")
+            95% HDI: [1.08, 8.94]
+
+        Note:
+            - HDIs are automatically nested (wider intervals contain narrower ones)
+            - MAP is forced inside the narrowest HDI via minimal shift
+            - Zero-dominated distributions (e.g., zero-inflated) handled specially
+        """
         self.samples = self._validate_samples(samples)
         self.credible_masses = self._validate_credible_masses(credible_masses)
         self.zero_mass_threshold = self._validate_zero_mass_threshold(zero_mass_threshold)
@@ -70,7 +166,15 @@ class PosteriorDistributionAnalyzer:
         return self.summary
 
     def _compute_summary(self) -> dict:
-        """Compute MAP, empirical HDIs, and summary statistics."""
+        """
+        Compute MAP, empirical HDIs, and summary statistics.
+
+        Internal Use:
+            Called by analyze() after validation to perform core computation.
+
+        Returns:
+            Dictionary with MAP, min, max, mass_at_zero, and HDIs
+        """
         # --- MAP Estimate ---
         # Mass at (near) zero
         mass_at_zero = np.mean(np.isclose(self.samples, 0.0, atol=1e-8))
@@ -115,9 +219,26 @@ class PosteriorDistributionAnalyzer:
 
     def _enforce_hdi_structure(self, hdis: List[Tuple[float, float]], map_val: float) -> List[Tuple[float, float]]:
         """
-        Adjust HDIs so that:
-        1. The narrowest HDI includes the MAP (via minimal shift)
-        2. Each wider HDI fully contains the narrower one (via minimal expansion)
+        Enforce HDI nesting and MAP containment constraints.
+
+        Adjusts HDI intervals to ensure:
+        1. Narrowest HDI contains the MAP estimate
+        2. Each wider HDI fully contains all narrower ones
+
+        Internal Use:
+            Called by _compute_summary() to post-process HDIs.
+
+        Args:
+            hdis: List of (lower, upper) HDI tuples from narrowest to widest
+            map_val: MAP estimate that must be contained in narrowest HDI
+
+        Returns:
+            Adjusted list of HDI tuples with enforced structure
+
+        Note:
+            - Uses minimal shifts/expansions to preserve original intervals
+            - Narrowest HDI shifted if MAP falls outside
+            - Wider HDIs expanded minimally to nest properly
         """
         if not hdis:
             logger.warning("No HDIs provided to enforce.")
@@ -167,18 +288,43 @@ class PosteriorDistributionAnalyzer:
 
     def summary_dict(self) -> Optional[Dict]:
         """
-        Return the computed posterior summary as a dictionary.
-        Returns None if analysis has not been run.
+        Get computed posterior summary as dictionary.
+
+        Returns:
+            Summary dictionary with MAP, HDIs, and statistics.
+            None if analyze() has not been called.
+
+        Example:
+            >>> analyzer = PosteriorDistributionAnalyzer()
+            >>> analyzer.analyze(samples)
+            >>> summary = analyzer.summary_dict()
+            >>> print(summary['map'])
+            5.123
         """
         return self.summary
 
 
     def print_summary(self, file: TextIO = sys.stdout) -> None:
         """
-        Nicely formatted print of the posterior summary.
+        Print formatted posterior summary to file or console.
 
-        Parameters:
-        - file: a file-like object to print to (default: sys.stdout)
+        Args:
+            file: Output stream (default: sys.stdout for console)
+
+        Example:
+            >>> analyzer = PosteriorDistributionAnalyzer()
+            >>> analyzer.analyze(samples)
+            >>> analyzer.print_summary()
+            MAP estimate: 5.1234
+            Min: 0.0012
+            Max: 10.4567
+            Mass at zero: 15.30%
+            50% HDI: [3.2100, 7.0345]
+            95% HDI: [1.0834, 9.1267]
+
+        Note:
+            - Prints nothing if analyze() has not been called
+            - Useful for quick inspection during interactive analysis
         """
         if self.summary is None:
             logger.warning("Summary not computed yet. Call `analyze()` first.")
@@ -198,14 +344,27 @@ class PosteriorDistributionAnalyzer:
 
     def plot_summary(self, show: bool = True, save_path: Optional[str] = None) -> Optional[plt.Figure]:
         """
-        Plot histogram of posterior samples with MAP and HDIs overlaid.
+        Visualize posterior distribution with MAP and HDI overlays.
 
-        Parameters:
-        - show: whether to display the plot immediately (default: True)
-        - save_path: optional path to save the plot image (e.g., 'plot.png')
+        Creates histogram of posterior samples with vertical line at MAP and
+        shaded regions for each HDI interval.
+
+        Args:
+            show: Whether to display plot immediately
+            save_path: Optional file path to save plot (e.g., 'posterior.png')
 
         Returns:
-        - The matplotlib Figure object for further customization or saving.
+            Matplotlib Figure object for further customization, or None if no summary
+
+        Example:
+            >>> analyzer = PosteriorDistributionAnalyzer()
+            >>> analyzer.analyze(samples)
+            >>> analyzer.plot_summary(save_path='results/posterior_plot.png')
+
+        Note:
+            - Requires analyze() to be called first
+            - HDIs shown as semi-transparent shaded regions
+            - MAP shown as red dashed vertical line
         """
         if self.summary is None:
             logger.warning("No summary available. Run `.analyze()` before plotting.")
@@ -245,17 +404,37 @@ class PosteriorDistributionAnalyzer:
     @staticmethod
     def test_posterior_analyzer(verbose: bool = True) -> Tuple[List[str], List[str]]:
         """
-        Run validation tests on PosteriorDistributionAnalyzer for various distribution types.
+        Run validation test suite on PosteriorDistributionAnalyzer.
 
-        Verifies:
-        - MAP is within all HDIs
-        - HDIs are properly nested (each HDI contains the narrower ones)
+        Tests analyzer correctness across various distribution types:
+        Normal, Cauchy, bimodal, skewed, heavy-tailed, etc.
 
-        Parameters:
-        - verbose: if True, print summary of each test
+        Validates:
+        - MAP is contained within all HDIs
+        - HDIs are properly nested (each HDI contains narrower ones)
+
+        Args:
+            verbose: If True, print detailed results for each test case
 
         Returns:
-        - Tuple of (distributions with MAP failures, distributions with nesting failures)
+            Tuple of (MAP containment failures, HDI nesting failures).
+            Each list contains names of distributions that failed.
+
+        Example:
+            >>> failed_map, failed_nest = PosteriorDistributionAnalyzer.test_posterior_analyzer()
+            ✅ MAP is contained in all HDIs for Normal
+            ✅ HDIs are nested for Normal
+            ...
+            Finished test suite.
+            MAP containment failures: []
+            HDI nesting failures: []
+            Total time: 2.45s
+
+        Note:
+            - Tests 12 different distribution types
+            - Uses 10,000 samples per distribution
+            - Logs errors for failed distributions
+            - Useful for validating algorithm changes
         """
         np.random.seed(42)
         start_time = time.time()
@@ -327,20 +506,26 @@ class PosteriorDistributionAnalyzer:
     
 class ForecastReconciler:
     """
-    A class for reconciling hierarchical forecasts at the country and grid levels.
+    Reconcile hierarchical forecasts between country and grid levels.
     
-    Supports:
-    - Probabilistic forecast reconciliation (adjusting posterior samples).
-    - Point estimate reconciliation (for deterministic forecasts).
-    - Automatic validation tests for correctness.
+    Supports both probabilistic (posterior samples) and point estimate
+    reconciliation with automatic validation tests.
     """
 
     def __init__(self, device=None):
         """
-        Initializes the ForecastReconciler class.
+        Initialize forecast reconciler with GPU support.
 
         Args:
-            device (str, optional): "cuda" for GPU acceleration, "cpu" otherwise. Defaults to auto-detect.
+            device: Computation device. Options:
+                - 'cuda': Use GPU acceleration
+                - 'cpu': Use CPU only
+                - None: Auto-detect (GPU if available)
+
+        Example:
+            >>> reconciler = ForecastReconciler(device='cuda')
+            >>> print(reconciler.device)
+            cuda
         """
         self.logger = logging.getLogger(__name__)  # Class-specific logger
         logging.basicConfig(level=logging.INFO)  # Configure logging format
@@ -350,20 +535,46 @@ class ForecastReconciler:
 
     def reconcile_forecast(self, grid_forecast, country_forecast, lr=0.01, max_iters=500, tol=1e-6):
         """
-        Adjusts grid-level forecasts to match the country-level forecasts using per-sample quadratic optimization.
+        Adjust grid-level forecasts to match country-level totals.
 
-        Supports both:
-        - **Probabilistic forecasts** (num_samples, num_grid_cells)
-        - **Point forecasts** (num_grid_cells,) by treating them as a special case of batch size = 1.
+        Uses proportional scaling to reconcile grid forecasts while preserving
+        zero values and relative patterns across grid cells.
 
         Args:
-            grid_forecast (torch.Tensor): Posterior samples of grid forecasts (num_samples, num_grid_cells) 
-                                          OR (num_grid_cells,) for point estimates.
-            country_forecast (torch.Tensor or float): Posterior samples of country-level forecast (num_samples,) 
-                                                      OR a single float for point estimate.
+            grid_forecast: Grid-level forecasts. Either:
+                - Probabilistic: (num_samples, num_grid_cells) tensor
+                - Point estimate: (num_grid_cells,) tensor
+            country_forecast: Country-level forecast. Either:
+                - Probabilistic: (num_samples,) tensor
+                - Point estimate: Single float value
+            lr: Learning rate for optimization (currently unused)
+            max_iters: Maximum optimization iterations (currently unused)
+            tol: Convergence tolerance (currently unused)
 
         Returns:
-            torch.Tensor: Adjusted grid forecasts with sum-matching per sample.
+            Adjusted grid forecasts with same shape as input.
+            Sum of adjusted forecasts matches country_forecast per sample.
+
+        Example:
+            >>> # Probabilistic reconciliation
+            >>> grid = torch.randn(1000, 100)  # 1000 samples, 100 grid cells
+            >>> country = grid.sum(dim=1) * 1.2  # Country total 20% higher
+            >>> adjusted = reconciler.reconcile_forecast(grid, country)
+            >>> print(torch.allclose(adjusted.sum(dim=1), country, atol=1e-2))
+            True
+
+            >>> # Point forecast reconciliation
+            >>> grid_point = torch.tensor([10., 20., 30., 0., 15.])
+            >>> country_point = 100.0  # Different from sum=75
+            >>> adjusted_point = reconciler.reconcile_forecast(grid_point, country_point)
+            >>> print(f"{adjusted_point.sum():.1f}")
+            100.0
+
+        Note:
+            - Preserves zero values in grid forecasts
+            - Uses proportional scaling (not optimization despite params)
+            - Handles both probabilistic and deterministic forecasts
+            - Clamps results to non-negative values
         """
         is_point_forecast = grid_forecast.dim() == 1  # Check if it's a point forecast
 
@@ -423,7 +634,25 @@ class ForecastReconciler:
 
     def run_tests(self):
         """
-        Runs a complete suite of validation tests for both probabilistic and point forecast reconciliation.
+        Run comprehensive validation test suite for reconciliation.
+
+        Executes tests for both probabilistic and point forecast reconciliation
+        across various scenarios: normal, sparse, skewed, edge cases.
+
+        Example:
+            >>> reconciler = ForecastReconciler()
+            >>> reconciler.run_tests()
+            🧪 Running Full Test Battery for Forecast Reconciliation...
+            
+            ++++++++++++++ 🔍 Running Probabilistic Forecast Reconciliation Tests ++++++++++++++++
+            ...
+            ✅ All Tests Passed Successfully!
+
+        Note:
+            - Tests sum constraint preservation
+            - Validates zero-inflation handling
+            - Checks extreme scaling scenarios
+            - Tests both GPU and CPU modes if available
         """
         self.logger.info("\n🧪 Running Full Test Battery for Forecast Reconciliation...\n")
 
@@ -440,7 +669,23 @@ class ForecastReconciler:
 
     def run_tests_probabilistic(self):
         """
-        Runs validation tests to ensure correctness of **probabilistic** forecast reconciliation.
+        Validate probabilistic forecast reconciliation correctness.
+
+        Tests reconciliation with posterior samples across multiple scenarios:
+        basic, all-zeros, extreme skew, sparse data, large-scale, etc.
+
+        Internal Use:
+            Called by run_tests() for probabilistic validation.
+
+        Raises:
+            AssertionError: If any validation check fails:
+                - Sum constraint violated (max diff > 0.01)
+                - Zero-inflation not preserved
+
+        Note:
+            - Each test generates random data with controlled characteristics
+            - Validates sum matching within 1e-2 tolerance
+            - Checks that zero grid cells remain zero after reconciliation
         """
         self.logger.info("\n🧪 Running Tests on Probabilistic Forecast Reconciliation...\n")
 
@@ -492,7 +737,23 @@ class ForecastReconciler:
     
     def run_tests_point(self):
         """
-        Runs validation tests to ensure correctness of **point** forecast reconciliation.
+        Validate point forecast reconciliation correctness.
+
+        Tests reconciliation with deterministic forecasts across multiple scenarios:
+        basic, all-zeros, extreme skew, sparse data, extreme scaling, etc.
+
+        Internal Use:
+            Called by run_tests() for point forecast validation.
+
+        Raises:
+            AssertionError: If any validation check fails:
+                - Sum constraint violated (diff > 0.01)
+                - Zero-inflation not preserved
+
+        Note:
+            - Tests point forecasts as special case of batch_size=1
+            - Each test generates random data with controlled characteristics
+            - Validates exact sum matching within 1e-2 tolerance
         """
         self.logger.info("\n🧪 Running Tests on Point Forecast Reconciliation...\n")
 

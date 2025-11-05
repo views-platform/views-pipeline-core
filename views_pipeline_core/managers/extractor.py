@@ -1,7 +1,3 @@
-# from views_pipeline_core.modules.wandb import (
-#     WandBModule,
-# )
-import wandb
 from typing import Union
 from pathlib import Path
 import logging
@@ -64,30 +60,28 @@ class ExtractorManager(ModelManager):
         self.data = None
         
     @abstractmethod
-    def _download(self, args: Namespace, dataframe: pl.DataFrame = None):
+    def _download(self):
         raise NotImplementedError("Subclasses must implement the _download method.")
 
     @abstractmethod
-    def _preprocess(self, args: Namespace):
+    def _preprocess(self):
         raise NotImplementedError("Subclasses must implement the _preprocess method.")
 
     @abstractmethod
-    def _save(self, args: Namespace):
+    def _save(self):
         raise NotImplementedError("Subclasses must implement the _save method.")
 
-    def run(self, args: Namespace):
-        self._download(args)
-        self._preprocess(args)
+    def run(self):
+        self._download()
+        self._preprocess()
         with self._wandb_manager.initialize_run(
             project=f"{self.configs['name']}_save", entity=self._entity, job_type="save"
         ):
             try:
-                self._save(args)
+                self._download()
+                self._preprocess()
+                self._save()
             except Exception as e:
-                # logger.error(f"Error occurred while saving to database: {e}")
-                # self._wandb_manager.send_alert(title=f"Error occurred while saving to database",
-                #             text=f"Error details: {e}",
-                #             notifications_enabled=self._wandb_notifications,
-                #             models_path=self._model_path.models
-                # )
                 raise PipelineException(message=f"Error occurred while saving to database. Error details: {e}", wandb_manager=self._wandb_module)
+            finally:
+                self._wandb_module.finish_run()

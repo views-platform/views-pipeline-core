@@ -1,7 +1,7 @@
 from typing import Dict, Optional
 import logging
 from datetime import datetime
-from views_pipeline_core.models.check import validate_config
+from views_pipeline_core.modules.validation.model import validate_config
 from views_pipeline_core.exceptions import ConfigurationException
 from views_pipeline_core.cli.args import ForecastingModelArgs
 
@@ -57,14 +57,14 @@ class ConfigurationManager:
     def update_for_single_run(
         self,
         args: ForecastingModelArgs,
-        wandb_manager: Optional['WandBModule'] = None,
+        wandb_module: Optional['WandBModule'] = None,
     ) -> None:
         """
         Update configuration for a single run with validated arguments.
         
         Args:
             args (ForecastingModelArgs): Validated pipeline arguments
-            wandb_manager (Optional[WandBModule]): WandB manager for error reporting
+            wandb_module (Optional[WandBModule]): WandB manager for error reporting
             
         Raises:
             ConfigurationException: If configuration validation fails
@@ -84,7 +84,7 @@ class ConfigurationManager:
         except Exception as e:
             raise ConfigurationException(
                 f"Configuration validation failed: {e}",
-                wandb_manager=wandb_manager,
+                wandb_module=wandb_module,
             )
 
     def _apply_timestep_override(self, args: ForecastingModelArgs) -> None:
@@ -117,7 +117,7 @@ class ConfigurationManager:
         self,
         wandb_config: Dict,
         args: ForecastingModelArgs,
-        wandb_manager: Optional['WandBModule'] = None,
+        wandb_module: Optional['WandBModule'] = None,
     ) -> None:
         """
         Update configuration for a sweep run.
@@ -125,7 +125,7 @@ class ConfigurationManager:
         Args:
             wandb_config (Dict): Configuration from WandB sweep
             args (ForecastingModelArgs): Validated pipeline arguments
-            wandb_manager (Optional[WandBModule]): WandB manager for error reporting
+            wandb_module (Optional[WandBModule]): WandB manager for error reporting
             
         Raises:
             ConfigurationException: If configuration validation fails
@@ -144,5 +144,5 @@ class ConfigurationManager:
         except Exception as e:
             raise ConfigurationException(
                 f"Sweep configuration validation failed: {e}",
-                wandb_manager=wandb_manager,
+                wandb_module=wandb_module,
             )

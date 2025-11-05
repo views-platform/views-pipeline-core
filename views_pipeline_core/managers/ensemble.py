@@ -128,12 +128,12 @@ class EnsembleManager(ForecastingModelManager):
         # Store args first
         self._args = args
 
-        self._wandb_manager.login()
+        self._wandb_module.login()
 
         # Update config
         self._config_manager.update_for_single_run(
             self.args,
-            wandb_manager=self._wandb_manager,
+            wandb_module=self._wandb_module,
         )
 
         self._project = f"{self.configs['name']}_{self.args.run_type}"
@@ -150,7 +150,7 @@ class EnsembleManager(ForecastingModelManager):
                 f"Error during {self._model_path.target} execution: {e}",
                 exc_info=True,
             )
-            self._wandb_manager.send_alert(
+            self._wandb_module.send_alert(
                 title=f"{self._model_path.target.title()} Execution Error",
                 text=f"An error occurred during {self._model_path.target} execution: {traceback.format_exc()}",
                 level=wandb.AlertLevel.ERROR,
@@ -184,7 +184,7 @@ class EnsembleManager(ForecastingModelManager):
         Executes the ensemble model training process.
         Uses self.args and self.configs.
         """
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project, 
             config=self.configs, 
             job_type="train"
@@ -193,26 +193,28 @@ class EnsembleManager(ForecastingModelManager):
                 logger.info(f"Training model {self.configs['name']}...")
                 self._train_ensemble()
 
-                self._wandb_manager.send_alert(
+                self._wandb_module.send_alert(
                     title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
             except Exception as e:
-                logger.error(
-                    f"{self._model_path.target.title()} training: {e}",
-                    exc_info=True,
-                )
+                # logger.error(
+                #     f"{self._model_path.target.title()} training: {e}",
+                #     exc_info=True,
+                # )
                 raise PipelineException(
                     f"Training failed: {traceback.format_exc()}",
-                    wandb_manager=self._wandb_manager,
+                    wandb_module=self._wandb_module,
                 )
+            finally:
+                self._wandb_module.finish_run()
 
     def _execute_model_evaluation(self) -> None:
         """
         Executes the ensemble model evaluation process.
         Uses self.args and self.configs.
         """
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project,
             config=self.configs,
             job_type="evaluate",
@@ -233,23 +235,25 @@ class EnsembleManager(ForecastingModelManager):
                     df_predictions, self._eval_type, ensemble=True
                 )
 
-                self._wandb_manager.send_alert(
+                self._wandb_module.send_alert(
                     title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
             except Exception as e:
-                logger.error(f"Error evaluating model: {e}", exc_info=True)
+                # logger.error(f"Error evaluating model: {e}", exc_info=True)
                 raise PipelineException(
                     f"Evaluation failed: {traceback.format_exc()}",
-                    wandb_manager=self._wandb_manager,
+                    wandb_module=self._wandb_module,
                 )
+            finally:
+                self._wandb_module.finish_run()
 
     def _execute_model_forecasting(self) -> None:
         """
         Executes the ensemble model forecasting process.
         Uses self.args and self.configs.
         """
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project,
             config=self.configs,
             job_type="forecast",
@@ -258,7 +262,7 @@ class EnsembleManager(ForecastingModelManager):
                 logger.info(f"Forecasting model {self.configs['name']}...")
                 df_prediction = self._forecast_ensemble()
 
-                self._wandb_manager.send_alert(
+                self._wandb_module.send_alert(
                     title=f"Forecasting for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
                 
@@ -269,14 +273,16 @@ class EnsembleManager(ForecastingModelManager):
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
             except Exception as e:
-                logger.error(
-                    f"Error forecasting {self._model_path.target}: {e}",
-                    exc_info=True,
-                )
+                # logger.error(
+                #     f"Error forecasting {self._model_path.target}: {e}",
+                #     exc_info=True,
+                # )
                 raise PipelineException(
                     f"Forecasting failed: {traceback.format_exc()}",
-                    wandb_manager=self._wandb_manager,
+                    wandb_module=self._wandb_module,
                 )
+            finally:
+                self._wandb_module.finish_run()
 
     # ============================================================
     # ENSEMBLE ORCHESTRATION METHODS
@@ -483,13 +489,15 @@ class EnsembleManager(ForecastingModelManager):
         """
         try:
             shell_command = model_args.to_shell_command(model_path)
+            logger.info(f"Executing shell command: {' '.join(shell_command)}")
             subprocess.run(shell_command, check=True)
         except Exception as e:
             logger.error(
                 f"Error during shell command execution for model {model_name}: {e}",
                 exc_info=True,
             )
-            raise
+            raise PipelineException(f"Error during shell command execution for model {model_name}: {e}", 
+                                    wandb_module=self._wandb_module)
 
     def _load_or_generate_prediction(
         self,
@@ -578,13 +586,13 @@ class EnsembleManager(ForecastingModelManager):
                     f"Reconciliation complete for {self._model_path.target}. "
                     "Predictions reconciled with C dataset."
                 )
-                self._wandb_manager.send_alert(
+                self._wandb_module.send_alert(
                     title=f"{self._model_path.target.title()} reconciliation complete",
                     level=wandb.AlertLevel.INFO,
                 )
                 return reconciled_pg
             else:
-                self._wandb_manager.send_alert(
+                self._wandb_module.send_alert(
                     title=f"{self._model_path.target.title()} Reconciliation Error",
                     text=f"Reconciliation returned None. Predictions not reconciled.",
                     level=wandb.AlertLevel.WARNING,
