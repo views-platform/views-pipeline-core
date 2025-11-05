@@ -64,7 +64,7 @@ class WandBModule:
         conflict_type: str,
     ) -> None:
         """Log structured evaluation results."""
-        from views_pipeline_core.wandb.utils import log_wandb_log_dict
+        from views_pipeline_core.modules.wandb import log_wandb_log_dict
         
         log_wandb_log_dict(
             step_wise,
@@ -73,20 +73,22 @@ class WandBModule:
             conflict_type,
         )
 
+    @staticmethod
     def send_alert(
-        self,
         title: str,
         text: str = "",
         level: wandb.AlertLevel = wandb.AlertLevel.INFO,
+        models_path: Optional[Path] = None,
+        notifications_enabled: bool = False,
     ) -> None:
         """Send a WandB alert with path redaction."""
-        if not self.notifications_enabled or not wandb.run:
+        if not notifications_enabled or not wandb.run:
             return
 
         try:
             # Redact sensitive paths
-            if self.models_path:
-                text = str(text).replace(str(self.models_path), "[REDACTED]")
+            if models_path:
+                text = str(text).replace(str(models_path), "[REDACTED]")
             
             wandb.alert(title=title, text=text, level=level)
             logger.info(f"WandB alert sent: {title}")

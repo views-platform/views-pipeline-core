@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import Dict, Any
 import pandas as pd
 
-from views_pipeline_core.modules.datastore.prediction import (
-    PredictionMetadata,
-    PredictionStoreManager,
+from views_pipeline_core.modules.datastore import (
+    FileMetadata,
+    DatastoreModule,
 )
 from views_pipeline_core.modules.appwrite.file import (
     AppwriteConfig,
@@ -15,11 +15,11 @@ from views_pipeline_core.modules.appwrite.file import (
 )
 
 
-# Test PredictionMetadata
+# Test FileMetadata
 class TestPredictionMetadata:
     def test_valid_initialization(self):
-        """Test creating PredictionMetadata with valid parameters"""
-        metadata = PredictionMetadata(
+        """Test creating FileMetadata with valid parameters"""
+        metadata = FileMetadata(
             loa="country",
             name="test_model",
             type="fatalities",
@@ -36,8 +36,8 @@ class TestPredictionMetadata:
         assert metadata.description == "Test description"
 
     def test_initialization_without_description(self):
-        """Test creating PredictionMetadata without optional description"""
-        metadata = PredictionMetadata(
+        """Test creating FileMetadata without optional description"""
+        metadata = FileMetadata(
             loa="country",
             name="test_model",
             type="fatalities",
@@ -51,7 +51,7 @@ class TestPredictionMetadata:
     def test_invalid_loa_type(self):
         """Test that non-string loa raises TypeError"""
         with pytest.raises(TypeError, match="loa must be a string"):
-            PredictionMetadata(
+            FileMetadata(
                 loa=123,
                 name="test_model",
                 type="fatalities",
@@ -62,7 +62,7 @@ class TestPredictionMetadata:
     def test_invalid_name_type(self):
         """Test that non-string name raises TypeError"""
         with pytest.raises(TypeError, match="name must be a string"):
-            PredictionMetadata(
+            FileMetadata(
                 loa="country",
                 name=["invalid"],
                 type="fatalities",
@@ -73,7 +73,7 @@ class TestPredictionMetadata:
     def test_invalid_type_type(self):
         """Test that non-string type raises TypeError"""
         with pytest.raises(TypeError, match="type must be a string"):
-            PredictionMetadata(
+            FileMetadata(
                 loa="country",
                 name="test_model",
                 type=123,
@@ -84,7 +84,7 @@ class TestPredictionMetadata:
     def test_invalid_targets_not_list(self):
         """Test that non-list targets raises TypeError"""
         with pytest.raises(TypeError, match="targets must be a list of strings"):
-            PredictionMetadata(
+            FileMetadata(
                 loa="country",
                 name="test_model",
                 type="fatalities",
@@ -95,7 +95,7 @@ class TestPredictionMetadata:
     def test_invalid_targets_non_string_elements(self):
         """Test that list with non-string elements raises TypeError"""
         with pytest.raises(TypeError, match="targets must be a list of strings"):
-            PredictionMetadata(
+            FileMetadata(
                 loa="country",
                 name="test_model",
                 type="fatalities",
@@ -106,7 +106,7 @@ class TestPredictionMetadata:
     def test_invalid_description_type(self):
         """Test that non-string, non-None description raises TypeError"""
         with pytest.raises(TypeError, match="description must be a string or None"):
-            PredictionMetadata(
+            FileMetadata(
                 loa="country",
                 name="test_model",
                 type="fatalities",
@@ -118,7 +118,7 @@ class TestPredictionMetadata:
     def test_invalid_category_value(self):
         """Test that invalid category value raises ValueError"""
         with pytest.raises(ValueError, match="category must be either 'forecast' or 'historical'"):
-            PredictionMetadata(
+            FileMetadata(
                 loa="country",
                 name="test_model",
                 type="fatalities",
@@ -128,7 +128,7 @@ class TestPredictionMetadata:
 
     def test_to_dict_with_description(self):
         """Test to_dict method with description"""
-        metadata = PredictionMetadata(
+        metadata = FileMetadata(
             loa="country",
             name="test_model",
             type="fatalities",
@@ -150,7 +150,7 @@ class TestPredictionMetadata:
 
     def test_to_dict_without_description(self):
         """Test to_dict method without description"""
-        metadata = PredictionMetadata(
+        metadata = FileMetadata(
             loa="country",
             name="test_model",
             type="fatalities",
@@ -170,7 +170,7 @@ class TestPredictionMetadata:
         assert "description" not in result
 
 
-# Fixtures for PredictionStoreManager tests
+# Fixtures for DatastoreModule tests
 @pytest.fixture
 def mock_path_manager():
     """Mock ModelPathManager"""
@@ -212,18 +212,18 @@ def mock_appwrite_manager():
 
 @pytest.fixture
 def prediction_store(mock_config, mock_appwrite_manager):
-    """Create PredictionStoreManager instance with mocked dependencies"""
+    """Create DatastoreModule instance with mocked dependencies"""
     with patch("views_pipeline_core.managers.prediction.AppWriteFileManager", return_value=mock_appwrite_manager):
-        store = PredictionStoreManager(mock_config)
+        store = DatastoreModule(mock_config)
         yield store
 
 
-# Test PredictionStoreManager
+# Test DatastoreModule
 class TestPredictionStoreManager:
     def test_initialization(self, mock_config, mock_appwrite_manager):
-        """Test PredictionStoreManager initialization"""
+        """Test DatastoreModule initialization"""
         with patch("views_pipeline_core.managers.prediction.AppWriteFileManager", return_value=mock_appwrite_manager):
-            store = PredictionStoreManager(mock_config)
+            store = DatastoreModule(mock_config)
             
             assert store.model_path == mock_config.path_manager
             assert store._PredictionStoreManager__appwrite_file_managerconfig == mock_config

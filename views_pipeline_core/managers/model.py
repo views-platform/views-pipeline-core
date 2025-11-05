@@ -1,5 +1,4 @@
 import sys
-import time
 import re
 import pyprojroot
 from typing import Union, Optional, List, Dict, Any
@@ -9,27 +8,24 @@ from abc import abstractmethod
 import hashlib
 from datetime import datetime
 import traceback
-from views_pipeline_core.cli.args import ForecastingModelArgs, ModelArgs
-from views_pipeline_core.exceptions.exceptions import ModelForecastingException
+from views_pipeline_core.cli import ForecastingModelArgs, ModelArgs
+from views_pipeline_core.exceptions import ModelForecastingException
 import wandb
 import pandas as pd
 from pathlib import Path
 import random
-import json
-from views_pipeline_core.managers.wandb import WandBModule
-from views_pipeline_core.managers.configuration import ConfigurationManager
+from views_pipeline_core.modules.wandb import WandBModule
+from views_pipeline_core.managers import ConfigurationManager
 from views_pipeline_core.exceptions import (
     DataFetchException,
     ModelForecastingException,
     ModelTrainingException,
-    ValidationException,
     ModelEvaluationException,
     PipelineException,
-    ConfigurationException,
 )
 
 
-from views_pipeline_core.wandb.utils import (
+from views_pipeline_core.modules.wandb import (
     add_wandb_metrics,
     log_wandb_log_dict,
     wandb_alert,
@@ -48,53 +44,42 @@ from views_pipeline_core.files.utils import (
     generate_evaluation_report_name,
 )
 
-from views_pipeline_core.configs.pipeline import PipelineConfig
+from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.models.check import (
     validate_prediction_dataframe,
     validate_config,
 )
-
+import os
 
 logger = logging.getLogger(__name__)
 
 
 # ============================================================ Model Path Manager ============================================================
 
-
 class ModelPathManager:
     """
-    Manages model paths and directories within the ViEWS Pipeline.
+    Manage model paths and directories within the ViEWS Pipeline.
 
     Provides centralized path management for model artifacts, configurations, data,
-    and scripts. Handles validation, directory initialization, and path resolution
-    for models, ensembles, and other pipeline components.
+    and scripts. Handles validation, directory initialization, and path resolution.
 
-    This class uses the Singleton pattern per model instance to avoid duplicate
-    directory structures and provides utilities for working with model-specific
-    file hierarchies.
-
-    Class Attributes:
-        _target (str): The target type (default: 'model').
-        __instances__ (int): Counter for tracking instances.
-        _root (Path): Project root directory.
-
-    Instance Attributes:
-        model_name (str): Validated model name.
-        target (str): Target type (model, ensemble, etc.).
-        root (Path): Project root directory.
-        models (Path): Base directory for all models.
-        model_dir (Path): Specific model directory.
-        artifacts (Path): Model artifacts directory.
-        configs (Path): Configuration files directory.
-        data (Path): Data directory.
-        data_generated (Path): Generated data directory.
-        data_processed (Path): Processed data directory.
-        data_raw (Path): Raw data directory.
-        reports (Path): Reports directory.
-        notebooks (Path): Jupyter notebooks directory.
-        logging (Path): Log files directory.
-        queryset_path (Path): Path to queryset configuration.
-        scripts (List[Path]): List of required script paths.
+    Attributes:
+        model_name (str): Validated model name (adjective_noun format)
+        target (str): Target type ('model', 'ensemble', etc.)
+        root (Path): Project root directory
+        models (Path): Base directory for all models
+        model_dir (Path): Specific model directory
+        artifacts (Path): Model artifacts directory
+        configs (Path): Configuration files directory
+        data (Path): Data directory
+        data_generated (Path): Generated data directory
+        data_processed (Path): Processed data directory
+        data_raw (Path): Raw data directory
+        reports (Path): Reports directory
+        notebooks (Path): Jupyter notebooks directory
+        logging (Path): Log files directory
+        queryset_path (Path): Path to queryset configuration
+        scripts (List[Path]): List of required script paths
 
     Example:
         >>> # Initialize for existing model
@@ -107,77 +92,55 @@ class ModelPathManager:
         >>>
         >>> # Get queryset configuration
         >>> queryset = model_path.get_queryset()
-        >>> if queryset:
-        ...     print(queryset.keys())
 
-    Notes:
+    Note:
         - Model names must follow 'adjective_noun' format (lowercase)
         - Validation can be disabled for model creation workflows
         - Automatically finds project root using .gitignore marker
-        - Supports models, ensembles, preprocessors, and other components
-
-    See Also:
-        - :class:`EnsemblePathManager`: Specialized path manager for ensembles
-        - :class:`ModelManager`: Uses ModelPathManager for model operations
     """
+
+
+    _target = "model"
+    __instances__ = 0
+    _root = None
 
     @classmethod
     def _initialize_class_paths(cls, current_path: Path = None) -> None:
         """
-        Initialize class-level paths for the ModelPathManager.
+        Initialize class-level paths for ModelPathManager.
 
-        Sets up the project root directory that all instances will use.
-        This is a class method to ensure consistent root paths across all instances.
+        Sets up project root directory that all instances will use.
 
         Internal Use:
-            Called automatically when first instance is created or when
-            get_root() is called before any instances exist.
+            Called automatically when first instance created.
 
         Args:
-            current_path (Path, optional): Starting path for root search.
-                If None, uses pyprojroot.here(). Defaults to None.
-
-        Side Effects:
-            - Sets cls._root class attribute
-            - Searches filesystem for project root marker
+            current_path: Starting path for root search.
+                If None, uses pyprojroot.here()
 
         Example:
-            >>> # Typically called automatically
             >>> ModelPathManager._initialize_class_paths()
             >>> root = ModelPathManager._root
-
-        See Also:
-            - :meth:`find_project_root`: Root directory discovery logic
-            - :meth:`get_root`: Public interface for accessing root
         """
         cls._root = cls.find_project_root(current_path=current_path)
 
     @classmethod
     def get_root(cls, current_path: Path = None) -> Path:
         """
-        Get the project root directory path.
+        Get project root directory.
 
-        Returns the root directory of the ViEWS Pipeline project, initializing
-        it if necessary. Thread-safe and idempotent.
+        Lazy initialization of root path if not already set.
 
         Args:
-            current_path (Path, optional): Starting path for root search.
-                Only used if root not yet initialized. Defaults to None.
+            current_path: Starting path for root search
 
         Returns:
-            Path: Absolute path to project root directory
+            Project root directory path
 
         Example:
             >>> root = ModelPathManager.get_root()
             >>> print(root)
-            PosixPath('/Users/user/views-platform')
-
-        Thread Safety:
-            Safe for concurrent access after first initialization
-
-        See Also:
-            - :meth:`_initialize_class_paths`: Initialization logic
-            - :meth:`find_project_root`: Root discovery algorithm
+            PosixPath('/path/to/views-platform')
         """
         if cls._root is None:
             cls._initialize_class_paths(current_path=current_path)
@@ -186,27 +149,17 @@ class ModelPathManager:
     @classmethod
     def get_models(cls) -> Path:
         """
-        Get the base models directory path.
+        Get models base directory.
 
-        Returns the directory containing all models/ensembles/etc based on
-        the target type. Initializes root if necessary.
+        Returns path to directory containing all models (models/, ensembles/, etc.).
 
         Returns:
-            Path: Path to models directory (e.g., /path/to/models or /path/to/ensembles)
+            Models base directory path
 
         Example:
             >>> models_dir = ModelPathManager.get_models()
             >>> print(models_dir)
-            PosixPath('/Users/user/views-platform/models')
-            >>>
-            >>> # For ensemble
-            >>> ensemble_dir = EnsemblePathManager.get_models()
-            >>> print(ensemble_dir)
-            PosixPath('/Users/user/views-platform/ensembles')
-
-        See Also:
-            - :meth:`get_root`: Root directory access
-            - :attr:`_target`: Determines subdirectory name
+            PosixPath('/path/to/views-platform/models')
         """
         if cls._root is None:
             cls._initialize_class_paths()
@@ -215,37 +168,18 @@ class ModelPathManager:
     @classmethod
     def check_if_model_dir_exists(cls, model_name: str) -> bool:
         """
-        Check if a model directory exists.
-
-        Verifies whether the directory for a given model name exists in the
-        models directory. Useful for validation before creating ModelPathManager
-        instances or for checking if models need to be created.
+        Check if model directory exists.
 
         Args:
-            model_name (str): Name of the model to check
-                Should follow 'adjective_noun' format
+            model_name: Name of model to check
 
         Returns:
-            bool: True if model directory exists, False otherwise
+            True if model directory exists, False otherwise
 
         Example:
-            >>> # Check before creating model
-            >>> if not ModelPathManager.check_if_model_dir_exists("purple_alien"):
-            ...     print("Model needs to be created")
-            >>>
-            >>> # Validate model name
-            >>> exists = ModelPathManager.check_if_model_dir_exists("invalid-name")
-            >>> print(exists)  # False
-
-        Performance:
-            O(1) filesystem check
-
-        Thread Safety:
-            Safe for concurrent reads
-
-        See Also:
-            - :meth:`validate_model_name`: Name format validation
-            - :meth:`_process_model_name`: Name processing logic
+            >>> exists = ModelPathManager.check_if_model_dir_exists("purple_alien")
+            >>> print(exists)
+            True
         """
         model_dir = cls.get_models() / model_name
         return model_dir.exists()
@@ -253,117 +187,54 @@ class ModelPathManager:
     @staticmethod
     def generate_hash(model_name: str, validate: bool, target: str) -> str:
         """
-        Generate a unique hash identifier for a ModelPathManager instance.
-
-        Creates a SHA-256 hash based on model name, validation flag, and target type.
-        Used for instance tracking and caching to prevent duplicate instances with
-        identical configurations.
+        Generate unique hash for ModelPathManager instance.
 
         Args:
-            model_name (str): Name of the model
-            validate (bool): Whether validation is enabled
-            target (str): Target type (model, ensemble, etc.)
+            model_name: The model name
+            validate: Whether to validate paths
+            target: Target type ('model', 'ensemble', etc.)
 
         Returns:
-            str: SHA-256 hash hexdigest (64 characters)
+            SHA-256 hash string
 
         Example:
-            >>> hash1 = ModelPathManager.generate_hash("purple_alien", True, "model")
-            >>> hash2 = ModelPathManager.generate_hash("purple_alien", True, "model")
-            >>> hash1 == hash2
-            True
-            >>>
-            >>> hash3 = ModelPathManager.generate_hash("purple_alien", False, "model")
-            >>> hash1 == hash3
-            False
-
-        Implementation Notes:
-            - Uses SHA-256 for cryptographic-quality hashing
-            - Hash is deterministic for same inputs
-            - Used internally for instance deduplication
-
-        Thread Safety:
-            Thread-safe (pure function)
-
-        Performance:
-            O(1) - constant time hashing
-
-        See Also:
-            - :attr:`_instance_hash`: Instance-level hash storage
+            >>> hash_val = ModelPathManager.generate_hash("purple_alien", True, "model")
+            >>> print(len(hash_val))
+            64
         """
         return hashlib.sha256(str((model_name, validate, target)).encode()).hexdigest()
 
     @staticmethod
     def get_model_name_from_path(path: Union[Path, str]) -> str:
         """
-        Extract model or ensemble name from a file path.
+        Extract model name from file path.
 
-        Parses a path containing 'models', 'ensembles', 'preprocessors', etc.,
-        and extracts the name of the specific component. Validates that the
-        path contains exactly one valid parent directory and that the extracted
-        name follows naming conventions.
-
-        Algorithm:
-            1. Convert input to Path object
-            2. Check for exactly one valid parent directory
-            3. Find index of parent directory in path parts
-            4. Extract name from next path component
-            5. Validate name format
+        Finds model name by locating 'models' or 'ensembles' in path
+        and extracting the following directory name.
 
         Args:
-            path (Union[Path, str]): Path to analyze
-                Typically from Path(__file__) in model scripts
+            path: Path to analyze (typically from Path(__file__))
 
         Returns:
-            str: Validated model/ensemble name if found, None otherwise
-
-        Valid Parent Directories:
-            - models
-            - ensembles
-            - preprocessors
-            - postprocessors
-            - extractors
-            - apis
+            Validated model name if found, None otherwise
 
         Example:
-            >>> path = Path("project/models/purple_alien/main.py")
-            >>> name = ModelPathManager.get_model_name_from_path(path)
+            >>> name = ModelPathManager.get_model_name_from_path(
+            ...     "project/models/purple_alien/script.py"
+            ... )
             >>> print(name)
             'purple_alien'
-            >>>
-            >>> # Invalid: multiple parent dirs
-            >>> path = Path("project/models/ensembles/test/main.py")
-            >>> name = ModelPathManager.get_model_name_from_path(path)
-            >>> print(name)
-            None
-            >>>
-            >>> # Invalid: no parent dir
-            >>> path = Path("project/test/main.py")
-            >>> name = ModelPathManager.get_model_name_from_path(path)
-            >>> print(name)
-            None
 
-        Notes:
-            - Returns None rather than raising exceptions
-            - Logs debug messages for troubleshooting
-            - Case-sensitive parent directory matching
-            - Validates extracted name format
-
-        See Also:
-            - :meth:`validate_model_name`: Name validation logic
-            - :meth:`_process_model_name`: Uses this method for path inputs
+        Note:
+            - Path must contain exactly one of: models, ensembles, preprocessors
+            - Model name must follow adjective_noun format
         """
         path = Path(path)
         logger.debug(f"Extracting model name from path: {path}")
 
-        valid_parents = {
-            "models",
-            "ensembles",
-            "preprocessors",
-            "postprocessors",
-            "extractors",
-            "apis",
-        }
+        # Define valid parent directories and check for exactly one occurrence
+
+        valid_parents = {"models", "ensembles", "preprocessors", "postprocessors", "extractors", "apis"}
 
         found_parents = [parent for parent in valid_parents if parent in path.parts]
 
@@ -376,6 +247,7 @@ class ModelPathManager:
         parent_dir = found_parents[0]
         parent_idx = path.parts.index(parent_dir)
 
+        # Check if there's a subdirectory after the parent directory
         if parent_idx + 1 >= len(path.parts):
             logger.debug(
                 f"No name found after '{parent_dir}' directory in path: {path}"
@@ -384,6 +256,7 @@ class ModelPathManager:
 
         model_name = path.parts[parent_idx + 1]
 
+        # Validate and return the extracted name
         if ModelPathManager.validate_model_name(model_name):
             logger.debug(
                 f"Valid {parent_dir[:-1]} name '{model_name}' found in path: {path}"
@@ -398,217 +271,113 @@ class ModelPathManager:
     @staticmethod
     def validate_model_name(name: str) -> bool:
         """
-        Validate model name follows lowercase 'adjective_noun' format.
+        Validate model name follows adjective_noun format.
 
-        Checks that the model name matches the required naming convention:
-        - All lowercase letters
-        - Two words separated by underscore
-        - No numbers or special characters
-
-        Pattern: ^[a-z]+_[a-z]+$
+        Checks if name matches lowercase "adjective_noun" pattern.
 
         Args:
-            name (str): Model name to validate
+            name: Model name to validate
 
         Returns:
-            bool: True if name is valid, False otherwise
-
-        Valid Examples:
-            - purple_alien ✓
-            - happy_cat ✓
-            - lazy_dog ✓
-
-        Invalid Examples:
-            - PurpleAlien ✗ (uppercase)
-            - purple_alien_v2 ✗ (three parts)
-            - purple-alien ✗ (hyphen instead of underscore)
-            - purple_123 ✗ (contains numbers)
-            - purplealien ✗ (no underscore)
+            True if valid, False otherwise
 
         Example:
             >>> ModelPathManager.validate_model_name("purple_alien")
             True
             >>> ModelPathManager.validate_model_name("PurpleAlien")
             False
-            >>> ModelPathManager.validate_model_name("purple_alien_v2")
+            >>> ModelPathManager.validate_model_name("purple")
             False
-
-        Notes:
-            - Basic format check only
-            - Does not verify actual adjective/noun validity
-            - Case-sensitive (must be lowercase)
-
-        Performance:
-            O(n) where n is length of name (regex matching)
-
-        Thread Safety:
-            Thread-safe (stateless function)
-
-        See Also:
-            - :meth:`_process_model_name`: Uses this for validation
-            - :meth:`get_model_name_from_path`: Calls this after extraction
         """
+        # Define a basic regex pattern for a noun_adjective format
         pattern = r"^[a-z]+_[a-z]+$"
+        # Check if the name matches the pattern
         if re.match(pattern, name):
+            # You might want to add further checks for actual noun and adjective validation
+            # For now, this regex checks for two words separated by an underscore
             return True
         return False
 
     @staticmethod
     def find_project_root(current_path: Path = None, marker=".gitignore") -> Path:
         """
-        Find the project root directory by searching for a marker file.
+        Find project root by searching for marker file.
 
-        Searches upward through the directory hierarchy starting from current_path
-        until it finds a directory containing the marker file (default: .gitignore).
-        This ensures all models use consistent absolute paths regardless of where
-        scripts are executed from.
-
-        Algorithm:
-            1. Start from current_path (or pyprojroot.here() if None)
-            2. Check if marker exists in current directory
-            3. If found, return current directory as root
-            4. If not found, move up one directory level
-            5. Repeat until marker found or filesystem root reached
+        Searches up directory tree for marker file (default: .gitignore).
 
         Args:
-            current_path (Path, optional): Starting directory for search.
-                If None, uses pyprojroot.here(). Defaults to None.
-            marker (str, optional): Marker file/directory name.
-                Defaults to ".gitignore".
+            current_path: Starting path for search.
+                If None, uses pyprojroot.here()
+            marker: Marker file name indicating project root
 
         Returns:
-            Path: Absolute path to project root directory
+            Project root directory path
 
         Raises:
-            FileNotFoundError: If marker not found in any parent directory
+            FileNotFoundError: If marker not found up to root directory
 
         Example:
-            >>> # From anywhere in project
             >>> root = ModelPathManager.find_project_root()
             >>> print(root)
-            PosixPath('/Users/user/views-platform')
-            >>>
-            >>> # Custom marker
-            >>> root = ModelPathManager.find_project_root(marker='.git')
-            >>>
-            >>> # Explicit starting path
-            >>> root = ModelPathManager.find_project_root(
-            ...     current_path=Path('/some/nested/path')
-            ... )
-
-        Performance:
-            O(d) where d is depth from current path to root
-            Typically completes in <10 iterations
-
-        Thread Safety:
-            Thread-safe (read-only filesystem operations)
-
-        Notes:
-            - Resolves to absolute path
-            - Stops at filesystem root to prevent infinite loops
-            - Marker file must exist (not just match pattern)
-
-        See Also:
-            - :meth:`_initialize_class_paths`: Primary caller
-            - :meth:`get_root`: Public interface for accessing root
+            PosixPath('/path/to/views-platform')
         """
         if current_path is None:
             current_path = Path(pyprojroot.here())
             if (current_path / marker).exists():
                 return current_path
+        # Start from the current directory and move up the hierarchy
         try:
             current_path = Path(current_path).resolve().parent
-            while current_path != current_path.parent:
+            while (
+                current_path != current_path.parent
+            ):  # Loop until we reach the root directory
                 if (current_path / marker).exists():
                     return current_path
                 current_path = current_path.parent
+                # print("CURRENT PATH ", current_path)
         except Exception as e:
+            # logger.error(f"Error finding project root: {e}")
             raise FileNotFoundError(
                 f"{marker} not found in the directory hierarchy. Unable to find project root. {current_path}"
             )
 
     def __init__(self, model_path: Union[str, Path], validate: bool = True) -> None:
         """
-        Initialize a ModelPathManager instance for a specific model.
+        Initialize ModelPathManager instance.
 
-        Sets up path management for a model by processing the model name/path,
-        validating directory structure, and initializing all required paths for
-        artifacts, configurations, data, and scripts.
-
-        Initialization Process:
-            1. Increment instance counter
-            2. Process and validate model name
-            3. Generate instance hash
-            4. Initialize class-level paths (if needed)
-            5. Create directory structure
-            6. Discover and validate scripts
-            7. Set up logging
+        Sets up all model paths and validates directory structure if requested.
 
         Args:
-            model_path (Union[str, Path]): Model name or path
-                - If str matching 'adjective_noun': treated as model name
-                - If Path or str with '/': extracts model name from path
-            validate (bool, optional): Whether to validate paths exist.
-                Set to False when creating new models. Defaults to True.
+            model_path: Model name or path
+                Can be "purple_alien" or Path("models/purple_alien/main.py")
+            validate: Whether to validate paths exist.
+                Set False when creating new models
 
         Raises:
-            ValueError: If model name is invalid format
-            FileNotFoundError: If model directory doesn't exist (when validate=True)
-
-        Side Effects:
-            - Increments class instance counter
-            - May initialize class-level paths
-            - Sets up logging for model
-            - Validates directory structure (if validate=True)
+            ValueError: If model name is invalid
+            FileNotFoundError: If model directory doesn't exist (validate=True)
 
         Example:
-            >>> # Initialize for existing model
-            >>> model_path = ModelPathManager("purple_alien")
-            >>> print(model_path.artifacts)
-            PosixPath('/path/to/models/purple_alien/artifacts')
+            >>> # Existing model with validation
+            >>> manager = ModelPathManager("purple_alien")
             >>>
-            >>> # Initialize from file path
-            >>> model_path = ModelPathManager(Path(__file__))
-            >>> print(model_path.model_name)
-            'purple_alien'
+            >>> # New model without validation
+            >>> manager = ModelPathManager("new_model", validate=False)
             >>>
-            >>> # Initialize without validation (for new models)
-            >>> model_path = ModelPathManager("new_model", validate=False)
-            >>> print(model_path.model_dir.exists())
-            False
-
-        Attributes Initialized:
-            - model_name: Validated model name
-            - model_dir: Model root directory
-            - artifacts: Artifacts directory
-            - configs: Configuration directory
-            - data: Data directory
-            - data_raw: Raw data directory
-            - data_processed: Processed data directory
-            - data_generated: Generated data directory
-            - reports: Reports directory
-            - notebooks: Notebooks directory
-            - logging: Logging directory
-            - scripts: List of required script paths
-
-        Notes:
-            - Automatically discovers project root
-            - Creates directory structure if validate=False
-            - Logs debug information about initialization
-            - Thread-safe for different model names
-
-        See Also:
-            - :meth:`_process_model_name`: Name/path processing
-            - :meth:`_initialize_directories`: Directory setup
-            - :meth:`_initialize_scripts`: Script discovery
+            >>> # From path
+            >>> manager = ModelPathManager(Path(__file__))
         """
+
+        # Configs
         self.__class__.__instances__ += 1
 
         self._validate = validate
         self.target = self.__class__._target
 
+        # Common paths
         self.root = self.__class__.get_root()
         self.models = self.__class__.get_models()
+        # Ignore attributes while processing
         self._ignore_attributes = [
             "model_name",
             "model_dir",
@@ -636,59 +405,28 @@ class ModelPathManager:
 
     def _process_model_name(self, model_path: Union[str, Path]) -> str:
         """
-        Process input and return validated model name.
+        Process input and return valid model name.
 
-        Determines whether input is a path or model name, extracts/validates
-        the name accordingly, and returns the validated model name. Fails
-        violently with clear error messages if validation fails.
-
-        Processing Logic:
-            1. Check if input appears to be a path
-            2. If path: extract model name from path structure
-            3. If name: validate format
-            4. Return validated name or raise ValueError
+        Extracts model name from path or validates name string.
 
         Internal Use:
-            Called by __init__ to process the model_path parameter.
+            Called by __init__ to process model_path argument.
 
         Args:
-            model_path (Union[str, Path]): Model name or path to process
+            model_path: Model name or path
 
         Returns:
-            str: Validated model name in 'adjective_noun' format
+            Validated model name
 
         Raises:
-            ValueError: If:
-                - Model name format is invalid
-                - Path doesn't contain valid model name
-                - Name extraction from path fails
+            ValueError: If model name is invalid
 
         Example:
-            >>> # Process model name
-            >>> name = self._process_model_name("purple_alien")
+            >>> name = self._process_model_name("models/purple_alien")
             >>> print(name)
             'purple_alien'
-            >>>
-            >>> # Process path
-            >>> name = self._process_model_name("models/purple_alien/main.py")
-            >>> print(name)
-            'purple_alien'
-            >>>
-            >>> # Invalid name
-            >>> name = self._process_model_name("PurpleAlien")
-            ValueError: Invalid model name...
-
-        Implementation Notes:
-            - Uses _is_path() to detect path vs name
-            - Uses get_model_name_from_path() for path extraction
-            - Uses validate_model_name() for format validation
-            - Logs debug information at each step
-
-        See Also:
-            - :meth:`_is_path`: Path detection logic
-            - :meth:`get_model_name_from_path`: Path extraction
-            - :meth:`validate_model_name`: Format validation
         """
+        # Should fail as violently as possible if the model name is invalid.
         if self._is_path(model_path, validate=self._validate):
             logger.debug(f"Path input detected: {model_path}")
             try:
@@ -713,485 +451,483 @@ class ModelPathManager:
             logger.debug(f"{self.target.title()} name detected: {model_path}")
             return model_path
 
-    def _is_path(self, model_path: Union[str, Path], validate: bool) -> bool:
-        """
-        Determine if input is a file path or model name.
-
-        Checks whether the input string/Path contains path separators or
-        represents an existing file. Used to distinguish between model names
-        (e.g., "purple_alien") and file paths (e.g., "models/purple_alien/main.py").
-
-        Detection Logic:
-            Returns True if ANY of:
-            1. Input contains path separator ('/')
-            2. Input exists as a file (when validate=True)
-            3. Input is a Path object
-
-        Internal Use:
-            Called by _process_model_name() to determine processing strategy.
-
-        Args:
-            model_path (Union[str, Path]): Input to analyze
-            validate (bool): Whether to check file existence
-
-        Returns:
-            bool: True if input appears to be a path, False if model name
-
-        Example:
-            >>> self._is_path("purple_alien", validate=True)
-            False
-            >>>
-            >>> self._is_path("models/purple_alien/main.py", validate=True)
-            True
-            >>>
-            >>> self._is_path(Path("models/purple_alien"), validate=True)
-            True
-            >>>
-            >>> # String with separator is treated as path even if doesn't exist
-            >>> self._is_path("some/path", validate=False)
-            True
-
-        Implementation Notes:
-            - Uses os.sep for cross-platform compatibility
-            - Path existence check only when validate=True
-            - Treats Path objects as paths regardless of existence
-
-        Performance:
-            O(1) - simple boolean checks
-
-        Thread Safety:
-            Thread-safe (read-only operations)
-
-        See Also:
-            - :meth:`_process_model_name`: Primary caller
-            - :meth:`get_model_name_from_path`: Path extraction logic
-        """
-        return (
-            os.sep in str(model_path)
-            or (validate and Path(model_path).exists())
-            or isinstance(model_path, Path)
-        )
-
     def _initialize_directories(self) -> None:
         """
-        Initialize all model directory paths.
+        Initialize model directories.
 
-        Sets up the complete directory structure for the model including
-        artifacts, configurations, data subdirectories, reports, notebooks,
-        and logging. Creates Path objects for all standard model directories.
-
-        Directory Structure Created:
-            model_name/
-            ├── artifacts/           # Model checkpoints and saved models
-            ├── configs/             # Configuration YAML files
-            ├── data/
-            │   ├── raw/            # Raw input data
-            │   ├── processed/      # Preprocessed data
-            │   └── generated/      # Model predictions and outputs
-            ├── reports/            # Evaluation and forecast reports
-            ├── notebooks/          # Jupyter notebooks for analysis
-            └── logs/               # Execution logs
+        Creates and sets up directory structure for model artifacts,
+        configs, data, reports, etc.
 
         Internal Use:
-            Called by __init__ during instance initialization.
-
-        Side Effects:
-            Creates instance attributes for each directory path:
-            - self.model_dir: Root model directory
-            - self.artifacts: Artifacts directory
-            - self.configs: Configurations directory
-            - self.data: Data root directory
-            - self.data_raw: Raw data directory
-            - self.data_processed: Processed data directory
-            - self.data_generated: Generated data directory
-            - self.reports: Reports directory
-            - self.notebooks: Notebooks directory
-            - self.logging: Logging directory
-            - self.queryset_path: Path to queryset config file
-
-        Validation:
-            If self._validate is True:
-            - Checks that model_dir exists
-            - Raises FileNotFoundError if not found
-
-        Example:
-            >>> # Called internally during initialization
-            >>> model_path = ModelPathManager("purple_alien")
-            >>> # All directory paths are now available
-            >>> print(model_path.artifacts)
-            PosixPath('/path/to/models/purple_alien/artifacts')
-
-        Implementation Notes:
-            - Uses pathlib.Path for cross-platform compatibility
-            - Does not create directories (only defines paths)
-            - Queryset path points to specific config file
-            - All paths are absolute
-
-        Raises:
-            FileNotFoundError: If model directory doesn't exist and validate=True
-
-        See Also:
-            - :meth:`__init__`: Calls this during initialization
-            - :meth:`_validate_directories`: Directory validation logic
+            Called by __init__ during initialization.
         """
-        self.model_dir = self.models / self.model_name
-        if self._validate and not self.model_dir.exists():
-            raise FileNotFoundError(
-                f"{self.target.title()} directory not found: {self.model_dir}"
-            )
-
-        self.artifacts = self.model_dir / "artifacts"
-        self.configs = self.model_dir / "configs"
-        self.data = self.model_dir / "data"
-        self.data_raw = self.data / "raw"
-        self.data_processed = self.data / "processed"
-        self.data_generated = self.data / "generated"
-        self.reports = self.model_dir / "reports"
-        self.notebooks = self.model_dir / "notebooks"
+        self.model_dir = self._get_model_dir()
         self.logging = self.model_dir / "logs"
-        self.queryset_path = self.configs / "config_queryset.py"
+        self.artifacts = self._build_absolute_directory(Path("artifacts"))
+        self.configs = self._build_absolute_directory(Path("configs"))
+        self.data = self._build_absolute_directory(Path("data"))
+        self.data_generated = self._build_absolute_directory(Path("data/generated"))
+        self.data_processed = self._build_absolute_directory(Path("data/processed"))
+        self.reports = self._build_absolute_directory(Path("reports"))
+        self._queryset = None
+        # Initialize model-specific directories only if the class is ModelPathManager
+        if self.__class__.__name__ == "ModelPathManager":
+            self._initialize_model_specific_directories()
+
+    def _initialize_model_specific_directories(self) -> None:
+        """
+        Initialize model-specific directories.
+
+        Sets up directories unique to models (not ensembles/preprocessors).
+
+        Internal Use:
+            Called by _initialize_directories for model instances.
+        """
+        self.data_raw = self._build_absolute_directory(Path("data/raw"))
+        self.notebooks = self._build_absolute_directory(Path("notebooks"))
 
     def _initialize_scripts(self) -> None:
         """
-        Initialize and validate required script paths.
+        Initialize model scripts paths.
 
-        Discovers and validates the existence of required execution scripts
-        for the model. Sets up sys.path to allow imports from model directory
-        and creates a list of required script paths.
-
-        Required Scripts:
-            - main.py: Primary execution script
-            - (Additional scripts based on model type)
+        Sets up paths to required scripts (configs, main.py, README, etc.).
 
         Internal Use:
-            Called by __init__ during instance initialization.
-
-        Side Effects:
-            - Sets self.scripts: List of Path objects to required scripts
-            - Adds model_dir to sys.path for imports
-            - Logs debug information about discovered scripts
-
-        Validation:
-            If self._validate is True:
-            - Checks that each required script exists
-            - Raises FileNotFoundError if scripts are missing
-
-        Example:
-            >>> # Called internally during initialization
-            >>> model_path = ModelPathManager("purple_alien")
-            >>> print(model_path.scripts)
-            [PosixPath('.../models/purple_alien/main.py')]
-
-        Implementation Notes:
-            - Only validates main.py by default
-            - Subclasses can extend to require additional scripts
-            - sys.path modification allows: from configs import ...
-
-        Raises:
-            FileNotFoundError: If required scripts not found and validate=True
-
-        See Also:
-            - :meth:`__init__`: Calls this during initialization
-            - :meth:`_initialize_directories`: Directory setup
+            Called by __init__ during initialization.
         """
-        self.scripts = [self.model_dir / "main.py"]
+        self.scripts = [
+            self._build_absolute_directory(Path("configs/config_deployment.py")),
+            self._build_absolute_directory(Path("configs/config_hyperparameters.py")),
+            self._build_absolute_directory(Path("configs/config_meta.py")),
+            self._build_absolute_directory(Path("configs/config_partitions.py")),
+            self._build_absolute_directory(Path("main.py")),
+            self._build_absolute_directory(Path("README.md")),
+        ]
+        # Initialize model-specific directories only if the class is ModelPathManager
+        if self.__class__.__name__ == "ModelPathManager":
+            self._initialize_model_specific_scripts()
 
-        if self._validate:
-            for script in self.scripts:
-                if not script.exists():
-                    raise FileNotFoundError(f"Script not found: {script}")
-
-        if str(self.model_dir) not in sys.path:
-            sys.path.insert(0, str(self.model_dir))
-            logger.debug(f"Added {self.model_dir} to sys.path")
-
-    def get_queryset(self) -> Optional[Dict]:
+    def _initialize_model_specific_scripts(self) -> None:
         """
-        Load and return the queryset configuration.
+        Initialize model-specific script paths.
 
-        Attempts to load the queryset configuration from config_queryset.py,
-        which defines data filtering and selection criteria. Caches the result
-        to avoid repeated file I/O.
+        Sets up paths to scripts unique to models (queryset, sweep configs).
 
-        Pipeline Stage:
-            data_fetch
-
-        Queryset Configuration:
-            Defines SQL-like filters for data retrieval:
-            - theme: Data theme (conflict, mortality, etc.)
-            - timespan: Time range for data
-            - spatial_coverage: Geographic scope
-            - filters: Additional WHERE-clause filters
-
-        Returns:
-            Optional[Dict]: Queryset configuration dictionary if file exists:
-                {
-                    "theme": str,
-                    "timespan": Tuple[int, int],
-                    "spatial_coverage": str,
-                    "filters": List[str],
-                    ...
-                }
-                None if queryset file doesn't exist
-
-        Side Effects:
-            - Caches queryset in self._queryset
-            - Logs warning if queryset file not found
-            - Imports config_queryset module (adds to sys.modules)
-
-        Example:
-            >>> model_path = ModelPathManager("purple_alien")
-            >>> queryset = model_path.get_queryset()
-            >>> if queryset:
-            ...     print(f"Theme: {queryset['theme']}")
-            ...     print(f"Timespan: {queryset['timespan']}")
-            Theme: conflict
-            Timespan: (121, 504)
-
-        Caching:
-            First call: Loads from file
-            Subsequent calls: Returns cached value
-            Cache invalidation: Not supported (create new instance)
-
-        Performance:
-            - First call: O(n) where n is file size
-            - Cached calls: O(1)
-
-        Thread Safety:
-            Not thread-safe on first call (module import)
-            Thread-safe for cached calls
-
-        Notes:
-            - Queryset file is optional
-            - Returns None rather than raising if file missing
-            - Cached value persists for instance lifetime
-
-        See Also:
-            - :attr:`queryset_path`: Path to queryset file
-            - :class:`ViewsDataset`: Uses queryset for data loading
+        Internal Use:
+            Called by _initialize_scripts for model instances.
         """
-        if not hasattr(self, "_queryset"):
-            if self.queryset_path.exists():
-                try:
-                    spec = importlib.util.spec_from_file_location(
-                        "config_queryset", self.queryset_path
-                    )
-                    config_queryset = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(config_queryset)
-                    self._queryset = config_queryset.queryset
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to load queryset from {self.queryset_path}: {e}"
-                    )
-                    self._queryset = None
-            else:
-                logger.debug(
-                    f"Queryset file not found at {self.queryset_path}. Skipping queryset loading."
-                )
-                self._queryset = None
-        return self._queryset
+        self.queryset_path = self._build_absolute_directory(
+            Path("configs/config_queryset.py")
+        )
+        self.scripts += [
+            self.queryset_path,
+            self._build_absolute_directory(Path("configs/config_sweep.py")),
+        ]
 
-    def get_latest_model_artifact_path(
-        self, run_type: str, file_extension: str = ".pt"
-    ) -> Path:
+    @staticmethod
+    def _is_path(path_input: Union[str, Path], validate: bool = True) -> bool:
         """
-        Get the path to the most recent model artifact for a run type.
+        Check if input is a valid path.
 
-        Searches the artifacts directory for the latest model file matching
-        the run type and file extension. Used to load trained models for
-        evaluation and forecasting.
-
-        File Naming Convention:
-            {run_type}_model_{timestamp}{file_extension}
-            Example: calibration_model_20241104_143022.pt
+        Determines if input is a path (vs simple string name).
 
         Args:
-            run_type (str): Type of run to search for
-                Valid values: "calibration" | "validation" | "forecasting"
-            file_extension (str, optional): Model file extension
-                Defaults to ".pt" (PyTorch)
-                Common values: .pt, .pkl, .h5, .joblib
+            path_input: Input to check
+            validate: Whether to check if path exists
 
         Returns:
-            Path: Absolute path to most recent model artifact
-
-        Raises:
-            FileNotFoundError: If no matching artifacts found
-            ValueError: If run_type is invalid
-
-        Search Logic:
-            1. List all files in artifacts directory
-            2. Filter by run_type prefix and file extension
-            3. Extract timestamps from filenames
-            4. Sort by timestamp (descending)
-            5. Return path to most recent
+            True if input is a valid path, False otherwise
 
         Example:
-            >>> model_path = ModelPathManager("purple_alien")
-            >>> artifact = model_path.get_latest_model_artifact_path(
-            ...     run_type="calibration",
-            ...     file_extension=".pt"
-            ... )
-            >>> print(artifact)
-            PosixPath('.../artifacts/calibration_model_20241104_143022.pt')
-            >>>
-            >>> # For different file types
-            >>> artifact = model_path.get_latest_model_artifact_path(
-            ...     run_type="calibration",
-            ...     file_extension=".h5"
-            ... )
-
-        Performance:
-            O(n log n) where n = number of artifacts
-            Typical: <100ms for directories with <1000 files
-
-        Thread Safety:
-            Safe for concurrent reads
-            Not safe during concurrent artifact creation
-
-        Notes:
-            - Timestamp format: YYYYmmdd_HHMMSS
-            - Case-sensitive run_type matching
-            - Returns absolute path
-            - Does not validate model integrity
-
-        See Also:
-            - :func:`generate_model_file_name`: Filename generation
-            - :meth:`_evaluate_model_artifact`: Uses this to load models
-            - :meth:`_forecast_model_artifact`: Uses this to load models
+            >>> ModelPathManager._is_path("models/purple_alien/main.py")
+            True
+            >>> ModelPathManager._is_path("purple_alien")
+            False
         """
-        pattern = f"{run_type}_model_*{file_extension}"
-        matching_files = list(self.artifacts.glob(pattern))
+        try:
+            path_input = Path(path_input) if isinstance(path_input, str) else path_input
+            if validate:
+                return path_input.exists() and len(path_input.parts) > 1
+            else:
+                return len(path_input.parts) > 1
+            # return path_input.exists() and len(path_input.parts) > 1
+        except Exception as e:
+            logger.error(f"Error checking if input is a path: {e}")
+            return False
 
-        if not matching_files:
-            raise FileNotFoundError(
-                f"No model artifacts found matching pattern: {pattern}"
-            )
+    def _get_artifact_files(self, run_type: str) -> List[Path]:
+        """
+        Get artifact files for given run type.
 
-        latest_file = max(
-            matching_files, key=lambda p: p.stem.split("_")[-2] + p.stem.split("_")[-1]
-        )
+        Retrieves model artifacts matching run type and common extensions.
 
-        return latest_file
+        Internal Use:
+            Called by get_latest_model_artifact_path.
+
+        Args:
+            run_type: Run type ('calibration', 'validation', 'forecasting')
+
+        Returns:
+            List of matching artifact file paths
+
+        Example:
+            >>> files = self._get_artifact_files('calibration')
+            >>> print(files[0])
+            PosixPath('.../calibration_model_20241105_143022.pt')
+        """
+        common_extensions = [
+            ".pt",
+            ".pth",
+            ".h5",
+            ".hdf5",
+            ".pkl",
+            ".json",
+            ".bst",
+            ".txt",
+            ".bin",
+            ".cbm",
+            ".onnx",
+        ]
+        artifact_files = [
+            f
+            for f in self.artifacts.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"{run_type}_model_")
+            and f.suffix in common_extensions
+        ]
+        return artifact_files
+
+    def _get_raw_data_file_paths(self, run_type: str) -> List[Path]:
+        """
+        Get raw data file paths for run type.
+
+        Retrieves viewser dataframes for specified run type.
+
+        Internal Use:
+            Used by data loading methods.
+
+        Args:
+            run_type: Run type
+
+        Returns:
+            Sorted list of raw data file paths (newest first)
+        """
+        paths = [
+            f
+            for f in self.data_raw.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"{run_type}_viewser_df")
+            and f.suffix == PipelineConfig().dataframe_format
+        ]
+        return sorted(paths, reverse=True)
 
     def _get_generated_predictions_data_file_paths(self, run_type: str) -> List[Path]:
         """
-        Get all generated prediction file paths for a run type.
+        Get generated prediction file paths for run type.
 
-        Searches the data/generated directory for all prediction files
-        matching the run type. Returns sorted list of paths (newest first).
-        Used to load existing predictions for analysis or reconciliation.
-
-        File Naming Convention:
-            predictions_{run_type}_{timestamp}_{sequence}.parquet
-            Example: predictions_calibration_20241104_143022_00.parquet
+        Retrieves prediction files for specified run type.
 
         Internal Use:
-            Used by ensemble and reconciliation managers to load predictions.
+            Used by evaluation and forecasting methods.
 
         Args:
-            run_type (str): Type of run to search for
-                Valid values: "calibration" | "validation" | "forecasting"
+            run_type: Run type
 
         Returns:
-            List[Path]: Sorted list of prediction file paths (newest first)
-                Empty list if no predictions found
-
-        Example:
-            >>> model_path = ModelPathManager("purple_alien")
-            >>> pred_files = model_path._get_generated_predictions_data_file_paths(
-            ...     run_type="calibration"
-            ... )
-            >>> for path in pred_files:
-            ...     print(path.name)
-            predictions_calibration_20241104_143022_00.parquet
-            predictions_calibration_20241104_143022_01.parquet
-            predictions_calibration_20241104_120000_00.parquet
-
-        Performance:
-            O(n log n) where n = number of prediction files
-            Typical: <50ms for directories with <100 files
-
-        Thread Safety:
-            Safe for concurrent reads
-            Not safe during concurrent file creation/deletion
-
-        Notes:
-            - Returns empty list rather than raising
-            - Sorted by timestamp and sequence number
-            - Uses PipelineConfig.dataframe_format (.parquet by default)
-            - Returns absolute paths
-
-        See Also:
-            - :func:`generate_output_file_name`: Filename generation
-            - :class:`ReconciliationModule`: Uses this to load predictions
-            - :class:`EnsembleManager`: Uses this for aggregation
+            Sorted list of prediction file paths (newest first)
         """
-        pattern = f"predictions_{run_type}_*{PipelineConfig.dataframe_format}"
-        matching_files = list(self.data_generated.glob(pattern))
+        paths = [
+            f
+            for f in self.data_generated.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"predictions_{run_type}")
+            and f.suffix == PipelineConfig().dataframe_format
+        ]
+        return sorted(paths, reverse=True)
 
-        if not matching_files:
-            return []
-
-        sorted_files = sorted(
-            matching_files,
-            key=lambda p: (p.stem.split("_")[-2], p.stem.split("_")[-1]),
-            reverse=True,
-        )
-
-        return sorted_files
-
-    def __repr__(self) -> str:
+    def _get_eval_file_paths(self, run_type: str, conflict_type: str) -> List[Path]:
         """
-        Return string representation of ModelPathManager.
+        Get evaluation file paths for run type and conflict type.
 
-        Provides detailed view of all initialized paths for debugging
-        and logging purposes.
+        Internal Use:
+            Used by evaluation reporting methods.
+
+        Args:
+            run_type: Run type
+            conflict_type: Conflict type ('sb', 'os', 'ns')
 
         Returns:
-            str: Multi-line representation showing all paths
+            Sorted list of evaluation file paths (newest first)
+        """
+        paths = [
+            f
+            for f in self.data_generated.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"eval_{run_type}_{conflict_type}")
+            and f.suffix == PipelineConfig().dataframe_format
+        ]
+        return sorted(paths, reverse=True)
+
+    def get_latest_model_artifact_path(self, run_type: str) -> Path:
+        """
+        Get path to latest model artifact for run type.
+
+        Finds most recent model artifact based on timestamp in filename.
+
+        Args:
+            run_type: Run type ('calibration', 'validation', 'forecasting')
+
+        Returns:
+            Path to latest model artifact
+
+        Raises:
+            FileNotFoundError: If no artifacts found for run type
 
         Example:
-            >>> model_path = ModelPathManager("purple_alien")
-            >>> print(model_path)
-            ModelPathManager(
-                model_name='purple_alien'
-                target='model'
-                root='/Users/user/views-platform'
-                models='/Users/user/views-platform/models'
-                model_dir='/Users/user/views-platform/models/purple_alien'
-                artifacts='/Users/user/views-platform/models/purple_alien/artifacts'
-                ...
+            >>> path = model_path.get_latest_model_artifact_path('calibration')
+            >>> print(path)
+            PosixPath('.../calibration_model_20241105_143022.pt')
+
+        Note:
+            - Artifacts must follow naming: {run_type}_model_{timestamp}.{ext}
+            - Timestamp format: YYYYMMDD_HHMMSS
+        """
+        # List all model files for the given specific run_type with the expected filename pattern
+        model_files = self._get_artifact_files(run_type=run_type)
+
+        if not model_files:
+            raise FileNotFoundError(
+                f"No model artifacts found for run type '{run_type}' in path '{self.artifacts}'"
             )
 
-        Implementation Notes:
-            - Shows all public attributes except those in _ignore_attributes
-            - Formats as multi-line for readability
-            - Useful for logging and debugging
+        # Sort the files based on the timestamp embedded in the filename. With format %Y%m%d_%H%M%S For example, '20210831_123456.pt'
+        model_files.sort(reverse=True)
 
-        See Also:
-            - :meth:`__str__`: Simple string representation
+        # Log the artifact used for debugging purposes
+        logger.info(f"Artifact used: {model_files[0]}")
+
+        return self.artifacts / model_files[0]
+
+    def get_queryset(self) -> Optional[Dict[str, str]]:
         """
-        attrs = []
-        for attr, value in self.__dict__.items():
-            if attr not in self._ignore_attributes and not attr.startswith("_"):
-                attrs.append(f"{attr}='{value}'")
+        Get queryset configuration if it exists.
 
-        return f"{self.__class__.__name__}(\n    " + "\n    ".join(attrs) + "\n)"
-
-    def __str__(self) -> str:
-        """
-        Return simple string representation.
+        Imports and executes queryset config module to get query specification.
 
         Returns:
-            str: Class name and model name
+            Queryset dictionary if available, None otherwise
 
         Example:
-            >>> model_path = ModelPathManager("purple_alien")
-            >>> str(model_path)
-            "ModelPathManager for model 'purple_alien'"
+            >>> queryset = model_path.get_queryset()
+            >>> if queryset:
+            ...     print(queryset.keys())
+            dict_keys(['theme', 'table', 'operations'])
+
+        Note:
+            - Returns None if queryset doesn't exist (e.g., ensembles)
+            - Queryset must have generate() method
         """
-        return f"{self.__class__.__name__} for {self.target} '{self.model_name}'"
+
+        if self._validate and self._check_if_dir_exists(self.queryset_path):
+            try:
+                spec = importlib.util.spec_from_file_location(
+                    self.queryset_path.stem, self.queryset_path
+                )
+                self._queryset = importlib.util.module_from_spec(spec)
+                sys.modules[self.queryset_path.stem] = self._queryset
+                spec.loader.exec_module(self._queryset)
+            except Exception as e:
+                logger.error(f"Error importing queryset: {e}")
+                self._queryset = None
+            else:
+                logger.debug(f"Queryset {self.queryset_path} imported successfully.")
+                if hasattr(self._queryset, "generate"):
+                    return self._queryset.generate()
+                # return self._queryset.generate() if self._queryset else None
+                else:
+                    logger.warning(
+                        f"Queryset {self.queryset_path} does not have a `generate` method. Continuing..."
+                    )
+        else:
+            logger.warning(
+                f"Queryset {self.queryset_path} does not exist. Continuing..."
+            )
+        return None
+
+    def _get_model_dir(self) -> Path:
+        """
+        Get model directory path.
+
+        Constructs and validates model directory path.
+
+        Internal Use:
+            Called by _initialize_directories.
+
+        Returns:
+            Model directory path
+
+        Raises:
+            FileNotFoundError: If directory doesn't exist (validate=True)
+        """
+        model_dir = self.models / self.model_name
+        if not self._check_if_dir_exists(model_dir) and self._validate:
+            error = f"{self.target.title()} directory {model_dir} does not exist. Please create it first using `make_new_model.py` or set validate to `False`."
+            logger.error(error, exc_info=True)
+            raise FileNotFoundError(error)
+        return model_dir
+
+    def _check_if_dir_exists(self, directory: Path) -> bool:
+        """
+        Check if directory exists.
+
+        Internal Use:
+            Used by directory initialization methods.
+
+        Args:
+            directory: Directory path to check
+
+        Returns:
+            True if directory exists, False otherwise
+        """
+        return directory.exists()
+
+    def _build_absolute_directory(self, directory: Path) -> Path:
+        """
+        Build absolute directory path from model directory.
+
+        Internal Use:
+            Called during directory initialization.
+
+        Args:
+            directory: Relative directory path
+
+        Returns:
+            Absolute directory path, or None if doesn't exist (validate=True)
+        """
+        directory = self.model_dir / directory
+        if self._validate:
+            if not self._check_if_dir_exists(directory=directory):
+                logger.warning(f"Directory {directory} does not exist. Continuing...")
+                if directory.name.endswith(".py"):
+                    return directory.name
+                return None
+        return directory
+
+    def view_directories(self) -> None:
+        """
+        Print formatted list of directories and paths.
+
+        Displays table of all directory attributes and their absolute paths.
+
+        Example:
+            >>> model_path.view_directories()
+            Name                Path
+            ========================================================================
+            root                /path/to/views-platform
+            models              /path/to/views-platform/models
+            model_dir           /path/to/views-platform/models/purple_alien
+            artifacts           /path/to/views-platform/models/purple_alien/artifacts
+            ...
+        """
+        print("\n{:<20}\t{:<50}".format("Name", "Path"))
+        print("=" * 72)
+        for attr, value in self.__dict__.items():
+            # value = getattr(self, attr)
+            if attr not in self._ignore_attributes and isinstance(value, Path):
+                print("{:<20}\t{:<50}".format(str(attr), str(value)))
+
+    def view_scripts(self) -> None:
+        """
+        Print formatted list of scripts and paths.
+
+        Displays table of all script paths.
+
+        Example:
+            >>> model_path.view_scripts()
+            Script              Path
+            ========================================================================
+            config_deployment.py    /path/.../configs/config_deployment.py
+            main.py                 /path/.../main.py
+            ...
+        """
+        print("\n{:<20}\t{:<50}".format("Script", "Path"))
+        print("=" * 72)
+        for path in self.scripts:
+            if isinstance(path, Path):
+                print("{:<20}\t{:<50}".format(str(path.name), str(path)))
+            else:
+                print("{:<20}\t{:<50}".format(str(path), "None"))
+
+    def get_directories(self) -> Dict[str, Optional[str]]:
+        """
+        Get dictionary of directory names and paths.
+
+        Returns:
+            Dictionary mapping directory names to path strings
+
+        Example:
+            >>> dirs = model_path.get_directories()
+            >>> print(dirs['artifacts'])
+            '/path/to/models/purple_alien/artifacts'
+        """
+        directories = {}
+        relative = False
+        for attr, value in self.__dict__.items():
+
+            if str(attr) not in [
+                "model_name",
+                "root",
+                "scripts",
+                "_validate",
+                "models",
+                "templates",
+                "_sys_paths",
+                "_queryset",
+                "queryset_path",
+                "_ignore_attributes",
+                "target",
+                "_force_cache_overwrite",
+                "initialized",
+                "_instance_hash",
+            ] and isinstance(value, Path):
+                if not relative:
+                    directories[str(attr)] = str(value)
+                else:
+                    if self.model_name in value.parts:
+                        relative_path = value.relative_to(self.model_dir)
+                    else:
+                        relative_path = value
+                    if relative_path == Path("."):
+                        continue
+                    directories[str(attr)] = str(relative_path)
+        return directories
+
+    def get_scripts(self) -> Dict[str, Optional[str]]:
+        """
+        Get dictionary of script names and paths.
+
+        Returns:
+            Dictionary mapping script names to path strings
+
+        Example:
+            >>> scripts = model_path.get_scripts()
+            >>> print(scripts['main.py'])
+            '/path/to/models/purple_alien/main.py'
+        """
+        scripts = {}
+        relative = False
+        for path in self.scripts:
+            if isinstance(path, Path):
+                if relative:
+                    if self.model_dir in path.parents:
+                        scripts[str(path.name)] = str(path.relative_to(self.model_dir))
+                    else:
+                        scripts[str(path.name)] = str(path)
+                else:
+                    scripts[str(path.name)] = str(path)
+            else:
+                scripts[str(path)] = None
+        return scripts
 
 
 # ============================================================ Model Manager ============================================================
@@ -1305,7 +1041,7 @@ class ModelManager:
             - :meth:`execute_single_run`: Main execution method
         """
         self.__class__.__instances__ += 1
-        from views_pipeline_core.managers.log import LoggingModule
+        from views_pipeline_core.modules.logging import LoggingModule
 
         self._model_repo = "views-models"
         self._entity = "views_pipeline"
@@ -1316,7 +1052,7 @@ class ModelManager:
         self._sweep = False
         self._args = None
         self._logger = LoggingModule(model_path=self._model_path).get_logger()
-        self._wandb_manager = WandBModule(
+        self._wandb_module = WandBModule(
             entity=self._entity,
             notifications_enabled=wandb_notifications,
             models_path=self._model_path.models,
@@ -1347,7 +1083,7 @@ class ModelManager:
         )
 
         try:
-            from views_pipeline_core.data.dataloaders import ViewsDataLoader
+            from views_pipeline_core.modules.dataloaders import ViewsDataLoader
 
             self._data_loader = ViewsDataLoader(
                 model_path=self._model_path,
@@ -1842,7 +1578,7 @@ class ForecastingModelManager(ModelManager):
             2. Load training data using self._data_loader
             3. Execute training loop with progress logging
             4. Save model artifact to self._model_path.artifacts
-            5. Log training metrics to WandB via self._wandb_manager
+            5. Log training metrics to WandB via self._wandb_module
             6. Return the trained model object
 
             Implementations may:
@@ -1909,7 +1645,7 @@ class ForecastingModelManager(ModelManager):
             ...         joblib.dump(model, artifact_path)
             ...
             ...         # Log to WandB
-            ...         self._wandb_manager.log({"train_score": model.score(X_train, y_train)})
+            ...         self._wandb_module.log({"train_score": model.score(X_train, y_train)})
             ...
             ...         return model
 
@@ -2081,7 +1817,7 @@ class ForecastingModelManager(ModelManager):
             1. Validate args is ForecastingModelArgs instance
             2. Store args in self._args
             3. Initialize configuration manager
-            4. Login to WandB (via self._wandb_manager)
+            4. Login to WandB (via self._wandb_module)
             5. Execute requested pipeline stages (train/evaluate/forecast)
             6. Handle errors and send alerts
             7. Log execution summary
@@ -2127,14 +1863,14 @@ class ForecastingModelManager(ModelManager):
             ...         self._args = args
             ...
             ...         # Initialize
-            ...         self._wandb_manager.login()
+            ...         self._wandb_module.login()
             ...         self._config_manager.update_for_single_run(args)
             ...
             ...         # Execute
             ...         try:
             ...             self._execute_model_tasks()
             ...         except Exception as e:
-            ...             self._wandb_manager.send_alert(...)
+            ...             self._wandb_module.send_alert(...)
             ...             raise
 
         Usage:
@@ -2165,12 +1901,12 @@ class ForecastingModelManager(ModelManager):
         # Store args FIRST before using them
         self._args = args
 
-        self._wandb_manager.login()
+        self._wandb_module.login()
 
         # Now we can use self.args in config_manager
         self._config_manager.update_for_single_run(
             self.args,
-            wandb_manager=self._wandb_manager,
+            wandb_manager=self._wandb_module,
         )
 
         self._project = f"{self.configs['name']}_{self.args.run_type}"
@@ -2199,7 +1935,7 @@ class ForecastingModelManager(ModelManager):
         # Store args FIRST before using them
         self._args = args
 
-        self._wandb_manager.login()
+        self._wandb_module.login()
 
         self._project = f"{self._config_manager.config_sweep['name']}_sweep"
         self._eval_type = self.args.eval_type
@@ -2323,7 +2059,7 @@ class ForecastingModelManager(ModelManager):
         Dependencies:
             - self._data_loader: ViewsDataLoader instance
             - self.args: ForecastingModelArgs with run configuration
-            - self._wandb_manager: WandB manager for logging
+            - self._wandb_module: WandB manager for logging
             - self._model_path: Path manager for data storage
 
         Execution Flow:
@@ -2399,7 +2135,7 @@ class ForecastingModelManager(ModelManager):
             - :func:`validate_data_schema`: Data validation logic
         """
 
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project,
             config={},
             job_type="fetch_data",
@@ -2416,18 +2152,19 @@ class ForecastingModelManager(ModelManager):
                 current_month = datetime.now().strftime("%Y-%m")
                 artifact_name = f"{self.args.run_type}_viewser_df_{current_month}"
 
-                self._wandb_manager.send_alert(
+                self._wandb_module.send_alert(
                     title=f"Queryset Fetch Complete ({str(self.args.run_type)})",
                     text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully.",
+                    notifications_enabled=self._wandb_notifications,
                 )
 
             except Exception as e:
                 raise DataFetchException(
                     f"Data fetching failed: {e}",
-                    wandb_manager=self._wandb_manager,
+                    wandb_manager=self._wandb_module,
                 )
             finally:
-                self._wandb_manager.finish_run()
+                self._wandb_module.finish_run()
 
     def _execute_model_training(self) -> None:
         """
@@ -2442,7 +2179,7 @@ class ForecastingModelManager(ModelManager):
 
         Dependencies:
             - self._train_model_artifact(): Abstract method implemented by subclass
-            - self._wandb_manager: WandB manager for logging
+            - self._wandb_module: WandB manager for logging
             - self._model_path: Path manager for artifact storage
             - self.configs: Combined configuration dictionary
 
@@ -2529,7 +2266,7 @@ class ForecastingModelManager(ModelManager):
         import traceback
         from views_pipeline_core.files.utils import handle_single_log_creation
 
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project,
             config=self.configs,
             job_type="train",
@@ -2546,9 +2283,10 @@ class ForecastingModelManager(ModelManager):
                     train=True,
                 )
 
-                self._wandb_manager.send_alert(
+                self._wandb_module.send_alert(
                     title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
                     text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```",
+                    notifications_enabled=self._wandb_notifications,
                 )
 
             except Exception as e:
@@ -2558,7 +2296,7 @@ class ForecastingModelManager(ModelManager):
                 )
                 raise ModelTrainingException(
                     f"Training failed: {traceback.format_exc()}",
-                    wandb_manager=self._wandb_manager,
+                    wandb_manager=self._wandb_module,
                 )
 
     def _execute_model_evaluation(self) -> None:
@@ -2568,7 +2306,7 @@ class ForecastingModelManager(ModelManager):
         from views_pipeline_core.models.check import validate_prediction_dataframe
         from views_pipeline_core.files.utils import handle_single_log_creation
 
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project,
             config=self.configs,
             job_type="evaluate",
@@ -2621,8 +2359,9 @@ class ForecastingModelManager(ModelManager):
                 else:
                     logger.warning("No metrics specified in config")
 
-                self._wandb_manager.send_alert(
-                    title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully."
+                self._wandb_module.send_alert(
+                    title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully.",
+                    notifications_enabled=self._wandb_notifications,
                 )
 
             except Exception as e:
@@ -2632,7 +2371,7 @@ class ForecastingModelManager(ModelManager):
                 )
                 raise ModelEvaluationException(
                     f"Evaluation failed: {traceback.format_exc()}",
-                    wandb_manager=self._wandb_manager,
+                    wandb_manager=self._wandb_module,
                 )
 
     def _execute_model_forecasting(self) -> None:
@@ -2641,7 +2380,7 @@ class ForecastingModelManager(ModelManager):
         from views_pipeline_core.models.check import validate_prediction_dataframe
         from views_pipeline_core.files.utils import handle_single_log_creation
 
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project,
             config=self.configs,
             job_type="forecast",
@@ -2663,8 +2402,9 @@ class ForecastingModelManager(ModelManager):
 
                 self._save_predictions(df_predictions, self._model_path.data_generated)
 
-                self._wandb_manager.send_alert(
-                    title=f"Forecasting for {self._model_path.target} {self.configs['name']} completed successfully."
+                self._wandb_module.send_alert(
+                    title=f"Forecasting for {self._model_path.target} {self.configs['name']} completed successfully.",
+                    notifications_enabled=self._wandb_notifications,
                 )
 
             except Exception as e:
@@ -2673,14 +2413,14 @@ class ForecastingModelManager(ModelManager):
                 )
                 raise ModelForecastingException(
                     f"Forecasting failed: {traceback.format_exc()}",
-                    wandb_manager=self._wandb_manager,
+                    wandb_manager=self._wandb_module,
                 )
 
     def _execute_model_sweeping(self) -> None:
         """Executes model sweeping using wandb.config and self.args."""
         import wandb
 
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project,
             config=None,  # Will be set by wandb.config
             job_type="sweep",
@@ -2689,15 +2429,16 @@ class ForecastingModelManager(ModelManager):
             self._config_manager.update_for_sweep_run(
                 wandb.config,
                 self.args,
-                wandb_manager=self._wandb_manager,
+                wandb_manager=self._wandb_module,
             )
 
             logger.info(f"Sweeping {self._model_path.target} {self.configs['name']}...")
             model = self._train_model_artifact()
 
-            self._wandb_manager.send_alert(
+            self._wandb_module.send_alert(
                 title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
                 text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```",
+                notifications_enabled=self._wandb_notifications,
             )
 
             logger.info(
@@ -2733,7 +2474,7 @@ class ForecastingModelManager(ModelManager):
         import pandas as pd
         from views_pipeline_core.files.utils import read_dataframe
 
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project,
             config=self.configs,
             job_type="report",
@@ -2811,7 +2552,7 @@ class ForecastingModelManager(ModelManager):
                     forecast_dataframe=forecast_df, historical_dataframe=historical_df
                 )
 
-                wandb_alert(
+                self._wandb_module.send_alert(
                     title="Forecast Report Generated",
                     text=f"Forecast report for {self._model_path.target} {self._model_path.model_name} has been successfully "
                     f"generated and saved locally at {report_path}.",
@@ -2821,7 +2562,7 @@ class ForecastingModelManager(ModelManager):
             except Exception as e:
                 raise PipelineException(
                     f"Forecast report generation failed: {traceback.format_exc()}",
-                    wandb_manager=self._wandb_manager,
+                    wandb_manager=self._wandb_module,
                 )
 
     def _save_model_artifact(self, run_type: str) -> None:
@@ -2847,7 +2588,7 @@ class ForecastingModelManager(ModelManager):
                 self._model_path.get_latest_model_artifact_path(run_type=run_type)
             )
 
-            self._wandb_manager.log_artifact(
+            self._wandb_module.log_artifact(
                 artifact_path=_latest_model_artifact_path,
                 artifact_name=f"{run_type}_{self._model_path.target}_artifact",
                 artifact_type=self._model_path.target,
@@ -2862,7 +2603,7 @@ class ForecastingModelManager(ModelManager):
             # logger.error(f"Error saving artifact to WandB: {e}", exc_info=True)
             raise PipelineException(
                 f"Error saving artifact to WandB: {e}",
-                wandb_manager=self._wandb_manager,
+                wandb_manager=self._wandb_module,
             )
 
     def _save_eval_report(self, eval_report, path_reports, conflict_type):
@@ -2886,7 +2627,7 @@ class ForecastingModelManager(ModelManager):
         except Exception as e:
             raise PipelineException(
                 f"Error saving evaluation report: {e}",
-                wandb_manager=self._wandb_manager,
+                wandb_manager=self._wandb_module,
             )
 
     def _save_evaluations(
@@ -2944,11 +2685,11 @@ class ForecastingModelManager(ModelManager):
             )
             save_dataframe(df_step_wise_evaluation, path_generated / eval_step_path)
 
-            self._wandb_manager.save(str(path_generated / eval_month_path))
-            self._wandb_manager.save(str(path_generated / eval_ts_path))
-            self._wandb_manager.save(str(path_generated / eval_step_path))
+            self._wandb_module.save(str(path_generated / eval_month_path))
+            self._wandb_module.save(str(path_generated / eval_ts_path))
+            self._wandb_module.save(str(path_generated / eval_step_path))
 
-            self._wandb_manager.log(
+            self._wandb_module.log(
                 {
                     "evaluation_metrics_month": wandb.Table(
                         dataframe=df_month_wise_evaluation
@@ -2962,16 +2703,17 @@ class ForecastingModelManager(ModelManager):
                 }
             )
 
-            self._wandb_manager.send_alert(
+            self._wandb_module.send_alert(
                 title=f"{self._model_path.target.title()} Outputs Saved",
                 text=f"Evaluation metrics saved at {path_generated.relative_to(self._model_path.root)}.",
+                notifications_enabled=self._wandb_notifications,
             )
 
         except Exception as e:
             logger.error(f"Error saving model outputs: {e}", exc_info=True)
             raise PipelineException(
                 f"Error saving model outputs: {e}",
-                wandb_manager=self._wandb_manager,
+                wandb_manager=self._wandb_module,
             )
 
     def _save_predictions(
@@ -3012,15 +2754,16 @@ class ForecastingModelManager(ModelManager):
                 df_predictions.forecasts.set_run(self._pred_store_name)
                 df_predictions.forecasts.to_store(name=name, overwrite=True)
 
-            self._wandb_manager.send_alert(
+            self._wandb_module.send_alert(
                 title="Predictions Saved",
                 text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
+                notifications_enabled=self._wandb_notifications,
             )
 
         except Exception as e:
             raise PipelineException(
                 f"Error saving predictions: {e}",
-                wandb_manager=self._wandb_manager,
+                wandb_manager=self._wandb_module,
             )
 
     def _evaluate_prediction_dataframe(
@@ -3084,7 +2827,7 @@ class ForecastingModelManager(ModelManager):
             )
             month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
 
-            self._wandb_manager.log_evaluation_results(
+            self._wandb_module.log_evaluation_results(
                 step_wise_evaluation,
                 month_wise_evaluation,
                 time_series_wise_evaluation,
@@ -3102,9 +2845,10 @@ class ForecastingModelManager(ModelManager):
 
         import wandb
 
-        self._wandb_manager.send_alert(
+        self._wandb_module.send_alert(
             title=f"Metrics for {self._model_path.model_name}",
             text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
+            notifications_enabled=self._wandb_notifications,
         )
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
@@ -3150,7 +2894,7 @@ class ForecastingModelManager(ModelManager):
             run_type=self.args.run_type,
         )
 
-        with self._wandb_manager.initialize_run(
+        with self._wandb_module.initialize_run(
             project=self._project,
             config=self.configs,
             job_type="report",
@@ -3170,7 +2914,7 @@ class ForecastingModelManager(ModelManager):
                         wandb_run=latest_run, target=target
                     )
 
-                wandb_alert(
+                self._wandb_module.send_alert(
                     title="Evaluation Report Generated",
                     text=f"Evaluation report for {self._model_path.model_name} has been successfully "
                     f"generated and saved locally at {report_path}.",
@@ -3180,7 +2924,7 @@ class ForecastingModelManager(ModelManager):
             except Exception as e:
                 raise PipelineException(
                     f"Evaluation report generation failed: {traceback.format_exc()}",
-                    wandb_manager=self._wandb_manager,
+                    wandb_manager=self._wandb_module,
                 )
 
     def __repr__(self) -> str:

@@ -13,7 +13,7 @@ from views_pipeline_core.managers.model import (
     ForecastingModelManager,
 )
 from views_pipeline_core.cli.args import ForecastingModelArgs
-from views_pipeline_core.wandb.utils import add_wandb_metrics, wandb_alert
+from views_pipeline_core.modules.wandb import add_wandb_metrics, wandb_alert
 from views_pipeline_core.ensembles.check import validate_ensemble_model
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig

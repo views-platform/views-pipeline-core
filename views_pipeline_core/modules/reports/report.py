@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from html import escape
 from datetime import datetime
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.reports.styles.tailwind import get_css
+from views_pipeline_core.modules.reports.styles.tailwind import get_css
 
 
 class ReportModule:
@@ -18,7 +18,7 @@ class ReportModule:
     def __init__(self):
         self.content = []
         self._plotly_js_loaded = False
-        self.add_image(image=str(Path(__file__).parent.parent / "assets/views_header.png"), caption=None)
+        self.add_image(image=str(Path(__file__).parent.parent.parent / "assets/views_header.png"), caption=None)
         self.content[-1] = self.content[-1].replace('class="responsive-image"', 'class="w-full rounded-xl"')
         self.content[-1] = self.content[-1].replace('<figure class="image-card">', '<div class="image-card overflow-hidden rounded-xl bg-white shadow-card transition-all duration-300 hover:shadow-card-hover">').replace('</figure>', '</div>')
         self.footer = None

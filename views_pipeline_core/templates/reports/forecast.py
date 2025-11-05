@@ -9,9 +9,9 @@ from views_pipeline_core.data.handlers import (
     _CDataset,
     _PGDataset,
 )
-from views_pipeline_core.managers.report import ReportModule
-from views_pipeline_core.managers.mapping import MappingManager
-from views_pipeline_core.visualizations.historical import HistoricalLineGraph
+from views_pipeline_core.modules.reports import ReportModule
+from views_pipeline_core.modules.mapping import MappingModule
+from views_pipeline_core.modules.visualizations import HistoricalLineGraph
 from views_pipeline_core.files.utils import generate_model_file_name
 import logging
 
@@ -59,7 +59,7 @@ class ForecastReportTemplate:
                     target = f"{target}_map"
 
                 # Common steps
-                mapping_manager = MappingManager(
+                mapping_manager = MappingModule(
                     forecast_dataset_map
                     if forecast_dataset.sample_size > 1
                     else forecast_dataset

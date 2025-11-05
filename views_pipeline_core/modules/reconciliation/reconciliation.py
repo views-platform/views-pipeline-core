@@ -7,15 +7,16 @@ import wandb
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 import torch
 import logging
-from views_pipeline_core.data.statistics import ForecastReconciler
-from views_pipeline_core.wandb.utils import wandb_alert
+from views_pipeline_core.modules.statistics import ForecastReconciler
+from views_pipeline_core.modules.wandb import WandBModule
 
 logger = logging.getLogger(__name__)
 
 class ReconciliationModule:
-    def __init__(self, c_dataset: _CDataset, pg_dataset: _PGDataset):
+    def __init__(self, c_dataset: _CDataset, pg_dataset: _PGDataset, wandb_notifications: bool = True):
         self._c_dataset = c_dataset
         self._pg_dataset = pg_dataset
+        self._wandb_notifications = wandb_notifications
         if not isinstance(c_dataset, _CDataset):
             raise TypeError(f"Expected _CDataset, got {type(c_dataset)}")
         if not isinstance(pg_dataset, _PGDataset):
@@ -61,9 +62,10 @@ class ReconciliationModule:
         self._valid_time_ids = set(self._c_dataset._time_values) & set(
             self._pg_dataset._time_values
         )
-        wandb_alert(
+        WandBModule.send_alert(
             title=self.__class__.__name__,
             text=f"All checks passed. Starting reconciliation with {len(self._valid_cids)} valid countries and {len(self._valid_time_ids)} valid time IDs for targets: {self._valid_targets}",
+            notifications_enabled=self._wandb_notifications,
         )
 
     def __detect_torch_device(self):

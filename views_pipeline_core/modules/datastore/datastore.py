@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
 from views_pipeline_core.managers.model import ModelPathManager
-from views_pipeline_core.managers.appwrite import AppwriteConfig, AppWriteFileManager, OperationResult
+from views_pipeline_core.modules.appwrite import AppwriteConfig, AppWriteFileModule, OperationResult
 import logging
 import pandas as pd
 import os
@@ -67,7 +67,7 @@ class DatastoreModule:
     def __init__(self, appwrite_file_manager_config: AppwriteConfig):
         self.model_path = appwrite_file_manager_config.path_manager
         self.__appwrite_file_manager_config = appwrite_file_manager_config
-        self.__appwrite_file_manager = AppWriteFileManager(
+        self.__appwrite_file_manager = AppWriteFileModule(
             self.__appwrite_file_manager_config
         )
 

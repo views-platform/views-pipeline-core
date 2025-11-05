@@ -1,6 +1,6 @@
-from views_pipeline_core.wandb.utils import (
-    wandb_alert,
-)
+# from views_pipeline_core.modules.wandb import (
+#     WandBModule,
+# )
 import wandb
 from typing import Union
 from pathlib import Path
@@ -9,6 +9,7 @@ from abc import abstractmethod
 from argparse import Namespace
 from views_pipeline_core.managers.model import ModelManager, ModelPathManager
 import polars as pl
+from views_pipeline_core.exceptions import PipelineException
 
 
 logger = logging.getLogger(__name__)
@@ -77,18 +78,16 @@ class ExtractorManager(ModelManager):
     def run(self, args: Namespace):
         self._download(args)
         self._preprocess(args)
-        with wandb.init(
+        with self._wandb_manager.initialize_run(
             project=f"{self.configs['name']}_save", entity=self._entity, job_type="save"
         ):
             try:
                 self._save(args)
             except Exception as e:
-                logger.error(f"Error occurred while saving to graph database: {e}")
-                wandb_alert(title=f"Error occurred while saving to graph database",
-                            text=f"Error details: {e}",
-                            wandb_notifications=self._wandb_notifications,
-                            models_path=self._model_path.models
-                )
-                raise
-            finally:
-                    wandb.finish()
+                # logger.error(f"Error occurred while saving to database: {e}")
+                # self._wandb_manager.send_alert(title=f"Error occurred while saving to database",
+                #             text=f"Error details: {e}",
+                #             notifications_enabled=self._wandb_notifications,
+                #             models_path=self._model_path.models
+                # )
+                raise PipelineException(message=f"Error occurred while saving to database. Error details: {e}", wandb_manager=self._wandb_module)

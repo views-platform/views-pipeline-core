@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
-from views_pipeline_core.data.statistics import PosteriorDistributionAnalyzer
-# from views_pipeline_core.visualizations.distributions import PlotDistribution
+from views_pipeline_core.modules.statistics import PosteriorDistributionAnalyzer
+# from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
 from viewser import Queryset, Column
 
 from pathlib import Path
@@ -648,7 +648,7 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes
         """
-        from views_pipeline_core.visualizations.distributions import PlotDistribution
+        from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
         self._distribution_plotter = (
             PlotDistribution(dataset=self)
             if not hasattr(self, "_distribution_plotter")
@@ -1294,7 +1294,7 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes: The plot axes
         """
-        from views_pipeline_core.visualizations.distributions import PlotDistribution
+        from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
         self._distribution_plotter = (
             PlotDistribution(dataset=self)
             if not hasattr(self, "_distribution_plotter")

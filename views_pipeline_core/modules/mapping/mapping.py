@@ -116,7 +116,7 @@ class MappingModule:
             OSError: If there is an issue reading the shapefile.
         """
         path = (
-            Path(__file__).parent.parent
+            Path(__file__).parent.parent.parent
             / "assets"
             / "shapefiles"
             / "country"
@@ -148,7 +148,7 @@ class MappingModule:
             OSError: If there is an issue reading the shapefile.
         """
         path = (
-            Path(__file__).parent.parent
+            Path(__file__).parent.parent.parent
             / "assets"
             / "shapefiles"
             / "priogrid"
