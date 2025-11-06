@@ -1224,6 +1224,65 @@ class ModelManager:
     def config(self) -> Dict:
         """Get combined configuration."""
         return self.configs
+    
+    @configs.setter
+    def configs(self, config: Dict) -> None:
+        """
+        Update runtime configuration.
+        
+        Adds or updates configuration values in the runtime config.
+        Values set here have highest priority in merged configuration.
+        
+        Args:
+            config: Dictionary of configuration key-value pairs to add/update.
+                Can contain any valid configuration keys.
+        
+        Side Effects:
+            - Updates _runtime_config in configuration manager
+            - Changes immediately visible in configs property
+            - Does not trigger validation (use with caution)
+        
+        Example:
+            >>> manager = ForecastingModelManager(model_path)
+            >>> manager.configs = {'custom_param': 42, 'debug': True}
+            >>> print(manager.configs['custom_param'])
+            42
+        
+        Notes:
+            - Overwrites existing keys with same names
+            - Does not validate configuration
+            - Use sparingly; prefer setting at initialization
+        
+        See Also:
+            - :meth:`configs`: Get merged configuration
+            - :class:`ConfigurationManager`: Configuration management
+        """
+        if not isinstance(config, dict):
+            raise TypeError(f"config must be a dictionary, got {type(config)}")
+        self._config_manager.add_config(config)
+
+    @property
+    def config(self) -> Dict:
+        """Get combined configuration (alias for configs)."""
+        return self.configs
+
+    @config.setter
+    def config(self, config: Dict) -> None:
+        """
+        Update runtime configuration (alias for configs setter).
+        
+        Args:
+            config: Dictionary of configuration values to add/update
+        
+        Example:
+            >>> manager.config = {'learning_rate': 0.001}
+            >>> print(manager.config['learning_rate'])
+            0.001
+        
+        See Also:
+            - :meth:`configs`: Primary setter method
+        """
+        self.configs = config
 
     @property
     def args(self) -> Optional[ModelArgs]:
