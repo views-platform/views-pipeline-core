@@ -11,15 +11,15 @@ class PipelineException(Exception):
     def __init__(
         self,
         message: str,
-        wandb_manager: Optional['WandBModule'] = None,
+        wandb_module: Optional['WandBModule'] = None,
         alert_level: wandb.AlertLevel = wandb.AlertLevel.ERROR,
     ):
         super().__init__(message)
         self.message = message
         
         # Auto-send WandB alert
-        if wandb_manager:
-            wandb_manager.send_alert(
+        if wandb_module:
+            wandb_module.send_alert(
                 title=self.__class__.__name__,
                 text=message,
                 level=alert_level,
