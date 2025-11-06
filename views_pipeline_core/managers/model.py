@@ -1073,6 +1073,8 @@ class ModelManager:
             self._config_sweep = self.__load_config(
                 "config_sweep.py", "get_sweep_config"
             )
+        else:
+            self._config_sweep = None
 
         # Initialize configuration manager
         self._config_manager = ConfigurationManager(
