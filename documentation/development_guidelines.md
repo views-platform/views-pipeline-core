@@ -1291,9 +1291,6 @@ from views_pipeline_core.data.handlers import CMDataset
 from views_pipeline_core.files.utils import read_dataframe
 from views_pipeline_core.exceptions import ModelTrainingException
 
-# Manager does NOT import from CLI layer (would be circular)
-# ❌ from views_pipeline_core.cli import ForecastingModelArgs
-
 # If you need this workaround, you have a circular dependency problem:
 from typing import TYPE_CHECKING
 
@@ -1301,6 +1298,9 @@ if TYPE_CHECKING:
     from views_pipeline_core.cli import ForecastingModelArgs
 
 # Fix: Refactor to remove circular dependency instead
+
+# Module does NOT import from CLI layer
+# ❌ from views_pipeline_core.cli import ForecastingModelArgs
 ```
 
 ---

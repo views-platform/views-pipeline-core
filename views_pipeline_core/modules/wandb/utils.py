@@ -134,6 +134,8 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
     Returns:
         dict: A dictionary of mean evaluation metrics for the input dictionary.
     """
+    if not evaluation_dict:
+        return {}
     mean_dict = {}
     first_item = next(iter(evaluation_dict.values()))
     metric_names = vars(first_item).keys()
@@ -293,8 +295,8 @@ def format_evaluation_dict(evaluation_dict):
                 formatted_dict[key] = f"{hours}h {remainder // 60}m {remainder % 60}s"
             else:
                 formatted_dict[key] = value
-        elif isinstance(value, wandb.old.summary.SummarySubDict):
-            continue
+        # elif isinstance(value, wandb.old.summary.SummarySubDict):
+        #     continue
         elif isinstance(value, (int, float)):
             formatted_dict[key] = value
         elif isinstance(value, str) and value.isdigit():
