@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 import logging
 from datetime import datetime
 from views_pipeline_core.modules.validation.model import validate_config
@@ -177,6 +177,236 @@ class ConfigurationManager:
         
         # Add timestamp at initialization
         self._runtime_config["timestamp"] = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    def __getitem__(self, key: str) -> Any:
+        """
+        Get configuration value by key (enables dict-style access).
+        
+        Allows accessing configuration values using dictionary syntax.
+        Retrieves from merged configuration.
+        
+        Args:
+            key: Configuration key to retrieve
+        
+        Returns:
+            Configuration value for the specified key
+        
+        Raises:
+            KeyError: If key not found in configuration
+        
+        Example:
+            >>> config_mgr = ConfigurationManager(...)
+            >>> value = config_mgr["algorithm"]
+            >>> print(value)
+            'random_forest'
+        
+        See Also:
+            - :meth:`__setitem__`: Set configuration value
+            - :meth:`get_combined_config`: Get full configuration
+        """
+        config = self.get_combined_config()
+        if key not in config:
+            raise KeyError(f"Configuration key '{key}' not found")
+        return config[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """
+        Set configuration value by key (enables dict-style setting).
+        
+        Allows setting configuration values using dictionary syntax.
+        Updates runtime configuration with the new key-value pair.
+        
+        Args:
+            key: Configuration key to set
+            value: Value to set for the key
+        
+        Side Effects:
+            - Updates _runtime_config with new key-value pair
+            - Overwrites existing key if present
+            - Does not trigger validation
+        
+        Example:
+            >>> config_mgr = ConfigurationManager(...)
+            >>> config_mgr["learning_rate"] = 0.001
+            >>> print(config_mgr["learning_rate"])
+            0.001
+            >>>
+            >>> # Can also update existing keys
+            >>> config_mgr["algorithm"] = "xgboost"
+            >>> print(config_mgr["algorithm"])
+            'xgboost'
+        
+        Notes:
+            - Uses add_config() internally
+            - No validation performed
+            - Changes immediately visible in get_combined_config()
+            - Overwrites keys from all other config sources (runtime has highest priority)
+        
+        Warning:
+            No type checking or validation is performed. Use with caution
+            to avoid creating invalid configurations.
+        
+        See Also:
+            - :meth:`__getitem__`: Get configuration value
+            - :meth:`add_config`: Add multiple config values
+            - :meth:`get_combined_config`: Get merged configuration
+        """
+        self._runtime_config[key] = value
+
+    def __contains__(self, key: str) -> bool:
+        """
+        Check if key exists in configuration (enables 'in' operator).
+        
+        Allows checking for key presence using 'in' operator.
+        
+        Args:
+            key: Configuration key to check
+        
+        Returns:
+            True if key exists in merged configuration, False otherwise
+        
+        Example:
+            >>> config_mgr = ConfigurationManager(...)
+            >>> if "algorithm" in config_mgr:
+            ...     print(config_mgr["algorithm"])
+            'random_forest'
+        
+        See Also:
+            - :meth:`__getitem__`: Get configuration value
+            - :meth:`get_combined_config`: Get full configuration
+        """
+        return key in self.get_combined_config()
+
+    def __delitem__(self, key: str) -> None:
+        """
+        Delete configuration key (enables 'del' operator).
+        
+        Removes key from runtime configuration only. Keys from other
+        config sources (hyperparameters, deployment, etc.) are not affected.
+        
+        Args:
+            key: Configuration key to delete
+        
+        Raises:
+            KeyError: If key not found in runtime configuration
+        
+        Example:
+            >>> config_mgr = ConfigurationManager(...)
+            >>> config_mgr["custom_param"] = 42
+            >>> del config_mgr["custom_param"]
+            >>> "custom_param" in config_mgr
+            False
+        
+        Notes:
+            - Only removes from runtime config, not other sources
+            - If key exists in other sources, it will still appear in merged config
+            - Use with caution
+        
+        Warning:
+            Deleting required configuration keys can cause validation failures.
+        
+        See Also:
+            - :meth:`__setitem__`: Set configuration value
+            - :meth:`add_config`: Add configuration values
+        """
+        if key not in self._runtime_config:
+            raise KeyError(f"Configuration key '{key}' not found in runtime config")
+        del self._runtime_config[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """
+        Get configuration value with default fallback.
+        
+        Safely retrieves configuration value, returning default if key not found.
+        
+        Args:
+            key: Configuration key to retrieve
+            default: Default value to return if key not found.
+                Defaults to None.
+        
+        Returns:
+            Configuration value if key exists, otherwise default
+        
+        Example:
+            >>> config_mgr = ConfigurationManager(...)
+            >>> value = config_mgr.get("algorithm", "default_algo")
+            >>> print(value)
+            'random_forest'
+            >>>
+            >>> value = config_mgr.get("nonexistent_key", "fallback")
+            >>> print(value)
+            'fallback'
+        
+        See Also:
+            - :meth:`__getitem__`: Get value (raises KeyError if not found)
+        """
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def keys(self) -> List[str]:
+        """
+        Get all configuration keys.
+        
+        Returns list of all keys in merged configuration.
+        
+        Returns:
+            List of configuration key names
+        
+        Example:
+            >>> config_mgr = ConfigurationManager(...)
+            >>> keys = config_mgr.keys()
+            >>> print(keys)
+            ['algorithm', 'features', 'targets', 'name', 'version', ...]
+        
+        See Also:
+            - :meth:`values`: Get all configuration values
+            - :meth:`items`: Get key-value pairs
+        """
+        return list(self.get_combined_config().keys())
+
+    def values(self) -> List[Any]:
+        """
+        Get all configuration values.
+        
+        Returns list of all values in merged configuration.
+        
+        Returns:
+            List of configuration values
+        
+        Example:
+            >>> config_mgr = ConfigurationManager(...)
+            >>> values = config_mgr.values()
+        
+        See Also:
+            - :meth:`keys`: Get all configuration keys
+            - :meth:`items`: Get key-value pairs
+        """
+        return list(self.get_combined_config().values())
+
+    def items(self) -> List[tuple]:
+        """
+        Get all configuration key-value pairs.
+        
+        Returns list of (key, value) tuples from merged configuration.
+        
+        Returns:
+            List of (key, value) tuples
+        
+        Example:
+            >>> config_mgr = ConfigurationManager(...)
+            >>> for key, value in config_mgr.items():
+            ...     print(f"{key}: {value}")
+            algorithm: random_forest
+            features: ['feature1', 'feature2']
+            ...
+        
+        See Also:
+            - :meth:`keys`: Get all configuration keys
+            - :meth:`values`: Get all configuration values
+        """
+        return list(self.get_combined_config().items())
 
     def get_combined_config(self) -> Dict:
         """
