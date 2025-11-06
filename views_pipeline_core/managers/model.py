@@ -1419,103 +1419,36 @@ class ForecastingModelManager(ModelManager):
     @abstractmethod
     def _train_model_artifact(self) -> any:
         """
-        Train the model artifact. Must be implemented by subclasses.
-
-        This abstract method defines the interface for model-specific training
-        logic. Implementations should handle the complete training workflow
-        including model initialization, training loop, and artifact saving.
-
+        Train model and save artifact. Must be implemented by subclasses.
+        
         Contract:
-            Implementations must:
-            1. Initialize model from self.configs['hyperparameters']
-            2. Load training data using self._data_loader
-            3. Execute training loop with progress logging
-            4. Save model artifact to self._model_path.artifacts
-            5. Log training metrics to WandB via self._wandb_module
-            6. Return the trained model object
-
-            Implementations may:
-            - Implement custom validation logic
-            - Add model-specific checkpointing
-            - Define custom early stopping criteria
-
-            Implementations must not:
-            - Modify self.configs (read-only)
+            Must:
+            - Initialize model from self.configs['hyperparameters']
+            - Load training data using self._data_loader
+            - Execute training loop with logging
+            - Save artifact to self._model_path.artifacts
+            - Log metrics to WandB
+            - Return trained model object
+            
+            Must not:
+            - Modify self.configs
             - Skip artifact saving
-            - Suppress training exceptions without logging
-
-        Pipeline Stage:
-            train
-
+            - Suppress exceptions without logging
+        
         Returns:
-            Any: Trained model object
-                Type depends on algorithm (sklearn model, torch module, etc.)
-                Must have standard predict() or forecast() method
-                Should be serializable for artifact saving
-
+            Trained model with .predict() method
+        
         Raises:
-            ModelTrainingException: If training fails for any reason
-                Should wrap underlying exceptions with context
-            ValueError: If hyperparameters are invalid
-            FileNotFoundError: If training data cannot be loaded
-
-        Side Effects:
-            - Creates model artifact in self._model_path.artifacts
-            - Logs metrics to WandB
-            - May create checkpoint files
-            - Updates training logs
-
-        Expected Training Flow:
-            1. Load data: train, validation (optional)
-            2. Initialize model with hyperparameters
-            3. Execute training loop:
-               - Forward pass
-               - Loss calculation
-               - Backward pass
-               - Parameter update
-               - Metrics logging
-            4. Save final model
-            5. Return trained model
-
+            ModelTrainingException: If training fails
+            ValueError: If hyperparameters invalid
+        
         Example Implementation:
-            >>> class RandomForestForecastingManager(ForecastingModelManager):
-            ...     def _train_model_artifact(self):
-            ...         from sklearn.ensemble import RandomForestRegressor
-            ...
-            ...         # Load data
-            ...         X_train, y_train = self._data_loader.get_train_data()
-            ...
-            ...         # Initialize model
-            ...         model = RandomForestRegressor(
-            ...             **self.configs['hyperparameters']
-            ...         )
-            ...
-            ...         # Train
-            ...         model.fit(X_train, y_train)
-            ...
-            ...         # Save artifact
-            ...         artifact_path = self._model_path.artifacts / "model.pkl"
-            ...         joblib.dump(model, artifact_path)
-            ...
-            ...         # Log to WandB
-            ...         self._wandb_module.log({"train_score": model.score(X_train, y_train)})
-            ...
-            ...         return model
-
-        Performance Considerations:
-            - Training time: Model and data dependent
-            - Memory usage: Monitor for large models/datasets
-            - GPU utilization: Ensure efficient use if applicable
-
-        Notes:
-            - Called by _execute_model_training() and _execute_model_sweeping()
-            - Model artifact naming handled by generate_model_file_name()
-            - Checkpointing is optional but recommended for long training
-
-        See Also:
-            - :meth:`_execute_model_training`: Orchestrates training
-            - :meth:`_evaluate_model_artifact`: Uses trained model
-            - :func:`generate_model_file_name`: Artifact naming
+            >>> def _train_model_artifact(self):
+            ...     model = RandomForestRegressor(**self.configs['hyperparameters'])
+            ...     X, y = self._data_loader.get_train_data()
+            ...     model.fit(X, y)
+            ...     joblib.dump(model, self._model_path.artifacts / "model.pkl")
+            ...     return model
         """
         raise NotImplementedError(
             "_train_model_artifact method must be implemented by subclasses."
@@ -1526,12 +1459,37 @@ class ForecastingModelManager(ModelManager):
         self, eval_type: str, artifact_name: str
     ) -> Union[Dict, pd.DataFrame]:
         """
-        Evaluate a model artifact based on the specified evaluation type.
+        Evaluate model artifact. Must be implemented by subclasses.
+        
+        Contract:
+            Must:
+            - Load model from artifacts directory
+            - Generate predictions for test period
+            - Return list of prediction DataFrames
+            
+            Must not:
+            - Modify saved artifacts
+            - Skip validation
+        
         Args:
-            eval_type (str): The type of evaluation to perform.
-            artifact_name (str): The name of the artifact to evaluate.
+            eval_type: Evaluation type ('standard'|'long'|'complete'|'live')
+            artifact_name: Name of model file to evaluate
+        
         Returns:
-            Union[Dict, pd.DataFrame]: The result of the evaluation, which can be either a dictionary or a pandas DataFrame.
+            List of prediction DataFrames, one per evaluation sequence
+        
+        Raises:
+            ModelEvaluationException: If evaluation fails
+        
+        Example Implementation:
+            >>> def _evaluate_model_artifact(self, eval_type, artifact_name):
+            ...     model = load_model(artifact_name)
+            ...     predictions = []
+            ...     for seq in range(n_sequences):
+            ...         X = self._get_test_data(seq)
+            ...         pred = model.predict(X)
+            ...         predictions.append(pred)
+            ...     return predictions
         """
 
         raise NotImplementedError(
@@ -1541,10 +1499,33 @@ class ForecastingModelManager(ModelManager):
     @abstractmethod
     def _forecast_model_artifact(self, artifact_name: str) -> pd.DataFrame:
         """
-        Abstract method to forecast using the model artifact. Must be implemented by subclasses.
-
+        Generate future forecasts. Must be implemented by subclasses.
+        
+        Contract:
+            Must:
+            - Load model from artifacts
+            - Generate predictions for future period
+            - Return DataFrame with forecasts
+            
+            Must not:
+            - Use future ground truth data
+            - Modify model artifact
+        
         Args:
-            artifact_name (str): The name of the model artifact to use for forecasting.
+            artifact_name: Name of model file for forecasting
+        
+        Returns:
+            DataFrame with future predictions and metadata
+        
+        Raises:
+            ModelForecastingException: If forecasting fails
+        
+        Example Implementation:
+            >>> def _forecast_model_artifact(self, artifact_name):
+            ...     model = load_model(artifact_name)
+            ...     X_future = self._prepare_future_data()
+            ...     forecasts = model.predict(X_future)
+            ...     return self._format_forecasts(forecasts)
         """
         raise NotImplementedError(
             "_forecast_model_artifact method must be implemented by subclasses."
@@ -1553,99 +1534,65 @@ class ForecastingModelManager(ModelManager):
     @abstractmethod
     def _evaluate_sweep(self, eval_type: str, model: any) -> None:
         """
-        Abstract method to evaluate the model during a sweep. Must be implemented by subclasses.
-
+        Evaluate model during sweep. Must be implemented by subclasses.
+        
+        Contract:
+            Must:
+            - Use provided model object (not load from disk)
+            - Generate predictions for evaluation
+            - Return list of prediction DataFrames
+            
+            Must not:
+            - Save model artifacts (handled by sweep)
+            - Modify hyperparameters
+        
         Args:
-            model: The model to evaluate.
-            eval_type (str): The type of evaluation to perform (e.g., standard, long, complete, live).
+            model: Trained model object from current sweep iteration
+            eval_type: Evaluation type
+        
+        Returns:
+            List of prediction DataFrames for metrics calculation
+        
+        Example Implementation:
+            >>> def _evaluate_sweep(self, eval_type, model):
+            ...     predictions = []
+            ...     for seq in range(n_sequences):
+            ...         X = self._get_test_data(seq)
+            ...         pred = model.predict(X)
+            ...         predictions.append(pred)
+            ...     return predictions
         """
         raise NotImplementedError(
             "_evaluate_sweep method must be implemented by subclasses."
         )
 
+    @DeprecationWarning
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
         """
-        Determine number of evaluation sequences based on evaluation type.
-
-        Maps evaluation types to sequence counts for temporal evaluation.
-        Used to determine how many sequential prediction periods to evaluate.
-
+        Get number of evaluation sequences for type.
+        
+        Maps evaluation type to sequence count for temporal evaluation.
+        
         Evaluation Types:
-            standard: 12 sequences (1 year of monthly predictions)
-                - Typical use: Model performance assessment
-                - Balances thoroughness with computation time
-
-            long: 36 sequences (3 years of monthly predictions)
-                - Typical use: Long-term stability testing
-                - Validates model performance over extended periods
-
-            complete: None (full available period)
-                - Typical use: Comprehensive historical evaluation
-                - Requires sophisticated calculation based on data
-
-            live: 12 sequences (current 1-year window)
-                - Typical use: Production monitoring
-                - Evaluates most recent predictions
-
+            - standard: 12 sequences (1 year)
+            - long: 36 sequences (3 years)
+            - complete: None (full period, needs calculation)
+            - live: 12 sequences (current year)
+        
         Args:
-            eval_type (str): Type of evaluation to perform
-                Valid values: "standard" | "long" | "complete" | "live"
-                Case-sensitive
-
+            eval_type: Type of evaluation
+        
         Returns:
-            Optional[int]: Number of evaluation sequences
-                int: For standard, long, and live types
-                None: For complete type (requires data-dependent calculation)
-
+            Number of sequences, or None for complete type
+        
         Raises:
-            ValueError: If eval_type is not one of the valid values
-
+            ValueError: If eval_type invalid
+        
         Example:
-            >>> n_sequences = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
-            >>> print(n_sequences)  # 12
-            >>>
-            >>> # Use in evaluation loop
-            >>> for seq in range(n_sequences):
-            ...     predictions = model.predict(sequence_number=seq)
-            ...     metrics = evaluate(predictions, actual)
-
-        Usage Context:
-            Called by:
-            - _evaluate_model_artifact()
-            - _evaluate_sweep()
-            - _execute_model_evaluation()
-
-            Used to determine:
-            - Loop iteration count for sequential evaluation
-            - Data partitioning for temporal cross-validation
-            - Result array/list sizing
-
-        Implementation Notes:
-            - Returns None for 'complete' to signal need for calculation
-            - Hard-coded values based on common use cases
-            - Consider making configurable via eval_config in future
-
-        Performance:
-            O(1) lookup, negligible overhead
-
-        Thread Safety:
-            Thread-safe (static method, no shared state)
-
-        See Also:
-            - :meth:`_execute_model_evaluation`: Primary caller
-            - :meth:`_evaluate_model_artifact`: Uses return value
-            - :class:`EvaluationManager`: Evaluation orchestration
-
-        Version History:
-            - 1.0.0: Initial implementation with standard/long
-            - 1.5.0: Added complete and live types
-            - 2.0.0: Made static method for wider reuse
-
-        TODO:
-            - [ ] Make sequence numbers configurable via config
-            - [ ] Implement complete type calculation
-            - [ ] Add validation type with custom sequence number
+            >>> n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
+            >>> print(n)
+            12
         """
         if eval_type == "standard":
             return 12
@@ -1660,91 +1607,44 @@ class ForecastingModelManager(ModelManager):
 
     def execute_single_run(self, args: ForecastingModelArgs) -> None:
         """
-        Execute a single pipeline run with given arguments.
-
-        Main entry point for executing model pipeline operations. Must be
-        implemented by subclasses to define model-specific execution logic.
-
-        Contract:
-            Implementations must:
-            1. Validate args is ForecastingModelArgs instance
-            2. Store args in self._args
-            3. Initialize configuration manager
-            4. Login to WandB (via self._wandb_module)
-            5. Execute requested pipeline stages (train/evaluate/forecast)
-            6. Handle errors and send alerts
-            7. Log execution summary
-
-            Implementations may:
-            - Define custom validation logic
-            - Add model-specific pipeline stages
-            - Customize error handling behavior
-
-            Implementations must not:
-            - Modify args (treat as immutable)
-            - Skip WandB initialization (breaks monitoring)
-            - Suppress exceptions without logging
-
+        Execute single pipeline run with given arguments.
+        
+        Main entry point for model pipeline operations. Orchestrates
+        data fetching, training, evaluation, forecasting, and reporting
+        based on command line arguments.
+        
+        Execution Flow:
+            1. Validate and store arguments
+            2. Initialize WandB session
+            3. Update configuration
+            4. Fetch/load data
+            5. Execute requested stages (train/evaluate/forecast/report)
+        
         Args:
-            args (ForecastingModelArgs): Validated command line arguments
-                Must be instance of ForecastingModelArgs
-                Contains flags for train, evaluate, forecast operations
-
+            args: Validated command line arguments.
+                Must be ForecastingModelArgs instance.
+        
         Raises:
-            ValueError: If args is not ForecastingModelArgs instance
+            ValueError: If args not ForecastingModelArgs instance
             PipelineException: If pipeline execution fails
-            ModelTrainingException: If training fails (when args.train=True)
-            ModelEvaluationException: If evaluation fails (when args.evaluate=True)
-            ModelForecastingException: If forecasting fails (when args.forecast=True)
-
+            ModelTrainingException: If training fails
+            ModelEvaluationException: If evaluation fails
+            ModelForecastingException: If forecasting fails
+        
         Side Effects:
             - Sets self._args
-            - Initializes self._config_manager
-            - Logs to WandB
-            - Creates model artifacts
-            - Saves predictions/evaluations
+            - Initializes WandB session
+            - Creates artifacts/predictions/reports
             - Sends WandB notifications
-
-        Example Implementation:
-            >>> class ForecastingModelManager(ModelManager):
-            ...     def execute_single_run(self, args: ForecastingModelArgs) -> None:
-            ...         # Validate
-            ...         if not isinstance(args, ForecastingModelArgs):
-            ...             raise ValueError("args must be ForecastingModelArgs")
-            ...
-            ...         # Store args
-            ...         self._args = args
-            ...
-            ...         # Initialize
-            ...         self._wandb_module.login()
-            ...         self._config_manager.update_for_single_run(args)
-            ...
-            ...         # Execute
-            ...         try:
-            ...             self._execute_model_tasks()
-            ...         except Exception as e:
-            ...             self._wandb_module.send_alert(...)
-            ...             raise
-
-        Usage:
+        
+        Example:
             >>> manager = ForecastingModelManager(model_path)
             >>> args = ForecastingModelArgs.parse_args()
             >>> manager.execute_single_run(args)
-
-        Performance:
-            - Execution time: Minutes to hours (model-dependent)
-            - Memory usage: Model and data-dependent
+        
+        Note:
+            - Typical runtime: Minutes to hours
             - GPU recommended for large models
-
-        Notes:
-            - This is the main pipeline execution method
-            - Subclasses must implement specific logic
-            - See ForecastingModelManager for reference implementation
-
-        See Also:
-            - :class:`ForecastingModelArgs`: Arguments structure
-            - :meth:`_execute_model_tasks`: Task orchestration
-            - :class:`ForecastingModelManager`: Reference implementation
         """
         if not isinstance(args, ForecastingModelArgs):
             raise ValueError(
@@ -1774,10 +1674,33 @@ class ForecastingModelManager(ModelManager):
 
     def execute_sweep_run(self, args: ForecastingModelArgs) -> None:
         """
-        Executes a sweep run of the model, including data fetching and hyperparameter optimization.
-
+        Execute hyperparameter sweep with WandB.
+        
+        Runs WandB sweep agent for hyperparameter optimization.
+        Trains and evaluates models with different configurations.
+        
         Args:
             args: Command line arguments.
+                Must have sweep=True.
+        
+        Raises:
+            ValueError: If args not ForecastingModelArgs instance
+        
+        Side Effects:
+            - Creates WandB sweep
+            - Initializes sweep agent
+            - Runs multiple training iterations
+        
+        Example:
+            >>> args = ForecastingModelArgs(
+            ...     run_type='calibration',
+            ...     sweep=True
+            ... )
+            >>> manager.execute_sweep_run(args)
+        
+        Note:
+            - Fetches data once, reuses for all iterations
+            - Sweep config must be defined in config_sweep.py
         """
         if not isinstance(args, ForecastingModelArgs):
             raise ValueError(
@@ -1807,74 +1730,33 @@ class ForecastingModelManager(ModelManager):
 
     def _execute_model_tasks(self) -> None:
         """
-        Execute all requested model pipeline tasks.
-
-        Orchestrates the execution of training, evaluation, forecasting, and
-        reporting tasks based on command line arguments. Handles both single
-        runs and sweep runs with comprehensive time tracking.
-
+        Execute requested pipeline stages.
+        
+        Orchestrates training, evaluation, forecasting, and reporting
+        based on arguments. Handles both single runs and sweeps.
+        
         Internal Use:
-            Called by execute_single_run() and execute_sweep_run() after
-            initialization to run the actual pipeline stages.
-
+            Called by execute_single_run() and execute_sweep_run().
+        
         Execution Flow:
-            If sweep mode:
-                1. Execute hyperparameter sweep with evaluation
-
-            If single run mode:
-                1. Execute training (if args.train=True)
-                2. Execute evaluation (if args.evaluate=True)
-                3. Execute forecasting (if args.forecast=True)
-                4. Generate forecast report (if args.report=True and args.forecast=True)
-                5. Generate evaluation report (if args.report=True and args.evaluate=True)
-
-        Pipeline Stages:
-            train: Model training and artifact saving
-            evaluate: Multi-sequence evaluation with metrics
-            forecast: Future prediction generation
-            report: Report generation for forecasts/evaluations
-
+            If sweep:
+                - Execute sweep training and evaluation
+            
+            If single run:
+                - Train model (if args.train)
+                - Evaluate model (if args.evaluate)
+                - Generate forecasts (if args.forecast)
+                - Create reports (if args.report)
+        
         Side Effects:
-            - Executes requested pipeline stages
-            - Creates artifacts, predictions, evaluations
+            - Executes pipeline stages
+            - Creates artifacts/predictions
             - Logs to WandB
-            - Generates reports
             - Sends notifications
-            - Updates log files
-
-        Performance:
-            - Total runtime: Sum of all enabled stages
-            - Logged at completion
-            - Typical ranges:
-                - Training: Minutes to hours
-                - Evaluation: Seconds to minutes
-                - Forecasting: Seconds to minutes
-                - Reporting: Seconds
-
-        Example:
-            >>> # Internal usage after initialization
-            >>> self._execute_model_tasks()
-            INFO: Training model purple_alien...
-            INFO: Training completed.
-            INFO: Evaluating model purple_alien...
-            INFO: Evaluation completed.
-            INFO: Forecasting model purple_alien...
-            INFO: Forecasting completed.
-            INFO: Done. Runtime: 23.456 minutes.
-
-        Notes:
-            - Uses self.args to determine which tasks to run
-            - Uses self._sweep flag to switch between modes
-            - All exceptions handled by individual stage methods
-            - Runtime always logged at completion
-
-        See Also:
-            - :meth:`execute_single_run`: Single run entry point
-            - :meth:`execute_sweep_run`: Sweep run entry point
-            - :meth:`_execute_model_training`: Training stage
-            - :meth:`_execute_model_evaluation`: Evaluation stage
-            - :meth:`_execute_model_forecasting`: Forecasting stage
-            - :meth:`_execute_model_sweeping`: Sweep stage
+        
+        Note:
+            - Logs total runtime at completion
+            - All exceptions handled by stage methods
         """
         import time
 
@@ -1900,92 +1782,34 @@ class ForecastingModelManager(ModelManager):
 
     def _execute_data_fetching(self) -> None:
         """
-        Execute data fetching and preprocessing pipeline stage.
-
-        Downloads or loads data from ViEWS viewser, applies queryset filters,
-        validates data quality, performs optional drift detection, and saves
-        processed data. Creates WandB artifact for data versioning.
-
+        Fetch and validate data from ViEWS viewser.
+        
+        Downloads or loads data, applies queryset filters, validates
+        quality, and saves processed data. Creates WandB artifact.
+        
         Pipeline Stage:
             data_fetch
-
-        Dependencies:
-            - self._data_loader: ViewsDataLoader instance
-            - self.args: ForecastingModelArgs with run configuration
-            - self._wandb_module: WandB manager for logging
-            - self._model_path: Path manager for data storage
-
-        Execution Flow:
-            1. Initialize WandB run for data fetching
-            2. Call data_loader.get_data() with configuration
-            3. Validate fetched data structure
-            4. Optionally perform drift detection
-            5. Save processed data to model data directory
-            6. Create WandB data artifact (optional)
-            7. Send completion alert
-            8. Handle errors and cleanup
-
+        
         Side Effects:
-            - Creates WandB run with job_type="fetch_data"
+            - Creates WandB run (job_type="fetch_data")
             - Downloads/loads data from viewser
-            - Saves data to self._model_path.data_raw
-            - Creates WandB artifact for data versioning
-            - Logs data statistics to WandB
-            - Sends WandB notification
-            - Updates data fetch logs
-
-        Data Processing:
-            - Applies queryset filters from config
-            - Validates data schema and types
-            - Checks for missing values
-            - Detects temporal gaps
-            - Optional: Runs drift detection tests
-            - Saves in configured format (parquet/pkl)
-
-        Example:
-            >>> # Internal usage in execute_single_run
-            >>> self._execute_data_fetching()
-            INFO: Fetching data for calibration run...
-            INFO: Applying queryset filters...
-            INFO: Data validation complete. 180,000 rows, 45 columns
-            INFO: Saved to data/raw/calibration_viewser_df_2024-11.parquet
-            INFO: WandB artifact created: calibration_viewser_df_2024-11
-
-        Artifact Naming:
-            Format: {run_type}_viewser_df_{YYYY-MM}
-            Examples:
-            - calibration_viewser_df_2024-11
-            - validation_viewser_df_2024-11
-            - forecasting_viewser_df_2024-11
-
-        Drift Detection:
-            If args.drift_self_test=True:
-            - Compares current data to previous fetches
-            - Detects distribution shifts
-            - Logs drift metrics to WandB
-            - Sends alert if significant drift detected
-
+            - Saves to self._model_path.data_raw
+            - Creates WandB artifact
+            - Sends completion notification
+        
         Raises:
-            DataFetchException: If data fetching or processing fails
-                Wraps underlying exceptions with context
-                Sends WandB error notification
-                Cleans up partial data files
-
-        Notes:
-            - Uses args.saved flag to skip download if data exists
-            - Respects args.override_timestep for custom time ranges
-            - Updates viewser data if args.update_viewser=True
-            - Finishes WandB run in finally block
-
-        Performance:
-            - Download time: Depends on data size and network
-            - Validation time: ~1-5 seconds for typical datasets
-            - Drift detection: Additional ~5-10 seconds if enabled
-
-        See Also:
-            - :class:`ViewsDataLoader`: Data loading utility
-            - :meth:`execute_single_run`: Calls this method
-            - :func:`validate_data_schema`: Data validation logic
+            DataFetchException: If fetching or validation fails
+        
+        Example:
+            >>> # Internal usage
+            >>> self._execute_data_fetching()
+            INFO: Fetching data for calibration...
+            INFO: Data saved to data/raw/calibration_viewser_df.parquet
+        
+        Note:
+            - Uses args.saved to skip download if data exists
+            - Respects args.override_timestep for custom ranges
+            - Updates viewser if args.update_viewser=True
         """
 
         with self._wandb_module.initialize_run(
@@ -2021,100 +1845,35 @@ class ForecastingModelManager(ModelManager):
 
     def _execute_model_training(self) -> None:
         """
-        Execute model training pipeline stage.
-
-        Trains the model using configured hyperparameters, saves the trained
-        model artifact, logs training metrics to WandB, and creates execution
-        logs. Handles errors with comprehensive logging and notifications.
-
+        Train model and save artifact.
+        
+        Executes model training using configured hyperparameters,
+        saves trained artifact, logs metrics to WandB, and creates
+        execution logs.
+        
         Pipeline Stage:
             train
-
-        Dependencies:
-            - self._train_model_artifact(): Abstract method implemented by subclass
-            - self._wandb_module: WandB manager for logging
-            - self._model_path: Path manager for artifact storage
-            - self.configs: Combined configuration dictionary
-
-        Execution Flow:
-            1. Initialize WandB run for training
-            2. Log training start
-            3. Call _train_model_artifact() (implemented by subclass)
-            4. Create execution log entry
-            5. Send completion notification
-            6. Handle errors with cleanup and alerts
-
+        
         Side Effects:
-            - Creates WandB run with job_type="train"
-            - Creates model artifact in self._model_path.artifacts
-            - Creates/updates training log file
-            - Logs training metrics to WandB
-            - Sends WandB completion/error notifications
-            - Updates model registry
-
-        Training Artifacts:
-            Created files:
-            - {run_type}_model_{timestamp}.pt (or .pkl, .h5)
-            - Training log entry in logs/
-            - WandB artifacts for model versioning
-
-        Example:
-            >>> # Internal usage after data fetching
-            >>> self._execute_model_training()
-            INFO: Training model purple_alien...
-            INFO: Epoch 1/100: train_loss=0.234
-            INFO: Epoch 2/100: train_loss=0.198
-            ...
-            INFO: Training completed. Model saved.
-            INFO: WandB notification sent.
-
-        Log Creation:
-            Creates entry with:
-            - Timestamp
-            - Model name
-            - Hyperparameters
-            - Training duration
-            - Final metrics
-            - Artifact path
-
+            - Creates WandB run (job_type="train")
+            - Creates artifact in self._model_path.artifacts
+            - Creates training log entry
+            - Logs metrics to WandB
+            - Sends completion notification
+        
         Raises:
             ModelTrainingException: If training fails
-                Includes full traceback
-                Sends WandB error alert
-                Cleans up partial artifacts
-
-        Error Handling:
-            On error:
-            - Log full exception with traceback
-            - Send WandB alert with error details
-            - Wrap in ModelTrainingException
-            - Preserve original stack trace
-            - Clean up partial files
-
-        Monitoring:
-            Logs to WandB:
-            - Training start/completion events
-            - Hyperparameter configuration
-            - Training metrics (if implemented)
-            - Model artifact reference
-            - Execution duration
-
-        Notes:
-            - Uses self.configs for all hyperparameters
+        
+        Example:
+            >>> # Internal usage
+            >>> self._execute_model_training()
+            INFO: Training purple_alien...
+            INFO: Training completed. Model saved.
+        
+        Note:
             - Calls abstract _train_model_artifact()
-            - Sweep flag (self._sweep) included in logs
+            - Artifact naming: {run_type}_model_{timestamp}.{ext}
             - WandB run finished in parent context
-
-        Performance:
-            - Training time: Model and data dependent
-            - Artifact size: Model dependent
-            - Memory usage: Monitor for large models
-
-        See Also:
-            - :meth:`_train_model_artifact`: Abstract training method
-            - :func:`handle_single_log_creation`: Log creation utility
-            - :class:`ModelTrainingException`: Training exception class
-            - :meth:`_execute_model_tasks`: Task orchestration
         """
         import traceback
         from views_pipeline_core.files.utils import handle_single_log_creation
@@ -2155,7 +1914,37 @@ class ForecastingModelManager(ModelManager):
                 self._wandb_module.finish_run()
 
     def _execute_model_evaluation(self) -> None:
-        """Executes model evaluation using self.args and self.configs."""
+        """
+        Evaluate model on test data.
+        
+        Generates predictions, validates structure, calculates metrics,
+        and saves evaluation results. Supports multi-sequence evaluation.
+        
+        Pipeline Stage:
+            evaluate
+        
+        Side Effects:
+            - Creates WandB run (job_type="evaluate")
+            - Generates predictions for each sequence
+            - Validates prediction DataFrames
+            - Calculates and saves metrics
+            - Logs to WandB
+            - Sends completion notification
+        
+        Raises:
+            ModelEvaluationException: If evaluation fails
+        
+        Example:
+            >>> # Internal usage
+            >>> self._execute_model_evaluation()
+            INFO: Evaluating purple_alien...
+            INFO: Validating 12 prediction sequences...
+            INFO: Evaluation completed.
+        
+        Note:
+            - Uses threadpool for parallel validation
+            - Metrics calculated only if specified in config
+        """
         import traceback
         from views_pipeline_core.modules.validation.model import validate_prediction_dataframe
         from views_pipeline_core.files.utils import handle_single_log_creation
@@ -2231,7 +2020,36 @@ class ForecastingModelManager(ModelManager):
                 self._wandb_module.finish_run()
 
     def _execute_model_forecasting(self) -> None:
-        """Executes model forecasting using self.args and self.configs."""
+        """
+        Generate future predictions.
+        
+        Creates forecasts for future time periods, validates structure,
+        and saves predictions to disk and optionally to prediction store.
+        
+        Pipeline Stage:
+            forecast
+        
+        Side Effects:
+            - Creates WandB run (job_type="forecast")
+            - Generates future predictions
+            - Validates prediction DataFrame
+            - Saves to data/generated
+            - Uploads to prediction store (if enabled)
+            - Sends completion notification
+        
+        Raises:
+            ModelForecastingException: If forecasting fails
+        
+        Example:
+            >>> # Internal usage
+            >>> self._execute_model_forecasting()
+            INFO: Forecasting purple_alien...
+            INFO: Forecasts saved.
+        
+        Note:
+            - Only valid for run_type='forecasting'
+            - Prediction store requires use_prediction_store=True
+        """
         import traceback
         from views_pipeline_core.modules.validation.model import validate_prediction_dataframe
         from views_pipeline_core.files.utils import handle_single_log_creation
@@ -2275,7 +2093,27 @@ class ForecastingModelManager(ModelManager):
                 self._wandb_module.finish_run()
 
     def _execute_model_sweeping(self) -> None:
-        """Executes model sweeping using wandb.config and self.args."""
+        """
+        Execute single sweep iteration.
+        
+        Trains model with current sweep parameters, evaluates performance,
+        and logs metrics to WandB for optimization.
+        
+        Internal Use:
+            Called by WandB sweep agent for each hyperparameter combination.
+        
+        Side Effects:
+            - Creates WandB run (job_type="sweep")
+            - Updates config with sweep parameters
+            - Trains model
+            - Evaluates model
+            - Calculates metrics
+            - Logs to WandB
+        
+        Note:
+            - Uses wandb.config for hyperparameters
+            - Validation always performed during sweeps
+        """
         import wandb
 
         with self._wandb_module.initialize_run(
@@ -2326,10 +2164,34 @@ class ForecastingModelManager(ModelManager):
 
     def _execute_forecast_reporting(self) -> None:
         """
-        Executes the reporting process.
-
-        Args:
-            config (dict): Configuration object containing parameters and settings.
+        Generate forecast visualization report.
+        
+        Creates HTML report with maps and time-series visualizations
+        of forecasts. Combines historical data with future predictions.
+        
+        Pipeline Stage:
+            report (forecasting)
+        
+        Side Effects:
+            - Creates WandB run (job_type="report")
+            - Loads historical and forecast data
+            - Generates interactive maps
+            - Creates time-series plots
+            - Saves HTML report to reports/
+            - Sends completion notification
+        
+        Raises:
+            PipelineException: If report generation fails
+        
+        Example:
+            >>> # Internal usage
+            >>> self._execute_forecast_reporting()
+            INFO: Generating forecast report...
+            INFO: Report saved to reports/report_forecasting_*.html
+        
+        Note:
+            - Requires both historical and forecast data
+            - Handles both model and ensemble targets
         """
         import wandb
         import pandas as pd
@@ -2430,20 +2292,24 @@ class ForecastingModelManager(ModelManager):
 
     def _save_model_artifact(self, run_type: str) -> None:
         """
-        Save the model artifact to Weights and Biases (WandB).
-
+        Upload model artifact to WandB.
+        
+        Creates WandB artifact from saved model file for versioning
+        and tracking.
+        
+        Internal Use:
+            Called after training to version model artifacts.
+        
         Args:
-            run_type (str): The type of run for which the model artifact is being saved.
-
+            run_type: Run type for artifact naming
+        
         Raises:
-            Exception: If there is an error while saving the artifact to WandB.
-
-        Logs:
-            Info: When the artifact is successfully saved to WandB.
-            Error: When there is an error saving the artifact to WandB.
-
-        Alerts:
-            WandB Alert: Sends an alert to WandB if there is an error while saving the artifact.
+            PipelineException: If artifact upload fails
+        
+        Side Effects:
+            - Creates WandB artifact
+            - Uploads model file
+            - Logs artifact reference
         """
         # Save the artifact to WandB
         try:
@@ -2470,6 +2336,20 @@ class ForecastingModelManager(ModelManager):
             )
 
     def _save_eval_report(self, eval_report, path_reports, conflict_type):
+        """
+        Save evaluation metrics report as JSON.
+        
+        Internal Use:
+            Called during evaluation reporting.
+        
+        Args:
+            eval_report: Dictionary of evaluation metrics
+            path_reports: Directory for saving reports
+            conflict_type: Conflict type code for filename
+        
+        Raises:
+            PipelineException: If save fails
+        """
         import json
         from views_pipeline_core.files.utils import generate_evaluation_report_name
 
@@ -2502,14 +2382,28 @@ class ForecastingModelManager(ModelManager):
         conflict_type: str,
     ) -> None:
         """
-        Save the model evaluation metrics to the specified path and log them to WandB.
-
+        Save evaluation metrics to disk and WandB.
+        
+        Saves three levels of evaluation metrics (step, time-series, month)
+        to parquet files and logs to WandB.
+        
+        Internal Use:
+            Called by _evaluate_prediction_dataframe().
+        
         Args:
-            df_step_wise_evaluation (pd.DataFrame): DataFrame containing step-wise evaluation metrics.
-            df_time_series_wise_evaluation (pd.DataFrame): DataFrame containing time series-wise evaluation metrics.
-            df_month_wise_evaluation (pd.DataFrame): DataFrame containing month-wise evaluation metrics.
-            path_generated (str or Path): The path where the outputs should be saved.
-            conflict_type (str): The conflict type (e.g., 'sb', 'os', 'ns').
+            df_step_wise_evaluation: Metrics per prediction step
+            df_time_series_wise_evaluation: Metrics per time series
+            df_month_wise_evaluation: Metrics per month
+            path_generated: Directory for saving files
+            conflict_type: Conflict type for filename
+        
+        Side Effects:
+            - Saves three parquet files
+            - Logs tables to WandB
+            - Sends completion notification
+        
+        Raises:
+            PipelineException: If save fails
         """
         from views_pipeline_core.files.utils import (
             save_dataframe,
@@ -2586,12 +2480,31 @@ class ForecastingModelManager(ModelManager):
         sequence_number: int = None,
     ) -> None:
         """
-        Save the model predictions to the specified path and log them to WandB.
-
+        Save predictions to disk and prediction store.
+        
+        Saves prediction DataFrame to parquet file and optionally
+        uploads to central VIEWS prediction store.
+        
+        Internal Use:
+            Called after evaluation and forecasting.
+        
         Args:
-            df_predictions (pd.DataFrame): DataFrame containing model predictions.
-            path_generated (str or Path): The path where the predictions should be saved.
-            sequence_number (int): The sequence number.
+            df_predictions: Predictions DataFrame
+            path_generated: Directory for saving
+            sequence_number: Sequence number for evaluation runs.
+                None for forecasting runs.
+        
+        Side Effects:
+            - Saves parquet file
+            - Uploads to prediction store (if enabled)
+            - Sends completion notification
+        
+        Raises:
+            PipelineException: If save fails
+        
+        Note:
+            - Filename includes timestamp and sequence number
+            - Prediction store requires use_prediction_store=True
         """
         from views_pipeline_core.files.utils import (
             save_dataframe,
@@ -2633,27 +2546,29 @@ class ForecastingModelManager(ModelManager):
         self, df_predictions, eval_type, ensemble=False
     ) -> None:
         """
-        Evaluates the prediction DataFrame against actual values and logs the evaluation metrics.
-
+        Calculate evaluation metrics from predictions.
+        
+        Computes metrics at multiple aggregation levels (step, time-series,
+        month) and logs to WandB. Saves results to disk.
+        
+        Internal Use:
+            Called by evaluation and sweep methods.
+        
         Args:
-            df_predictions (pd.DataFrame or dict): The DataFrame or dictionary containing the prediction results.
-            eval_type (str): The type of evaluation to be performed.
-            ensemble (bool, optional): Flag indicating whether the predictions are from an ensemble model. Defaults to False.
-
-        Returns:
-            None
-
-        This method performs the following steps:
-        1. Initializes the MetricsManager with the specified metrics configuration.
-        2. Reads the actual values from the forecast store.
-        3. Evaluates the predictions using step-wise, time-series-wise, and month-wise evaluations.
-        4. Logs the evaluation metrics using WandB.
-        5. Saves the evaluation metrics and predictions to the specified paths.
-        6. Generates and logs an evaluation table if the predictions are provided as a dictionary or DataFrame.
-        7. Sends a WandB alert with the evaluation results.
-
-        Raises:
-            None
+            df_predictions: List of prediction DataFrames or single DataFrame
+            eval_type: Evaluation type
+            ensemble: Whether predictions from ensemble model
+        
+        Side Effects:
+            - Calculates metrics using EvaluationManager
+            - Logs metrics to WandB
+            - Saves evaluation files
+            - Sends summary notification
+        
+        Note:
+            - Loads actual values from viewser data
+            - Processes each target separately
+            - Groups metrics by conflict type
         """
         import pandas as pd
         from views_evaluation.evaluation.evaluation_manager import EvaluationManager
@@ -2716,13 +2631,28 @@ class ForecastingModelManager(ModelManager):
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
         """
-        Generates a formatted evaluation table as a string.
-
+        Format metrics as markdown table.
+        
+        Creates readable table from WandB summary metrics for
+        notifications and reports.
+        
+        Internal Use:
+            Called when sending evaluation notifications.
+        
         Args:
-            metric_dict (Dict): A dictionary where keys are metric names and values are their corresponding values.
-
+            metric_dict: WandB summary metrics dictionary
+        
         Returns:
-            str: A formatted string representing the evaluation table.
+            Formatted markdown table string
+        
+        Example:
+            >>> table = self._generate_evaluation_table(wandb.summary._as_dict())
+            >>> print(table)
+            ```
+            | Metric | Value |
+            |--------|-------|
+            | MSE    | 0.045 |
+            ```
         """
         from tabulate import tabulate
 
@@ -2745,10 +2675,33 @@ class ForecastingModelManager(ModelManager):
 
     def _execute_evaluation_reporting(self) -> None:
         """
-        Executes the reporting process.
-
-        Args:
-            config (dict): Configuration object containing parameters and settings.
+        Generate evaluation visualization report.
+        
+        Creates HTML report with evaluation metrics, comparisons to
+        baselines, and performance visualizations.
+        
+        Pipeline Stage:
+            report (evaluation)
+        
+        Side Effects:
+            - Creates WandB run (job_type="report")
+            - Loads latest WandB run data
+            - Generates evaluation report
+            - Saves HTML to reports/
+            - Sends completion notification
+        
+        Raises:
+            PipelineException: If report generation fails
+        
+        Example:
+            >>> # Internal usage
+            >>> self._execute_evaluation_reporting()
+            INFO: Generating evaluation report...
+            INFO: Report saved to reports/report_calibration_*.html
+        
+        Note:
+            - Retrieves metrics from latest WandB run
+            - Includes comparison to baseline models
         """
 
         latest_run = get_latest_run(
@@ -2794,65 +2747,27 @@ class ForecastingModelManager(ModelManager):
 
     def __repr__(self) -> str:
         """
-        Return detailed string representation of ForecastingModelManager.
-
-        Provides comprehensive view of manager state including model information,
-        configuration status, and runtime settings for debugging and logging.
-
+        Return detailed string representation.
+        
+        Provides comprehensive view of manager state for debugging
+        and logging.
+        
         Returns:
-            str: Multi-line representation showing manager configuration:
+            Multi-line representation with:
                 - Class name
-                - Model name and target type
-                - WandB notification status
-                - Prediction store status
-                - Sweep mode status
-                - Current run type (if args set)
-                - Evaluation type (if configured)
-                - Project name (if configured)
-
+                - Model name and target
+                - Configuration flags
+                - Runtime state (if executing)
+        
         Example:
-            >>> manager = ForecastingModelManager(model_path)
             >>> print(repr(manager))
             ForecastingModelManager(
                 model_name='purple_alien'
                 target='model'
                 wandb_notifications=True
-                use_prediction_store=False
                 sweep_mode=False
                 run_type='calibration'
-                eval_type='standard'
-                project='purple_alien_calibration'
             )
-            >>>
-            >>> # Before execution (minimal info)
-            >>> manager = ForecastingModelManager(model_path)
-            >>> print(repr(manager))
-            ForecastingModelManager(
-                model_name='purple_alien'
-                target='model'
-                wandb_notifications=False
-                use_prediction_store=False
-                sweep_mode=False
-            )
-
-        Implementation Notes:
-            - Shows only initialized attributes
-            - Formats as multi-line for readability
-            - Includes conditional attributes (run_type, eval_type, project)
-            - Safe to call at any initialization stage
-
-        Use Cases:
-            - Debugging manager configuration
-            - Logging initialization state
-            - Verifying settings before execution
-            - Troubleshooting pipeline issues
-
-        Thread Safety:
-            Thread-safe (read-only access to instance attributes)
-
-        See Also:
-            - :meth:`__str__`: Simple string representation
-            - :meth:`ModelPathManager.__repr__`: Path manager representation
         """
         attrs = [
             f"model_name='{self._model_path.model_name}'",
@@ -2876,47 +2791,16 @@ class ForecastingModelManager(ModelManager):
 
     def __str__(self) -> str:
         """
-        Return simple string representation of ForecastingModelManager.
-
-        Provides concise, human-readable description of the manager suitable
-        for logging, display, and casual inspection.
-
+        Return simple string representation.
+        
+        Provides concise description suitable for logging and display.
+        
         Returns:
-            str: Simple one-line description containing:
-                - Class name
-                - Model name
-                - Current run type (if executing)
-
+            One-line description with model name and run type (if available)
+        
         Example:
-            >>> manager = ForecastingModelManager(model_path)
-            >>> str(manager)
-            "ForecastingModelManager for model 'purple_alien'"
-            >>>
-            >>> # During execution
-            >>> manager.execute_single_run(args)
-            >>> str(manager)
-            "ForecastingModelManager for model 'purple_alien' (calibration)"
-
-        Usage:
-            >>> manager = ForecastingModelManager(model_path)
-            >>> logger.info(f"Initialized {manager}")
-            INFO: Initialized ForecastingModelManager for model 'purple_alien'
-            >>>
             >>> print(manager)
-            ForecastingModelManager for model 'purple_alien'
-
-        Implementation Notes:
-            - Always safe to call (no required attributes)
-            - Includes run_type if available
-            - Suitable for user-facing messages
-            - Lightweight compared to __repr__
-
-        Thread Safety:
-            Thread-safe (read-only access to instance attributes)
-
-        See Also:
-            - :meth:`__repr__`: Detailed representation
-            - :meth:`ModelPathManager.__str__`: Path manager string format
+            ForecastingModelManager for model 'purple_alien' (calibration)
         """
         base_str = (
             f"{self.__class__.__name__} for model '{self._model_path.model_name}'"
