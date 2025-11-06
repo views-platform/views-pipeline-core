@@ -2278,7 +2278,7 @@ class ForecastingModelManager(ModelManager):
                     title="Forecast Report Generated",
                     text=f"Forecast report for {self._model_path.target} {self._model_path.model_name} has been successfully "
                     f"generated and saved locally at {report_path}.",
-                    wandb_notifications=self._wandb_notifications,
+                    notifications_enabled=self._wandb_notifications,
                     models_path=self._model_path.models,
                 )
             except Exception as e:
@@ -2733,7 +2733,7 @@ class ForecastingModelManager(ModelManager):
                     title="Evaluation Report Generated",
                     text=f"Evaluation report for {self._model_path.model_name} has been successfully "
                     f"generated and saved locally at {report_path}.",
-                    wandb_notifications=self._wandb_notifications,
+                    notifications_enabled=self._wandb_notifications,
                     models_path=self._model_path.models,
                 )
             except Exception as e:
