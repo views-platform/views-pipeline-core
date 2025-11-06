@@ -1566,7 +1566,6 @@ class ForecastingModelManager(ModelManager):
             "_evaluate_sweep method must be implemented by subclasses."
         )
 
-    @DeprecationWarning
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
         """
