@@ -6,21 +6,19 @@ import subprocess
 import pandas as pd
 import traceback
 import tqdm
+import wandb
 
 from views_pipeline_core.managers.model import (
     ModelPathManager,
-    ModelManager,
     ForecastingModelManager,
 )
 from views_pipeline_core.cli.args import ForecastingModelArgs
-from views_pipeline_core.modules.wandb import add_wandb_metrics, wandb_alert
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.modules.reconciliation.reconciliation import ReconciliationModule
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
 from views_pipeline_core.exceptions import PipelineException
-import wandb
 
 logger = logging.getLogger(__name__)
 
