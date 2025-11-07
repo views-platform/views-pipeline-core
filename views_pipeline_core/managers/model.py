@@ -1219,11 +1219,6 @@ class ModelManager:
     def configs(self) -> Dict:
         """Get combined configuration."""
         return self._config_manager.get_combined_config()
-
-    @property
-    def config(self) -> Dict:
-        """Get combined configuration."""
-        return self.configs
     
     @configs.setter
     def configs(self, config: Dict) -> None:
@@ -1397,85 +1392,6 @@ class ForecastingModelManager(ModelManager):
         raise ValueError(
             f"Conflict type not found in '{target}'. Valid types: 'sb', 'os', 'ns'."
         )
-
-    @property
-    def args(self) -> ForecastingModelArgs:
-        """
-        Get the current command line arguments.
-
-        Provides access to parsed and validated command line arguments.
-        Must be set via execute_single_run() or execute_sweep_run() before access.
-
-        Returns:
-            ForecastingModelArgs: Validated command line arguments containing:
-                - run_type (str): Type of run (calibration/validation/forecasting)
-                - train (bool): Whether to train model
-                - evaluate (bool): Whether to evaluate model
-                - forecast (bool): Whether to generate forecasts
-                - saved (bool): Whether to use saved data
-                - eval_type (str): Evaluation type (standard/long/complete)
-                - update_viewser (bool): Whether to update viewser data
-                - prediction_store (bool): Whether to use prediction store
-                - wandb_notifications (bool): Whether to send WandB notifications
-                - override_timestep (Optional[int]): Override for current timestep
-
-        Raises:
-            AttributeError: If accessed before execute_single_run() called
-
-        Example:
-            >>> manager = ForecastingModelManager(model_path)
-            >>> args = ForecastingModelArgs.parse_args()
-            >>> manager.execute_single_run(args)
-            >>> # Now args property is available
-            >>> print(manager.args.run_type)
-            'calibration'
-            >>> print(manager.args.train)
-            True
-
-        Notes:
-            - Read-only property (use execute_single_run to set)
-            - Available after execute_single_run() or execute_sweep_run()
-            - Validated by ForecastingModelArgs before storage
-
-        See Also:
-            - :class:`ForecastingModelArgs`: Arguments dataclass
-            - :meth:`execute_single_run`: Sets args property
-            - :meth:`configs`: Configuration property
-        """
-        if not hasattr(self, "_args"):
-            raise AttributeError(
-                "args not set. Call execute_single_run() or execute_sweep_run() first."
-            )
-        return self._args
-
-    @property
-    def configs(self) -> Dict[str, Any]:
-        """
-        Get merged runtime configuration.
-        
-        Combines hyperparameters, deployment settings, metadata, partition
-        info, and runtime values. Later sources override earlier ones.
-        
-        Returns:
-            Merged configuration dictionary with keys:
-                - 'algorithm', 'features', 'targets' (hyperparameters)
-                - 'name', 'version' (deployment)
-                - 'run_type', 'timestamp' (runtime)
-        
-        Raises:
-            AttributeError: If accessed before execute_single_run()
-        
-        Example:
-            >>> manager.execute_single_run(args)
-            >>> config = manager.configs
-            >>> print(config['algorithm'])
-            'random_forest'
-        """
-        if not hasattr(self, "_config_manager"):
-            raise AttributeError(
-                "configs not set. Call execute_single_run() or execute_sweep_run() first."
-            )
-        return self._config_manager.get_combined_config()
 
     @abstractmethod
     def _train_model_artifact(self) -> any:

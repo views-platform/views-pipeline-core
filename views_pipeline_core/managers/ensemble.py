@@ -459,13 +459,18 @@ class EnsembleManager(ForecastingModelManager):
 
         Returns:
             ForecastingModelArgs: Configured args instance.
+        
+        Note:
+            If train, the saved flag is set to the value of the saved flag in the args.
+            Check cli validation "if --train or --sweep is not set, you should use --saved flag".
         """
+        saved = self.args.saved if train else True
         return ForecastingModelArgs(
             run_type=self.args.run_type,
             train=train,
             evaluate=evaluate,
             forecast=forecast,
-            saved=self.args.saved,
+            saved=saved,
             eval_type=self.args.eval_type,
             update_viewser=self.args.update_viewser,
             prediction_store=self._use_prediction_store,
