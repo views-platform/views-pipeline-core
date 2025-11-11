@@ -13,6 +13,7 @@ from views_pipeline_core.exceptions import ModelForecastingException
 import wandb
 import pandas as pd
 from pathlib import Path
+from functools import partial
 import random
 from views_pipeline_core.modules.wandb import WandBModule
 from views_pipeline_core.managers import ConfigurationManager
@@ -23,7 +24,8 @@ from views_pipeline_core.exceptions import (
     ModelEvaluationException,
     PipelineException,
 )
-
+from views_pipeline_core.modules.transformations import DatasetTransformationModule
+from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 
 # from views_pipeline_core.modules.wandb import (
 #     add_wandb_metrics,
@@ -1216,6 +1218,61 @@ class ModelManager:
         PipelineConfig.dataframe_format = format
 
     @property
+    def config(self) -> Dict:
+        """Get combined configuration."""
+        return self.configs
+
+    @property
+    def args(self) -> ForecastingModelArgs:
+        """
+        Get the current command line arguments.
+
+        Provides access to parsed and validated command line arguments.
+        Must be set via execute_single_run() or execute_sweep_run() before access.
+
+        Returns:
+            ForecastingModelArgs: Validated command line arguments containing:
+                - run_type (str): Type of run (calibration/validation/forecasting)
+                - train (bool): Whether to train model
+                - evaluate (bool): Whether to evaluate model
+                - forecast (bool): Whether to generate forecasts
+                - saved (bool): Whether to use saved data
+                - eval_type (str): Evaluation type (standard/long/complete)
+                - update_viewser (bool): Whether to update viewser data
+                - prediction_store (bool): Whether to use prediction store
+                - wandb_notifications (bool): Whether to send WandB notifications
+                - override_timestep (Optional[int]): Override for current timestep
+
+        Raises:
+            AttributeError: If accessed before execute_single_run() called
+
+        Example:
+            >>> manager = ForecastingModelManager(model_path)
+            >>> args = ForecastingModelArgs.parse_args()
+            >>> manager.execute_single_run(args)
+            >>> # Now args property is available
+            >>> print(manager.args.run_type)
+            'calibration'
+            >>> print(manager.args.train)
+            True
+
+        Notes:
+            - Read-only property (use execute_single_run to set)
+            - Available after execute_single_run() or execute_sweep_run()
+            - Validated by ForecastingModelArgs before storage
+
+        See Also:
+            - :class:`ForecastingModelArgs`: Arguments dataclass
+            - :meth:`execute_single_run`: Sets args property
+            - :meth:`configs`: Configuration property
+        """
+        if not hasattr(self, "_args"):
+            raise AttributeError(
+                "args not set. Call execute_single_run() or execute_sweep_run() first."
+            )
+        return self._args
+
+    @property
     def configs(self) -> Dict:
         """Get combined configuration."""
         return self._config_manager.get_combined_config()
@@ -1542,6 +1599,14 @@ class ForecastingModelManager(ModelManager):
         raise NotImplementedError(
             "_evaluate_sweep method must be implemented by subclasses."
         )
+    
+    @staticmethod
+    def dataset_class(loa: str) -> Optional[type]:
+        dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
+        dataset_cls = dataset_classes.get(loa)
+        if dataset_cls:
+            return partial(dataset_cls)
+        return None
 
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
@@ -2040,6 +2105,7 @@ class ForecastingModelManager(ModelManager):
                     f"Forecasting {self._model_path.target} {self.configs['name']}..."
                 )
                 df_predictions = self._forecast_model_artifact(self.args.artifact_name)
+                
                 validate_prediction_dataframe(
                     dataframe=df_predictions, target=self.configs["targets"]
                 )
@@ -2049,6 +2115,21 @@ class ForecastingModelManager(ModelManager):
                     config=self.configs,
                     train=False,
                 )
+
+                # ------------------------------------
+                # TEMPORARY: Undo transformations before saving. Ensure predictions are in original space. This is a very painful hack but will be gone when a new
+                # ADR is written and enforced.
+                forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=df_predictions)
+                forecast_transformation_module = DatasetTransformationModule(
+                    dataset=forecast_dataset
+                )
+                forecast_transformation_module.undo_all_transformations()
+                df_predictions = forecast_transformation_module.get_dataframe()
+                # updated_targets = []
+                # for target in self.configs["targets"]:
+                #     updated_targets.append(forecast_transformation_module.get_current_column_name(original_name=f"pred_{target}").removeprefix("pred_"))
+                # self._config_manager.add_config({"targets": updated_targets})
+                # ------------------------------------
 
                 self._save_predictions(df_predictions, self._model_path.data_generated)
 
@@ -2218,16 +2299,26 @@ class ForecastingModelManager(ModelManager):
                             run_type=self.args.run_type
                         )[0]
                     )
+
                 else:
                     raise ValueError(
                         f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
                     )
+                
                 try:
                     forecast_df = read_dataframe(
                         self._model_path._get_generated_predictions_data_file_paths(
                             run_type=self.args.run_type
                         )[0]
                     )
+                    # TEMPORARY: Undo transformations before saving. Ensure predictions are in original space.
+                    # forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=forecast_df)
+                    # forecast_transformation_module = DatasetTransformationModule(
+                    #     dataset=forecast_dataset
+                    # )
+                    # forecast_transformation_module.undo_all_transformations()
+                    # forecast_df = forecast_transformation_module.get_dataframe()
+
                     logger.info(f"Using latest forecast dataframe")
                 except Exception as e:
                     raise FileNotFoundError(
@@ -2241,6 +2332,19 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Generating forecast report for {self._model_path.target} {self.configs['name']}..."
                 )
+
+                # ------------------------------------
+                # TEMPORARY: Update target names based on transformations. Undo transformations first if necessary.
+                historical_transformation_module = DatasetTransformationModule(
+                    dataset=self.dataset_class(loa=self.configs.get("level"))(source=historical_df, targets=self.configs.get("targets"))
+                )
+                historical_transformation_module.undo_transformations(column_names=self.configs.get("targets"))
+                updated_targets = []
+                for target in self.configs.get("targets"):
+                    updated_targets.append(historical_transformation_module.get_current_column_name(original_name=target))
+                self._config_manager.add_config({"targets": updated_targets})
+                historical_df = historical_transformation_module.get_dataframe()
+                # ------------------------------------
 
                 forecast_template = ForecastReportTemplate(
                     config=self.configs,
