@@ -492,7 +492,7 @@ class DatasetTransformationModule:
             logger.debug(f"Removed old prefix '{old_prefix}' from column '{column}'")
         
         # Add new prefix after 'pred_' if it exists, otherwise at the start
-        if parts[0] == "pred":
+        if parts and parts[0] == "pred":
             parts.insert(1, new_prefix)
         else:
             parts.insert(0, new_prefix)
@@ -586,6 +586,10 @@ class DatasetTransformationModule:
             INFO: Applying ln(x + 1) transformation: 'ged_sb_dep' -> 'ln_ged_sb_dep'
             INFO: ✓ Successfully applied ln transform
             
+            From lr_ prefix:
+            >>> transformer.ln_transform(["lr_ged_sb_dep"])
+            INFO: Applying ln(x + 1) transformation: 'lr_ged_sb_dep' -> 'ln_ged_sb_dep'
+            
             Multiple columns:
             >>> transformer.ln_transform(["ged_sb_dep", "ged_sb_count"])
             INFO: ln_transform completed: 2 transformed, 0 skipped
@@ -597,7 +601,7 @@ class DatasetTransformationModule:
         
         Note:
             - Creates new column, removes original
-            - Replaces lr_ prefix with ln_ if present
+            - Replaces lr_ or lx_ prefix with ln_ if present
             - Updates column mapping automatically
             - Logs transformation in history
             - Handles numpy arrays in cells
@@ -620,8 +624,15 @@ class DatasetTransformationModule:
                 skipped_count += 1
                 continue
             
+            # Determine which prefix to remove (if any)
+            old_prefix = None
+            if self._has_transform_prefix(column, "lr"):
+                old_prefix = "lr"
+            elif self._has_transform_prefix(column, "lx"):
+                old_prefix = "lx"
+            
             # Generate new column name
-            new_col_name = self._add_transform_prefix(column, "ln", "lr")
+            new_col_name = self._add_transform_prefix(column, "ln", old_prefix)
             logger.info(f"Applying ln(x + 1) transformation: '{column}' -> '{new_col_name}'")
             
             # Apply transformation
@@ -679,6 +690,10 @@ class DatasetTransformationModule:
             INFO: Computed offset value: exp(-100) = 3.72e-44
             INFO: ✓ Successfully applied lx transform
             
+            From lr_ prefix:
+            >>> transformer.lx_transform(["lr_ged_sb_dep"])
+            INFO: Applying ln(x + exp(-100)) transformation: 'lr_ged_sb_dep' -> 'lx_ged_sb_dep'
+            
             Custom offset:
             >>> transformer.lx_transform(["feature_1"], offset=-50)
             INFO: Starting lx_transform on 1 column(s) with offset=-50...
@@ -690,7 +705,7 @@ class DatasetTransformationModule:
         
         Note:
             - Creates new column, removes original
-            - Replaces lr_ prefix with lx_ if present
+            - Replaces lr_ or ln_ prefix with lx_ if present
             - Offset stored in transformation history
             - Must use same offset when undoing
             - Handles numpy arrays in cells
@@ -715,8 +730,15 @@ class DatasetTransformationModule:
                 skipped_count += 1
                 continue
             
+            # Determine which prefix to remove (if any)
+            old_prefix = None
+            if self._has_transform_prefix(column, "lr"):
+                old_prefix = "lr"
+            elif self._has_transform_prefix(column, "ln"):
+                old_prefix = "ln"
+            
             # Generate new column name
-            new_col_name = self._add_transform_prefix(column, "lx", "lr")
+            new_col_name = self._add_transform_prefix(column, "lx", old_prefix)
             logger.info(f"Applying ln(x + exp({offset})) transformation: '{column}' -> '{new_col_name}'")
             
             # Apply transformation
