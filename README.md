@@ -8,7 +8,7 @@
 </div>
 
 <p align="center">
-  <img src="views_pipeline_core/assets/vpc_header.png" alt="VIEWS Pipeline Core Banner" width="100%">
+  <img src="views_pipeline_core/assets/vpc_header.png" alt="VIEWS Pipeline Core Banner" width="85%">
 </p>
 
 <p align="center">
@@ -19,6 +19,9 @@
   <img src="https://img.shields.io/github/issues/views-platform/views-pipeline-core" alt="GitHub Issues or Pull Requests" />
   &nbsp;&nbsp;
   <img src="https://img.shields.io/github/v/release/views-platform/views-pipeline-core" alt="GitHub Release" />
+  &nbsp;&nbsp;
+  <img src="https://img.shields.io/github/languages/top/views-platform/views-pipeline-core
+  " alt="GitHub top language" />
 </p>
 
 # Welcome to views-pipeline-core repository! 
