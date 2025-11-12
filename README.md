@@ -1,12 +1,25 @@
-![GitHub License](https://img.shields.io/github/license/views-platform/views-pipeline-core)
+<!-- ![GitHub License](https://img.shields.io/github/license/views-platform/views-pipeline-core)
 ![GitHub branch check runs](https://img.shields.io/github/check-runs/views-platform/views-pipeline-core/main)
 ![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/views-platform/views-pipeline-core)
-![GitHub Release](https://img.shields.io/github/v/release/views-platform/views-pipeline-core)
+![GitHub Release](https://img.shields.io/github/v/release/views-platform/views-pipeline-core) -->
 
 <div style="width: 100%; max-width: 1500px; height: 400px; overflow: hidden; position: relative;">
   <img src="https://github.com/user-attachments/assets/1ec9e217-508d-4b10-a41a-08dface269c7" alt="VIEWS Twitter Header" style="position: absolute; top: -50px; width: 100%; height: auto;">
 </div>
 
+<p align="center">
+  <img src="views_pipeline_core/assets/vpc_header.png" alt="VIEWS Pipeline Core Banner" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/license/views-platform/views-pipeline-core" alt="GitHub License" />
+  &nbsp;&nbsp;
+  <img src="https://img.shields.io/github/check-runs/views-platform/views-pipeline-core/main" alt="GitHub branch check runs" />
+  &nbsp;&nbsp;
+  <img src="https://img.shields.io/github/issues/views-platform/views-pipeline-core" alt="GitHub Issues or Pull Requests" />
+  &nbsp;&nbsp;
+  <img src="https://img.shields.io/github/v/release/views-platform/views-pipeline-core" alt="GitHub Release" />
+</p>
 
 # Welcome to views-pipeline-core repository! 
 
