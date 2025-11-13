@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import copy
 
-from views_pipeline_core.managers.configuration import ConfigurationManager
+from views_pipeline_core.managers.configuration.configuration import ConfigurationManager
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.exceptions import ConfigurationException
 
@@ -282,7 +282,7 @@ class TestUpdateForSingleRun:
             evaluate=True,
         )
         
-        with patch("views_pipeline_core.managers.configuration.validate_config"):
+        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
             config_manager.update_for_single_run(args, mock_wandb_module)
         
         config = config_manager.get_combined_config()
@@ -299,7 +299,7 @@ class TestUpdateForSingleRun:
             override_timestep=530,
         )
         
-        with patch("views_pipeline_core.managers.configuration.validate_config"):
+        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
             config_manager.update_for_single_run(args, mock_wandb_module)
         
         config = config_manager.get_combined_config()
@@ -311,7 +311,7 @@ class TestUpdateForSingleRun:
         """Test validation failure raises ConfigurationException."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch("views_pipeline_core.managers.configuration.validate_config") as mock_validate:
+        with patch("views_pipeline_core.managers.configuration.configuration.validate_config") as mock_validate:
             mock_validate.side_effect = ValueError("Invalid config")
             
             with pytest.raises(ConfigurationException, match="Configuration validation failed"):
@@ -321,7 +321,7 @@ class TestUpdateForSingleRun:
         """Test validation failure sends WandB alert."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch("views_pipeline_core.managers.configuration.validate_config") as mock_validate:
+        with patch("views_pipeline_core.managers.configuration.configuration.validate_config") as mock_validate:
             mock_validate.side_effect = ValueError("Invalid config")
             
             try:
@@ -388,7 +388,7 @@ class TestUpdateForSweepRun:
             sweep=True,
         )
         
-        with patch("views_pipeline_core.managers.configuration.validate_config"):
+        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
             config_manager.update_for_sweep_run(wandb_config, args, mock_wandb_module)
         
         config = config_manager.get_combined_config()
@@ -402,7 +402,7 @@ class TestUpdateForSweepRun:
         wandb_config = {"invalid": "config"}
         args = ForecastingModelArgs(run_type="calibration", sweep=True)
         
-        with patch("views_pipeline_core.managers.configuration.validate_config") as mock_validate:
+        with patch("views_pipeline_core.managers.configuration.configuration.validate_config") as mock_validate:
             mock_validate.side_effect = ValueError("Invalid sweep config")
             
             with pytest.raises(ConfigurationException, match="Sweep configuration validation failed"):
@@ -434,7 +434,7 @@ class TestConfigurationManagerIntegration:
             evaluate=True,
         )
         
-        with patch("views_pipeline_core.managers.configuration.validate_config"):
+        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
             manager.update_for_single_run(args, mock_wandb_module)
         
         # Get final config
@@ -475,7 +475,7 @@ class TestConfigurationManagerIntegration:
             train=True,
         )
         
-        with patch("views_pipeline_core.managers.configuration.validate_config"):
+        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
             manager.update_for_single_run(args, mock_wandb_module)
         
         config = manager.get_combined_config()

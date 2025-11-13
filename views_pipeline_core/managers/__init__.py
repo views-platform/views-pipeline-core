@@ -1,6 +1,6 @@
-from .configuration import ConfigurationManager
-from .extractor import ExtractorManager, ExtractorPathManager
-from .model import ModelManager, ModelPathManager, ForecastingModelManager
-from .postprocessor import PostprocessorManager, PostprocessorPathManager
-from .ensemble import EnsembleManager, EnsemblePathManager
-from .package import PackageManager
+from .configuration.configuration import ConfigurationManager
+from .extractor.extractor import ExtractorManager, ExtractorPathManager
+from .model.model import ModelManager, ModelPathManager, ForecastingModelManager
+from .postprocessor.postprocessor import PostprocessorManager, PostprocessorPathManager
+from .ensemble.ensemble import EnsembleManager, EnsemblePathManager
+from .package.package import PackageManager
