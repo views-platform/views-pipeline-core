@@ -25,8 +25,9 @@
   A modular Python framework for end‑to‑end conflict forecasting: data ingestion, transformation, drift monitoring, model and ensemble management, evaluation, reconciliation, mapping, reporting, packaging, and artifact governance.
 </p>
 
----
-## Acknowledgements  
+
+<h2 align="center">Acknowledgements</h2>
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/views-platform/docs/main/images/views_funders.png" alt="Views Funders" width="80%">
 </p>
