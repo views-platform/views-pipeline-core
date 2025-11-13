@@ -350,18 +350,27 @@ class TestForecastingModelManagerAbstractMethods:
 
 class TestExecuteSingleRun:
     @pytest.fixture
-    def manager(self, mock_model_path, mock_wandb_module, mock_configs):
+    def manager(self, mock_model_path, mock_configs):
         """Create manager with mocked dependencies."""
         with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config') as mock_load:
             mock_load.side_effect = lambda script, method: mock_configs.get(
                 script.replace("config_", "").replace(".py", "")
             )
             
-            with patch('views_pipeline_core.modules.wandb.WandBModule', return_value=mock_wandb_module):
-                with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
-                    with patch('views_pipeline_core.modules.logging.LoggingModule'):
-                        manager = ForecastingModelManager(model_path=mock_model_path)
-                        return manager
+            # Mock wandb.login at the module level BEFORE creating manager
+            with patch('wandb.login'):
+                with patch('views_pipeline_core.modules.wandb.WandBModule') as MockWandB:
+                    mock_wandb_instance = MagicMock()
+                    mock_wandb_instance.login = MagicMock()  # Mock the login method
+                    MockWandB.return_value = mock_wandb_instance
+                    
+                    with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
+                        with patch('views_pipeline_core.modules.logging.LoggingModule'):
+                            manager = ForecastingModelManager(
+                                model_path=mock_model_path,
+                                wandb_notifications=False  # Disable notifications
+                            )
+                            return manager
     
     def test_execute_single_run_invalid_args_raises(self, manager):
         """Test execute_single_run with invalid args raises ValueError."""
@@ -372,42 +381,47 @@ class TestExecuteSingleRun:
         """Test execute_single_run sets args property."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch.object(manager, '_execute_data_fetching'):
-            with patch.object(manager, '_execute_model_tasks'):
-                manager.execute_single_run(args)
-                
-                assert manager._args == args
+        # Mock wandb.login during execution
+        with patch('wandb.login'):
+            with patch.object(manager, '_execute_data_fetching'):
+                with patch.object(manager, '_execute_model_tasks'):
+                    manager.execute_single_run(args)
+                    
+                    assert manager._args == args
                 
     def test_execute_single_run_updates_config(self, manager):
         """Test execute_single_run updates configuration."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch.object(manager, '_execute_data_fetching'):
-            with patch.object(manager, '_execute_model_tasks'):
-                manager.execute_single_run(args)
-                
-                # Check that run_type was added to config
-                assert manager.configs['run_type'] == 'calibration'
+        with patch('wandb.login'):
+            with patch.object(manager, '_execute_data_fetching'):
+                with patch.object(manager, '_execute_model_tasks'):
+                    manager.execute_single_run(args)
+                    
+                    # Check that run_type was added to config
+                    assert manager.configs['run_type'] == 'calibration'
                 
     def test_execute_single_run_calls_data_fetching(self, manager):
         """Test execute_single_run calls data fetching."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch.object(manager, '_execute_data_fetching') as mock_fetch:
-            with patch.object(manager, '_execute_model_tasks'):
-                manager.execute_single_run(args)
-                
-                mock_fetch.assert_called_once()
+        with patch('wandb.login'):
+            with patch.object(manager, '_execute_data_fetching') as mock_fetch:
+                with patch.object(manager, '_execute_model_tasks'):
+                    manager.execute_single_run(args)
+                    
+                    mock_fetch.assert_called_once()
                 
     def test_execute_single_run_calls_model_tasks(self, manager):
         """Test execute_single_run calls model tasks."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch.object(manager, '_execute_data_fetching'):
-            with patch.object(manager, '_execute_model_tasks') as mock_tasks:
-                manager.execute_single_run(args)
-                
-                mock_tasks.assert_called_once()
+        with patch('wandb.login'):
+            with patch.object(manager, '_execute_data_fetching'):
+                with patch.object(manager, '_execute_model_tasks') as mock_tasks:
+                    manager.execute_single_run(args)
+                    
+                    mock_tasks.assert_called_once()
 
 
 
