@@ -149,6 +149,15 @@ Each manager has accompanying documentation in its module directory.
 
 ---
 
+## 5.1 Intermediate Modules
+
+| Module                        | Role                                           |
+|-------------------------------|------------------------------------------------|
+| [cli](./views_pipeline_core/cli/README.md) | CLI parsing and validation|
+| [dataset](./views_pipeline_core/data/README.md) | Spatio-temporal dataset handler with country and priogrid level support |
+
+---
+
 ## 6. Data Layer & Querysets
 
 - Querysets define feature/target extraction logic + transformation chains.
