@@ -26,6 +26,12 @@
 </p>
 
 ---
+## Acknowledgements  
+<p align="center">
+  <img src="https://raw.githubusercontent.com/views-platform/docs/main/images/views_funders.png" alt="Views Funders" width="80%">
+</p>
+
+---
 
 ## Table of Contents
 
