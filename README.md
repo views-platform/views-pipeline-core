@@ -144,7 +144,8 @@ Each manager has accompanying documentation in its module directory.
 | [logging](./views_pipeline_core/modules/logging/README.md) | Central logging configuration injection |
 | [statistics](./views_pipeline_core/modules/statistics/README.md) | Forecast reconciliation math (proportional scaling) |
 | [wandb](./views_pipeline_core/modules/wandb/README.md) | Alerts, artifact logging, run lifecycle |
-| [validation](./views_pipeline_core/modules/validation/README.md) | Structural & logical integrity checks (models, ensembles) |
+| [model validation](./views_pipeline_core/modules/validation/model/README.md) | Structural & logical integrity checks |
+| [ensemble validation](./views_pipeline_core/modules/validation/ensemble/README.md) | Structural & logical integrity checks |
 
 ---
 
