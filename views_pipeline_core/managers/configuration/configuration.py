@@ -494,10 +494,11 @@ class ConfigurationManager:
         if self.config_deployment:
             config.update(self.config_deployment)
         if self.config_meta:
-            if "targets" in self.config_meta:
-                if isinstance(self.config_meta["targets"], str):
-                    self.config_meta["targets"] = [self.config_meta["targets"]]
-            config.update(self.config_meta)
+             meta_copy = self.config_meta.copy()  
+             if "targets" in meta_copy:  
+                if isinstance(meta_copy["targets"], str):  
+                    meta_copy["targets"] = [meta_copy["targets"]]  
+                    config.update(meta_copy)  
         if self._runtime_config:
             config.update(self._runtime_config)
         

@@ -577,7 +577,6 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             pd.DataFrame: Reconciled or original predictions.
         """
-        import wandb
         
         reconciliation_type = self.configs.get("reconciliation", None)
         

@@ -72,8 +72,6 @@ class ExtractorManager(ModelManager):
         raise NotImplementedError("Subclasses must implement the _save method.")
 
     def run(self):
-        self._download()
-        self._preprocess()
         with self._wandb_manager.initialize_run(
             project=f"{self.configs['name']}_save", entity=self._entity, job_type="save"
         ):
