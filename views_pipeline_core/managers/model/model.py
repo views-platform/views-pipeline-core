@@ -54,6 +54,8 @@ from views_pipeline_core.configs import PipelineConfig
 #     validate_config,
 # )
 
+import dotenv
+
 logger = logging.getLogger(__name__)
 
 
@@ -401,6 +403,7 @@ class ModelPathManager:
             self.model_name, self._validate, self.target
         )
         self.dotenv = self.root / ".env"
+        dotenv.load_dotenv(dotenv_path=self.dotenv)
         self._initialize_directories()
         self._initialize_scripts()
         logger.debug(
