@@ -1029,7 +1029,7 @@ class ViewsDataLoader:
         else:
             logger.info(f"Found queryset for {self._model_name}")
 
-        args = parse_args()
+        # args = parse_args()
         df, alerts = None, None
 
         try:
@@ -1069,7 +1069,7 @@ class ViewsDataLoader:
             logger.error(traceback.format_exc())
             raise RuntimeError(f"Error fetching data from viewser: {e}") from e
         
-        df = self._overwrite_viewser(df, queryset_base, args)
+        # df = self._overwrite_viewser(df, queryset_base, args)
         df = ensure_float64(df)
         return df, alerts
 

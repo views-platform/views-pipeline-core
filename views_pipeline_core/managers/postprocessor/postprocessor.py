@@ -121,16 +121,14 @@ class PostprocessorManager(ModelManager):
                 self._validate()
                 self._save()
                 self._wandb_module.send_alert(
-                    level=wandb.AlertLevel.INFO,
                     title=f"Postprocessor Run Completed",
                     text=f"Postprocessing run for {self._model_path.model_name} complete.",
-                    wandb_notifications=self._wandb_notifications,
-                    models_path=self._model_path.models,
+                    notifications_enabled=self._wandb_notifications,
                 )
 
             except Exception as e:
                 logger.error(f"Error during postprocessor run: {e}")
-                raise PipelineException(message=f"Error occurred during postprocessor run. Error details: {e}", wandb_manager=self._wandb_module)
+                raise PipelineException(message=f"Error occurred during postprocessor run. Error details: {e}", wandb_module=self._wandb_module)
             finally:
                 self._wandb_module.finish_run()
 

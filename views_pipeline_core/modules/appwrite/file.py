@@ -91,8 +91,8 @@ class AppwriteConfig:
     bucket_name: Optional[str] = None  # Will default to bucket_id with spaces if not provided
     
     # Metadata settings
-    collection_name: str = "Pipeline Forecasts"  #"Pipeline Forecasts"
-    collection_id: Optional[str] = "pipeline_forecasts"  # Custom collection ID override
+    collection_name: str = "Metadata"  #"Pipeline Forecasts"
+    collection_id: Optional[str] = "metadata"  # Custom collection ID override
     database_name: Optional[str] = "File Metadata" #"File Metadata"  # Will default to bucket_name + " Metadata" if not provided
     database_id: Optional[str] = "file_metadata"  # Custom database ID override
     

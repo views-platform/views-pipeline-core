@@ -76,13 +76,14 @@ class DatastoreModule:
         file: Union[Path, str, pd.DataFrame],
         filename: str,
         loa: str,
-        name: str,
+        name: Optional[str],
         type: str,
         targets: List[str],
         category: str,
         description: Optional[str] = None,
     ) -> OperationResult:
-
+        if name is None:
+            name = self.model_path.model_name
         metadata = FileMetadata(
             loa=loa, name=name, type=type, targets=targets, description=description, category=category
         ).to_dict()
