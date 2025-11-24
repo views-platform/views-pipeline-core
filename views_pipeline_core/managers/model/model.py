@@ -2635,7 +2635,7 @@ class ForecastingModelManager(ModelManager):
 
                 if self._datastore is not None:
                     try:
-                        self._datastore.upload_predictions(file=path_generated / self._predictions_name,
+                        self._datastore.upload_data(file=path_generated / self._predictions_name,
                                                         filename=self._predictions_name,
                                                         loa=self.configs.get("level"),
                                                         name=self._model_path.model_name,
