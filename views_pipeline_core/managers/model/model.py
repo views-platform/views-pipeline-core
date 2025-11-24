@@ -26,6 +26,7 @@ from views_pipeline_core.exceptions import (
 )
 from views_pipeline_core.modules.transformations import DatasetTransformationModule
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+import os
 
 # from views_pipeline_core.modules.wandb import (
 #     add_wandb_metrics,
@@ -1054,6 +1055,8 @@ class ModelManager:
         self._use_prediction_store = use_prediction_store
         self._sweep = False
         self._args = None
+        self._appwrite_config = None
+        self._datastore = None
         self._logger = LoggingModule(model_path=self._model_path).get_logger()
         self._wandb_module = WandBModule(
             entity=self._entity,
@@ -1104,7 +1107,24 @@ class ModelManager:
             self._data_loader = None
 
         if use_prediction_store:
+            from views_pipeline_core.modules.datastore import DatastoreModule
+            from views_pipeline_core.modules.appwrite import AppwriteConfig
             self._pred_store_name = self.__get_pred_store_name()
+            self._appwrite_config = AppwriteConfig(
+                path_manager=self._model_path,
+                endpoint=os.getenv("APPWRITE_ENDPOINT"),
+                project_id=os.getenv("APPWRITE_DATASTORE_PROJECT_ID"),
+                credentials=os.getenv("APPWRITE_DATASTORE_API_KEY"),
+                auth_method="api_key",
+                cache_ttl_hours=24,
+                bucket_id=os.getenv("APPWRITE_PROD_FORECASTS_BUCKET_ID"),
+                bucket_name=os.getenv("APPWRITE_PROD_FORECASTS_BUCKET_NAME"),
+                collection_id=os.getenv("APPWRITE_PROD_FORECASTS_COLLECTION_ID"),
+                collection_name=os.getenv("APPWRITE_PROD_FORECASTS_COLLECTION_NAME"),
+                database_id=os.getenv("APPWRITE_METADATA_DATABASE_ID"),
+                database_name=os.getenv("APPWRITE_METADATA_DATABASE_NAME"),
+            )
+            self._datastore = DatastoreModule(appwrite_file_manager_config=self._appwrite_config)
         else:
             self._pred_store_name = None
 
@@ -2609,6 +2629,19 @@ class ForecastingModelManager(ModelManager):
                 name = f"{self._model_path.model_name}_{self._predictions_name.split('.')[0]}"
                 df_predictions.forecasts.set_run(self._pred_store_name)
                 df_predictions.forecasts.to_store(name=name, overwrite=True)
+
+                if self._datastore is not None:
+                    try:
+                        self._datastore.upload_predictions(file=path_generated / self._predictions_name,
+                                                        filename=self._predictions_name,
+                                                        loa=self.configs.get("level"),
+                                                        name=self._model_path.model_name,
+                                                        targets=self.configs.get("targets"),
+                                                        category="forecast",
+                                                        description=""),
+                        logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
+                    except Exception as e:
+                        logger.error(f"Error uploading predictions to datastore: {e}", exc_info=True)
 
             self._wandb_module.send_alert(
                 title="Predictions Saved",
