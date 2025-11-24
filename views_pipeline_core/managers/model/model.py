@@ -2641,7 +2641,8 @@ class ForecastingModelManager(ModelManager):
                                                         name=self._model_path.model_name,
                                                         targets=self.configs.get("targets"),
                                                         category="forecast",
-                                                        description=""),
+                                                        description="",
+                                                        type=self._model_path.target),
                         logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
                     except Exception as e:
                         logger.error(f"Error uploading predictions to datastore: {e}", exc_info=True)
