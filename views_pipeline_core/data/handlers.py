@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
-from views_pipeline_core.data.statistics import PosteriorDistributionAnalyzer
-from views_pipeline_core.visualizations.distributions import PlotDistribution
+from views_pipeline_core.modules.statistics import PosteriorDistributionAnalyzer
+# from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
 from viewser import Queryset, Column
 
 from pathlib import Path
@@ -596,10 +596,26 @@ class _ViewsDataset:
             map = max(0, map)
         return float(map)
 
-    def _create_map_dataframe(self, var_name: str, values: np.ndarray) -> pd.DataFrame:
+    def _create_map_dataframe(
+    self, var_name: str, values: np.ndarray,
+    time_ids: Optional[Union[int, List[int]]] = None,
+    entity_ids: Optional[Union[int, List[int]]] = None,
+) -> pd.DataFrame:
         """Helper to format statistic results into DataFrame"""
-        time_steps = self.dataframe.index.get_level_values(self._time_id).unique()
-        entities = self.dataframe.index.get_level_values(self._entity_id).unique()
+        # Use the subsetted time and entity values if provided, otherwise use all values
+        if time_ids is not None:
+            if not isinstance(time_ids, list):
+                time_ids = [time_ids]
+            time_steps = pd.Index(time_ids)
+        else:
+            time_steps = self.dataframe.index.get_level_values(self._time_id).unique()
+        
+        if entity_ids is not None:
+            if not isinstance(entity_ids, list):
+                entity_ids = [entity_ids]
+            entities = pd.Index(entity_ids)
+        else:
+            entities = self.dataframe.index.get_level_values(self._entity_id).unique()
 
         return (
             pd.DataFrame(values, index=time_steps, columns=entities)
@@ -632,6 +648,7 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes
         """
+        from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
         self._distribution_plotter = (
             PlotDistribution(dataset=self)
             if not hasattr(self, "_distribution_plotter")
@@ -861,17 +878,21 @@ class _ViewsDataset:
     def get_subset_tensor(
         self,
         time_ids: Optional[Union[int, List[int]]] = None,
+        features: Optional[Union[str, List[str]]] = None,
+        sample_idx: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
     ) -> np.ndarray:
         """
-        Get subset of tensor for specified time and/or entity IDs
+        Get subset of tensor for specified time, feature, sample, and/or entity IDs
 
         Parameters:
         time_ids: Single or list of time IDs (None for all)
+        features: Single or list of feature names (None for all)
+        sample_idx: Single or list of sample indices (None for all)
         entity_ids: Single or list of entity IDs (None for all)
 
         Returns:
-        np.ndarray: Subset tensor with dimensions [time, entity, ...]
+        np.ndarray: Subset tensor with dimensions [time, entity, sample, feature]
         """
 
         tensor = self.to_tensor()
@@ -881,6 +902,10 @@ class _ViewsDataset:
             time_ids = [time_ids]
         if entity_ids is not None and not isinstance(entity_ids, list):
             entity_ids = [entity_ids]
+        if sample_idx is not None and not isinstance(sample_idx, list):
+            sample_idx = [sample_idx]
+        if features is not None and not isinstance(features, list):
+            features = [features]
 
         # Get indices using pandas Index for vectorized lookup
         time_indices = None
@@ -901,26 +926,58 @@ class _ViewsDataset:
                 raise KeyError(f"Invalid entity IDs: {invalid}")
             entity_indices = entity_indices.tolist()
 
+        # Get feature indices
+        feature_indices = None
+        if features is not None:
+            if self.is_prediction:
+                # For prediction datasets, features refers to target variables
+                invalid = set(features) - set(self.targets)
+                if invalid:
+                    raise ValueError(f"Invalid features specified: {invalid}")
+                feature_indices = [self.targets.index(f) for f in features]
+            else:
+                # For regular datasets, features refers to feature columns
+                invalid = set(features) - set(self.features)
+                if invalid:
+                    raise ValueError(f"Invalid features specified: {invalid}")
+                feature_indices = [self.dataframe.columns.get_loc(f) for f in features]
+
+        # Get sample indices
+        sample_indices = None
+        if sample_idx is not None:
+            sample_indices = sample_idx
+            # Validate sample indices
+            max_sample = tensor.shape[2] - 1
+            if any(idx < 0 or idx > max_sample for idx in sample_indices):
+                raise ValueError(f"Sample indices must be between 0 and {max_sample}")
+
         # Perform subsetting using numpy advanced indexing
-        if time_indices is not None and entity_indices is not None:
-            return tensor[np.ix_(time_indices, entity_indices)]
-        elif time_indices is not None:
-            return tensor[time_indices]
-        elif entity_indices is not None:
-            return tensor[:, entity_indices]
-        else:
-            return tensor
+        result = tensor
+        if time_indices is not None:
+            result = result[time_indices]
+        if entity_indices is not None:
+            result = result[:, entity_indices]
+        if sample_indices is not None:
+            result = result[:, :, sample_indices]
+        if feature_indices is not None:
+            result = result[..., feature_indices]
+
+        return result
 
     def get_subset_dataframe(
         self,
         time_ids: Optional[Union[int, List[int]]] = None,
+        features: Optional[Union[str, List[str]]] = None,
+        sample_idx: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
     ) -> pd.DataFrame:
         """
-        Get subset dataframe for specified time and/or entity IDs
+        Get subset dataframe for specified time, feature, sample, and/or entity IDs
 
         Parameters:
         time_ids: Single or list of time IDs (None for all)
+        features: Single or list of feature names (None for all)
+        sample_idx: Single or list of sample indices (None for all)
         entity_ids: Single or list of entity IDs (None for all)
         """
         mask = np.ones(len(self.dataframe), dtype=bool)
@@ -935,11 +992,53 @@ class _ViewsDataset:
                 entity_ids
             )
 
-        return self.dataframe.loc[mask]
+        # Apply row mask first
+        subset_df = self.dataframe.loc[mask]
+
+        # Apply feature subsetting
+        if features is not None:
+            if not isinstance(features, list):
+                features = [features]
+            
+            if self.is_prediction:
+                # For prediction datasets, features refers to target variables
+                invalid = set(features) - set(self.targets)
+                if invalid:
+                    raise ValueError(f"Invalid features specified: {invalid}")
+            else:
+                # For regular datasets, features refers to feature columns
+                invalid = set(features) - set(self.features)
+                if invalid:
+                    raise ValueError(f"Invalid features specified: {invalid}")
+            
+            subset_df = subset_df[features]
+
+        # Apply sample subsetting
+        if sample_idx is not None:
+            if not isinstance(sample_idx, list):
+                sample_idx = [sample_idx]
+            
+            # Validate sample indices
+            if self.sample_size is None:
+                raise ValueError("Cannot subset by sample when sample_size is not defined")
+            
+            max_sample = self.sample_size - 1
+            if any(idx < 0 or idx > max_sample for idx in sample_idx):
+                raise ValueError(f"Sample indices must be between 0 and {max_sample}")
+            
+            # Apply sample subsetting to each column
+            for col in subset_df.columns:
+                subset_df[col] = subset_df[col].apply(
+                    lambda x: x[sample_idx] if isinstance(x, np.ndarray) else x
+                )
+
+        return subset_df
 
     def split_data(
         self,
         time_ids: Optional[Union[int, List[int]]] = None,
+        features: Optional[Union[str, List[str]]] = None,
+        sample_idx: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -947,6 +1046,8 @@ class _ViewsDataset:
 
         Parameters:
         time_ids: Time IDs to include (None for all)
+        features: Feature names to include (None for all)
+        sample_idx: Sample indices to include (None for all)
         entity_ids: Entity IDs to include (None for all)
 
         Returns:
@@ -959,6 +1060,8 @@ class _ViewsDataset:
 
         key = (
             tuple(time_ids) if time_ids is not None else None,
+            tuple(features) if features is not None else None,
+            tuple(sample_idx) if sample_idx is not None else None,
             tuple(entity_ids) if entity_ids is not None else None,
         )
         if key in self._split_tensor_cache:
@@ -967,8 +1070,8 @@ class _ViewsDataset:
         else:
             # Get subset if specified
             self._clear_tensor_cache_if_needed()
-            if time_ids is not None or entity_ids is not None:
-                subset_df = self.get_subset_dataframe(time_ids, entity_ids)
+            if time_ids is not None or entity_ids is not None or features is not None or sample_idx is not None:
+                subset_df = self.get_subset_dataframe(time_ids, features, sample_idx, entity_ids)
                 temp_ds = _ViewsDataset(
                     subset_df,
                     targets=self.targets,
@@ -1003,6 +1106,8 @@ class _ViewsDataset:
         self,
         include_targets: bool = True,
         time_ids: Optional[Union[int, List[int]]] = None,
+        features: Optional[Union[str, List[str]]] = None,
+        sample_idx: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
     ) -> bool:
         """
@@ -1011,14 +1116,16 @@ class _ViewsDataset:
         Parameters:
         include_targets: Whether to include dependent variables
         time_ids: Time IDs to validate (None for all)
+        features: Feature names to validate (None for all)
+        sample_idx: Sample indices to validate (None for all)
         entity_ids: Entity IDs to validate (None for all)
         """
         if self.is_prediction and not include_targets:
             raise ValueError("Cannot exclude dependent variables in prediction mode")
 
         # Get subset if specified
-        if time_ids is not None or entity_ids is not None:
-            subset_df = self.get_subset_dataframe(time_ids, entity_ids)
+        if time_ids is not None or entity_ids is not None or features is not None or sample_idx is not None:
+            subset_df = self.get_subset_dataframe(time_ids, features, sample_idx, entity_ids)
             temp_ds = _ViewsDataset(subset_df)
             tensor = temp_ds.to_tensor(include_targets)
             reconstructed = temp_ds.to_dataframe(tensor)
@@ -1053,13 +1160,24 @@ class _ViewsDataset:
             f"prediction_mode={self.is_prediction})"
         )
 
-    def calculate_hdi(self, alpha: float = 0.9) -> pd.DataFrame:
+    def calculate_hdi(
+    self,
+    alpha: float = 0.9,
+    features: Optional[Union[str, List[str]]] = None,
+    sample_idx: Optional[Union[int, List[int]]] = None,
+    time_ids: Optional[Union[int, List[int]]] = None,
+    entity_ids: Optional[Union[int, List[int]]] = None,
+) -> pd.DataFrame:
         """
         Calculate Highest Density Intervals (HDIs) for prediction distributions using PosteriorDistributionAnalyzer.
 
         Parameters:
         alpha (float): Credibility level for HDI (e.g., 0.9 for 90% HDI).
                     Must be between 0 and 1.
+        features: Feature names to calculate HDI for (None for all)
+        sample_idx: Sample indices to include (None for all)
+        time_ids: Time IDs to include (None for all)
+        entity_ids: Entity IDs to include (None for all)
 
         Returns:
         pd.DataFrame: DataFrame with multi-index (time, entity) and columns
@@ -1076,10 +1194,27 @@ class _ViewsDataset:
         if self.dataframe.empty:
             return pd.DataFrame()
 
-        tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
+        # Validate features parameter
+        if features is not None:
+            if not isinstance(features, list):
+                features = [features]
+            invalid = set(features) - set(self.targets)
+            if invalid:
+                raise ValueError(f"Invalid features specified: {invalid}")
+            selected_vars = features
+        else:
+            selected_vars = self.targets
+
+        # Get tensor with optional subsetting
+        tensor = self.get_subset_tensor(
+            features=selected_vars, 
+            sample_idx=sample_idx,
+            time_ids=time_ids,
+            entity_ids=entity_ids
+        )
         hdi_results = []
 
-        for var_idx, var_name in enumerate(self.targets):
+        for var_idx, var_name in enumerate(selected_vars):
             var_tensor = tensor[..., var_idx]  # Shape: (time, entity, samples)
             # Reshape to (time*entity, samples) for vectorized processing
             flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
@@ -1096,18 +1231,32 @@ class _ViewsDataset:
             hdi_lower[nan_mask] = np.nan
             hdi_upper[nan_mask] = np.nan
 
-            # Create DataFrame for this variable
-            df = self._create_hdi_dataframe(var_name, hdi_lower, hdi_upper)
+            # Create DataFrame for this variable, passing the subsetted time and entity IDs
+            df = self._create_hdi_dataframe(var_name, hdi_lower, hdi_upper, time_ids, entity_ids)
             hdi_results.append(df)
 
         return pd.concat(hdi_results, axis=1)
 
     def _create_hdi_dataframe(
-        self, var_name: str, lower: np.ndarray, upper: np.ndarray
-    ) -> pd.DataFrame:
+    self, var_name: str, lower: np.ndarray, upper: np.ndarray,
+    time_ids: Optional[Union[int, List[int]]] = None,
+    entity_ids: Optional[Union[int, List[int]]] = None,
+) -> pd.DataFrame:
         """Helper to format HDI results into DataFrame"""
-        time_steps = self.dataframe.index.get_level_values(self._time_id).unique()
-        entities = self.dataframe.index.get_level_values(self._entity_id).unique()
+        # Use the subsetted time and entity values if provided, otherwise use all values
+        if time_ids is not None:
+            if not isinstance(time_ids, list):
+                time_ids = [time_ids]
+            time_steps = pd.Index(time_ids)
+        else:
+            time_steps = self.dataframe.index.get_level_values(self._time_id).unique()
+        
+        if entity_ids is not None:
+            if not isinstance(entity_ids, list):
+                entity_ids = [entity_ids]
+            entities = pd.Index(entity_ids)
+        else:
+            entities = self.dataframe.index.get_level_values(self._entity_id).unique()
 
         # Create MultiIndex DataFrame
         index = pd.MultiIndex.from_product(
@@ -1145,6 +1294,7 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes: The plot axes
         """
+        from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
         self._distribution_plotter = (
             PlotDistribution(dataset=self)
             if not hasattr(self, "_distribution_plotter")
@@ -1160,17 +1310,24 @@ class _ViewsDataset:
         )
 
     def calculate_map(
-        self,
-        enforce_non_negative: bool = False,
-        features: Optional[List[str]] = None,
-        alpha: float = 0.9,
-    ) -> pd.DataFrame:
+    self,
+    enforce_non_negative: bool = False,
+    features: Optional[Union[str, List[str]]] = None,
+    sample_idx: Optional[Union[int, List[int]]] = None,
+    time_ids: Optional[Union[int, List[int]]] = None,
+    entity_ids: Optional[Union[int, List[int]]] = None,
+    alpha: float = 0.9,
+) -> pd.DataFrame:
         """
         Calculate Maximum A Posteriori (MAP) estimates for prediction distributions.
 
         Parameters:
         enforce_non_negative (bool): If True, forces MAP estimates to be non-negative
         features (List[str]): List of features to calculate MAP for. If None, uses all prediction targets.
+        sample_idx: Sample indices to include (None for all)
+        time_ids: Time IDs to include (None for all)
+        entity_ids: Entity IDs to include (None for all)
+        alpha (float): Credibility level for HDI (e.g., 0.9 for 90% HDI).
 
         Returns:
         pd.DataFrame: DataFrame with MAP estimates (time × entity × targets)
@@ -1181,6 +1338,8 @@ class _ViewsDataset:
 
         # Validate features parameter
         if features is not None:
+            if not isinstance(features, list):
+                features = [features]
             invalid = set(features) - set(self.targets)
             if invalid:
                 raise ValueError(f"Invalid features specified: {invalid}")
@@ -1188,14 +1347,20 @@ class _ViewsDataset:
         else:
             selected_vars = self.targets
 
-        tensor = self.to_tensor()  # Shape: (time, entity, samples, vars)
+        # Get tensor with optional subsetting
+        tensor = self.get_subset_tensor(
+            features=selected_vars, 
+            sample_idx=sample_idx,
+            time_ids=time_ids,
+            entity_ids=entity_ids
+        )
         map_results = []
 
         # Pre-sort entire tensor once for all variables
         sorted_tensor = np.sort(tensor, axis=2)
 
         for var_name in tqdm(selected_vars, desc="Processing features"):
-            var_idx = self.targets.index(var_name)
+            var_idx = selected_vars.index(var_name)
             var_tensor = sorted_tensor[..., var_idx]
             orig_shape = var_tensor.shape[:2]
 
@@ -1226,10 +1391,129 @@ class _ViewsDataset:
                         progress_bar.update(1)
 
             map_estimates = np.array(map_flat).reshape(orig_shape)
-            df = self._create_map_dataframe(var_name, map_estimates)
+            # Create DataFrame for this variable, passing the subsetted time and entity IDs
+            df = self._create_map_dataframe(var_name, map_estimates, time_ids, entity_ids)
             map_results.append(df)
 
         return pd.concat(map_results, axis=1)
+
+    def calculate_hdi_map(
+    self,
+    alpha: float = 0.9,
+    features: Optional[Union[str, List[str]]] = None,
+    sample_idx: Optional[Union[int, List[int]]] = None,
+    time_ids: Optional[Union[int, List[int]]] = None,
+    entity_ids: Optional[Union[int, List[int]]] = None,
+    enforce_non_negative: bool = False,
+) -> pd.DataFrame:
+        """
+        Calculate both Highest Density Intervals (HDIs) and Maximum A Posteriori (MAP) estimates
+        for prediction distributions using PosteriorDistributionAnalyzer in a single operation.
+
+        Parameters:
+        alpha (float): Credibility level for HDI (e.g., 0.9 for 90% HDI).
+                    Must be between 0 and 1.
+        features: Feature names to calculate HDI and MAP for (None for all)
+        sample_idx: Sample indices to include (None for all)
+        time_ids: Time IDs to include (None for all)
+        entity_ids: Entity IDs to include (None for all)
+        enforce_non_negative (bool): If True, forces MAP estimates to be non-negative
+
+        Returns:
+        pd.DataFrame: DataFrame with multi-index (time, entity) and columns
+                    for each variable's HDI bounds and MAP estimates.
+
+        Raises:
+        ValueError: If called on non-prediction data or invalid alpha.
+        """
+        if not self.is_prediction:
+            raise ValueError("HDI and MAP calculation only valid for prediction dataframes")
+        if not 0 < alpha < 1:
+            raise ValueError(f"Alpha must be between 0 and 1, got {alpha}")
+
+        if self.dataframe.empty:
+            return pd.DataFrame()
+
+        # Validate features parameter
+        if features is not None:
+            if not isinstance(features, list):
+                features = [features]
+            invalid = set(features) - set(self.targets)
+            if invalid:
+                raise ValueError(f"Invalid features specified: {invalid}")
+            selected_vars = features
+        else:
+            selected_vars = self.targets
+
+        # Get tensor with optional subsetting
+        tensor = self.get_subset_tensor(
+            features=selected_vars, 
+            sample_idx=sample_idx,
+            time_ids=time_ids,
+            entity_ids=entity_ids
+        )
+        results = []
+
+        for var_idx, var_name in enumerate(selected_vars):
+            var_tensor = tensor[..., var_idx]  # Shape: (time, entity, samples)
+            # Reshape to (time*entity, samples) for vectorized processing
+            flat_tensor = var_tensor.reshape(-1, var_tensor.shape[2])
+            
+            # Compute HDI and MAP for each (time, entity) pair
+            analysis_results = np.apply_along_axis(
+                lambda x: self._analyze_samples(x, alpha, enforce_non_negative), axis=1, arr=flat_tensor
+            )
+            
+            # Extract HDI bounds and MAP values
+            hdi_lower = analysis_results[:, 0].reshape(var_tensor.shape[:2])
+            hdi_upper = analysis_results[:, 1].reshape(var_tensor.shape[:2])
+            map_values = analysis_results[:, 2].reshape(var_tensor.shape[:2])
+
+            # Handle NaN samples (if any)
+            nan_mask = np.isnan(var_tensor).all(axis=2)
+            hdi_lower[nan_mask] = np.nan
+            hdi_upper[nan_mask] = np.nan
+            map_values[nan_mask] = np.nan
+
+            # Create DataFrames for this variable, passing the subsetted time and entity IDs
+            hdi_df = self._create_hdi_dataframe(var_name, hdi_lower, hdi_upper, time_ids, entity_ids)
+            map_df = self._create_map_dataframe(var_name, map_values, time_ids, entity_ids)
+            
+            # Merge HDI and MAP DataFrames
+            merged_df = pd.concat([hdi_df, map_df], axis=1)
+            results.append(merged_df)
+
+        return pd.concat(results, axis=1)
+
+    def _analyze_samples(
+        self, samples: np.ndarray, alpha: float, enforce_non_negative: bool
+    ) -> Tuple[float, float, float]:
+        """
+        Analyze samples to get HDI bounds and MAP estimate in a single operation.
+        
+        Parameters:
+        samples: Array of samples
+        alpha: Credibility level for HDI
+        enforce_non_negative: Whether to enforce non-negative MAP estimates
+        
+        Returns:
+        Tuple of (hdi_lower, hdi_upper, map_estimate)
+        """
+        if np.all(np.isnan(samples)):
+            return (np.nan, np.nan, np.nan)
+            
+        # Use PosteriorDistributionAnalyzer to get both HDI and MAP
+        analysis = self._posterior_distribution_analyser.analyze(
+            samples=samples, credible_masses=(alpha,)
+        )
+        
+        hdi_lower, hdi_upper = analysis.get("hdis")[0]
+        map_estimate = analysis.get("map")
+        
+        if enforce_non_negative and map_estimate < 0:
+            map_estimate = max(0, map_estimate)
+            
+        return (hdi_lower, hdi_upper, map_estimate)
 
     def _calculate_single_hdi(
         self, data: np.ndarray, alpha: float
@@ -1272,7 +1556,13 @@ class _ViewsDataset:
 
         return pd.DataFrame(reports)
 
-    def to_reconciler(self, feature: str, time_id: int) -> torch.Tensor:
+    def to_reconciler(
+        self,
+        feature: str,
+        time_id: int,
+        sample_idx: Optional[Union[int, List[int]]] = None,
+        entity_ids: Optional[Union[int, List[int]]] = None,
+    ) -> torch.Tensor:
         """
         Extracts a tensor compatible with ForecastReconciler for a specified feature and time_id.
 
@@ -1282,6 +1572,8 @@ class _ViewsDataset:
         Args:
             feature (str): Name of the prediction target variable to reconcile.
             time_id (int): The time ID (e.g., month_id) for which to extract the tensor.
+            sample_idx: Sample indices to include (None for all)
+            entity_ids: Entity IDs to include (None for all)
 
         Returns:
             torch.Tensor: Tensor of shape (samples, entities) for the specified feature
@@ -1298,32 +1590,33 @@ class _ViewsDataset:
         if time_id not in self._time_values:
             raise ValueError(f"Time ID {time_id} not found in dataset's time values.")
 
-        var_idx = self.targets.index(feature)
-        pred_tensor = self.to_tensor()
+        # Get tensor with optional subsetting
+        pred_tensor = self.get_subset_tensor(
+            time_ids=[time_id], 
+            features=[feature], 
+            sample_idx=sample_idx,
+            entity_ids=entity_ids
+        )
+        
+        # Remove the time and feature dimensions
+        # Shape: (1, entity, samples, 1) -> (entity, samples)
+        data = pred_tensor[0, :, :, 0]  # Shape (entity, samples)
 
         if "ln" in feature.split("_"):
-            logger.info(
+            logger.debug(
                 f"Unlogging tensor for feature '{feature}' for time_id '{time_id}' before reconciliation."
             )
-            # Shape (time, entity, samples, vars)
             # unlog the tensor if it starts with 'ln_'
-            pred_tensor = np.exp(pred_tensor) - 1
+            data = np.exp(data) - 1
         elif "lx" in feature.split("_"):
             pred_tensor = np.exp(pred_tensor) - np.exp(100)
-            logger.info(
+            logger.debug(
                 f"Unlogging tensor with offset for feature '{feature}' for time_id '{time_id}' before reconciliation."
             )
         else:
-            logger.info(
+            logger.debug(
                 f"No transformation required for feature '{feature}' for time_id '{time_id}'."
             )
-
-        # Get the time index using the provided time_id
-        time_idx = self._get_time_index(time_id)
-        # latest_time_idx = len(self._time_values) - 1
-
-        # Extract data for all entities, samples, at the specified time for the feature
-        data = pred_tensor[time_idx, :, :, var_idx]  # Shape (entity, samples)
 
         # Transpose to (samples, entity) and convert to torch tensor
         return torch.from_numpy(data.transpose(1, 0))
@@ -1483,7 +1776,11 @@ class _PGDataset(_ViewsDataset):
             self._country_to_grids_cache[country_id].append(entity_id)
 
     def get_subset_by_country_id(
-        self, country_ids: List[int] = None, time_ids: List[int] = None
+        self, 
+        country_ids: List[int] = None, 
+        time_ids: List[int] = None,
+        features: Optional[Union[str, List[str]]] = None,
+        sample_idx: Optional[Union[int, List[int]]] = None,
     ) -> pd.DataFrame:
         """
         Extract a subset of the dataset for specific country IDs and time IDs.
@@ -1491,6 +1788,8 @@ class _PGDataset(_ViewsDataset):
         Args:
             country_ids: List of country IDs to include.
             time_ids: List of time IDs to include.
+            features: Feature names to include (None for all)
+            sample_idx: Sample indices to include (None for all)
 
         Returns:
             pd.DataFrame: Subset filtered by the specified country and time IDs.
@@ -1509,8 +1808,47 @@ class _PGDataset(_ViewsDataset):
         # Get matching (time_id, entity_id) indices
         matching_indices = country_df[mask].index
 
-        # Return subset dataframe
-        return self.dataframe.loc[matching_indices]
+        # Get subset dataframe
+        subset_df = self.dataframe.loc[matching_indices]
+        
+        # Apply feature subsetting if specified
+        if features is not None:
+            if not isinstance(features, list):
+                features = [features]
+            
+            if self.is_prediction:
+                # For prediction datasets, features refers to target variables
+                invalid = set(features) - set(self.targets)
+                if invalid:
+                    raise ValueError(f"Invalid features specified: {invalid}")
+            else:
+                # For regular datasets, features refers to feature columns
+                invalid = set(features) - set(self.features)
+                if invalid:
+                    raise ValueError(f"Invalid features specified: {invalid}")
+            
+            subset_df = subset_df[features]
+
+        # Apply sample subsetting if specified
+        if sample_idx is not None:
+            if not isinstance(sample_idx, list):
+                sample_idx = [sample_idx]
+            
+            # Validate sample indices
+            if self.sample_size is None:
+                raise ValueError("Cannot subset by sample when sample_size is not defined")
+            
+            max_sample = self.sample_size - 1
+            if any(idx < 0 or idx > max_sample for idx in sample_idx):
+                raise ValueError(f"Sample indices must be between 0 and {max_sample}")
+            
+            # Apply sample subsetting to each column
+            for col in subset_df.columns:
+                subset_df[col] = subset_df[col].apply(
+                    lambda x: x[sample_idx] if isinstance(x, np.ndarray) else x
+                )
+
+        return subset_df
 
     def reconcile(
         self,
@@ -1566,17 +1904,17 @@ class _PGDataset(_ViewsDataset):
         reconciled_np = reconciled_tensor.cpu().numpy()
         if "ln" in feature.split("_"):
             # take the natural log of the tensor if it starts with 'ln_'
-            logger.info(
+            logger.debug(
                 f"Applying log transformation to reconciled tensor for feature '{feature}' at time_id '{time_id}'."
             )
             reconciled_np = np.log(reconciled_np + 1)
         elif "lx" in feature.split("_"):
             reconciled_np = np.log(reconciled_np + np.exp(-100))
-            logger.info(
+            logger.debug(
                 f"Applying log transformation with offset to reconciled tensor for feature '{feature}' at time_id '{time_id}'."
             )
         else:
-            logger.info(
+            logger.debug(
                 f"No transformation required for feature '{feature}' for time_id '{time_id}'."
             )
 
@@ -1589,6 +1927,7 @@ class _PGDataset(_ViewsDataset):
 
     def get_lat_lon(self) -> pd.DataFrame:
         """Get latitude and longitude for each priogrid"""
+        self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
                 "lat": self._entity_metadata_cache["lat"].reindex(self.dataframe.index),
@@ -1600,6 +1939,7 @@ class _PGDataset(_ViewsDataset):
 
     def get_row_col(self) -> pd.DataFrame:
         """Get row and column indices for each priogrid"""
+        self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
                 "row": self._entity_metadata_cache["row"].reindex(self.dataframe.index),
