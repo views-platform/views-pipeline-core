@@ -463,6 +463,7 @@ class EnsembleManager(ForecastingModelManager):
             Check cli validation "if --train or --sweep is not set, you should use --saved flag".
         """
         saved = self.args.saved if train else True
+        use_prediction_store = True if forecast and self._use_prediction_store else False
         return ForecastingModelArgs(
             run_type=self.args.run_type,
             train=train,
@@ -471,7 +472,7 @@ class EnsembleManager(ForecastingModelManager):
             saved=saved,
             eval_type=self.args.eval_type,
             update_viewser=self.args.update_viewser,
-            prediction_store=self._use_prediction_store,
+            prediction_store=use_prediction_store,
             wandb_notifications=self._wandb_notifications,
             override_timestep=self.args.override_timestep,
         )
