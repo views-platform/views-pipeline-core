@@ -19,6 +19,8 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.modules.reconciliation.reconciliation import ReconciliationModule
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
 from views_pipeline_core.exceptions import PipelineException
+from views_pipeline_core.modules.ensemble_aggregator.aggregator import AggregationManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -711,7 +713,7 @@ class EnsembleManager(ForecastingModelManager):
             return None
 
     @staticmethod
-    def _get_aggregated_df(df_to_aggregate: List[pd.DataFrame], aggregation: str) -> pd.DataFrame:
+    def _get_aggregated_df_old(df_to_aggregate: List[pd.DataFrame], aggregation: str) -> pd.DataFrame:
         """
         Aggregates DataFrames using mean or median aggregation.
         Handles single-element lists by converting to scalars.
@@ -754,3 +756,94 @@ class EnsembleManager(ForecastingModelManager):
             return concatenated.groupby(level=[0, 1]).median()
         else:
             raise ValueError(f"Invalid aggregation method: {aggregation}")
+        
+
+    @staticmethod
+    def _get_aggregated_df(self,
+        df_to_aggregate: List[pd.DataFrame],
+        aggregation: str,
+    ) -> pd.DataFrame:
+        """
+        Aggregate model predictions using the AggregationManager.
+
+        Args:
+            df_to_aggregate: List of model prediction DataFrames (all with the same index).
+            aggregation: 
+                - for *point* predictions: 'mean', 'median', 'min', 'max', or custom name
+                - for *distribution* predictions: 'concat' or 'vincentization'
+
+        Returns:
+            Aggregated predictions as a pandas DataFrame with the original MultiIndex.
+        """
+
+        if not df_to_aggregate:
+            raise ValueError("df_to_aggregate must contain at least one DataFrame.")
+
+        # ---- 1) Define index + target columns -----------------------------------
+        
+        first_df = df_to_aggregate[0]
+        index_cols = list(first_df.index.names)
+        target_cols = [c for c in first_df.columns if c not in index_cols]
+
+        # ---- 2) Create AggregationManager ---------------------------------------
+        manager = AggregationManager(
+            index_cols=index_cols,
+            target_cols=target_cols,
+        )
+
+        # ---- 3) Add each model to the manager -----------------------------------
+        # Read weighting behaviour from config
+        use_weights = self.configs.get("use_weights", False)
+        weights_cfg = self.configs.get("weights", {})  # dict: {model_name: weight}
+        model_names = self.configs.get("models", [])
+        
+        for i, df in enumerate(df_to_aggregate):
+            # Derive model name:
+            #   1) if df has attribute 'model_name', use that
+            #   2) else if df has attribute 'name', use that
+            #   3) else fall back to m1, m2, ...
+            model_name = model_names[i]
+
+            # Look up weight in config (may be None)
+            weight = weights_cfg.get(model_name)
+
+            # Add model to aggregation manager
+            manager.add_model(
+                data=df,
+                weight=weight,      # can be None; AggregationManager will handle equal weights if all None
+                name=model_name,
+            )
+
+        # ---- 4) Decide how to call aggregate() based on prediction type ---------
+        # AggregationManager infers prediction_type ("point" vs "distribution")
+        # when you call add_model().
+        pred_type = manager.prediction_type
+        if pred_type is None:
+            raise RuntimeError(
+                "AggregationManager.prediction_type is None. "
+                "Make sure at least one model was added with `add_model`."
+            )
+
+        if pred_type == "distribution":
+            # `aggregation` here is the distribution method: "concat" or "vincentization"
+            aggregated_pl = manager.aggregate(
+                method=aggregation,
+                use_weights=use_weights,   # from config
+            )
+        elif pred_type == "point":
+            # `aggregation` here is a point aggregation function: "mean", "median", etc.
+            aggregated_pl = manager.aggregate(
+                aggregation_func=aggregation,
+                use_weights=use_weights,   # from config
+            )
+        else:
+            raise ValueError(f"Unknown prediction_type: {pred_type}")
+
+        # ---- 5) Convert back to pandas with MultiIndex -------------------------
+        aggregated_pdf = aggregated_pl.to_pandas()
+
+        # AggregationManager returns index columns as normal columns.
+        # To match your previous behaviour, set a MultiIndex again:
+        aggregated_pdf = aggregated_pdf.set_index(index_cols).sort_index()
+
+        return aggregated_pdf
