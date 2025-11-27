@@ -336,7 +336,7 @@ class EnsembleManager(ForecastingModelManager):
             tqdm.tqdm.write(f"Current model: {model_name}")
             dfs.append(self._forecast_model_artifact(model_name))
 
-        df_prediction = self._get_aggregated_df(dfs, self.configs["aggregation"])
+        df_prediction = self._get_aggregated_df(self, dfs, self.configs["aggregation"])
         df_prediction = _ViewsDataset(source=df_prediction).dataframe
 
         # Apply reconciliation if configured
