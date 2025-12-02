@@ -377,7 +377,10 @@ class AggregationManager:
                     "(e.g. aggregation_func='mean')."
                 )
             # only pass point relevant args
-            logger.info(f"Aggregating POINT predictions using '{aggregation_func}' (use_weights={use_weights})")
+            logger.info(
+        f"Aggregating POINT predictions using '{aggregation_func}' "
+        f"(use_weights={use_weights}; weights only valid with 'mean')."
+    )
 
             return self.aggregate_point_predictions(
                 aggregation_func=aggregation_func,
@@ -435,55 +438,66 @@ class AggregationManager:
 
 
     def aggregate_point_predictions(
-            self,
-            aggregation_func: Union[str, Callable[[pl.Series], float]] = None,
-            use_weights: bool = True
-    ) -> pl.DataFrame:
+        self,
+        aggregation_func: Union[str, Callable[[pl.Series], float]] = None,
+        use_weights: bool = True
+) -> pl.DataFrame:
         """
         Aggregate point predictions from all models.
 
         Parameters:
-            aggregation_func: Aggregation function ("mean", "median", "min", "max")
-            use_weights: Whether to use model weights
+            aggregation_func:
+                Aggregation across models: "mean", "median", "min", "max",
+                or a custom callable (when use_weights=False).
+            use_weights:
+                Whether to use model weights. Only supported for aggregation_func="mean".
 
         Returns:
-            Polars DataFrame with aggregated point predictions
+            Polars DataFrame with aggregated point predictions.
         """
 
-        # specify aggregation function
-        if aggregation_func == "mean":
-            aggregation_func = pl.Series.mean
-        elif aggregation_func == "median":
-            aggregation_func = pl.Series.median
-        elif aggregation_func == "min":
-            aggregation_func = pl.Series.min
-        elif aggregation_func == "max":
-            aggregation_func = pl.Series.max
+        # --- 1) Normalize / validate aggregation_func ---
+        if isinstance(aggregation_func, str):
+            if aggregation_func not in ("mean", "median", "min", "max"):
+                raise ValueError(
+                    f'Unsupported aggregation function: "{aggregation_func}", '
+                    f"must be one of 'mean', 'median', 'min', 'max' "
+                    f"or custom aggregation function of form Callable[[pl.Series], float]."
+                )
+            agg_name = aggregation_func
         elif callable(aggregation_func):
-            aggregation_func = aggregation_func
+            agg_name = getattr(aggregation_func, "__name__", "custom")
         else:
-            raise ValueError(f"Unsupported aggregation function: \"{aggregation_func}\", must be one of 'mean', 'median', "
-                             f"'min', 'max' or custum aggregation function of form Callable[[pl.Series], float]")
+            raise ValueError(
+                f'Unsupported aggregation function: "{aggregation_func}", '
+                f"must be one of 'mean', 'median', 'min', 'max' "
+                f"or custom aggregation function of form Callable[[pl.Series], float]."
+            )
 
+        # --- 2) Restrict weights: only allowed for mean ---
+        if use_weights and agg_name != "mean":
+            raise ValueError(
+                "Weights can only be used with aggregation_func='mean'. "
+                f"Got aggregation_func='{agg_name}' with use_weights=True."
+            )
 
-        # join dataframes
+        # --- 3) Join model predictions ---
         joined = self._inner_join_model_predictions()
 
-        # aggregate individual model distribution samples into point predictions
+        # --- 4) Extract scalar point predictions from [value] lists ---
         point_cols = []
-
         for target_column in self.target_cols:
-
             model_cols = [c for c in joined.columns if c.startswith(target_column)]
-
             for c in model_cols:
+                # Each cell is [value] -> take first element as scalar
                 point_cols.append(
-                    pl.col(c).map_elements(aggregation_func, return_dtype=pl.Float64).alias(f"{c}_point")
+                    pl.col(c).list.first().alias(f"{c}_point")
                 )
 
         point_df = joined.select(self.index_cols + point_cols)
         point_agg = point_df.select(self.index_cols)
 
+        # --- 5) Compute weights if needed ---
         weights_by_name = self._normalized_weights_by_name() if use_weights else None
 
         if use_weights:
@@ -497,23 +511,24 @@ class AggregationManager:
             for name, w in weights_by_name.items():
                 logger.info(f"  {name:<12} → {w:>7.4f}")
         else:
-            logger.info(f"Not using weights; aggregating models with simple "
-                f"{aggregation_func.__name__ if hasattr(aggregation_func, '__name__') else 'function'} over models.")
+            logger.info(
+                "Not using weights; aggregating models with "
+                f"{agg_name if agg_name != 'custom' else 'custom function'} across models."
+            )
 
-
-
-        # aggregate individual model point predictions into one, using weights if specified
+        # --- 6) Aggregate across models for each target ---
         for target_column in self.target_cols:
-        # all point cols for this target, e.g. ["y_m1_point", "y_m2_point", ...]
+            # all point cols for this target, e.g. ["y_m1_point", "y_m2_point", ...]
             model_point_cols = [
-                c for c in point_df.columns if c.startswith(target_column) and c.endswith("_point")
+                c for c in point_df.columns
+                if c.startswith(target_column) and c.endswith("_point")
             ]
 
             if use_weights:
+                # Only allowed when agg_name == "mean"
                 weighted_terms = []
                 for c in model_point_cols:
                     # extract model name from "y_<name>_point"
-                    # strip "<target_column>_" prefix and "_point" suffix
                     without_prefix = c[len(target_column) + 1:]  # skip "y_"
                     model_name = without_prefix[:-len("_point")]  # remove "_point"
 
@@ -522,7 +537,20 @@ class AggregationManager:
 
                 expr = sum(weighted_terms)
             else:
-                expr = pl.mean_horizontal(model_point_cols)
+                # Unweighted aggregation across models
+                if agg_name == "mean":
+                    expr = pl.mean_horizontal(model_point_cols)
+                elif agg_name == "min":
+                    expr = pl.min_horizontal(model_point_cols)
+                elif agg_name == "max":
+                    expr = pl.max_horizontal(model_point_cols)
+                elif agg_name == "median":
+                    # median across model predictions per row
+                    expr = pl.concat_list(model_point_cols).list.median()
+                else:  # custom callable
+                    expr = pl.concat_list(model_point_cols).map_elements(
+                        aggregation_func, return_dtype=pl.Float64
+                    )
 
             tmp = point_df.select(self.index_cols + [expr.alias(target_column)])
             point_agg = point_agg.join(tmp, on=self.index_cols)
