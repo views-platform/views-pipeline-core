@@ -305,22 +305,31 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             List[pd.DataFrame]: Aggregated evaluation predictions.
         """
-        dfs = []
-        dfs_agg = []
+        #dfs = []
+        #dfs_agg = []
+        eval_results: dict[str, List[pd.DataFrame]] = {}
 
         for model_name in tqdm.tqdm(self.configs["models"], desc="Evaluating ensemble"):
             tqdm.tqdm.write(f"Current model: {model_name}")
-            dfs.append(self._evaluate_model_artifact(model_name))
+            #dfs.append(self._evaluate_model_artifact(model_name))
+            eval_results[model_name] = self._evaluate_model_artifact(model_name)
+
+        n_outputs = len(next(iter(eval_results.values())))
+        aggregated_outputs: List[pd.DataFrame] = []
 
         tqdm.tqdm.write(f"Aggregating metrics...")
-        for i in range(len(dfs[0])):
-            df_to_aggregate = [df[i] for df in dfs]
-            df_agg = self._get_aggregated_df(
-                df_to_aggregate, self.configs["aggregation"]
-            )
-            dfs_agg.append(df_agg)
+        for i in range(len(n_outputs)):
+            model_dfs_i = {model_name: dfs[i] for model_name, dfs in eval_results.items()}
 
-        return dfs_agg
+            df_agg = self._get_aggregated_df(
+                df_to_aggregate=model_dfs_i,
+                aggregation=self.configs["aggregation"],
+            )
+
+            aggregated_outputs.append(df_agg)
+            #dfs_agg.append(df_agg)
+
+        return aggregated_outputs
 
     def _forecast_ensemble(self) -> pd.DataFrame:
         """
@@ -330,13 +339,16 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             pd.DataFrame: The aggregated (and possibly reconciled) forecast DataFrame.
         """
-        dfs = []
+        #dfs = []
+        model_dfs: dict[str, pd.DataFrame] = {}
 
         for model_name in tqdm.tqdm(self.configs["models"], desc="Forecasting ensemble"):
             tqdm.tqdm.write(f"Current model: {model_name}")
-            dfs.append(self._forecast_model_artifact(model_name))
+            df = self._forecast_model_artifact(model_name)
+            model_dfs[model_name] = df
+            #dfs.append(self._forecast_model_artifact(model_name))
 
-        df_prediction = self._get_aggregated_df(self, dfs, self.configs["aggregation"])
+        df_prediction = self._get_aggregated_df(self, df_to_aggregate = model_dfs, aggregation = self.configs["aggregation"])
         df_prediction = _ViewsDataset(source=df_prediction).dataframe
 
         # Apply reconciliation if configured
@@ -760,7 +772,7 @@ class EnsembleManager(ForecastingModelManager):
 
     @staticmethod
     def _get_aggregated_df(self,
-        df_to_aggregate: List[pd.DataFrame],
+        df_to_aggregate: dict[str, pd.DataFrame],
         aggregation: str,
     ) -> pd.DataFrame:
         """
@@ -781,8 +793,9 @@ class EnsembleManager(ForecastingModelManager):
 
         # ---- 1) Define index + target columns -----------------------------------
         
-        first_df = df_to_aggregate[0]
+        first_df = next(iter(df_to_aggregate.values()))
         index_cols = list(first_df.index.names)
+        #target_cols = [c for c in first_df.columns if c not in index_cols] ### This is not right, but how to chose target cols?
         target_cols = [c for c in first_df.columns if c not in index_cols]
 
         # ---- 2) Create AggregationManager ---------------------------------------
@@ -795,22 +808,12 @@ class EnsembleManager(ForecastingModelManager):
         # Read weighting behaviour from config
         use_weights = self.configs.get("use_weights", False)
         weights_cfg = self.configs.get("weights", {})  # dict: {model_name: weight}
-        model_names = self.configs.get("models", [])
         
-        for i, df in enumerate(df_to_aggregate):
-            # Derive model name:
-            #   1) if df has attribute 'model_name', use that
-            #   2) else if df has attribute 'name', use that
-            #   3) else fall back to m1, m2, ...
-            model_name = model_names[i]
-
-            # Look up weight in config (may be None)
-            weight = weights_cfg.get(model_name)
-
-            # Add model to aggregation manager
+        for model_name, df in df_to_aggregate.items():
+            weight = weights_cfg.get(model_name)  # may be None
             manager.add_model(
                 data=df,
-                weight=weight,      # can be None; AggregationManager will handle equal weights if all None
+                weight=weight,
                 name=model_name,
             )
 
@@ -824,20 +827,10 @@ class EnsembleManager(ForecastingModelManager):
                 "Make sure at least one model was added with `add_model`."
             )
 
-        if pred_type == "distribution":
-            # `aggregation` here is the distribution method: "concat" or "vincentization"
-            aggregated_pl = manager.aggregate(
-                method=aggregation,
-                use_weights=use_weights,   # from config
-            )
-        elif pred_type == "point":
-            # `aggregation` here is a point aggregation function: "mean", "median", etc.
-            aggregated_pl = manager.aggregate(
-                aggregation_func=aggregation,
-                use_weights=use_weights,   # from config
-            )
-        else:
-            raise ValueError(f"Unknown prediction_type: {pred_type}")
+        aggregated_pl = manager.aggregate(
+            method=aggregation,
+            use_weights=use_weights,
+        )
 
         # ---- 5) Convert back to pandas with MultiIndex -------------------------
         aggregated_pdf = aggregated_pl.to_pandas()
