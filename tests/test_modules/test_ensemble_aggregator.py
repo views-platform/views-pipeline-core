@@ -100,7 +100,7 @@ def test_aggregate_point_mean_unweighted():
     mgr.prediction_type = "point"
     mgr.sample_size = 1  # arbitrary for point predictions
 
-    out = mgr.aggregate(aggregation_func="mean", use_weights=False)
+    out = mgr.aggregate(method="mean", use_weights=False)
     result = out.select("y").to_series().to_list()
 
     # row1: (1 + 3) / 2 = 2
@@ -122,7 +122,7 @@ def test_aggregate_point_mean_weighted():
     mgr.prediction_type = "point"
     mgr.sample_size = 1
 
-    out = mgr.aggregate(aggregation_func="mean", use_weights=True)
+    out = mgr.aggregate(method="mean", use_weights=True)
     result = out.select("y").to_series().to_list()
 
     # Weighted average:
@@ -145,30 +145,9 @@ def test_aggregate_point_non_mean_with_weights_raises(agg_func):
     mgr.prediction_type = "point"
     mgr.sample_size = 1
 
+    # updated expectation: new message mentions aggregation_func instead of method
     with pytest.raises(ValueError, match="Weights can only be used with aggregation_func='mean'"):
-        mgr.aggregate(aggregation_func=agg_func, use_weights=True)
-
-def test_aggregate_point_custom_func_with_weights_raises():
-    """Custom aggregation function with weights should also raise."""
-
-    def custom(series: pl.Series) -> float:
-        return float(series.max())
-
-    mgr = AggregationManager(target_cols=["y"])
-
-    df_m1 = _df_point_single_model("m1", [1.0, 3.0])
-    df_m2 = _df_point_single_model("m2", [2.0, 4.0])
-
-    mgr.models = [
-        _ModelSpec(name="m1", df=df_m1, weight=0.25),
-        _ModelSpec(name="m2", df=df_m2, weight=0.75),
-    ]
-    mgr.prediction_type = "point"
-    mgr.sample_size = 1
-
-    with pytest.raises(ValueError, match="Weights can only be used with aggregation_func='mean'"):
-        mgr.aggregate(aggregation_func=custom, use_weights=True)
-
+        mgr.aggregate(method=agg_func, use_weights=True)
 
 @pytest.mark.parametrize(
     "agg_func, expected",
@@ -181,7 +160,7 @@ def test_aggregate_point_custom_func_with_weights_raises():
 )
 def test_aggregate_point_aggregation_functions_unweighted(agg_func, expected):
     """
-    For point predictions, aggregation_func controls how we combine across models.
+    For point predictions, method controls how we combine across models.
     """
     mgr = AggregationManager(target_cols=["y"])
 
@@ -195,7 +174,7 @@ def test_aggregate_point_aggregation_functions_unweighted(agg_func, expected):
     mgr.prediction_type = "point"
     mgr.sample_size = 1
 
-    out = mgr.aggregate(aggregation_func=agg_func, use_weights=False)
+    out = mgr.aggregate(method=agg_func, use_weights=False)
     result = out.select("y").to_series().to_list()
 
     # mean:   (1+3)/2 = 2, (3+5)/2 = 4
@@ -206,7 +185,7 @@ def test_aggregate_point_aggregation_functions_unweighted(agg_func, expected):
 
 
 def test_aggregate_point_invalid_aggregation_func_raises():
-    """Unsupported aggregation_func should raise a ValueError."""
+    """Unsupported method should raise a ValueError."""
     mgr = AggregationManager(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 2.0])
@@ -215,7 +194,7 @@ def test_aggregate_point_invalid_aggregation_func_raises():
     mgr.sample_size = 1
 
     with pytest.raises(ValueError, match="Unsupported aggregation function"):
-        mgr.aggregate_point_predictions(aggregation_func="not_a_func")
+        mgr._aggregate_point_predictions(method="not_a_func")
 
 
 def test_aggregate_point_use_weights_true_without_weights_raises(monkeypatch):
@@ -236,7 +215,7 @@ def test_aggregate_point_use_weights_true_without_weights_raises(monkeypatch):
     mgr.sample_size = 1
 
     # Here we expect equal weights [0.5, 0.5] from _normalize_weights_new()
-    out = mgr.aggregate(aggregation_func="mean", use_weights=True)
+    out = mgr.aggregate(method="mean", use_weights=True)
     result = out.select("y").to_series().to_list()
 
     # row1: (1 + 2) / 2 = 1.5
@@ -583,7 +562,7 @@ def test_aggregate_distributions_invalid_method_raises():
     mgr.sample_size = n_samples
 
     with pytest.raises(ValueError, match="method must be 'concat' or 'vincentization'"):
-        mgr.aggregate_distributions(method="not_a_method", use_weights=False)
+        mgr._aggregate_distributions(method="not_a_method", use_weights=False)
 
 
 def test_aggregate_distributions_requires_sample_size():
@@ -595,7 +574,7 @@ def test_aggregate_distributions_requires_sample_size():
     mgr.sample_size = None  # explicit
 
     with pytest.raises(ValueError, match="sample_size is not set"):
-        mgr.aggregate_distributions(method="concat", use_weights=False)
+        mgr._aggregate_distributions(method="concat", use_weights=False)
 
 
 def test_aggregate_dispatch_distribution_rejects_aggregation_func():
@@ -607,8 +586,8 @@ def test_aggregate_dispatch_distribution_rejects_aggregation_func():
     mgr.prediction_type = "distribution"
     mgr.sample_size = n_samples
 
-    # Any non-None aggregation_func should be rejected for distribution predictions
-    with pytest.raises(ValueError, match="aggregation_func is only valid for point predictions"):
-        mgr.aggregate(method="concat", aggregation_func="mean")
+    # Any non-None method should be rejected for distribution predictions
+    with pytest.raises(ValueError, match="Invalid method='mean' for distribution predictions"):
+        mgr.aggregate(method="mean")
 
 

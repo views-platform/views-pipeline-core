@@ -53,6 +53,510 @@ class AggregationManager:
     def n_models(self) -> int:
         return len(self.models)
     
+    #### ----- Public Methods - Entry Points ----- ####
+
+    def add_model(self, data: Union[pl.DataFrame, pd.DataFrame, str, Path],  weight: Optional[float] = None,
+        name: Optional[str] = None,) -> None:
+        """
+        Add a model's predictions to the aggregation pool.
+
+        Parameters:
+            data: Polars DataFrame, Pandas DataFrame or path to parquet/csv file containing predictions
+        """
+
+        # Read in dataframe as polars dataframe
+
+        df = self._load_to_polars(data)
+            
+        # Validate Weights
+
+        if weight is not None and weight >= 1:
+            raise ValueError(f"Weight must be less than 1.0, got {weight}")
+
+
+        # select only index columns and target columns
+        df = df.select(self.index_cols + self.target_cols)
+
+        # rename target columns to specify model number
+        if name is None:
+            name = f"m{self.n_models + 1}"
+        
+        # check index consistency
+        self._check_index_consistency(df, model_name=name)
+
+        pred_type, sample_size = self._detect_prediction_shape(df)
+        logger.info(f"Detected model '{name}', type='{pred_type}', sample_size={sample_size}")
+
+        # check consistency with previously added models
+        logger.info("Checking model consistency...")
+        self._check_model_consistency(pred_type, sample_size, model_name=name)
+
+
+        rename_map = {col: f"{col}_{name}" for col in self.target_cols}
+        df = df.rename(rename_map)
+
+
+        # Append model, increase model count
+        #self.models.append(df)
+        #self.n_models += 1
+        self.models.append(_ModelSpec(name=name, df=df, weight=float(weight) if weight is not None else None))
+
+    
+    def aggregate(
+        self,
+        *,
+        method: str | None = None,
+        use_weights: bool = True
+    ) -> pl.DataFrame:
+        
+        """
+        Unified aggregation entry point.
+
+        Decides between distribution vs. point aggregation based on
+        self.prediction_type.
+
+        Parameters
+        ----------
+        method:
+            - for distribution predictions (prediction_type='distribution'):
+                "concat", "vincentization", ...
+            - for point predictions (prediction_type='point'):
+                "mean", "median", "min", "max"
+
+            If None:
+                - defaults to "concat" for distributions
+                - defaults to "mean" for point predictions
+
+        use_weights:
+            Whether to use model weights. For point predictions, weights are only
+            supported when method='mean'.
+
+        Returns
+        -------
+        pl.DataFrame
+            Aggregated predictions as DataFrame.
+        """
+
+        # decide which prediction type to use
+        pt = self.prediction_type
+        if pt is None:
+            raise ValueError(
+                "Cannot aggregate: prediction_type is not set. "
+                "Make sure to add at least one model first."
+            )
+
+        if pt == "distribution":
+            # only pass distribution relevant args
+            if method is None:
+                method = "concat"
+
+            valid_methods = {"concat", "vincentization"}
+            if method not in valid_methods:
+                raise ValueError(
+                    f"Invalid method='{method}' for distribution predictions. "
+                    f"Expected one of {sorted(valid_methods)}."
+                )
+
+            logger.info(
+                f"Aggregating DISTRIBUTION predictions using method='{method}' "
+                f"(use_weights={use_weights}, inferred sample_size={self.sample_size})"
+            )
+            return self._aggregate_distributions(method=method, use_weights=use_weights)
+
+        elif pt == "point":
+            if method is None:
+                method = "mean"
+
+            valid_methods = {"mean", "median", "min", "max"}
+            if method not in valid_methods:
+                raise ValueError(
+                    f"Invalid method='{method}' for point predictions. "
+                    f"Expected one of {sorted(valid_methods)}."
+                )
+
+            logger.info(
+                f"Aggregating POINT predictions using method='{method}' "
+                f"(use_weights={use_weights}; weights only valid with method='mean')."
+            )
+
+            return self._aggregate_point_predictions(
+                method=method,
+                use_weights=use_weights,
+            )
+
+        else:
+            raise ValueError(
+                f"Unknown prediction_type '{pt}'. Expected 'point' or 'distribution'."
+            )
+
+    #### ----- High Level Private Functions ----- ####
+
+    def _aggregate_distributions(
+        self,
+        method: str = None,
+        use_weights: bool = True,
+    ) -> pl.DataFrame:
+        """
+        Aggregate distributions from all models using specified method.
+
+        Parameters:
+            method: Aggregation method - "concat", "vincentization"
+            use_weights: Whether to use model weights
+                   
+
+        Returns:
+            Polars DataFrame with aggregated distributions
+        """
+
+        # join dataframes
+        joined = self._inner_join_model_predictions()
+
+        # decide weights (only for weighted methods)
+        if use_weights:
+            weights = self._normalize_weights_new()
+            logger.info("Assigned Weights (distribution aggregation):")
+            for m, w in zip(self.models, weights):
+                logger.info(f"  {m.name:<12} → {w:>7.4f}")  
+        else:
+            weights = None
+            logger.info(f"Not using weights for distribution aggregation (method='{method}').")
+
+        if method == "concat":
+            pooled_df = self._concatenate_aggregation(joined, weights=weights)
+
+        elif method == "vincentization":
+            pooled_df = self._vincentization_aggregation(joined, weights=weights)
+
+        else:
+            raise ValueError("method must be 'concat' or 'vincentization'.")
+
+        self.aggregated_df = pooled_df
+        return pooled_df
+
+
+
+    def _aggregate_point_predictions(
+        self,
+        method: str = None,
+        use_weights: bool = True
+) -> pl.DataFrame:
+        """
+        Aggregate point predictions from all models.
+
+        Parameters:
+            method:
+                Aggregation across models: "mean", "median", "min", "max"
+            use_weights:
+                Whether to use model weights. Only supported for method="mean".
+
+        Returns:
+            Polars DataFrame with aggregated point predictions.
+        """
+
+        # --- 1) Normalize / validate aggregation_func ---
+        if method not in ("mean", "median", "min", "max"):
+            raise ValueError(
+                f'Unsupported aggregation function: "{method}", '
+                f"must be one of 'mean', 'median', 'min', 'max'."
+            )
+        agg_name = method
+
+        # --- 2) Restrict weights: only allowed for mean ---
+        if use_weights and agg_name != "mean":
+            raise ValueError(
+                "Weights can only be used with aggregation_func='mean'. "
+                f"Got aggregation_func='{agg_name}' with use_weights=True."
+            )
+
+        # --- 3) Join model predictions ---
+        joined = self._inner_join_model_predictions()
+
+        # --- 4) Extract scalar point predictions from [value] lists ---
+        point_cols = []
+        for target_column in self.target_cols:
+            model_cols = [c for c in joined.columns if c.startswith(target_column)]
+            for c in model_cols:
+                # Each cell is [value] -> take first element as scalar
+                point_cols.append(
+                    pl.col(c).list.first().alias(f"{c}_point")
+                )
+
+        point_df = joined.select(self.index_cols + point_cols)
+        point_agg = point_df.select(self.index_cols)
+
+        # --- 5) Compute weights if needed ---
+        weights_by_name = self._normalized_weights_by_name() if use_weights else None
+
+        if use_weights:
+            if weights_by_name is None:
+                raise ValueError(
+                    "use_weights=True, but no weights have been set for the models. "
+                    "Either provide weights when adding models or call with use_weights=False."
+                )
+
+            logger.info("Assigned Weights (point aggregation):")
+            for name, w in weights_by_name.items():
+                logger.info(f"  {name:<12} → {w:>7.4f}")
+        else:
+            logger.info(
+                "Not using weights; aggregating models with "
+                 f"{agg_name} across models."
+            )
+
+        # --- 6) Aggregate across models for each target ---
+        for target_column in self.target_cols:
+            # all point cols for this target, e.g. ["y_m1_point", "y_m2_point", ...]
+            model_point_cols = [
+                c for c in point_df.columns
+                if c.startswith(target_column) and c.endswith("_point")
+            ]
+
+            if use_weights:
+                # Only allowed when agg_name == "mean"
+                weighted_terms = []
+                for c in model_point_cols:
+                    # extract model name from "y_<name>_point"
+                    without_prefix = c[len(target_column) + 1:]  # skip "y_"
+                    model_name = without_prefix[:-len("_point")]  # remove "_point"
+
+                    w = weights_by_name[model_name]
+                    weighted_terms.append(pl.col(c) * w)
+
+                expr = sum(weighted_terms)
+            else:
+                # Unweighted aggregation across models
+                if agg_name == "mean":
+                    expr = pl.mean_horizontal(model_point_cols)
+                elif agg_name == "min":
+                    expr = pl.min_horizontal(model_point_cols)
+                elif agg_name == "max":
+                    expr = pl.max_horizontal(model_point_cols)
+                elif agg_name == "median":
+                    # median across model predictions per row
+                    expr = pl.concat_list(model_point_cols).list.median()
+                else:  
+                    raise RuntimeError(f"Unexpected aggregation_func: {agg_name}")
+
+            tmp = point_df.select(self.index_cols + [expr.alias(target_column)])
+            point_agg = point_agg.join(tmp, on=self.index_cols)
+
+        return point_agg
+    
+
+    #### ----- Distribution Aggregation Methods ----- ####
+
+    def _concatenate_aggregation(
+            self,
+            df: pl.DataFrame,
+            weights: Optional[List[float]] = None
+    ) -> pl.DataFrame:
+        """
+        Perform linear pooling with resampling to combine distributions
+
+        Parameters:
+            df: Polars DataFrame with target columns containing distribution samples
+            weights: list of floats (default: equal weights)
+
+        Returns:
+            Polars DataFrame with pooled distributions
+        """
+
+        # set weights to equal if not specified
+        if weights is None:
+            weights = [1.0 / self.n_models] * self.n_models
+
+        # infer sample size from manager state
+        if self.sample_size is None:
+            raise ValueError(
+                "self.sample_size is not set. Make sure you added at least one "
+                "distribution model and detected its sample size."
+            )
+        n_samples = self.sample_size
+
+        pooled_cols = []
+        rng = np.random.default_rng(42)
+
+
+        for target_column in self.target_cols:
+
+            # find target columns
+            model_cols = [c for c in df.columns if c.startswith(target_column)]
+
+        #    def pool_row(row, *, rng=rng):
+
+        #        samples_list = [np.array(val) for val in row]
+
+        #        # decide how many samples to draw from each model
+        #        sample_counts = rng.multinomial(n_samples, weights)
+
+        #        pool = []
+        #        for s, count in zip(samples_list, sample_counts):
+        #                pool.extend(rng.choice(s, size=count, replace=True))
+        #        return (pool,)
+
+        #    pools = df.select(model_cols).map_rows(pool_row)
+        #    pooled_cols.append(pools.to_series().alias(target_column))
+            model_arrays = []
+            for col in model_cols:
+                # df[col].to_list() -> List[List[...]] with length n_rows
+                arr = np.asarray(df[col].to_list())
+                # Basic sanity check
+                if arr.ndim != 2 or arr.shape[1] != n_samples:
+                    raise ValueError(
+                        f"Column {col} does not have shape (n_rows, {n_samples}). "
+                        f"Got shape {arr.shape}."
+                    )
+                model_arrays.append(arr)
+
+            # Stack into (n_models, n_rows, n_samples)
+            model_stack = np.stack(model_arrays, axis=0)
+            # Reorder to (n_rows, n_models, n_samples)
+            model_stack = np.moveaxis(model_stack, 0, 1)
+
+            n_rows, n_models, n_samples_check = model_stack.shape
+            assert n_samples_check == n_samples
+
+            # Draw model indices and sample indices for ALL rows at once
+            # model_idx: (n_rows, n_samples) with values in [0, n_models)
+            model_idx = rng.choice(n_models, size=(n_rows, n_samples), p=weights)
+            # sample_idx: (n_rows, n_samples) with values in [0, n_samples)
+            sample_idx = rng.integers(n_samples, size=(n_rows, n_samples))
+
+            # row indices broadcasted to (n_rows, n_samples)
+            row_idx = np.arange(n_rows)[:, None]
+
+            # Advanced indexing: result shape (n_rows, n_samples)
+            pooled_array = model_stack[row_idx, model_idx, sample_idx]
+
+            # Convert each row to a list
+            pooled_lists = pooled_array.tolist()
+
+            # Build a Polars Series of list type
+            pooled_series = pl.Series(name=target_column, values=pooled_lists)
+            pooled_cols.append(pooled_series)
+
+        # combine back into polar dataframe with index columns
+        pooled = df.select(self.index_cols)
+        for col in pooled_cols:
+            pooled = pooled.with_columns(col)
+
+        return pooled
+
+
+
+    def _vincentization_aggregation(
+            self,
+            df: pl.DataFrame,
+            weights: Optional[List[float]] = None
+    ) -> pl.DataFrame:
+        """
+        Perform vincentization based aggregation
+
+        Parameters:
+            df: Polars DataFrame with target columns containing distribution samples
+            weights: list of floats (default: equal weights)
+
+        Returns:
+            Polars DataFrame with pooled distributions
+        """
+
+        # set weights to equal if not specified
+        if weights is None:
+            weights = [1.0 / self.n_models] * self.n_models
+
+        # infer sample size from manager state
+        if self.sample_size is None:
+            raise ValueError(
+                "self.sample_size is not set. Make sure you added at least one "
+                "distribution model and detected its sample size."
+            )
+        n_samples = self.sample_size
+        n_models = self.n_models
+
+        # default: equal weights
+        if weights is None:
+            weights = [1.0 / n_models] * n_models
+
+        weights_np = np.asarray(weights, dtype=float)
+        if weights_np.ndim != 1:
+            raise ValueError("weights must be a 1D list/array")
+        if len(weights_np) != n_models:
+            raise ValueError(
+                f"Got {len(weights_np)} weights but self.n_models = {n_models}."
+            )
+
+        # normalize once
+        s = weights_np.sum()
+        if not np.isclose(s, 1.0):
+            weights_np = weights_np / s
+
+        # quantile levels: compute ONCE
+        quantile_levels = np.linspace(0.0, 1.0, n_samples)
+
+        pooled_cols: List[pl.Series] = []
+        n_rows = df.height
+
+        # --- main loop over target columns ---
+        for target_column in self.target_cols:
+            # find model columns for this target
+            model_cols = [c for c in df.columns if c.startswith(target_column)]
+            if len(model_cols) != n_models:
+                raise ValueError(
+                    f"Number of model columns ({len(model_cols)}) for "
+                    f"{target_column} does not match self.n_models ({n_models})."
+                )
+
+            # Build a single 3D array: (n_rows, n_models, n_samples)
+            model_stack = np.empty((n_rows, n_models, n_samples), dtype=float)
+
+            # Only unavoidable Python loop: reading Polars list columns into NumPy
+            for j, col in enumerate(model_cols):
+                # Each element in df[col] is a list/array of length n_samples
+                col_vals = df[col].to_list()
+                arr = np.asarray(col_vals, dtype=float)  # (n_rows, n_samples)
+                if arr.ndim != 2 or arr.shape[1] != n_samples:
+                    raise ValueError(
+                        f"Column {col} does not have shape (n_rows, {n_samples}). "
+                        f"Got shape {arr.shape}."
+                    )
+                model_stack[:, j, :] = arr
+
+            # model_stack: (n_rows, n_models, n_samples)
+            # We want quantiles across the *samples* axis
+            # Result shape from np.quantile:
+            #   q.shape + remaining_dims
+            # = (n_samples,) + (n_rows, n_models) = (n_samples, n_rows, n_models)
+            quantiles = np.quantile(
+                model_stack,
+                quantile_levels,
+                axis=2
+            )  # shape: (n_samples, n_rows, n_models)
+
+            # Weighted average across models (last axis)
+            # tensordot over last axis (-1) with weights axis (0):
+            #   (n_samples, n_rows, n_models) · (n_models,) -> (n_samples, n_rows)
+            pooled = np.tensordot(quantiles, weights_np, axes=([-1], [0]))
+            # pooled: (n_samples, n_rows)
+
+            # Transpose to (n_rows, n_samples) so each row is one pooled distribution
+            pooled = pooled.T  # (n_rows, n_samples)
+
+            # Back to Polars: list column, one list per row
+            pooled_series = pl.Series(
+                name=target_column,
+                values=pooled.tolist()
+            )
+            pooled_cols.append(pooled_series)
+
+        # combine back into polar dataframe with index columns
+        pooled = df.select(self.index_cols)
+        for col in pooled_cols:
+            pooled = pooled.with_columns(col)
+        return pooled
+    
+    
+    #### ----- Check Functions for add_model() ----- ####
+    
     def _extract_index_signature(self, df: pl.DataFrame) -> pl.DataFrame:
         """
         Return a canonical representation of the index:
@@ -64,7 +568,6 @@ class AggregationManager:
         return (
             df
             .select(self.index_cols)
-            .unique()
             .sort(self.index_cols)
         )
 
@@ -192,6 +695,7 @@ class AggregationManager:
                 f"extra rows in new model: {extra.height}."
             )
 
+    #### ----- Utility Functions for Aggregation ----- ####
 
     def _load_to_polars(self, data: Union[pl.DataFrame, pd.DataFrame, str, Path]) -> pl.DataFrame:
         """
@@ -266,296 +770,82 @@ class AggregationManager:
         return df
 
 
-    def add_model(self, data: Union[pl.DataFrame, pd.DataFrame, str, Path],  weight: Optional[float] = None,
-        name: Optional[str] = None,) -> None:
+    def _inner_join_model_predictions(self) -> pl.DataFrame:
         """
-        Add a model's predictions to the aggregation pool.
-
-        Parameters:
-            data: Polars DataFrame, Pandas DataFrame or path to parquet/csv file containing predictions
-        """
-
-        # Read in dataframe as polars dataframe
-
-        df = self._load_to_polars(data)
-            
-        # Validate Weights
-
-        if weight is not None and weight >= 1:
-            raise ValueError(f"Weight must be less than 1.0, got {weight}")
-
-
-        # select only index columns and target columns
-        df = df.select(self.index_cols + self.target_cols)
-
-        # rename target columns to specify model number
-        if name is None:
-            name = f"m{self.n_models + 1}"
-        
-        # check index consistency
-        self._check_index_consistency(df, model_name=name)
-
-        pred_type, sample_size = self._detect_prediction_shape(df)
-        logger.info(f"Detected model '{name}', type='{pred_type}', sample_size={sample_size}")
-
-        # check consistency with previously added models
-        logger.info("Checking model consistency...")
-        self._check_model_consistency(pred_type, sample_size, model_name=name)
-
-
-        rename_map = {col: f"{col}_{name}" for col in self.target_cols}
-        df = df.rename(rename_map)
-
-
-        # Append model, increase model count
-        #self.models.append(df)
-        #self.n_models += 1
-        self.models.append(_ModelSpec(name=name, df=df, weight=float(weight) if weight is not None else None))
-
-    def aggregate(
-        self,
-        *,
-        # distribution-related kwargs
-        method: str = None,
-        # point-related kwargs
-        aggregation_func: Union[str, Callable[[pl.Series], float]] = None,
-        #for both point and distribution
-        use_weights: bool = True
-    ) -> pl.DataFrame:
-        
-        """
-        Unified aggregation entry point.
-
-        Decides between distribution vs. point aggregation based on
-        self.prediction_type (or explicit prediction_type override).
-
-        Parameters
-        ----------
-        For distribution predictions:
-            method: str
-                - "concat",
-                - "vincentization"
-
-        For point predictions:
-            aggregation_func: str or Callable[[pl.Series], float]
-                "mean", "median", "min", "max" or custom function
-            
-        use_weights: bool
-            Whether to use model weights
-
-        Returns
-        -------
-        pl.DataFrame
-            Aggregated predictions as DataFrame.
-        """
-
-        # decide which prediction type to use
-        pt = self.prediction_type
-        if pt is None:
-            raise ValueError(
-                "Cannot aggregate: prediction_type is not set. "
-                "Make sure to add at least one model first."
-            )
-
-        if pt == "distribution":
-            # only pass distribution relevant args
-            if aggregation_func is not None:  # or just `if aggregation_func is not None` if you change default
-                raise ValueError(
-                    "aggregation_func is only valid for point predictions. "
-                    "For distribution predictions, use the 'method' argument "
-                    "(e.g. method='concat' or method='vincentization')."
-                )
-            logger.info(f"Aggregating DISTRIBUTION predictions using method='{method}' (use_weights={use_weights}, inferred sample_size={self.sample_size})")
-            return self.aggregate_distributions(method=method, use_weights=use_weights)
-
-        elif pt == "point":
-            if method is not None:  # or just `if method is not None` if you change default
-                raise ValueError(
-                    f"Got method='{method}' but prediction_type='point'. "
-                    "The 'method' argument is only valid for distribution predictions. "
-                    "For point predictions, use 'aggregation_func' instead "
-                    "(e.g. aggregation_func='mean')."
-                )
-            # only pass point relevant args
-            logger.info(
-        f"Aggregating POINT predictions using '{aggregation_func}' "
-        f"(use_weights={use_weights}; weights only valid with 'mean')."
-    )
-
-            return self.aggregate_point_predictions(
-                aggregation_func=aggregation_func,
-                use_weights=use_weights,
-            )
-
-        else:
-            raise ValueError(
-                f"Unknown prediction_type '{pt}'. Expected 'point' or 'distribution'."
-            )
-
-
-    def aggregate_distributions(
-        self,
-        method: str = None,
-        use_weights: bool = True,
-    ) -> pl.DataFrame:
-        """
-        Aggregate distributions from all models using specified method.
-
-        Parameters:
-            method: Aggregation method - "concat", "vincentization"
-            use_weights: Whether to use model weights
-                   
+        Inner join model predictions based on index columns.
 
         Returns:
-            Polars DataFrame with aggregated distributions
+            Polars DataFrame with combined model predictions
         """
+        if not self.models:
+            raise ValueError("No models to join. Add at least one model using add_model().")
 
-        # join dataframes
-        joined = self._inner_join_model_predictions()
+        # extract the underlying DataFrames
+        dfs = [m.df for m in self.models]
 
-        # decide weights (only for weighted methods)
-        if use_weights:
-            weights = self._normalize_weights_new()
-            logger.info("Assigned Weights (distribution aggregation):")
-            for m, w in zip(self.models, weights):
-                logger.info(f"  {m.name:<12} → {w:>7.4f}")  
-        else:
-            weights = None
-            logger.info(f"Not using weights for distribution aggregation (method='{method}').")
+        if len(dfs) == 1:
+            # nothing to join, just return the single df
+            return dfs[0]
 
-        if method == "concat":
-            pooled_df = self._concatenate_aggregation(joined, weights=weights)
+        joined = reduce(
+            lambda left, right: left.join(right, on=self.index_cols, how="inner"),
+            dfs,
+        )
 
-        elif method == "vincentization":
-            pooled_df = self._vincentization_aggregation(joined, weights=weights)
+        # Optional: warn if rows were dropped
+        return joined
+    
+    def _normalize_weights_new(self) -> List[float]:
+        if self.n_models == 0:
+            raise ValueError("No models available to compute weights.")
 
-        else:
-            raise ValueError("method must be 'concat' or 'vincentization'.")
+        raw = [m.weight for m in self.models]
 
-        self.aggregated_df = pooled_df
-        return pooled_df
+        # all None -> equal weights
+        if all(w is None for w in raw):
+            return [1.0 / self.n_models] * self.n_models
 
+        specified_total = sum(w for w in raw if w is not None)
+        logger.info(f"Specified weight total: {specified_total}")
 
+        if specified_total > 1.0:
+            raise ValueError(f"Specified weights sum to {specified_total}, which exceeds 1.0")
+        elif specified_total == 1.0 and any(w is None for w in raw):
+            raise ValueError("Weights sum to 1.0 but some weights are unspecified (None)")
+        elif specified_total < 1:
+            logger.info(f"Warning: Specified weights sum to {specified_total}, less than 1.0. "
+                  f"Remaining weight will be evenly distributed among unspecified weights.")
+        n_missing = sum(1 for w in raw if w is None)
 
-    def aggregate_point_predictions(
-        self,
-        aggregation_func: Union[str, Callable[[pl.Series], float]] = None,
-        use_weights: bool = True
-) -> pl.DataFrame:
+        remaining = max(0.0, 1.0 - specified_total)
+        missing_weight = remaining / n_missing if n_missing > 0 else 0.0
+
+        filled = [w if w is not None else missing_weight for w in raw]
+
+        total = sum(filled)
+        if total <= 0:
+            raise ValueError("Total weight is non-positive; cannot normalize.")
+        return [w / total for w in filled]
+
+    def _normalized_weights_by_name(self) -> Dict[str, float]:
+        """Return mapping model_name -> normalized_weight."""
+        ws = self._normalize_weights_new()
+        return {m.name: w for m, w in zip(self.models, ws)}
+    
+
+    ### ----- Not Implemented Yet ----- ####
+
+    def _extract_samples_as_polars(self) -> pl.DataFrame:
         """
-        Aggregate point predictions from all models.
-
-        Parameters:
-            aggregation_func:
-                Aggregation across models: "mean", "median", "min", "max",
-                or a custom callable (when use_weights=False).
-            use_weights:
-                Whether to use model weights. Only supported for aggregation_func="mean".
+        Extract all samples as polars dataframes
 
         Returns:
-            Polars DataFrame with aggregated point predictions.
+            Polars DataFrame with all samples as polars dataframe
         """
 
-        # --- 1) Normalize / validate aggregation_func ---
-        if isinstance(aggregation_func, str):
-            if aggregation_func not in ("mean", "median", "min", "max"):
-                raise ValueError(
-                    f'Unsupported aggregation function: "{aggregation_func}", '
-                    f"must be one of 'mean', 'median', 'min', 'max' "
-                    f"or custom aggregation function of form Callable[[pl.Series], float]."
-                )
-            agg_name = aggregation_func
-        elif callable(aggregation_func):
-            agg_name = getattr(aggregation_func, "__name__", "custom")
-        else:
-            raise ValueError(
-                f'Unsupported aggregation function: "{aggregation_func}", '
-                f"must be one of 'mean', 'median', 'min', 'max' "
-                f"or custom aggregation function of form Callable[[pl.Series], float]."
-            )
+        raise NotImplementedError("_extract_samples_as_polars() not implemented")
 
-        # --- 2) Restrict weights: only allowed for mean ---
-        if use_weights and agg_name != "mean":
-            raise ValueError(
-                "Weights can only be used with aggregation_func='mean'. "
-                f"Got aggregation_func='{agg_name}' with use_weights=True."
-            )
-
-        # --- 3) Join model predictions ---
-        joined = self._inner_join_model_predictions()
-
-        # --- 4) Extract scalar point predictions from [value] lists ---
-        point_cols = []
-        for target_column in self.target_cols:
-            model_cols = [c for c in joined.columns if c.startswith(target_column)]
-            for c in model_cols:
-                # Each cell is [value] -> take first element as scalar
-                point_cols.append(
-                    pl.col(c).list.first().alias(f"{c}_point")
-                )
-
-        point_df = joined.select(self.index_cols + point_cols)
-        point_agg = point_df.select(self.index_cols)
-
-        # --- 5) Compute weights if needed ---
-        weights_by_name = self._normalized_weights_by_name() if use_weights else None
-
-        if use_weights:
-            if weights_by_name is None:
-                raise ValueError(
-                    "use_weights=True, but no weights have been set for the models. "
-                    "Either provide weights when adding models or call with use_weights=False."
-                )
-
-            logger.info("Assigned Weights (point aggregation):")
-            for name, w in weights_by_name.items():
-                logger.info(f"  {name:<12} → {w:>7.4f}")
-        else:
-            logger.info(
-                "Not using weights; aggregating models with "
-                f"{agg_name if agg_name != 'custom' else 'custom function'} across models."
-            )
-
-        # --- 6) Aggregate across models for each target ---
-        for target_column in self.target_cols:
-            # all point cols for this target, e.g. ["y_m1_point", "y_m2_point", ...]
-            model_point_cols = [
-                c for c in point_df.columns
-                if c.startswith(target_column) and c.endswith("_point")
-            ]
-
-            if use_weights:
-                # Only allowed when agg_name == "mean"
-                weighted_terms = []
-                for c in model_point_cols:
-                    # extract model name from "y_<name>_point"
-                    without_prefix = c[len(target_column) + 1:]  # skip "y_"
-                    model_name = without_prefix[:-len("_point")]  # remove "_point"
-
-                    w = weights_by_name[model_name]
-                    weighted_terms.append(pl.col(c) * w)
-
-                expr = sum(weighted_terms)
-            else:
-                # Unweighted aggregation across models
-                if agg_name == "mean":
-                    expr = pl.mean_horizontal(model_point_cols)
-                elif agg_name == "min":
-                    expr = pl.min_horizontal(model_point_cols)
-                elif agg_name == "max":
-                    expr = pl.max_horizontal(model_point_cols)
-                elif agg_name == "median":
-                    # median across model predictions per row
-                    expr = pl.concat_list(model_point_cols).list.median()
-                else:  # custom callable
-                    expr = pl.concat_list(model_point_cols).map_elements(
-                        aggregation_func, return_dtype=pl.Float64
-                    )
-
-            tmp = point_df.select(self.index_cols + [expr.alias(target_column)])
-            point_agg = point_agg.join(tmp, on=self.index_cols)
-
-        return point_agg
+        # TODO implementation here
 
 
     def calculate_ensemble_statistics(self) -> pl.DataFrame:
@@ -601,209 +891,4 @@ class AggregationManager:
         )
 
         return aggregated_stats
-
-
-    def _inner_join_model_predictions(self) -> pl.DataFrame:
-        """
-        Inner join model predictions based on index columns.
-
-        Returns:
-            Polars DataFrame with combined model predictions
-        """
-        if not self.models:
-            raise ValueError("No models to join. Add at least one model using add_model().")
-
-        # extract the underlying DataFrames
-        dfs = [m.df for m in self.models]
-
-        if len(dfs) == 1:
-            # nothing to join, just return the single df
-            return dfs[0]
-
-        joined = reduce(
-            lambda left, right: left.join(right, on=self.index_cols, how="inner"),
-            dfs,
-        )
-
-        # Optional: warn if rows were dropped
-        return joined
-
-
-    def _concatenate_aggregation(
-            self,
-            df: pl.DataFrame,
-            weights: Optional[List[float]] = None
-    ) -> pl.DataFrame:
-        """
-        Perform linear pooling with resampling to combine distributions
-
-        Parameters:
-            df: Polars DataFrame with target columns containing distribution samples
-            weights: list of floats (default: equal weights)
-            n_samples: int, number of samples to use for resampling (default: largest model sample size)
-
-        Returns:
-            Polars DataFrame with pooled distributions
-        """
-
-        # set weights to equal if not specified
-        if weights is None:
-            weights = [1.0 / self.n_models] * self.n_models
-
-        # infer sample size from manager state
-        if self.sample_size is None:
-            raise ValueError(
-                "self.sample_size is not set. Make sure you added at least one "
-                "distribution model and detected its sample size."
-            )
-        n_samples = self.sample_size
-
-        pooled_cols = []
-
-        for target_column in self.target_cols:
-
-            # find target columns
-            model_cols = [c for c in df.columns if c.startswith(target_column)]
-
-            def pool_row(row):
-
-                samples_list = [np.array(val) for val in row]
-
-                # decide how many samples to draw from each model
-                sample_counts = np.random.multinomial(n_samples, weights)
-
-                pool = []
-                for s, count in zip(samples_list, sample_counts):
-                    if len(s) > 0 and count > 0:
-                        pool.extend(np.random.choice(s, size=count, replace=True))
-                return (pool,)
-
-            pools = df.select(model_cols).map_rows(pool_row)
-            pooled_cols.append(pools.to_series().alias(target_column))
-
-        # combine back into polar dataframe with index columns
-        pooled = df.select(self.index_cols)
-        for col in pooled_cols:
-            pooled = pooled.with_columns(col)
-
-        return pooled
-
-
-
-    def _vincentization_aggregation(
-            self,
-            df: pl.DataFrame,
-            weights: Optional[List[float]] = None
-    ) -> pl.DataFrame:
-        """
-        Perform vincentization based aggregation
-
-        Parameters:
-            df: Polars DataFrame with target columns containing distribution samples
-            weights: list of floats (default: equal weights)
-            n_samples: int, number of samples to use for resampling (default: largest model sample size)
-
-        Returns:
-            Polars DataFrame with pooled distributions
-        """
-
-        # set weights to equal if not specified
-        if weights is None:
-            weights = [1.0 / self.n_models] * self.n_models
-
-        # infer sample size from manager state
-        if self.sample_size is None:
-            raise ValueError(
-                "self.sample_size is not set. Make sure you added at least one "
-                "distribution model and detected its sample size."
-            )
-        n_samples = self.sample_size
-
-        pooled_cols = []
-
-        for target_column in self.target_cols:
-
-            # find target columns
-            model_cols = [c for c in df.columns if c.startswith(target_column)]
-
-            def pool_row_vincent(row):
-
-                # retrieve quantile space
-                quantile_levels = np.linspace(0, 1, n_samples)
-
-                # compute weighted quantiles across models
-                model_quantiles = []
-                for samples in row:
-                    arr = np.array(samples)
-                    model_quantiles.append(np.quantile(arr, quantile_levels))
-
-                # weighted quantile averages across models
-                pooled_q = [
-                    sum(w * model_quantiles[m][i] for m, w in enumerate(weights))
-                    for i in range(n_samples)
-                ]
-
-                return (pooled_q,)
-
-            # apply row-wise
-            pooled_series = df.select(model_cols).map_rows(pool_row_vincent)
-            pooled_cols.append(pooled_series.to_series().alias(target_column))
-
-        # combine back into polar dataframe with index columns
-        pooled = df.select(self.index_cols)
-        for col in pooled_cols:
-            pooled = pooled.with_columns(col)
-        return pooled
-        
-
-    def _normalize_weights_new(self) -> List[float]:
-        if self.n_models == 0:
-            raise ValueError("No models available to compute weights.")
-
-        raw = [m.weight for m in self.models]
-
-        # all None -> equal weights
-        if all(w is None for w in raw):
-            return [1.0 / self.n_models] * self.n_models
-
-        specified_total = sum(w for w in raw if w is not None)
-        logger.info(f"Specified weight total: {specified_total}")
-
-        if specified_total > 1.0:
-            raise ValueError(f"Specified weights sum to {specified_total}, which exceeds 1.0")
-        elif specified_total == 1.0 and any(w is None for w in raw):
-            raise ValueError("Weights sum to 1.0 but some weights are unspecified (None)")
-        elif specified_total < 1:
-            logger.info(f"Warning: Specified weights sum to {specified_total}, less than 1.0. "
-                  f"Remaining weight will be evenly distributed among unspecified weights.")
-        n_missing = sum(1 for w in raw if w is None)
-
-        remaining = max(0.0, 1.0 - specified_total)
-        missing_weight = remaining / n_missing if n_missing > 0 else 0.0
-
-        filled = [w if w is not None else missing_weight for w in raw]
-
-        total = sum(filled)
-        if total <= 0:
-            raise ValueError("Total weight is non-positive; cannot normalize.")
-        return [w / total for w in filled]
-
-    def _normalized_weights_by_name(self) -> Dict[str, float]:
-        """Return mapping model_name -> normalized_weight."""
-        ws = self._normalize_weights_new()
-        return {m.name: w for m, w in zip(self.models, ws)}
-
-
-    def _extract_samples_as_polars(self) -> pl.DataFrame:
-        """
-        Extract all samples as polars dataframes
-
-        Returns:
-            Polars DataFrame with all samples as polars dataframe
-        """
-
-        raise NotImplementedError("_extract_samples_as_polars() not implemented")
-
-        # TODO implementation here
-
 
