@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset, _ViewsDataset
 
 
-
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class _ModelSpec:
@@ -21,58 +21,64 @@ class _ModelSpec:
 
 class AggregationManager:
     """
-    Advanced distribution aggregation manager for ensemble forecasting.
+    New aggregation manager that can aggregate distributions and point forecasts for
+    ensemble forecasting.
 
     Supports weighted aggregation of both point predictions and distribution samples
     from multiple models using Polars for efficient operations.
 
     Parameters:
-        weights: Optional weights for each model (default: equal weights)
         index_cols: List of index column names (default: ['time', 'entity_id'])
         target_cols: List of target variable names
+
+    Returns:
+        pl.DataFrame
+            Aggregated predictions as DataFrame.
     """
 
     def __init__(
-            self,
-            index_cols: List[str] = ['time', 'entity_id'],
-            target_cols: Optional[List[str]] = None
+        self,
+        index_cols: List[str] = ["time", "entity_id"],
+        target_cols: Optional[List[str]] = None,
     ):
-        #self.models: List[pl.DataFrame] = []
         self.models: List[_ModelSpec] = []
         self.index_cols = index_cols
         self.target_cols = target_cols
-        #self.n_models = 0
-        # optional: but could be useful to avoid repetition of aggregation; store aggregated models
         self.aggregated_df = None
-        self.prediction_type: Optional[str] = None   # "point" or "distribution"
-        self.sample_size: Optional[int] = None       # for distributions only
+        self.prediction_type: Optional[str] = None  # "point" or "distribution"
+        self.sample_size: Optional[int] = None  # for distributions only
 
         self._index_signature: Optional[pl.DataFrame] = None
 
     @property
     def n_models(self) -> int:
         return len(self.models)
-    
+
     #### ----- Public Methods - Entry Points ----- ####
 
-    def add_model(self, data: Union[pl.DataFrame, pd.DataFrame, str, Path],  weight: Optional[float] = None,
-        name: Optional[str] = None,) -> None:
+    def add_model(
+        self,
+        data: Union[pl.DataFrame, pd.DataFrame, str, Path],
+        weight: Optional[float] = None,
+        name: Optional[str] = None,
+    ) -> None:
         """
         Add a model's predictions to the aggregation pool.
 
         Parameters:
             data: Polars DataFrame, Pandas DataFrame or path to parquet/csv file containing predictions
+            weight: Optional weight for the model (float < 1.0)
+            name: Optional name for the model (used in column renaming)
         """
 
         # Read in dataframe as polars dataframe
 
         df = self._load_to_polars(data)
-            
+
         # Validate Weights
 
         if weight is not None and weight >= 1:
             raise ValueError(f"Weight must be less than 1.0, got {weight}")
-
 
         # select only index columns and target columns
         df = df.select(self.index_cols + self.target_cols)
@@ -80,35 +86,32 @@ class AggregationManager:
         # rename target columns to specify model number
         if name is None:
             name = f"m{self.n_models + 1}"
-        
+
         # check index consistency
         self._check_index_consistency(df, model_name=name)
 
         pred_type, sample_size = self._detect_prediction_shape(df)
-        logger.info(f"Detected model '{name}', type='{pred_type}', sample_size={sample_size}")
+        logger.info(
+            f"Detected model '{name}', type='{pred_type}', sample_size={sample_size}"
+        )
 
         # check consistency with previously added models
         logger.info("Checking model consistency...")
         self._check_model_consistency(pred_type, sample_size, model_name=name)
 
-
         rename_map = {col: f"{col}_{name}" for col in self.target_cols}
         df = df.rename(rename_map)
 
+        # Append model
+        self.models.append(
+            _ModelSpec(
+                name=name, df=df, weight=float(weight) if weight is not None else None
+            )
+        )
 
-        # Append model, increase model count
-        #self.models.append(df)
-        #self.n_models += 1
-        self.models.append(_ModelSpec(name=name, df=df, weight=float(weight) if weight is not None else None))
-
-    
     def aggregate(
-        self,
-        *,
-        method: str | None = None,
-        use_weights: bool = True
+        self, *, method: str | None = None, use_weights: bool = True
     ) -> pl.DataFrame:
-        
         """
         Unified aggregation entry point.
 
@@ -202,7 +205,7 @@ class AggregationManager:
         Parameters:
             method: Aggregation method - "concat", "vincentization"
             use_weights: Whether to use model weights
-                   
+
 
         Returns:
             Polars DataFrame with aggregated distributions
@@ -216,10 +219,12 @@ class AggregationManager:
             weights = self._normalize_weights_new()
             logger.info("Assigned Weights (distribution aggregation):")
             for m, w in zip(self.models, weights):
-                logger.info(f"  {m.name:<12} → {w:>7.4f}")  
+                logger.info(f"  {m.name:<12} → {w:>7.4f}")
         else:
             weights = None
-            logger.info(f"Not using weights for distribution aggregation (method='{method}').")
+            logger.info(
+                f"Not using weights for distribution aggregation (method='{method}')."
+            )
 
         if method == "concat":
             pooled_df = self._concatenate_aggregation(joined, weights=weights)
@@ -233,13 +238,9 @@ class AggregationManager:
         self.aggregated_df = pooled_df
         return pooled_df
 
-
-
     def _aggregate_point_predictions(
-        self,
-        method: str = None,
-        use_weights: bool = True
-) -> pl.DataFrame:
+        self, method: str = None, use_weights: bool = True
+    ) -> pl.DataFrame:
         """
         Aggregate point predictions from all models.
 
@@ -271,18 +272,8 @@ class AggregationManager:
         # --- 3) Join model predictions ---
         joined = self._inner_join_model_predictions()
 
-        # --- 4) Extract scalar point predictions from [value] lists ---
-        point_cols = []
-        for target_column in self.target_cols:
-            model_cols = [c for c in joined.columns if c.startswith(target_column)]
-            for c in model_cols:
-                # Each cell is [value] -> take first element as scalar
-                point_cols.append(
-                    pl.col(c).list.first().alias(f"{c}_point")
-                )
-
-        point_df = joined.select(self.index_cols + point_cols)
-        point_agg = point_df.select(self.index_cols)
+        # --- 4) Prepare columns for operations ---
+        point_df, point_agg = self.prepare_point_cols(joined)
 
         # --- 5) Compute weights if needed ---
         weights_by_name = self._normalized_weights_by_name() if use_weights else None
@@ -300,29 +291,31 @@ class AggregationManager:
         else:
             logger.info(
                 "Not using weights; aggregating models with "
-                 f"{agg_name} across models."
+                f"{agg_name} across models."
             )
 
         # --- 6) Aggregate across models for each target ---
         for target_column in self.target_cols:
             # all point cols for this target, e.g. ["y_m1_point", "y_m2_point", ...]
             model_point_cols = [
-                c for c in point_df.columns
+                c
+                for c in point_df.columns
                 if c.startswith(target_column) and c.endswith("_point")
             ]
-
             if use_weights:
                 # Only allowed when agg_name == "mean"
                 weighted_terms = []
                 for c in model_point_cols:
                     # extract model name from "y_<name>_point"
-                    without_prefix = c[len(target_column) + 1:]  # skip "y_"
-                    model_name = without_prefix[:-len("_point")]  # remove "_point"
+                    without_prefix = c[len(target_column) + 1 :]  # skip "y_"
+                    model_name = without_prefix[: -len("_point")]  # remove "_point"
 
                     w = weights_by_name[model_name]
                     weighted_terms.append(pl.col(c) * w)
 
-                expr = sum(weighted_terms)
+                # expr = sum(weighted_terms)
+                expr = pl.sum_horizontal(weighted_terms)
+
             else:
                 # Unweighted aggregation across models
                 if agg_name == "mean":
@@ -334,21 +327,18 @@ class AggregationManager:
                 elif agg_name == "median":
                     # median across model predictions per row
                     expr = pl.concat_list(model_point_cols).list.median()
-                else:  
+                else:
                     raise RuntimeError(f"Unexpected aggregation_func: {agg_name}")
 
             tmp = point_df.select(self.index_cols + [expr.alias(target_column)])
             point_agg = point_agg.join(tmp, on=self.index_cols)
 
         return point_agg
-    
 
     #### ----- Distribution Aggregation Methods ----- ####
 
     def _concatenate_aggregation(
-            self,
-            df: pl.DataFrame,
-            weights: Optional[List[float]] = None
+        self, df: pl.DataFrame, weights: Optional[List[float]] = None
     ) -> pl.DataFrame:
         """
         Perform linear pooling with resampling to combine distributions
@@ -376,26 +366,25 @@ class AggregationManager:
         pooled_cols = []
         rng = np.random.default_rng(42)
 
-
         for target_column in self.target_cols:
 
             # find target columns
             model_cols = [c for c in df.columns if c.startswith(target_column)]
 
-        #    def pool_row(row, *, rng=rng):
+            #    def pool_row(row, *, rng=rng):
 
-        #        samples_list = [np.array(val) for val in row]
+            #        samples_list = [np.array(val) for val in row]
 
-        #        # decide how many samples to draw from each model
-        #        sample_counts = rng.multinomial(n_samples, weights)
+            #        # decide how many samples to draw from each model
+            #        sample_counts = rng.multinomial(n_samples, weights)
 
-        #        pool = []
-        #        for s, count in zip(samples_list, sample_counts):
-        #                pool.extend(rng.choice(s, size=count, replace=True))
-        #        return (pool,)
+            #        pool = []
+            #        for s, count in zip(samples_list, sample_counts):
+            #                pool.extend(rng.choice(s, size=count, replace=True))
+            #        return (pool,)
 
-        #    pools = df.select(model_cols).map_rows(pool_row)
-        #    pooled_cols.append(pools.to_series().alias(target_column))
+            #    pools = df.select(model_cols).map_rows(pool_row)
+            #    pooled_cols.append(pools.to_series().alias(target_column))
             model_arrays = []
             for col in model_cols:
                 # df[col].to_list() -> List[List[...]] with length n_rows
@@ -442,12 +431,8 @@ class AggregationManager:
 
         return pooled
 
-
-
     def _vincentization_aggregation(
-            self,
-            df: pl.DataFrame,
-            weights: Optional[List[float]] = None
+        self, df: pl.DataFrame, weights: Optional[List[float]] = None
     ) -> pl.DataFrame:
         """
         Perform vincentization based aggregation
@@ -472,10 +457,6 @@ class AggregationManager:
             )
         n_samples = self.sample_size
         n_models = self.n_models
-
-        # default: equal weights
-        if weights is None:
-            weights = [1.0 / n_models] * n_models
 
         weights_np = np.asarray(weights, dtype=float)
         if weights_np.ndim != 1:
@@ -527,9 +508,7 @@ class AggregationManager:
             #   q.shape + remaining_dims
             # = (n_samples,) + (n_rows, n_models) = (n_samples, n_rows, n_models)
             quantiles = np.quantile(
-                model_stack,
-                quantile_levels,
-                axis=2
+                model_stack, quantile_levels, axis=2
             )  # shape: (n_samples, n_rows, n_models)
 
             # Weighted average across models (last axis)
@@ -542,10 +521,7 @@ class AggregationManager:
             pooled = pooled.T  # (n_rows, n_samples)
 
             # Back to Polars: list column, one list per row
-            pooled_series = pl.Series(
-                name=target_column,
-                values=pooled.tolist()
-            )
+            pooled_series = pl.Series(name=target_column, values=pooled.tolist())
             pooled_cols.append(pooled_series)
 
         # combine back into polar dataframe with index columns
@@ -553,10 +529,9 @@ class AggregationManager:
         for col in pooled_cols:
             pooled = pooled.with_columns(col)
         return pooled
-    
-    
+
     #### ----- Check Functions for add_model() ----- ####
-    
+
     def _extract_index_signature(self, df: pl.DataFrame) -> pl.DataFrame:
         """
         Return a canonical representation of the index:
@@ -565,13 +540,8 @@ class AggregationManager:
         - unique combinations
         - sorted by all index columns
         """
-        return (
-            df
-            .select(self.index_cols)
-            .sort(self.index_cols)
-        )
+        return df.select(self.index_cols).sort(self.index_cols)
 
-    
     def _detect_prediction_shape(self, df: pl.DataFrame):
         """
         Minimal check:
@@ -583,7 +553,7 @@ class AggregationManager:
         """
 
         list_lengths = {}
-        
+
         # First pass: verify consistent lengths within each column
         for col in self.target_cols:
             lengths = df.select(pl.col(col).list.len().alias("_len"))["_len"]
@@ -618,8 +588,9 @@ class AggregationManager:
 
         return pred_type, size
 
-
-    def _check_model_consistency(self, pred_type: str, sample_size: int, model_name: str) -> None:
+    def _check_model_consistency(
+        self, pred_type: str, sample_size: int, model_name: str
+    ) -> None:
         """
         Ensure global prediction type and sample size consistency.
         """
@@ -636,10 +607,11 @@ class AggregationManager:
                 f"Model '{model_name}' has prediction type '{pred_type}', "
                 f"but existing models use '{self.prediction_type}'."
             )
-        
-        if pred_type == self.prediction_type:
-            logger.info(f"Model '{model_name}' prediction type '{pred_type}' matches existing models.")
 
+        if pred_type == self.prediction_type:
+            logger.info(
+                f"Model '{model_name}' prediction type '{pred_type}' matches existing models."
+            )
 
         # If distribution, also check sample size
         if pred_type == "distribution" and sample_size != self.sample_size:
@@ -647,7 +619,7 @@ class AggregationManager:
                 f"Model '{model_name}' has sample size {sample_size}, "
                 f"but existing models use {self.sample_size}."
             )
-    
+
     def _check_index_consistency(self, df: pl.DataFrame, model_name: str) -> None:
         """
         Ensure that the index (time/entity_id/etc.) of this model matches
@@ -664,22 +636,6 @@ class AggregationManager:
             self._index_signature = current_sig
             return
 
-        # Quick check: row count
-        if current_sig.height != self._index_signature.height:
-            # optional: more detailed diagnostics
-            missing = self._index_signature.join(
-                current_sig, on=self.index_cols, how="anti"
-            )
-            extra = current_sig.join(
-                self._index_signature, on=self.index_cols, how="anti"
-            )
-            raise ValueError(
-                f"Index mismatch for model '{model_name}': different number of unique "
-                f"index rows ({current_sig.height} vs {self._index_signature.height}).\n"
-                f"Missing rows in new model: {missing.height}, "
-                f"extra rows in new model: {extra.height}."
-            )
-
         # Exact content check
         if not current_sig.equals(self._index_signature):
             # optional: detailed diff again
@@ -690,14 +646,60 @@ class AggregationManager:
                 self._index_signature, on=self.index_cols, how="anti"
             )
             raise ValueError(
-                f"Index mismatch for model '{model_name}': index sets differ.\n"
+                f"Index mismatch for model '{model_name}'.\n"
+                f"Expected {self._index_signature.height} unique index rows, "
+                f"got {current_sig.height}.\n"
                 f"Missing rows in new model: {missing.height}, "
                 f"extra rows in new model: {extra.height}."
             )
 
     #### ----- Utility Functions for Aggregation ----- ####
 
-    def _load_to_polars(self, data: Union[pl.DataFrame, pd.DataFrame, str, Path]) -> pl.DataFrame:
+    def prepare_point_cols(
+        self, joined: pl.DataFrame
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+        """
+        Extract scalar point predictions from list/array columns.
+
+        Columns are named like "y_m1", where:
+            - y      = target column name
+            - m1     = model name
+        Each cell contains a numpy array of length 1, e.g. array([1.64]).
+
+        This function creates new scalar columns named "y_m1_point"
+        where the value is the first element of the array.
+
+        Returns
+        -------
+        point_df : pl.DataFrame
+            DataFrame with all index columns AND the new <col>_point columns.
+
+        point_agg : pl.DataFrame
+            DataFrame initialized with index columns only.
+            This is the structure into which aggregated predictions will be added later.
+        """
+
+        point_cols = []
+
+        # --- Loop over all target columns and find corresponding model columns ---
+        for target_column in self.target_cols:
+            model_cols = [c for c in joined.columns if c.startswith(target_column)]
+
+            for c in model_cols:
+                # Extract scalar from array/list: array([x]) -> x
+                point_cols.append(pl.col(c).list.first().alias(f"{c}_point"))
+
+        # --- Build point_df ---
+        point_df = joined.select(self.index_cols + point_cols)
+
+        # --- Prepare initial aggregation frame ---
+        point_agg = point_df.select(self.index_cols)
+
+        return point_df, point_agg
+
+    def _load_to_polars(
+        self, data: Union[pl.DataFrame, pd.DataFrame, str, Path]
+    ) -> pl.DataFrame:
         """
         Normalize input to a Polars DataFrame with index columns included.
         Steps:
@@ -718,16 +720,16 @@ class AggregationManager:
                 f"Unsupported data type: {type(data)}. "
                 "Type must be either Polars DataFrame, Pandas DataFrame or path to a file."
             )
-        
+
         # Get index names
         time_name, entity_name = _ViewsDataset(data).original_index.names
 
         # ---------- 2) Wrap in CMDataset or PGMDataset ----------
         # Decide based on the *second index level* entity_id --> country_id OR priogrid_id
         if entity_name == "country_id":
-            ds = CMDataset(pdf)   
+            ds = CMDataset(pdf)
         elif entity_name in ("priogrid_id", "priogrid_gid", "pg_id"):
-            ds = PGMDataset(pdf)  
+            ds = PGMDataset(pdf)
         else:
             raise ValueError(
                 f"Cannot infer dataset type from second index level '{entity_name}'. "
@@ -735,11 +737,10 @@ class AggregationManager:
                 "['priogrid_id', 'priogrid_gid', 'pg_id'] for PGMDataset."
             )
 
-
         # ---------- 3) Convert to Polars and keep index as columns ----------
-        # 
-        pdf_processed = ds.dataframe.reset_index()  
-        df = pl.from_pandas(pdf_processed)          
+        #
+        pdf_processed = ds.dataframe.reset_index()
+        df = pl.from_pandas(pdf_processed)
 
         # ---------- 4) Schema validation on Polars dataframe ----------
         # Validate that index columns are in dataframe
@@ -769,7 +770,6 @@ class AggregationManager:
 
         return df
 
-
     def _inner_join_model_predictions(self) -> pl.DataFrame:
         """
         Inner join model predictions based on index columns.
@@ -778,7 +778,9 @@ class AggregationManager:
             Polars DataFrame with combined model predictions
         """
         if not self.models:
-            raise ValueError("No models to join. Add at least one model using add_model().")
+            raise ValueError(
+                "No models to join. Add at least one model using add_model()."
+            )
 
         # extract the underlying DataFrames
         dfs = [m.df for m in self.models]
@@ -794,7 +796,7 @@ class AggregationManager:
 
         # Optional: warn if rows were dropped
         return joined
-    
+
     def _normalize_weights_new(self) -> List[float]:
         if self.n_models == 0:
             raise ValueError("No models available to compute weights.")
@@ -809,12 +811,20 @@ class AggregationManager:
         logger.info(f"Specified weight total: {specified_total}")
 
         if specified_total > 1.0:
-            raise ValueError(f"Specified weights sum to {specified_total}, which exceeds 1.0")
+            raise ValueError(
+                f"Specified weights sum to {specified_total}, which exceeds 1.0"
+            )
         elif specified_total == 1.0 and any(w is None for w in raw):
-            raise ValueError("Weights sum to 1.0 but some weights are unspecified (None)")
+            raise ValueError(
+                "Weights sum to 1.0 but some weights are unspecified (None)"
+            )
         elif specified_total < 1:
-            logger.info(f"Warning: Specified weights sum to {specified_total}, less than 1.0. "
-                  f"Remaining weight will be evenly distributed among unspecified weights.")
+            logger.info(
+                f"Warning: Specified weights sum to {specified_total}, less than 1.0. "
+                f"Remaining weight will be evenly distributed among remaining models or if "
+                f"no models remain, weights will be evenly distributed so that they all "
+                f"pertain the same proportions in existing models."
+            )
         n_missing = sum(1 for w in raw if w is None)
 
         remaining = max(0.0, 1.0 - specified_total)
@@ -831,64 +841,3 @@ class AggregationManager:
         """Return mapping model_name -> normalized_weight."""
         ws = self._normalize_weights_new()
         return {m.name: w for m, w in zip(self.models, ws)}
-    
-
-    ### ----- Not Implemented Yet ----- ####
-
-    def _extract_samples_as_polars(self) -> pl.DataFrame:
-        """
-        Extract all samples as polars dataframes
-
-        Returns:
-            Polars DataFrame with all samples as polars dataframe
-        """
-
-        raise NotImplementedError("_extract_samples_as_polars() not implemented")
-
-        # TODO implementation here
-
-
-    def calculate_ensemble_statistics(self) -> pl.DataFrame:
-        """
-        Calculate comprehensive statistics for the ensemble distribution.
-
-        Returns:
-            Polars DataFrame with ensemble statistics including mean, std, and quantiles
-        """
-
-        raise NotImplementedError("Calculate ensemble statistics not implemented.")
-
-        # if not aggregated yet, aggregate
-        if self.aggregated_df is None:
-            self.aggregated_df = self.aggregate_distributions()
-
-
-        # Extract all samples as polars DataFrame
-        samples_df = self.aggregated_df
-
-        # Calculate statistics for each variable and index combination
-        stats = (
-            samples_df
-            .group_by([self.index_cols[0], self.index_cols[1], self.target_cols])
-            .agg([
-                pl.col(self.target_cols).mean().alias("mean"),
-                pl.col(self.target_cols).std().alias("std"),
-                pl.col(self.target_cols).quantile(0.05).alias("q05"),
-                pl.col(self.target_cols).quantile(0.25).alias("q25"),
-                pl.col(self.target_cols).quantile(0.50).alias("q50"),
-                pl.col(self.target_cols).quantile(0.75).alias("q75"),
-                pl.col(self.target_cols).quantile(0.95).alias("q95"),
-                pl.col(self.target_cols).quantile(0.98).alias("q98"),
-                pl.col(self.target_cols).max().alias("max")
-            ])
-        )
-
-        # Pivot to wide format
-        aggregated_stats = stats.pivot(
-            index=[self.index_cols[0], self.index_cols[1]],
-            columns=self.target_cols,
-            values=["mean", "std", "q05", "q25", "q50", "q75", "q95", "q98", "max"]
-        )
-
-        return aggregated_stats
-
