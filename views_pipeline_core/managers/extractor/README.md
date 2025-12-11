@@ -96,18 +96,17 @@ Guidelines:
 
 ### Lifecycle: `run()`
 Execution sequence:
-1. (Pre-flight) Calls `_download()` and `_preprocess()` once outside WandB context (early failure surface).
-2. Opens WandB run: project name pattern `"{configs['name']}_save"`.
-3. Inside try block:
-   - Calls `_download()` again (fresh state—optional; can remove if redundant).
+1. Opens WandB run: project name pattern `"{configs['name']}_save"`.
+2. Inside try block:
+   - Calls `_download()`.
    - Calls `_preprocess()`.
    - Calls `_save()`; expected to write outputs and optionally log artifacts.
-4. On exception:
+3. On exception:
    - Raises `PipelineException` with message and passes `wandb_module` for alerting.
-5. Finally:
+4. Finally:
    - Ensures `wandb_module.finish_run()` is invoked.
 
-Note: Double invocation of `_download()` and `_preprocess()` lets you stage and verify outside artifact logging; adjust if unnecessary.
+Note: `_download()` and `_preprocess()` are only called inside the WandB context. If early failure surfacing is desired, consider manually invoking these methods before opening the WandB run.
 
 ### Example Subclass
 ```python
