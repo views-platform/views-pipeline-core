@@ -1,226 +1,36 @@
-import sys
-import argparse
+"""
+DEPRECATED: This module is deprecated. Use ForecastingModelArgs.parse_args() instead.
+
+All argument parsing and validation is now handled by the ForecastingModelArgs dataclass.
+"""
+import warnings
+from views_pipeline_core.cli.args import ForecastingModelArgs
 
 
 def parse_args():
     """
-    CLI parser for model specific main.py scripts.
+    DEPRECATED: Use ForecastingModelArgs.parse_args() instead.
+    
+    This function is kept for backward compatibility but will be removed in a future version.
     """
-
-    parser = argparse.ArgumentParser(
-        description="Run model pipeline with specified run type."
+    warnings.warn(
+        "parse_args() is deprecated. Use ForecastingModelArgs.parse_args() instead.",
+        DeprecationWarning,
+        stacklevel=2
     )
-
-    parser.add_argument(
-        "-r",
-        "--run_type",
-        choices=["calibration", "validation", "forecasting"],
-        type=str,
-        default="calibration",
-        help="Choose the run type for the model: calibration, validation, or forecasting. Default is calibration. "
-        "Note: If --sweep is flagged, --run_type must be calibration.",
-    )
-
-    parser.add_argument(
-        "-s",
-        "--sweep",
-        action="store_true",
-        help="Set flag to run the model pipeline as part of a sweep. No explicit flag means no sweep."
-        "Note: If --sweep is flagged, --run_type must be calibration, and both training and evaluation is automatically implied.",
-    )
-
-    parser.add_argument(
-        "-t",
-        "--train",
-        action="store_true",
-        help="Flag to indicate if a new model should be trained. "
-        "Note: If --sweep is flagged, --train will also automatically be flagged.",
-    )
-
-    parser.add_argument(
-        "-e",
-        "--evaluate",
-        action="store_true",
-        help="Flag to indicate if the model should be evaluated. "
-        "Note: If --sweep is specified, --evaluate will also automatically be flagged. "
-        "Cannot be used with --run_type forecasting.",
-    )
-
-    parser.add_argument(
-        "-f",
-        "--forecast",
-        action="store_true",
-        help="Flag to indicate if the model should produce predictions. "
-        "Note: If --sweep is specified, --forecast will also automatically be flagged. "
-        "Can only be used with --run_type forecasting.",
-    )
-
-    parser.add_argument(
-        "-p",
-        "--prediction_store",
-        action="store_true",
-        help="Flag to indicate if the model should use the prediction store.",
-    )
-
-    parser.add_argument(
-        "-a",
-        "--artifact_name",
-        type=str,
-        help="Specify the name of the model artifact to be used for evaluation. "
-        "The file extension will be added in the main and fit with the specific model algorithm."
-        "The artifact name should be in the format: <run_type>_model_<timestamp>.pt."
-        "where <run_type> is calibration, validation, or forecasting, and <timestamp> is in the format YMD_HMS."
-        "If not provided, the latest artifact will be used by default.",
-    )
-
-    parser.add_argument(
-        "-sa", "--saved", action="store_true", help="Used locally stored data"
-    )
-
-    parser.add_argument(
-        "-o", "--override_timestep", help="Override use of current time (year/month/week/day depending on your LoA)", type=int
-    )
-
-    parser.add_argument(
-        "-dd",
-        "--drift_self_test",
-        action="store_true",
-        default=False,
-        help="Enable drift-detection self_test at data-fetch",
-    )
-
-    parser.add_argument(
-        "-et",
-        "--eval_type",
-        type=str,
-        default="standard",
-        help="Type of evaluation to be performed",
-    )
-
-    parser.add_argument(
-        "-re", "--report", action="store_true", help="Generate forecast report."
-    )
-
-    parser.add_argument(
-        "-u",
-        "--update_viewser",
-        action="store_true",
-        help="Update the viewser dataframe for a set of months where viewser returns only zeros.",
-    )
-
-    parser.add_argument(
-        "-wn",
-        "--wandb_notifications",
-        action="store_true",
-        help="Enable Weights & Biases notifications.",
-    )
-
-    parser.add_argument(
-        "-m",
-        "--monthly",
-        action="store_true",
-        help="Shorthand flag for monthly production runs. "
-        "Automatically sets: --run_type forecasting, --train, --forecast, --report, --prediction_store, --wandb_notifications.",
-    )
-
-    return parser.parse_args()
+    return ForecastingModelArgs.parse_args()
 
 
 def validate_arguments(args):
-    if args.monthly:
-        if args.sweep:
-            print("Error: --monthly flag cannot be used with --sweep flag. Exiting.")
-            print("To fix: Remove --sweep flag when using --monthly.")
-            sys.exit(1)
-        
-        if args.evaluate:
-            print("Error: --monthly flag cannot be used with --evaluate flag (monthly runs do forecasting, not evaluation). Exiting.")
-            print("To fix: Remove --evaluate flag when using --monthly.")
-            sys.exit(1)
-        
-        args.run_type = "forecasting"
-        args.train = True
-        args.forecast = True
-        args.report = True
-        args.prediction_store = True
-        args.wandb_notifications = True
-
-    if args.report and args.run_type not in ("forecasting", "validation"):
-        print("Error: --report can only be used with --run_type forecasting or validation. Exiting.")
-        sys.exit(1)
-
-    if args.report and not (args.evaluate or args.forecast):
-        print("Error: --report requires either --evaluate or --forecast to be set. Exiting.")
-        sys.exit(1)
-
-    if args.sweep and args.run_type != "calibration":
-        print("Error: Sweep runs must have --run_type set to 'calibration'. Exiting.")
-        print("To fix: Use --run_type calibration when --sweep is flagged.")
-        sys.exit(1)
-
-    if args.sweep and (args.train or args.evaluate):
-        print(
-            "Error: Sweep runs cannot have --train or --evaluate flags set. Sweep does training and evaluation by default. Exiting."
-        )
-        print("To fix: Remove --train, or --evaluate flags when --sweep is flagged.")
-        sys.exit(1)
-
-    if args.sweep and args.forecast:
-        print(
-            "Error: Sweep runs cannot have --forecast flag set because sweep doesn't do forecasting. Exiting."
-        )
-        print("To fix: Remove --forecast flag when --sweep is flagged.")
-        sys.exit(1)
-
-    if args.evaluate and args.run_type == "forecasting":
-        print("Error: Forecasting runs cannot evaluate. Exiting.")
-        print("To fix: Remove --evaluate flag when --run_type is 'forecasting'.")
-        sys.exit(1)
-
-    if (
-        args.run_type in ["calibration", "validation", "forecasting"]
-        and not args.train
-        and not args.evaluate
-        and not args.forecast
-        and not args.sweep
-        and not args.report
-    ):
-        print(
-            f"Error: Run type is {args.run_type} but neither --train, --evaluate, nor --sweep flag is set. Nothing to do... Exiting."
-        )
-        print(
-            "To fix: Add --train and/or --evaluate flag. Or use --sweep to run both training and evaluation in a WadnB sweep loop."
-        )
-        sys.exit(1)
-
-    if args.train and args.artifact_name:
-        print("Error: Both --train and --artifact_name flags are set. Exiting.")
-        print("To fix: Remove --artifact_name if --train is set, or vice versa.")
-        sys.exit(1)
-
-    if args.forecast and args.run_type != "forecasting":
-        print(
-            "Error: --forecast flag can only be used with --run_type forecasting. Exiting."
-        )
-        print("To fix: Set --run_type to forecasting if --forecast is flagged.")
-        sys.exit(1)
-
-    if (not args.train and not args.sweep) and not args.saved:
-        # if not training or sweeping, then we need to use saved data
-        print(
-            "Error: if --train or --sweep is not set, you should only use --saved flag. Exiting."
-        )
-        print("To fix: Add --train or --sweep or --saved flag.")
-        sys.exit(1)
-
-    if args.eval_type not in ["standard", "long", "complete", "live"]:
-        print(
-            "Error: --eval_type should be one of 'standard', 'long', 'complete', or 'live'. Exiting."
-        )
-        print("To fix: Set --eval_type to one of the above options.")
-        sys.exit(1)
-
-    if args.prediction_store and not args.forecast:
-        print("Error: --prediction_store flag can only be used with --forecast flag. Exiting.")
-        print("To fix: Set --forecast flag if --prediction_store is flagged.")
-        sys.exit(1)
+    """
+    DEPRECATED: Validation is now automatic in ForecastingModelArgs.__post_init__().
+    
+    This function is kept for backward compatibility but will be removed in a future version.
+    """
+    warnings.warn(
+        "validate_arguments() is deprecated. Validation is now automatic in ForecastingModelArgs.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    # No-op, validation happens in dataclass
+    pass

@@ -64,7 +64,7 @@ Handles model and ensemble management.
 - `model.py`: ModelPathManager and ModelManager classes.
 - `ensemble.py`: EnsemblePathManager and EnsembleManager classes.
 - `package.py`: PackageManager class.
-- `log.py`: LoggingManager class.
+- `log.py`: LoggingModule class.
 
 **Detailed documentation available** [here](https://github.com/views-platform/views-pipeline-core/tree/main/views_pipeline_core/managers).
 
