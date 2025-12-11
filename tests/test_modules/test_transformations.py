@@ -85,7 +85,7 @@ class TestLnTransform:
         # Get original values - extract from numpy arrays if stored as objects
         original_col = transformer.dataframe['ged_sb_dep']
         original_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in original_col.to_numpy()])
+                                   for x in original_col.to_numpy()]).flatten()
         
         transformer.ln_transform(['ged_sb_dep'])
         
@@ -95,7 +95,7 @@ class TestLnTransform:
         # Verify transformation is correct
         transformed_col = transformer.dataframe['ln_ged_sb_dep']
         transformed = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                               for x in transformed_col.to_numpy()])
+                               for x in transformed_col.to_numpy()]).flatten()
         expected = np.log(original_values + 1)
         np.testing.assert_array_almost_equal(transformed, expected)
     
@@ -147,7 +147,7 @@ class TestLxTransform:
         # Get original values - extract from numpy arrays if stored as objects
         original_col = transformer.dataframe['ged_sb_dep']
         original_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in original_col.to_numpy()])
+                                   for x in original_col.to_numpy()]).flatten()
         
         transformer.lx_transform(['ged_sb_dep'])
         
@@ -157,7 +157,7 @@ class TestLxTransform:
         # Verify transformation is correct
         transformed_col = transformer.dataframe['lx_ged_sb_dep']
         transformed = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                               for x in transformed_col.to_numpy()])
+                               for x in transformed_col.to_numpy()]).flatten()
         expected = np.log(original_values + np.exp(-100))
         np.testing.assert_array_almost_equal(transformed, expected)
     
@@ -167,13 +167,13 @@ class TestLxTransform:
         # Get original values - extract from numpy arrays if stored as objects
         original_col = transformer.dataframe['ged_sb_dep']
         original_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in original_col.to_numpy()])
+                                   for x in original_col.to_numpy()]).flatten()
         
         transformer.lx_transform(['ged_sb_dep'], offset=offset)
         
         transformed_col = transformer.dataframe['lx_ged_sb_dep']
         transformed = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                               for x in transformed_col.to_numpy()])
+                               for x in transformed_col.to_numpy()]).flatten()
         expected = np.log(original_values + np.exp(offset))
         np.testing.assert_array_almost_equal(transformed, expected)
     
@@ -202,13 +202,13 @@ class TestLrTransform:
         """Test lr transformation doesn't change values"""
         original_col = transformer.dataframe['ged_sb_dep']
         original_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in original_col.to_numpy()])
+                                   for x in original_col.to_numpy()]).flatten()
         
         transformer.lr_transform(['ged_sb_dep'])
         
         new_col = transformer.dataframe['lr_ged_sb_dep']
         new_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                              for x in new_col.to_numpy()])
+                              for x in new_col.to_numpy()]).flatten()
         np.testing.assert_array_equal(original_values, new_values)
     
     def test_lr_transform_skip_already_lr(self, transformer):
@@ -239,7 +239,7 @@ class TestUndoTransformations:
         """Test undo ln transformation"""
         original_col = transformer.dataframe['ged_sb_dep']
         original_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in original_col.to_numpy()])
+                                   for x in original_col.to_numpy()]).flatten()
         
         transformer.ln_transform(['ged_sb_dep'])
         transformer.undo_ln_transform(['ln_ged_sb_dep'])
@@ -250,14 +250,14 @@ class TestUndoTransformations:
         # Verify values are restored (within floating point precision)
         restored_col = transformer.dataframe['lr_ged_sb_dep']
         restored_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in restored_col.to_numpy()])
+                                   for x in restored_col.to_numpy()]).flatten()
         np.testing.assert_array_almost_equal(original_values, restored_values, decimal=10)
     
     def test_undo_lx_transform(self, transformer):
         """Test undo lx transformation"""
         original_col = transformer.dataframe['ged_sb_dep']
         original_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in original_col.to_numpy()])
+                                   for x in original_col.to_numpy()]).flatten()
         
         offset = -50
         transformer.lx_transform(['ged_sb_dep'], offset=offset)
@@ -267,7 +267,7 @@ class TestUndoTransformations:
         
         restored_col = transformer.dataframe['lr_ged_sb_dep']
         restored_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in restored_col.to_numpy()])
+                                   for x in restored_col.to_numpy()]).flatten()
         np.testing.assert_array_almost_equal(original_values, restored_values, decimal=10)
     
     def test_undo_lr_transform(self, transformer):
@@ -411,7 +411,7 @@ class TestEdgeCases:
         # Use larger offset values where the difference is measurable
         original_col = transformer.dataframe['ged_sb_dep']
         original_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in original_col.to_numpy()])
+                                   for x in original_col.to_numpy()]).flatten()
         
         # Use offsets that produce measurable differences
         # exp(-2) ≈ 0.135, exp(-1) ≈ 0.368 - significant difference
@@ -420,7 +420,7 @@ class TestEdgeCases:
         
         restored_col = transformer.dataframe['lr_ged_sb_dep']
         restored_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in restored_col.to_numpy()])
+                                   for x in restored_col.to_numpy()]).flatten()
         
         # With wrong offset, values should differ
         # exp(-2) - exp(-1) ≈ 0.135 - 0.368 = -0.233
@@ -467,7 +467,7 @@ class TestIntegration:
         # Use only ged_sb_dep which should have non-negative values (count data)
         original_col = transformer.dataframe['ged_sb_dep']
         original_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                   for x in original_col.to_numpy()])
+                                   for x in original_col.to_numpy()]).flatten()
         
         # Apply and undo transformations
         transformer.ln_transform(['ged_sb_dep'])
@@ -479,7 +479,7 @@ class TestIntegration:
         # Get final values
         final_col = transformer.dataframe['ged_sb_dep']
         final_values = np.array([x[0] if isinstance(x, np.ndarray) else x 
-                                for x in final_col.to_numpy()])
+                                for x in final_col.to_numpy()]).flatten()
         
         # Compare (should match within floating point precision)
         np.testing.assert_array_almost_equal(original_values, final_values, decimal=10,
