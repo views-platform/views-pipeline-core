@@ -61,9 +61,9 @@ Diversity should be calculated in the non-log form. The diversity score is added
 
 A shadow ensemble **$S_i$** must:
 
-- Show **no irregularities** and produce correct forecast files for *≥ 2 consecutive months**
+- Show **no irregularities** and produce correct forecast files for **≥ 2 consecutive months**
 
-As soon as Online Evaluation is implemented: 
+As soon as online evaluation is implemented: 
 - Run for **≥ 3 consecutive months** and outperform **P** in the **Performance Comparison** and the **Diversity Requirement**
 
 
@@ -77,10 +77,10 @@ A VIEWS production ensemble **P** (with forecasts both at cm and pgm levels) wil
 
 **Suggestion**:
 We do not want to reward conservative models.
-- Compare the aggregate prediction distribution of the new shaddow ensemble $S_i$ a) to the one of **P** and b) to the aggregate observed distributions. Compute distance metrics that put special emphasis on the right hand tail.
-- Suggested metrics: Kolmogorov–Smirnov (KS) Test and Wasserstein Distance on the whole distribution and the upper tail. Again, we need to define a treshold for the upper tail. 
+- Compare the aggregate prediction distribution of the new shadow ensemble $S_i$ a) to the one of **P** and b) to the aggregate observed distributions. Compute distance metrics that put special emphasis on the right hand tail.
+- Suggested metrics: Kolmogorov–Smirnov (KS) Test and Wasserstein Distance on the whole distribution and the upper tail. Again, we need to define a threshold for the upper tail. 
 
-### **Rule 2 — Diversity Requirement (Proposed Revision)**
+### **Rule 2 — Diversity Requirement**
 
 A new ensemble must not reduce diversity. The shadow ensemble S is at least as diverse as the production ensemble P.
 - The diversity of P is at least equal or lower than that of S (TBD define the diversity score)
@@ -93,34 +93,34 @@ Score: TBD
 
 A shadow ensemble **$S_i$** must:
 
-- Show **no irregularities** and produce correct forecast files for *≥ 2 consecutive months**
+- Show **no irregularities** and produce correct forecast files for **≥ 2 consecutive months**
 
 As soon as Online Evaluation is implemented: 
 - Run for **≥ 3 consecutive months** and outperform **P** in the **Performance Comparison** and the **Diversity Requirement**
 
 
 
-### **Notes on Metrics**
+## **Notes on Metrics**
 
-For all the decision rules that compare metrics (point predictions: MSLE, MSE, $\hat{\bar{y}}$, diversity; probabilitic predictions: CRPS, Log-Score, diversity), someone (HH or similar) needs to define an epsilon (`eps`) for each comparison such that the promotion/demotion is meaningful (e.g. we do not promote based on changes in the 6th decimal). The following questions have to be answered:
+For all the decision rules that compare metrics (**point predictions**: MSLE, MSE, $\hat{\bar{y}}$, diversity; **probabilistic predictions**: CRPS, Log-Score, diversity), someone (HH or similar) needs to define an epsilon (`eps`) for each comparison such that the promotion/demotion is meaningful (e.g. we do not promote based on changes in the 6th decimal). The following questions have to be answered:
 - How much better on **MSLE/CRPS** does $S_i$ need to be before we treat it as meaningfully better?
 - How much better on **MSE/Log-Score**?
 - How large a difference in average prediction $\hat{\bar{y}}$ (and equivalent for probabilistic predictions) counts as “less conservative” in a meaningful way?
 - Same for diversity, if relevant.
 
 
-### **Ensemble Performance Monitoring (Governance & Expert Review) **
+## **Ensemble Performance Monitoring (Governance & Expert Review)**
 
 An expert team consisting of 2-5 researchers will examine the ensemble runs bi-monthly (confirm with Simon and HH) and compare shadow ensembles to the production ensemble. They will adhere to the rules defined the ADRs regarding Ensemble Governance Protocols and consult the evaluation reports - both offline and online evaluation - to take a decision on if to promote or demote ensembles. They will also examine and discuss the effects of the defined rules and suggest changes if unanticipated/undesirable patterns emerge. 
 
-When evaluating shadow ensembles, VIEWS also monitors aggreagtes:
+When evaluating shadow ensembles, VIEWS also monitors aggregates:
 
 - Our ability to predict correctly in the aggregate (e.g. MSE across all time steps) for a country or PG cell, and for geographical aggregations including global total, EMD and pEMDiv at both cm and pgm.
 - The distributions of predictions in comparison to the distribution of historical actuals. 
 
 Both of these should be added to the evaluation reports!
 
-### General Notes
+## General Notes
 If a production ensemble is replaced by a shadow ensemble, the old production ensemble is relegated to shadow ensemble. The new production ensemble becomes the point of departure of all new shadow ensembles.
 
 
@@ -147,7 +147,7 @@ This protocol represents a first MVP as the baseline for demotion and promotion 
  a) a fallback option in case of unexpected issues with the new production ensemble and b) for interesting retrospective evaluation. As a future extension, one could also imagine 2 production ensembles: young buck vs old faithful. Young buck contains always the best predictions in terms of performance metrics while old faithful is more consistent over time. The **Rule 3 — Stability Requirement** would differ between the two. For young buck, the above stated 3 months could be enough while for old faithful we would at least require 12 months. This is an interesting addition but would require further discussions. 
 - Defining thresholds a-priori is difficult without a-priori experience. A solution would be to leave the metric-specific threshold 
  question open and come back to this question after a couple of iterations and bi-monthly sessions of our expert term.
-- Currently, the validation persiod consists of 12 evaluation sequences. HH suggested to increase the validation partition size to 36 
+- Currently, the validation period consists of 12 evaluation sequences. HH suggested to increase the validation partition size to 36 
  sequences (six years) to obtain more stable evaluation metrics. 
 
 ## Additional Considerations
@@ -155,7 +155,7 @@ While the decision to start shadow ensembles from the production ensemble might 
 
 We also discussed the inclusion of correctly predicting onsets as a potential addition to the Governance Protocol, but decided against it due to the difficulties in operationalizing what exactly constitutes an onset. The reader is referred to Simon if in doubt.
 
-A separate ADR defines governance for probabilistic/uncertainty forecast ensembles and the procedure to include models in ensembles.
+A separate ADR defines the procedure to include models in ensembles.
 
 ## Feedback and Suggestions
 Feedback welcome!
