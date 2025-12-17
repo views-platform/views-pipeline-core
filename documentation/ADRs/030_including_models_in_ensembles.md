@@ -23,16 +23,22 @@ The purpose of these rules is to ensure that the production ensemble continues t
 3. Retain the strengths of our existing models while supporting stable, incremental innovation.
 
 4. Mitigate systematic under-prediction in a consistent and reliable manner.
+
+
 **Reminder**:  We compute all performance metrics on the validation partion. The validation partition is the prediction parallelogram that fits inside the four most recent calendar years -- i.e., the four most recent years for which we have final UCDP GED data.
 
 ## Decision
 ### **Protocol for Including Models in Shadow Ensembles**
 
-There are production ensembles **$P_i$** (currently, we only have ONE production ensemble) and shadow ensembles **$S_i$**. Shadow ensembles are potential successors of the production ensemble and always start out with the current production ensemble as its point of departure. Out of practicality, there should be an upper limit to the number of models an ensemble can contain. However, to introduce variance in shadow ensembles, different shadow ensembles can have different upper limits.
+Currently, there is one production ensemble **P** and multiple shadow ensembles **$S_i$**. Shadow ensembles are potential successors of the production ensemble and always start out with the current production ensemble as its point of departure. If a production ensemble is replaced by a shadow ensemble, the old production ensemble is relegated to shadow ensemble. The old production ensemble will continue to run in shadow mode for at least 12 months to a) have the option to roll back quickly if the new production ensemble shows irregularities and b) for interesting retrospective evaluation. The new production ensemble becomes the point of departure of all new shadow ensembles. 
 
-While different projects and stakeholders could potentially receive their own forecasts, there should only be one production ensemble as a starting point. For point predictions the metrics and criteria to consider for promotion/demotion are defined in ADR 028 and for distribution forecasts in ADR 029.
+As a starting point there should be 3 shadow ensembles. Once the production ensemble is replaced, an effort should be made to replace the 3 shadow ensembles as well.However, this takes time and cannot happen instantly. 
 
-**Rules**: 
+Out of practicality, there should be an upper limit to the number of models an ensemble can contain. However, to introduce variance in shadow ensembles, different shadow ensembles can have different upper limits.
+
+While different projects and stakeholders could potentially receive their own forecasts, there should only be one production ensemble as a starting point. For both point and probabilistic predictions the metrics and criteria to consider for promotion/demotion are defined in ADR 029.
+
+### **Rules**: 
 
 1. Ensure that all input data is part of the current data ingestion protocol. If a feature requires an additional ingestion routine, its inclusion should be justified by a cost–benefit analysis informed by its contribution to the shadow ensemble’s performance.
 2. Promote a candidate model to a shadow ensemble **$S_i$** if it improves all metrics by a (metric-specific) threshold $\tau_m$.
@@ -49,7 +55,7 @@ Once, a production ensemble is replaced, it will become a shadow ensemble itself
 - Possible definition of $\tau_m$ is in terms of standard deviations of the metrics across the 12 (or so) time series/sequences that go into evaluation.
 
 ### **Starting Shadow Ensembles**
-HH - review and adjust thresholds 
+HH - review and adjust thresholds. 
 All shadow models start out with the current production ensemble. When the current production ensemble is replaced by a shadow ensemble this process starts anew. Old shadow and production ensembles are retained as shadow models for 12 months for observation.
 
 In the suggested ensembles below the term **metrics** refers to both the metrics in the **Performance Comparison** and the **Diversity Requirement** for point and probablistic predictions. See ADR 029 for further information.
@@ -94,7 +100,7 @@ This protocol represents a first MVP as the baseline for demotion and promotion 
 ## Additional Notes
 While the decision to start shadow ensembles from the production ensemble might restrict creativity, it is a viable solution in the context of severe time constraints. If this should change in the future and developers get ample time to experiment around, this rule could also be updated. 
 
-Separate ADRs define metrics and criteria fro promotion/demotion for point predictions and probabilistic/uncertainty forecast ensembles.
+A separate ADR defines metrics and criteria for promotion/demotion for point and probabilistic predictions.
 
 ## Feedback and Suggestions
 Feedback welcome!
