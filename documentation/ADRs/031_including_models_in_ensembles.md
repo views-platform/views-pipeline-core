@@ -5,7 +5,7 @@
 | **Subject** | Protocol for Including Models in Shadow Ensembles |
 | **ADR Number** | 031 |
 | **Status** | Proposed |
-| **Author** | [Sonja, Simon] |
+| **Author** | [Sonja, Simon, Håvard] |
 | **Date** | [25.11.2025] |
 
 
@@ -23,7 +23,7 @@ The purpose of these rules is to ensure that the production ensemble continues t
 3. Retain the strengths of our existing models while supporting stable, incremental innovation.
 
 4. Mitigate systematic under-prediction in a consistent and reliable manner.
-
+**Reminder**:  We compute all performance metrics on the validation partion. The validation partition is the prediction parallelogram that fits inside the four most recent calendar years -- i.e., the four most recent years for which we have final UCDP GED data.
 
 ## Decision
 ### **Protocol for Including Models in Shadow Ensembles**
@@ -34,7 +34,7 @@ While different projects and stakeholders could potentially receive their own fo
 
 **Rules**: 
 
-1. Ensure that all input data is part of the current data ingestion protocol. If a feature requires a additional ingestion routine, but does not improve the metrics above, consider dropping it to facilitate operational routines.
+1. Ensure that all input data is part of the current data ingestion protocol. If a feature requires an additional ingestion routine, its inclusion should be justified by a cost–benefit analysis informed by its contribution to the shadow ensemble’s performance.
 2. Promote a candidate model to a shadow ensemble **$S_i$** if it improves all metrics by a (metric-specific) threshold $\tau_m$.
 3. If the maximum number of models for **$S_i$** is exceeded, roll over all models in the ensemble and remove models that, if removed, the ablated ensemble improves for all metrics by a minimum threshold (metric-specific) $\tau_m$.
 
@@ -50,17 +50,20 @@ Once, a production ensemble is replaced, it will become a shadow ensemble itself
 
 ### **Starting Shadow Ensembles**
 HH - review and adjust thresholds 
+All shadow models start out with the current production ensemble. When the current production ensemble is replaced by a shadow ensemble this process starts anew. Old shadow and production ensembles are retained as shadow models for 12 months for observation.
+
+In the suggested ensembles below the term **metrics** refers to both the metrics in the **Performance Comparison** and the **Diversity Requirement** for point and probablistic predictions. See ADR 029 for further information.
 
 1. **Shadow Ensemble A – Non-conservative / exploratory**
-   - Thresholds: $\tau_m = 0$ for all metrics (no deterioration allowed, but no strict improvement required).
+   - Thresholds: $\tau_m = 0$ for all **metrics** (no deterioration allowed, but no strict improvement required).
    - Size: Fewer models than the production ensemble (at least **two fewer**).
 
 2. **Shadow Ensemble B – Moderate improvement**
-   - Thresholds: $\tau_m > 0$ for all metrics (each metric must improve by at least a small, metric-specific amount).
+   - Thresholds: $\tau_m > 0$ for all **metrics** (each metric must improve by at least a small, metric-specific amount).
    - Size: Number of models **at least as large** as in the production ensemble, but can include **up to 4 more**.
 
 3. **Shadow Ensemble C – High-confidence improvement**
-   - Thresholds: $tau_m = k*\sigma_m$ where $\sigma_m$ is the standard deviation of metric across the evaluation time series, and k > 0. Start with $k=1$ 
+   - Thresholds: $tau_m = k*\sigma_m$ where $\sigma_m$ is the standard deviation of a metric across the evaluation time series, and k > 0. Start with $k=0.1$ 
    - Size: Number of models **at least as large** as in the production ensemble, but can include **up to 4 more**.
 
 
@@ -73,7 +76,8 @@ HH - review and adjust thresholds
 
 
 ### Negative Effects
-- Potential innovation bottleneck: since all shadow ensembles start from the production ensemble, radically different model architectures or data strategies may struggle to enter the pipeline or be explored sufficiently.
+- Potential innovation bottleneck: since all shadow ensembles start from the production ensemble, radically different model 
+architectures or data strategies may struggle to enter the pipeline or be explored sufficiently.
 - Increased procedural complexity: implementing, maintaining, and monitoring multiple shadow ensembles requires additional engineering, experimentation, and documentation effort.
 - Maintenance overhead for metric thresholds: metric-specific thresholds (including σ-based definitions) must be calibrated, validated, and sometimes redefined, introducing ongoing tuning work.
 
@@ -83,7 +87,9 @@ This protocol represents a first MVP as the baseline for demotion and promotion 
 
 
 ## Potential Future Extensions
-One could also imagine 2 production ensembles: young buck vs old faithful. Young buck contains always the best predictions in terms of performance metrics while old faithful is more consistent over time. The **Rule 3 — Stability Requirement** would differ between the two. For young buck, the above stated 3 months could be enough while for old faithful we would at least require 12 months. This is an interesting addition but would require further discussions. 
+- For now, we only have one production ensemble and once that production ensemble is replaced, it will continue to run in shadow mode as
+ a) a fallback option in case of unexpected issues with the new production ensemble and b) for interesting retrospective evaluation. As a future extension, on could imagine 2 production ensembles: young buck vs old faithful. Young buck contains always the best predictions in terms of performance metrics while old faithful is more consistent over time. The **Rule 3 — Stability Requirement** would differ between the two. For young buck, the above stated 3 months could be enough while for old faithful we would at least require 12 months. This is an interesting addition but would require further discussions. 
+- Suggestion by HH: Should we evaluate the shadow ensembles against a calibration partition? This would help a lot to avoid overfitting, but we might get into conflicts with hyper-parameter sweeps etc.
 
 ## Additional Notes
 While the decision to start shadow ensembles from the production ensemble might restrict creativity, it is a viable solution in the context of severe time constraints. If this should change in the future and developers get ample time to experiment around, this rule could also be updated. 
