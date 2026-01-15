@@ -1,3 +1,52 @@
+"""Appwrite file management module for cloud storage operations.
+
+This module provides a comprehensive interface for interacting with Appwrite
+cloud storage, including file uploads/downloads, metadata management, caching,
+and authentication. It supports both API key and session-based authentication.
+
+The module consists of several key components:
+    - AppWriteFileModule: Main interface for file operations
+    - AppwriteMetadataHandler: Database/collection management for file metadata
+    - CacheManager: Local caching with TTL-based validation
+    - AuthManager hierarchy: Flexible authentication (API key or session)
+
+Typical usage example:
+
+    from views_pipeline_core.modules.appwrite import (
+        AppWriteFileModule,
+        AppwriteConfig,
+        AuthMethod
+    )
+
+    # Configure with API key authentication
+    config = AppwriteConfig(
+        endpoint="https://cloud.appwrite.io/v1",
+        project_id="my_project",
+        credentials="my_api_key",
+        auth_method=AuthMethod.API_KEY,
+        bucket_id="my_bucket"
+    )
+
+    # Initialize the file manager
+    file_manager = AppWriteFileModule(config)
+
+    # Upload a file with metadata
+    result = file_manager.upload_file_with_metadata(
+        bucket_id="my_bucket",
+        file_path="/data/predictions.parquet",
+        filename="predictions.parquet",
+        metadata={"model": "ensemble_v2", "loa": "pgm"}
+    )
+
+    # Download with caching
+    download = file_manager.download_file(
+        bucket_id="my_bucket",
+        file_id="abc123",
+        save_path="/tmp/output.parquet",
+        use_cache=True
+    )
+"""
+
 from appwrite.client import Client
 from appwrite.services.storage import Storage
 from appwrite.services.databases import Databases
@@ -36,10 +85,42 @@ INITIAL_RETRY_DELAY = 1.0
 
 # Enums
 class AuthMethod(Enum):
+    """Authentication methods supported by AppWriteFileModule.
+
+    Attributes:
+        API_KEY: Server-side API key authentication. Requires string credentials.
+        SESSION: User session authentication. Requires dict with email/password.
+
+    Example:
+        >>> config = AppwriteConfig(
+        ...     auth_method=AuthMethod.API_KEY,
+        ...     credentials="my_api_key"
+        ... )
+    """
+
     API_KEY = "api_key"
     SESSION = "session"
 
+
 class CacheValidationResult(Enum):
+    """Results of cache validation checks.
+
+    Used by CacheManager.validate_cache() to indicate cache state.
+
+    Attributes:
+        VALID: Cache entry exists, is within TTL, and matches remote timestamp.
+        INVALID_TTL: Cache entry exists but has exceeded the TTL period.
+        INVALID_TIMESTAMP: Cache entry exists but remote file was updated after caching.
+        NOT_FOUND: No cache entry exists for the requested file.
+
+    Example:
+        >>> validation = cache_manager.validate_cache(bucket_id, file_id)
+        >>> if validation == CacheValidationResult.VALID:
+        ...     # Use cached file
+        ... else:
+        ...     # Download fresh copy
+    """
+
     VALID = "valid"
     INVALID_TTL = "invalid_ttl"
     INVALID_TIMESTAMP = "invalid_timestamp"
@@ -48,12 +129,42 @@ class CacheValidationResult(Enum):
 # Type Definitions
 @dataclass
 class OperationResult:
+    """Standard result container for all Appwrite operations.
+
+    Provides a consistent interface for returning operation outcomes across
+    all file manager methods. Supports both successful results with data
+    and failures with error information.
+
+    Attributes:
+        success: Whether the operation completed successfully.
+        data: Result data on success. Structure varies by operation.
+        error: Human-readable error message on failure.
+        code: Machine-readable status/error code (e.g., 'CREATED', 'EXISTS',
+            'NOT_FOUND', or Appwrite error types).
+
+    Example:
+        >>> result = file_manager.upload_file(bucket_id, file_path)
+        >>> if result.success:
+        ...     file_id = result.data['$id']
+        ...     print(f"Uploaded: {file_id}")
+        ... else:
+        ...     print(f"Error ({result.code}): {result.error}")
+        >>>
+        >>> # Convert to dictionary for serialization
+        >>> result_dict = result.to_dict()
+    """
+
     success: bool
     data: Any = None
     error: Optional[str] = None
     code: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
+        """Convert result to dictionary format.
+
+        Returns:
+            Dictionary with keys: success, data, error, code.
+        """
         return {
             "success": self.success,
             "data": self.data,
@@ -63,6 +174,30 @@ class OperationResult:
 
 @dataclass
 class FileMetadata:
+    """Metadata structure for files stored in Appwrite.
+
+    Contains essential file information tracked in the metadata database.
+    Used internally by AppwriteMetadataHandler for document creation.
+
+    Attributes:
+        fileId: Appwrite storage file ID.
+        bucketId: ID of the bucket containing the file.
+        filename: Original filename as stored.
+        mime_type: MIME type of the file. Defaults to 'application/octet-stream'.
+        uploaded_at: ISO format timestamp of upload. Auto-generated if not provided.
+        file_size: Size of the file in bytes.
+        file_hash: SHA-256 hash of file contents for deduplication.
+
+    Example:
+        >>> metadata = FileMetadata(
+        ...     fileId="abc123",
+        ...     bucketId="my_bucket",
+        ...     filename="predictions.parquet",
+        ...     file_size=1048576,
+        ...     file_hash="sha256_hash_here"
+        ... )
+    """
+
     fileId: str
     bucketId: str
     filename: str
@@ -73,6 +208,49 @@ class FileMetadata:
 
 @dataclass
 class AppwriteConfig:
+    """Configuration for Appwrite file manager connections.
+
+    Centralized configuration for all Appwrite connection settings, authentication,
+    caching behavior, and storage/metadata identifiers.
+
+    Attributes:
+        endpoint: Appwrite server endpoint URL (e.g., 'https://cloud.appwrite.io/v1').
+        project_id: Appwrite project identifier.
+        credentials: Authentication credentials. String for API_KEY, dict with
+            'email' and 'password' keys for SESSION auth.
+        auth_method: Authentication method to use. Defaults to API_KEY.
+        cache_dir: Local directory for file caching. Auto-generated if not provided.
+        cache_ttl_hours: Hours before cached files expire. Defaults to 24.
+        allow_metadata_only_updates: If True, updates only metadata when file hash
+            matches existing file. Defaults to True.
+        bucket_id: Default storage bucket ID. Defaults to 'production_forecasts'.
+        bucket_name: Human-readable bucket name. Derived from bucket_id if not set.
+        collection_name: Metadata collection name. Defaults to 'Metadata'.
+        collection_id: Metadata collection ID. Defaults to 'metadata'.
+        database_name: Metadata database name. Derived from collection_id if not set.
+        database_id: Metadata database ID. Defaults to 'file_metadata'.
+        path_manager: Optional ModelPathManager for path resolution.
+
+    Example:
+        >>> # API key configuration
+        >>> config = AppwriteConfig(
+        ...     endpoint="https://cloud.appwrite.io/v1",
+        ...     project_id="my_project",
+        ...     credentials="secret_api_key",
+        ...     auth_method=AuthMethod.API_KEY,
+        ...     bucket_id="forecasts",
+        ...     cache_ttl_hours=48
+        ... )
+        >>>
+        >>> # Session authentication configuration
+        >>> config = AppwriteConfig(
+        ...     endpoint="https://cloud.appwrite.io/v1",
+        ...     project_id="my_project",
+        ...     credentials={"email": "user@example.com", "password": "secret"},
+        ...     auth_method=AuthMethod.SESSION
+        ... )
+    """
+
     # Core connection settings
     endpoint: str
     project_id: str
@@ -112,12 +290,54 @@ class AppwriteConfig:
 
 # Authentication Classes
 class AuthManager(ABC):
+    """Abstract base class for Appwrite authentication handlers.
+
+    Defines the interface for authentication strategies used by AppWriteFileModule.
+    Implementations must provide the setup() method to configure client authentication.
+
+    See Also:
+        ApiKeyAuth: Implementation for API key authentication.
+        SessionAuth: Implementation for user session authentication.
+        AuthFactory: Factory for creating appropriate AuthManager instances.
+    """
+
     @abstractmethod
     def setup(self, client: Client, credentials: Union[str, Dict[str, str]]) -> OperationResult:
+        """Configure authentication on the Appwrite client.
+
+        Args:
+            client: Appwrite Client instance to configure.
+            credentials: Authentication credentials (format depends on implementation).
+
+        Returns:
+            OperationResult indicating success or failure of authentication setup.
+        """
         pass
 
 class ApiKeyAuth(AuthManager):
+    """API key authentication handler for server-side Appwrite access.
+
+    Uses a server API key for authentication, suitable for backend services
+    and automated pipelines. Provides full access based on API key permissions.
+
+    Example:
+        >>> auth = ApiKeyAuth()
+        >>> result = auth.setup(client, "my_api_key_string")
+        >>> if result.success:
+        ...     # Client is now authenticated
+    """
+
     def setup(self, client: Client, credentials: Union[str, Dict[str, str]]) -> OperationResult:
+        """Configure API key authentication on the client.
+
+        Args:
+            client: Appwrite Client instance to configure.
+            credentials: API key string. Must be a string, not a dictionary.
+
+        Returns:
+            OperationResult with success=True if key was set, or success=False
+            with error message if credentials format is invalid.
+        """
         if not isinstance(credentials, str):
             return OperationResult(
                 success=False,
@@ -129,11 +349,41 @@ class ApiKeyAuth(AuthManager):
         return OperationResult(success=True)
 
 class SessionAuth(AuthManager):
+    """Session-based authentication handler for user-specific Appwrite access.
+
+    Authenticates using email/password credentials to create a user session.
+    Suitable for applications where user-specific permissions are needed.
+
+    Attributes:
+        account: Appwrite Account service instance after setup.
+        current_user_id: ID of the authenticated user.
+
+    Example:
+        >>> auth = SessionAuth()
+        >>> result = auth.setup(client, {
+        ...     "email": "user@example.com",
+        ...     "password": "secure_password"
+        ... })
+        >>> if result.success:
+        ...     user_id = result.data['user_id']
+    """
+
     def __init__(self):
+        """Initialize SessionAuth with empty account and user ID."""
         self.account = None
         self.current_user_id = None
-    
+
     def setup(self, client: Client, credentials: Union[str, Dict[str, str]]) -> OperationResult:
+        """Configure session authentication by creating a user session.
+
+        Args:
+            client: Appwrite Client instance to configure.
+            credentials: Dictionary with 'email' and 'password' keys.
+
+        Returns:
+            OperationResult with success=True and data containing 'user_id'
+            on successful authentication, or success=False with error details.
+        """
         if not isinstance(credentials, dict) or not all(k in credentials for k in ["email", "password"]):
             return OperationResult(
                 success=False,
@@ -150,8 +400,18 @@ class SessionAuth(AuthManager):
         
         self.current_user_id = session_result.data["user_id"]
         return OperationResult(success=True, data={"user_id": self.current_user_id})
-    
+
     def _create_session(self, email: str, password: str) -> OperationResult:
+        """Create an email/password session with Appwrite.
+
+        Args:
+            email: User's email address.
+            password: User's password.
+
+        Returns:
+            OperationResult with session details on success, including
+            session_id, user_id, and creation timestamp.
+        """
         try:
             session = self.account.create_email_password_session(email, password)
             return OperationResult(
@@ -170,8 +430,29 @@ class SessionAuth(AuthManager):
             )
 
 class AuthFactory:
+    """Factory for creating authentication handler instances.
+
+    Provides a static method to instantiate the appropriate AuthManager
+    subclass based on the specified authentication method.
+
+    Example:
+        >>> auth_manager = AuthFactory.create_auth(AuthMethod.API_KEY)
+        >>> result = auth_manager.setup(client, "my_api_key")
+    """
+
     @staticmethod
     def create_auth(auth_method: AuthMethod) -> AuthManager:
+        """Create an AuthManager instance for the specified method.
+
+        Args:
+            auth_method: The authentication method to use.
+
+        Returns:
+            Appropriate AuthManager subclass instance.
+
+        Raises:
+            ValueError: If auth_method is not supported.
+        """
         if auth_method == AuthMethod.API_KEY:
             return ApiKeyAuth()
         elif auth_method == AuthMethod.SESSION:
@@ -182,6 +463,20 @@ class AuthFactory:
 # Cache Management
 @dataclass
 class CacheMetadata:
+    """Metadata for cached files.
+
+    Stores information about cached files to enable validation and management.
+
+    Attributes:
+        bucket_id: ID of the bucket the file belongs to.
+        file_id: Appwrite file ID.
+        path: Local filesystem path to the cached file.
+        cached_at: ISO format timestamp when file was cached.
+        size_bytes: Size of the cached file in bytes.
+        filename: Original filename.
+        remote_updated_at: Remote file's last update timestamp for validation.
+    """
+
     bucket_id: str
     file_id: str
     path: str
@@ -191,14 +486,49 @@ class CacheMetadata:
     remote_updated_at: Optional[str] = None
 
 class CacheManager:
+    """Local file cache manager with TTL-based validation.
+
+    Manages a local cache of downloaded files to reduce network requests.
+    Supports TTL-based expiration and timestamp validation against remote files.
+
+    The cache stores files organized by bucket ID and maintains a metadata JSON
+    file to track cached files, their timestamps, and sizes.
+
+    Attributes:
+        cache_dir: Root directory for cached files.
+        cache_ttl: Time-to-live duration for cached files.
+        cache_metadata_file: Path to the JSON metadata file.
+        cache_metadata: Dictionary mapping cache keys to CacheMetadata objects.
+
+    Example:
+        >>> from datetime import timedelta
+        >>> cache = CacheManager(Path("/tmp/cache"), timedelta(hours=24))
+        >>>
+        >>> # Check if file is in valid cache
+        >>> result = cache.validate_cache("bucket1", "file123")
+        >>> if result == CacheValidationResult.VALID:
+        ...     cached_path = cache.get_cached_file_path("bucket1", "file123")
+    """
+
     def __init__(self, cache_dir: Path, cache_ttl: timedelta):
+        """Initialize cache manager with directory and TTL settings.
+
+        Args:
+            cache_dir: Directory to store cached files. Will be created if needed.
+            cache_ttl: Maximum age of cached files before they're considered stale.
+        """
         self.cache_dir = cache_dir
         self.cache_ttl = cache_ttl
         self.cache_metadata_file = cache_dir / "cache_metadata.json"
         self.cache_metadata: Dict[str, CacheMetadata] = {}
         self._load_cache_metadata()
-    
+
     def _load_cache_metadata(self):
+        """Load cache metadata from JSON file on disk.
+
+        Reads the cache_metadata.json file and populates the cache_metadata
+        dictionary. Silently handles missing or corrupted files.
+        """
         if self.cache_metadata_file.exists():
             try:
                 with open(self.cache_metadata_file, "r") as f:
@@ -209,27 +539,79 @@ class CacheManager:
             except (json.JSONDecodeError, IOError, TypeError) as e:
                 logger.warning(f"Failed to load cache metadata: {e}")
                 self.cache_metadata = {}
-    
+
     def _save_cache_metadata(self):
+        """Save cache metadata to JSON file on disk.
+
+        Persists the current cache_metadata dictionary to disk for
+        recovery across sessions.
+        """
         try:
             data = {k: v.__dict__ for k, v in self.cache_metadata.items()}
             with open(self.cache_metadata_file, "w") as f:
                 json.dump(data, f, indent=2)
         except IOError as e:
             logger.warning(f"Failed to save cache metadata: {e}")
-    
+
     def _get_cache_key(self, bucket_id: str, file_id: str) -> str:
+        """Generate a unique cache key for a file.
+
+        Args:
+            bucket_id: Storage bucket identifier.
+            file_id: File identifier.
+
+        Returns:
+            Combined key string in format 'bucket_id_file_id'.
+        """
         return f"{bucket_id}_{file_id}"
-    
+
     def _get_cache_path(self, bucket_id: str, file_id: str, filename: str = None) -> Path:
+        """Get the filesystem path for a cached file.
+
+        Creates the bucket subdirectory if it doesn't exist.
+
+        Args:
+            bucket_id: Storage bucket identifier.
+            file_id: File identifier.
+            filename: Optional filename to use. Defaults to file_id.
+
+        Returns:
+            Path object pointing to the cache file location.
+        """
         bucket_cache_dir = self.cache_dir / bucket_id
         bucket_cache_dir.mkdir(exist_ok=True)
         
         if filename:
             return bucket_cache_dir / filename
         return bucket_cache_dir / file_id
-    
+
     def validate_cache(self, bucket_id: str, file_id: str, remote_updated_at: str = None) -> CacheValidationResult:
+        """Check if a cached file is valid and usable.
+
+        Validates cache entries based on:
+        1. Existence in cache metadata
+        2. Physical file existence on disk
+        3. TTL expiration
+        4. Remote file timestamp (if provided)
+
+        Args:
+            bucket_id: Storage bucket identifier.
+            file_id: File identifier.
+            remote_updated_at: Optional ISO timestamp of remote file's last update.
+                If provided and newer than cache time, returns INVALID_TIMESTAMP.
+
+        Returns:
+            CacheValidationResult enum value:
+                - VALID: Cache entry is usable
+                - NOT_FOUND: No cache entry exists
+                - INVALID_TTL: Cache has expired
+                - INVALID_TIMESTAMP: Remote file is newer than cache
+
+        Example:
+            >>> result = cache.validate_cache("bucket1", "file123", "2024-01-15T10:00:00")
+            >>> if result == CacheValidationResult.VALID:
+            ...     # Safe to use cached file
+        """
         cache_key = self._get_cache_key(bucket_id, file_id)
         
         if cache_key not in self.cache_metadata:
@@ -255,8 +637,28 @@ class CacheManager:
                 pass
         
         return CacheValidationResult.VALID
-    
+
     def add_to_cache(self, bucket_id: str, file_id: str, file_path: Path, file_metadata: Dict[str, Any] = None):
+        """Add or update a file in the cache.
+
+        Records cache metadata for a downloaded file. Call this after
+        successfully downloading a file from remote storage.
+
+        Args:
+            bucket_id: Storage bucket identifier.
+            file_id: File identifier.
+            file_path: Path where the file is stored locally.
+            file_metadata: Optional metadata from Appwrite including
+                'name' and '$updatedAt' fields.
+
+        Example:
+            >>> cache.add_to_cache(
+            ...     "my_bucket",
+            ...     "file123",
+            ...     Path("/cache/my_bucket/data.parquet"),
+            ...     {"name": "data.parquet", "$updatedAt": "2024-01-15T10:00:00Z"}
+            ... )
+        """
         cache_key = self._get_cache_key(bucket_id, file_id)
         
         self.cache_metadata[cache_key] = CacheMetadata(
@@ -270,8 +672,17 @@ class CacheManager:
         )
         
         self._save_cache_metadata()
-    
+
     def remove_from_cache(self, bucket_id: str, file_id: str):
+        """Remove a file from the cache.
+
+        Deletes both the cached file from disk and its metadata entry.
+        Silently handles missing files.
+
+        Args:
+            bucket_id: Storage bucket identifier.
+            file_id: File identifier.
+        """
         cache_key = self._get_cache_key(bucket_id, file_id)
         
         if cache_key in self.cache_metadata:
@@ -284,8 +695,24 @@ class CacheManager:
             
             del self.cache_metadata[cache_key]
             self._save_cache_metadata()
-    
+
     def get_cached_file_path(self, bucket_id: str, file_id: str) -> OperationResult:
+        """Get the local filesystem path of a cached file.
+
+        Args:
+            bucket_id: Storage bucket identifier.
+            file_id: File identifier.
+
+        Returns:
+            OperationResult with:
+                - success=True and data containing 'cache_path' and 'metadata'
+                - success=False if file not in cache or file missing from disk
+
+        Example:
+            >>> result = cache.get_cached_file_path("bucket1", "file123")
+            >>> if result.success:
+            ...     path = result.data['cache_path']
+        """
         cache_key = self._get_cache_key(bucket_id, file_id)
         
         if cache_key not in self.cache_metadata:
@@ -311,8 +738,33 @@ class CacheManager:
                 "metadata": self.cache_metadata[cache_key].__dict__
             }
         )
-    
+
     def clear_cache(self, bucket_id: str = None, older_than_hours: int = None) -> OperationResult:
+        """Clear cached files matching specified criteria.
+
+        Removes cached files from disk and metadata. Can filter by bucket
+        and/or age to selectively clear cache.
+
+        Args:
+            bucket_id: Optional bucket ID to limit clearing to. If None,
+                clears all buckets.
+            older_than_hours: Optional age filter. Only clears files cached
+                more than this many hours ago. If None, clears regardless of age.
+
+        Returns:
+            OperationResult with data containing:
+                - deleted_files: Count of files deleted
+                - deleted_bytes: Total bytes freed
+                - errors: List of any deletion errors, or None
+
+        Example:
+            >>> # Clear all cache older than 48 hours
+            >>> result = cache.clear_cache(older_than_hours=48)
+            >>> print(f"Freed {result.data['deleted_bytes']} bytes")
+            >>>
+            >>> # Clear all cache for a specific bucket
+            >>> result = cache.clear_cache(bucket_id="old_bucket")
+        """
         deleted_count = 0
         deleted_bytes = 0
         errors = []
@@ -357,8 +809,24 @@ class CacheManager:
                 "errors": errors if errors else None
             }
         )
-    
+
     def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics and usage information.
+
+        Returns:
+            Dictionary containing:
+                - total_files: Number of cached files
+                - total_size_bytes: Total cache size in bytes
+                - total_size_mb: Total cache size in megabytes
+                - cache_dir: Path to cache directory
+                - by_bucket: Dict mapping bucket IDs to {files, bytes}
+
+        Example:
+            >>> stats = cache.get_stats()
+            >>> print(f"Cache: {stats['total_files']} files, {stats['total_size_mb']}MB")
+            >>> for bucket, info in stats['by_bucket'].items():
+            ...     print(f"  {bucket}: {info['files']} files")
+        """
         total_files = len(self.cache_metadata)
         total_bytes = 0
         by_bucket = {}
@@ -384,26 +852,85 @@ class CacheManager:
 
 # Metadata Management
 class AppwriteMetadataHandler:
+    """Handler for managing file metadata in Appwrite databases.
+
+    Manages the database and collection infrastructure for storing file metadata.
+    Handles dynamic attribute creation based on metadata structure, and provides
+    search and update capabilities for metadata documents.
+
+    The handler automatically:
+        - Creates databases and collections if they don't exist
+        - Infers attribute types from metadata values
+        - Creates necessary database attributes dynamically
+        - Supports searching with equality and array containment filters
+
+    Attributes:
+        databases: Appwrite Databases service instance.
+        config: AppwriteConfig with database/collection settings.
+
+    Example:
+        >>> handler = AppwriteMetadataHandler(databases_service, config)
+        >>>
+        >>> # Ensure collection exists with required attributes
+        >>> result = handler.create_metadata_collection_if_not_exists(
+        ...     metadata={"model": "test", "targets": ["ged_sb"]},
+        ...     collection_name="Predictions"
+        ... )
+        >>>
+        >>> # Search for files by metadata
+        >>> results = handler.search_files_by_metadata(
+        ...     filters={"model": "test"},
+        ...     array_filters={"targets": "ged_sb"}
+        ... )
+    """
+
     def __init__(self, databases: Databases, config: AppwriteConfig):
+        """Initialize metadata handler with database service and config.
+
+        Args:
+            databases: Appwrite Databases service instance.
+            config: AppwriteConfig with database/collection identifiers.
+        """
         self.databases = databases
         self.config = config
-    
+
     # def _get_metadata_database_name(self, bucket_name: str) -> str:
     #     return f"{bucket_name} Metadata"
-    
+
     # def _get_metadata_database_id(self, bucket_name: str) -> str:
     #     clean_name = "".join(c for c in bucket_name if c.isalnum())
     #     return f"{clean_name}_metadata".lower()
-    
+
     # def _get_collection_id(self, bucket_name: str, collection_name: str, collection_id: str = None) -> str:
     #     # Use custom collection_id if provided, otherwise generate one
     #     if collection_id:
     #         return collection_id
-        
+
     #     clean_bucket_name = "".join(c for c in bucket_name if c.isalnum()).lower()
     #     return f"{collection_name}"
-    
+
     def create_database_if_not_exists(self, database_id: str = None, database_name: str = None) -> OperationResult:
+        """Create metadata database if it doesn't exist.
+
+        Checks for existing database by name or ID, creating a new one only
+        if necessary. Uses config values as defaults for parameters.
+
+        Args:
+            database_id: Database identifier. Defaults to config.database_id.
+            database_name: Human-readable database name. Defaults to config.database_name.
+
+        Returns:
+            OperationResult with:
+                - success=True and database data if exists or created
+                - code='EXISTS' if database already existed
+                - success=False if database limit reached or other error
+
+        Example:
+            >>> result = handler.create_database_if_not_exists(
+            ...     database_id="predictions_db",
+            ...     database_name="Predictions Database"
+            ... )
+        """
         # Use config values as defaults
         db_id = database_id or self.config.database_id
         db_name = database_name or self.config.database_name
@@ -454,7 +981,7 @@ class AppwriteMetadataHandler:
                                 code="EXISTS"
                             )
                 raise create_error
-        
+
         except AppwriteException as e:
             logger.error(f"Database operation failed: {e.message}")
             return OperationResult(
@@ -462,8 +989,28 @@ class AppwriteMetadataHandler:
                 error=f"Database operation failed: {e.message}",
                 code=e.type
             )
-    
+
     def _infer_attribute_type(self, value: Any) -> Tuple[str, bool]:
+        """Infer Appwrite attribute type from a Python value.
+
+        Determines the appropriate database attribute type based on the
+        value's Python type. Handles arrays by checking the first element.
+
+        Args:
+            value: Python value to infer type from.
+
+        Returns:
+            Tuple of (type_string, is_array) where type_string is one of:
+            'boolean', 'integer', 'double', 'datetime', 'string'.
+
+        Example:
+            >>> handler._infer_attribute_type(["a", "b"])
+            ('string', True)
+            >>> handler._infer_attribute_type(42)
+            ('integer', False)
+            >>> handler._infer_attribute_type("2024-01-15T10:00:00")
+            ('datetime', False)
+        """
         is_array = isinstance(value, list)
         base_value = value[0] if is_array and value else value
         
@@ -483,7 +1030,7 @@ class AppwriteMetadataHandler:
                 return "string", is_array
         else:
             return "string", is_array
-    
+
     def _create_dynamic_attributes(
         self,
         database_id: str,
@@ -492,6 +1039,22 @@ class AppwriteMetadataHandler:
         max_retries: int = MAX_ATTRIBUTE_CREATION_RETRIES,
         initial_delay: float = INITIAL_RETRY_DELAY
     ) -> OperationResult:
+        """Create database attributes dynamically based on metadata structure.
+
+        Creates both fixed attributes (fileId, bucketId, etc.) and dynamic
+        attributes inferred from the metadata dictionary. Uses exponential
+        backoff for retries when collection is not ready.
+
+        Args:
+            database_id: Target database identifier.
+            collection_id: Target collection identifier.
+            metadata: Dictionary of metadata fields to create attributes for.
+            max_retries: Maximum retry attempts for listing attributes.
+            initial_delay: Initial delay in seconds between retries.
+
+        Returns:
+            OperationResult indicating success or failure of attribute creation.
+        """
         fixed_attributes = [
             {"key": "fileId", "type": "string", "size": 255, "required": True},
             {"key": "bucketId", "type": "string", "size": 255, "required": True},
@@ -545,8 +1108,15 @@ class AppwriteMetadataHandler:
                 logger.error(f"Failed to create attribute '{key}': {e.message}")
         
         return OperationResult(success=True)
-    
+
     def _create_single_attribute(self, database_id: str, collection_id: str, attr: Dict[str, Any]):
+        """Create a single fixed attribute in the collection.
+
+        Args:
+            database_id: Target database identifier.
+            collection_id: Target collection identifier.
+            attr: Attribute specification dict with 'key', 'type', 'size', 'required'.
+        """
         attr_creators = {
             "string": lambda: self.databases.create_string_attribute(
                 database_id, collection_id, attr["key"], attr["size"], attr["required"]
@@ -562,7 +1132,7 @@ class AppwriteMetadataHandler:
         if attr["type"] in attr_creators:
             attr_creators[attr["type"]]()
             logger.debug(f"Created {attr['type']} attribute: {attr['key']}")
-    
+
     def _create_attribute_by_type(
         self,
         database_id: str,
@@ -571,6 +1141,22 @@ class AppwriteMetadataHandler:
         attr_type: str,
         is_array: bool
 ):
+        """Create an attribute of a specific type in the collection.
+
+        Args:
+            database_id: Target database identifier.
+            collection_id: Target collection identifier.
+            key: Attribute key/name.
+            attr_type: Type string ('string', 'integer', 'boolean', etc.).
+            is_array: Whether the attribute should be an array type.
+
+        Returns:
+            Created attribute result, or None if attribute already exists.
+
+        Raises:
+            AppwriteException: If creation fails for reasons other than
+                attribute already existing.
+        """
         common_args = [database_id, collection_id, key]
         
         try:
@@ -601,7 +1187,7 @@ class AppwriteMetadataHandler:
                 return None
             # Otherwise, re-raise the exception
             raise e
-    
+
     def create_metadata_collection_if_not_exists(
         self,
         metadata: Dict[str, Any] = None,
@@ -609,6 +1195,31 @@ class AppwriteMetadataHandler:
         collection_id: str = None,
         database_id: str = None
     ) -> OperationResult:
+        """Create metadata collection if it doesn't exist.
+
+        Ensures the database and collection exist, creating them if needed.
+        Also creates dynamic attributes based on provided metadata structure.
+
+        Args:
+            metadata: Optional metadata dict to infer required attributes from.
+            collection_name: Collection name. Defaults to config.collection_name.
+            collection_id: Collection ID. Defaults to config.collection_id.
+            database_id: Database ID. Defaults to config.database_id.
+
+        Returns:
+            OperationResult with:
+                - success=True and data containing collection info and IDs
+                - code='EXISTS' if collection already existed
+                - success=False if creation fails
+
+        Example:
+            >>> result = handler.create_metadata_collection_if_not_exists(
+            ...     metadata={"model": "test", "loa": "pgm"},
+            ...     collection_name="Predictions"
+            ... )
+            >>> if result.success:
+            ...     coll_id = result.data['collection_id']
+        """
         # Use config values as defaults
         db_id = database_id or self.config.database_id
         coll_name = collection_name or self.config.collection_name
@@ -675,7 +1286,7 @@ class AppwriteMetadataHandler:
                 error=f"Collection creation failed: {e.message}",
                 code=e.type
             )
-        
+
     def search_files_by_metadata(
     self,
     filters: Dict[str, Any] = None,
@@ -684,6 +1295,38 @@ class AppwriteMetadataHandler:
     collection_id: str = None,
     database_id: str = None,
 ) -> OperationResult:
+        """Search for files by metadata attributes.
+
+        Queries the metadata collection with equality filters and/or array
+        containment filters to find matching file metadata documents.
+
+        Args:
+            filters: Dict of attribute=value pairs for equality matching.
+            array_filters: Dict of attribute=value pairs for array containment.
+            collection_name: Collection name. Defaults to config.collection_name.
+            collection_id: Collection ID. Defaults to config.collection_id.
+            database_id: Database ID. Defaults to config.database_id.
+
+        Returns:
+            OperationResult with:
+                - success=True and data containing 'documents' list and 'total' count
+                - success=False if search fails
+
+        Example:
+            >>> # Find files by exact match
+            >>> result = handler.search_files_by_metadata(
+            ...     filters={"model": "ensemble", "loa": "pgm"}
+            ... )
+            >>>
+            >>> # Find files where array contains value
+            >>> result = handler.search_files_by_metadata(
+            ...     array_filters={"targets": "ged_sb"}
+            ... )
+            >>>
+            >>> if result.success:
+            ...     for doc in result.data['documents']:
+            ...         print(doc['filename'])
+        """
         # Use config values as defaults
         db_id = database_id or self.config.database_id
         coll_id = collection_id or self.config.collection_id
@@ -720,7 +1363,7 @@ class AppwriteMetadataHandler:
             return OperationResult(
                 success=False, error=f"Search failed: {e.message}", code=e.type
             )
-    
+
     def check_file_exists_by_hash(
     self,
     file_hash: str,
@@ -728,6 +1371,28 @@ class AppwriteMetadataHandler:
     collection_id: str = None,
     database_id: str = None,
 ) -> OperationResult:
+        """Check if a file with the given hash exists in metadata.
+
+        Searches the metadata collection for a file with matching file_hash.
+        Creates the file_hash attribute if it doesn't exist in the schema.
+
+        Args:
+            file_hash: SHA-256 hash of file contents to search for.
+            collection_name: Collection name. Defaults to config.collection_name.
+            collection_id: Collection ID. Defaults to config.collection_id.
+            database_id: Database ID. Defaults to config.database_id.
+
+        Returns:
+            OperationResult with:
+                - success=True, code='FOUND_BY_HASH' and document data if found
+                - success=False, code='NOT_FOUND' if no match
+
+        Example:
+            >>> file_hash = hashlib.sha256(file_bytes).hexdigest()
+            >>> result = handler.check_file_exists_by_hash(file_hash)
+            >>> if result.success and result.code == 'FOUND_BY_HASH':
+            ...     existing_file_id = result.data['fileId']
+        """
         # Use config values as defaults
         db_id = database_id or self.config.database_id
         coll_id = collection_id or self.config.collection_id
@@ -809,7 +1474,7 @@ class AppwriteMetadataHandler:
             return OperationResult(
                 success=False, error=f"Search failed: {e.message}", code=e.type
             )
-    
+
     def update_file_metadata(
         self,
         file_id: str,
@@ -818,6 +1483,28 @@ class AppwriteMetadataHandler:
         collection_id: str = None,
         database_id: str = None
     ) -> OperationResult:
+        """Update metadata for an existing file.
+
+        Finds the metadata document by fileId and updates specified fields.
+
+        Args:
+            file_id: Appwrite file ID to update metadata for.
+            metadata_updates: Dict of fields to update with new values.
+            collection_name: Collection name. Defaults to config.collection_name.
+            collection_id: Collection ID. Defaults to config.collection_id.
+            database_id: Database ID. Defaults to config.database_id.
+
+        Returns:
+            OperationResult with:
+                - success=True, code='UPDATED' and updated document data
+                - success=False, code='METADATA_NOT_FOUND' if file not found
+
+        Example:
+            >>> result = handler.update_file_metadata(
+            ...     file_id="abc123",
+            ...     metadata_updates={"status": "validated", "score": 0.95}
+            ... )
+        """
         # Use config values as defaults
         db_id = database_id or self.config.database_id
         coll_id = collection_id or self.config.collection_id
@@ -866,10 +1553,81 @@ class AppwriteMetadataHandler:
 
 # Main File Manager
 class AppWriteFileModule:
+    """Main interface for Appwrite file storage operations.
+
+    Provides comprehensive file management capabilities including uploads,
+    downloads, metadata tracking, caching, and bucket management. Supports
+    both file path and byte-based uploads with automatic deduplication.
+
+    Key features:
+        - File uploads with hash-based deduplication
+        - Metadata storage in Appwrite databases
+        - Local caching with TTL validation
+        - Bucket and collection management
+        - Support for API key and session authentication
+
+    Attributes:
+        config: AppwriteConfig with connection and storage settings.
+        client: Appwrite Client instance.
+        storage: Appwrite Storage service.
+        databases: Appwrite Databases service.
+        users: Appwrite Users service.
+        metadata_manager: AppwriteMetadataHandler for database operations.
+        cache_manager: CacheManager for local file caching.
+        auth_manager: AuthManager instance handling authentication.
+
+    Example:
+        >>> from views_pipeline_core.modules.appwrite import (
+        ...     AppWriteFileModule, AppwriteConfig, AuthMethod
+        ... )
+        >>>
+        >>> config = AppwriteConfig(
+        ...     endpoint="https://cloud.appwrite.io/v1",
+        ...     project_id="my_project",
+        ...     credentials="my_api_key",
+        ...     bucket_id="forecasts"
+        ... )
+        >>> file_manager = AppWriteFileModule(config)
+        >>>
+        >>> # Upload with metadata
+        >>> result = file_manager.upload_file_with_metadata(
+        ...     bucket_id="forecasts",
+        ...     file_path="/data/predictions.parquet",
+        ...     filename="predictions.parquet",
+        ...     metadata={"model": "ensemble", "loa": "pgm"}
+        ... )
+        >>>
+        >>> # Download with caching
+        >>> download = file_manager.download_file(
+        ...     bucket_id="forecasts",
+        ...     file_id=result.data['file_id'],
+        ...     use_cache=True
+        ... )
+    """
+
     def __init__(self, config: AppwriteConfig):
+        """Initialize AppWriteFileModule with configuration.
+
+        Sets up Appwrite client, authentication, and internal managers
+        for metadata and caching.
+
+        Args:
+            config: AppwriteConfig with all connection and storage settings.
+
+        Raises:
+            ValueError: If authentication fails with provided credentials.
+
+        Example:
+            >>> config = AppwriteConfig(
+            ...     endpoint="https://cloud.appwrite.io/v1",
+            ...     project_id="my_project",
+            ...     credentials="api_key"
+            ... )
+            >>> manager = AppWriteFileModule(config)
+        """
         # if not isinstance(config.path_manager, ModelPathManager):
         #     raise ValueError("path_manager must be an instance of ModelPathManager")
-        
+
         self.config = config
         self.client = Client()
         self.client.set_endpoint(config.endpoint).set_project(config.project_id)
@@ -888,8 +1646,16 @@ class AppWriteFileModule:
         # Initialize managers
         self.metadata_manager = AppwriteMetadataHandler(self.databases, config)
         self.cache_manager = self._setup_cache()
-    
+
     def _setup_cache(self) -> CacheManager:
+        """Initialize the local file cache manager.
+
+        Creates cache directory based on config or path_manager settings.
+        Falls back to a default directory if setup fails.
+
+        Returns:
+            Configured CacheManager instance.
+        """
         try:
             if not self.config.cache_dir:
                 cache_dir = getattr(self.config.path_manager, "cache", Path(".")) / "appwrite_cache"
@@ -906,8 +1672,24 @@ class AppWriteFileModule:
             cache_dir = Path(".appwrite_cache")
             cache_dir.mkdir(exist_ok=True)
             return CacheManager(cache_dir, timedelta(hours=DEFAULT_CACHE_TTL_HOURS))
-    
+
     def _calculate_file_hash(self, file_path: str = None, file_bytes: bytes = None) -> str:
+        """Calculate SHA-256 hash of a file for deduplication.
+
+        Args:
+            file_path: Path to file on disk. Reads in 4KB chunks.
+            file_bytes: Raw file bytes. Use for in-memory data.
+
+        Returns:
+            Hexadecimal SHA-256 hash string.
+
+        Raises:
+            ValueError: If neither file_path nor file_bytes is provided.
+
+        Example:
+            >>> hash1 = manager._calculate_file_hash(file_path="/data/file.parquet")
+            >>> hash2 = manager._calculate_file_hash(file_bytes=b"file content")
+        """
         sha256_hash = hashlib.sha256()
         
         if file_path:
@@ -977,7 +1759,7 @@ class AppWriteFileModule:
     #                     )
             
     #         return OperationResult(success=False, code="NOT_FOUND")
-        
+
     #     except AppwriteException as e:
     #         return OperationResult(
     #             success=False,
@@ -990,6 +1772,22 @@ class AppWriteFileModule:
     file_hash: str,
     filename: str = None
 ) -> OperationResult:
+        """Check if a file exists by hash or filename.
+
+        First checks metadata for matching hash, then falls back to
+        filename search in storage. Used for deduplication during uploads.
+
+        Args:
+            bucket_id: Storage bucket to search in.
+            file_hash: SHA-256 hash to search for.
+            filename: Optional filename to search as fallback.
+
+        Returns:
+            OperationResult with:
+                - success=True, code='FOUND_BY_HASH' if hash matches
+                - success=True, code='FOUND_BY_NAME' if filename matches
+                - success=False, code='NOT_FOUND' if no match
+        """
         try:
             # First try to find by hash in metadata
             search_result = self.metadata_manager.check_file_exists_by_hash(
@@ -1056,7 +1854,7 @@ class AppWriteFileModule:
                 error=e.message,
                 code=e.type
             )
-    
+
     def _build_metadata_document(
         self,
         file_id: str,
@@ -1066,6 +1864,23 @@ class AppWriteFileModule:
         metadata: Dict[str, Any],
         file_hash: str = None
     ) -> Dict[str, Any]:
+        """Build a metadata document for database storage.
+
+        Combines fixed fields (fileId, bucketId, etc.) with custom metadata
+        to create a complete document for the metadata collection.
+
+        Args:
+            file_id: Appwrite file ID.
+            bucket_id: Storage bucket ID.
+            filename: Original filename.
+            upload_result: Result from file upload containing size info.
+            metadata: Custom metadata fields to include.
+            file_hash: Optional SHA-256 hash of file contents.
+
+        Returns:
+            Dictionary suitable for storing in Appwrite database.
+            None values are filtered out.
+        """
         base_document = {
             "fileId": file_id,
             "bucketId": bucket_id,
@@ -1080,7 +1895,7 @@ class AppWriteFileModule:
             base_document["file_size"] = upload_result["data"]["sizeOriginal"]
         
         return {k: v for k, v in base_document.items() if v is not None}
-    
+
     def _store_metadata_document(
         self,
         database_id: str,
@@ -1088,6 +1903,20 @@ class AppWriteFileModule:
         file_id: str,
         metadata_document: Dict[str, Any]
     ) -> OperationResult:
+        """Store or update a metadata document in the database.
+
+        Creates a new document if none exists for the file_id, otherwise
+        updates the existing document.
+
+        Args:
+            database_id: Target database identifier.
+            collection_id: Target collection identifier.
+            file_id: File ID to associate metadata with.
+            metadata_document: Complete metadata document to store.
+
+        Returns:
+            OperationResult with code 'CREATED' or 'UPDATED' on success.
+        """
         try:
             existing_docs = self.databases.list_documents(
                 database_id, collection_id, queries=[Query.equal("fileId", file_id)]
@@ -1111,7 +1940,7 @@ class AppWriteFileModule:
                 error=e.message,
                 code=e.type
             )
-    
+
     def upload_file(
         self,
         bucket_id: str,
@@ -1121,6 +1950,38 @@ class AppWriteFileModule:
         check_duplicates: bool = True,
         overwrite: bool = False
     ) -> OperationResult:
+        """Upload a file from disk to Appwrite storage.
+
+        Uploads a file with optional duplicate checking and overwrite support.
+        Does NOT store metadata - use upload_file_with_metadata for that.
+
+        Args:
+            bucket_id: Target storage bucket ID.
+            file_path: Local path to the file to upload.
+            file_id: Optional custom file ID. Auto-generated if not provided.
+            permissions: Optional list of Appwrite permission strings.
+            check_duplicates: Whether to check for existing files by hash/name.
+                Defaults to True.
+            overwrite: If True and duplicate found, delete existing and upload.
+                If False and duplicate found, return existing file info.
+                Defaults to False.
+
+        Returns:
+            OperationResult with:
+                - success=True, code='CREATED' and file data on new upload
+                - success=True, code='EXISTS' and existing file data if duplicate
+                - success=False with error details on failure
+
+        Example:
+            >>> result = manager.upload_file(
+            ...     bucket_id="my_bucket",
+            ...     file_path="/data/output.parquet",
+            ...     check_duplicates=True,
+            ...     overwrite=False
+            ... )
+            >>> if result.success:
+            ...     file_id = result.data['$id']
+        """
         try:
             filename = Path(file_path).name
             file_hash = None
@@ -1172,7 +2033,7 @@ class AppWriteFileModule:
                 error=f"Unexpected error: {str(e)}",
                 code="UNKNOWN_ERROR"
             )
-    
+
     def upload_file_from_bytes(
         self,
         bucket_id: str,
@@ -1183,6 +2044,33 @@ class AppWriteFileModule:
         check_duplicates: bool = True,
         overwrite: bool = False
     ) -> OperationResult:
+        """Upload a file from bytes to Appwrite storage.
+
+        Uploads in-memory file data with optional duplicate checking.
+        Does NOT store metadata - use upload_file_from_bytes_with_metadata.
+
+        Args:
+            bucket_id: Target storage bucket ID.
+            file_bytes: Raw file content as bytes.
+            filename: Name to give the file in storage.
+            file_id: Optional custom file ID. Auto-generated if not provided.
+            permissions: Optional list of Appwrite permission strings.
+            check_duplicates: Whether to check for existing files by hash/name.
+            overwrite: If True and duplicate found, delete and re-upload.
+
+        Returns:
+            OperationResult with file data on success.
+
+        Example:
+            >>> import pandas as pd
+            >>> df = pd.DataFrame({"col": [1, 2, 3]})
+            >>> parquet_bytes = df.to_parquet()
+            >>> result = manager.upload_file_from_bytes(
+            ...     bucket_id="my_bucket",
+            ...     file_bytes=parquet_bytes,
+            ...     filename="data.parquet"
+            ... )
+        """
         try:
             file_hash = None
             
@@ -1227,7 +2115,7 @@ class AppWriteFileModule:
                 error=f"Upload from bytes failed: {e.message}",
                 code=e.type
             )
-        
+
     def upload_file_with_metadata(
     self,
     bucket_id: str,
@@ -1239,21 +2127,45 @@ class AppWriteFileModule:
     collection_name: str = None,
     collection_id: str = None
 ) -> OperationResult:
-        """
-        Upload a file to Appwrite storage and store its metadata in a database collection.
+        """Upload a file and store metadata in the database.
+
+        Complete upload workflow that:
+        1. Calculates file hash for deduplication
+        2. Checks for existing files by hash or name
+        3. Handles existing files (update metadata or delete old version)
+        4. Uploads the file to storage
+        5. Stores metadata in the database collection
 
         Args:
-            bucket_id: The ID of the bucket to upload to
-            file_path: Path to the file to upload
-            filename: Name to give the file in storage
-            metadata: Dictionary of metadata to store
-            file_id: Optional file ID (if None, one will be generated)
-            permissions: Optional list of permissions for the file
-            collection_name: Optional collection name (defaults to config)
-            collection_id: Optional collection ID (defaults to config)
+            bucket_id: Target storage bucket ID.
+            file_path: Local path to the file to upload.
+            filename: Name to give the file in storage.
+            metadata: Custom metadata dict to store with the file.
+            file_id: Optional custom file ID.
+            permissions: Optional Appwrite permission strings.
+            collection_name: Metadata collection name. Defaults to config.
+            collection_id: Metadata collection ID. Defaults to config.
 
         Returns:
-            OperationResult with success status and data/error information
+            OperationResult with:
+                - success=True, code='UPLOAD_SUCCESS' with file_id, document_id, metadata
+                - success=True, code='METADATA_UPDATED' if only metadata was updated
+                - success=False with error details on failure
+
+        Example:
+            >>> result = manager.upload_file_with_metadata(
+            ...     bucket_id="forecasts",
+            ...     file_path="/output/predictions.parquet",
+            ...     filename="predictions_202401.parquet",
+            ...     metadata={
+            ...         "model": "ensemble_v2",
+            ...         "loa": "pgm",
+            ...         "targets": ["ged_sb", "ged_ns"]
+            ...     }
+            ... )
+            >>> if result.success:
+            ...     print(f"File ID: {result.data['file_id']}")
+            ...     print(f"Document ID: {result.data['document_id']}")
         """
         # Use defaults from config if not provided
         if collection_name is None:
@@ -1664,6 +2576,37 @@ class AppWriteFileModule:
         collection_name: str = None,
         collection_id: str = None
     ) -> OperationResult:
+        """Upload file bytes and store metadata in the database.
+
+        Same as upload_file_with_metadata but accepts raw bytes instead
+        of a file path. Useful for uploading in-memory data.
+
+        Args:
+            bucket_id: Target storage bucket ID.
+            file_bytes: Raw file content as bytes.
+            filename: Name to give the file in storage.
+            metadata: Custom metadata dict to store with the file.
+            file_id: Optional custom file ID.
+            permissions: Optional Appwrite permission strings.
+            collection_name: Metadata collection name. Defaults to config.
+            collection_id: Metadata collection ID. Defaults to config.
+
+        Returns:
+            OperationResult with:
+                - success=True, code='CREATED_WITH_METADATA' on new upload
+                - success=True, code='EXISTS_METADATA_UPDATED' if metadata updated
+                - success=False with error on failure
+
+        Example:
+            >>> import pandas as pd
+            >>> df = pd.DataFrame({"predictions": [0.1, 0.5, 0.9]})
+            >>> result = manager.upload_file_from_bytes_with_metadata(
+            ...     bucket_id="forecasts",
+            ...     file_bytes=df.to_parquet(),
+            ...     filename="predictions.parquet",
+            ...     metadata={"model": "test", "loa": "pgm"}
+            ... )
+        """
         # Use defaults from config if not provided
         if collection_name is None:
             collection_name = self.config.collection_name
@@ -1797,7 +2740,7 @@ class AppWriteFileModule:
                 error=f"Metadata handling failed: {e.message}",
                 code="METADATA_ERROR"
             )
-    
+
     def download_file(
         self,
         bucket_id: str,
@@ -1806,6 +2749,42 @@ class AppWriteFileModule:
         use_cache: bool = True,
         validate_cache: bool = True
     ) -> OperationResult:
+        """Download a file from Appwrite storage with caching.
+
+        Downloads a file either from local cache (if valid) or from remote
+        storage. Automatically updates cache after remote downloads.
+
+        Args:
+            bucket_id: Storage bucket containing the file.
+            file_id: ID of the file to download.
+            save_path: Optional path to save file to disk. If None, returns
+                bytes in result data.
+            use_cache: Whether to use cached file if available. Defaults to True.
+            validate_cache: Whether to validate cache against remote timestamps.
+                Defaults to True.
+
+        Returns:
+            OperationResult with:
+                - success=True and data containing either:
+                    - 'save_path' and 'from_cache' if save_path was provided
+                    - 'file_bytes' and 'from_cache' if no save_path
+                - code indicating source: 'SAVED_FROM_CACHE', 'RETURNED_FROM_CACHE',
+                  'SAVED_FROM_REMOTE', or 'RETURNED_FROM_REMOTE'
+
+        Example:
+            >>> # Download to file
+            >>> result = manager.download_file(
+            ...     bucket_id="forecasts",
+            ...     file_id="abc123",
+            ...     save_path="/tmp/output.parquet"
+            ... )
+            >>>
+            >>> # Download to memory
+            >>> result = manager.download_file("forecasts", "abc123")
+            >>> if result.success:
+            ...     data = result.data['file_bytes']
+            ...     print(f"From cache: {result.data['from_cache']}")
+        """
         try:
             # Get file metadata for cache validation
             file_metadata = None
@@ -1881,7 +2860,7 @@ class AppWriteFileModule:
                 error=f"File operation failed: {str(e)}",
                 code="IO_ERROR"
             )
-    
+
     def list_files(
         self,
         bucket_id: str,
@@ -1891,6 +2870,31 @@ class AppWriteFileModule:
         order_field: str = None,
         order_type: str = "ASC"
     ) -> OperationResult:
+        """List files in a storage bucket with optional filtering.
+
+        Args:
+            bucket_id: Storage bucket to list files from.
+            queries: Optional list of Appwrite Query objects for filtering.
+            limit: Maximum number of files to return. Defaults to 100.
+            offset: Number of files to skip for pagination.
+            order_field: Field name to sort by (e.g., '$createdAt').
+            order_type: Sort direction, 'ASC' or 'DESC'. Defaults to 'ASC'.
+
+        Returns:
+            OperationResult with data containing:
+                - 'files': List of file objects
+                - 'total': Total count of matching files
+
+        Example:
+            >>> result = manager.list_files(
+            ...     bucket_id="forecasts",
+            ...     limit=50,
+            ...     order_field="$createdAt",
+            ...     order_type="DESC"
+            ... )
+            >>> for file in result.data['files']:
+            ...     print(f"{file['name']}: {file['$id']}")
+        """
         try:
             if queries is None:
                 queries = []
@@ -1921,8 +2925,25 @@ class AppWriteFileModule:
                 error=f"List files failed: {e.message}",
                 code=e.type
             )
-    
+
     def delete_file(self, bucket_id: str, file_id: str) -> OperationResult:
+        """Delete a file from Appwrite storage.
+
+        Removes the file from both remote storage and local cache.
+        Note: Does not delete associated metadata documents.
+
+        Args:
+            bucket_id: Storage bucket containing the file.
+            file_id: ID of the file to delete.
+
+        Returns:
+            OperationResult with code='DELETED' on success.
+
+        Example:
+            >>> result = manager.delete_file("my_bucket", "file123")
+            >>> if result.success:
+            ...     print("File deleted")
+        """
         try:
             result = self.storage.delete_file(bucket_id, file_id)
             
@@ -1941,8 +2962,26 @@ class AppWriteFileModule:
                 error=f"Delete failed: {e.message}",
                 code=e.type
             )
-    
+
     def get_file(self, bucket_id: str, file_id: str) -> OperationResult:
+        """Get file metadata from Appwrite storage.
+
+        Retrieves file information (name, size, timestamps, etc.) without
+        downloading the actual file content.
+
+        Args:
+            bucket_id: Storage bucket containing the file.
+            file_id: ID of the file.
+
+        Returns:
+            OperationResult with file metadata in data field on success.
+
+        Example:
+            >>> result = manager.get_file("my_bucket", "file123")
+            >>> if result.success:
+            ...     print(f"Name: {result.data['name']}")
+            ...     print(f"Size: {result.data['sizeOriginal']} bytes")
+        """
         try:
             result = self.storage.get_file(bucket_id, file_id)
             return OperationResult(success=True, data=result)
@@ -1953,8 +2992,25 @@ class AppWriteFileModule:
                 error=f"Get file failed: {e.message}",
                 code=e.type
             )
-    
+
     def get_bucket(self, bucket_id: str) -> OperationResult:
+        """Get bucket metadata from Appwrite storage.
+
+        Retrieves bucket information including name, settings, and permissions.
+
+        Args:
+            bucket_id: ID of the bucket to retrieve.
+
+        Returns:
+            OperationResult with:
+                - success=True and bucket data on success
+                - success=False, code='storage_bucket_not_found' if not found
+
+        Example:
+            >>> result = manager.get_bucket("forecasts")
+            >>> if result.success:
+            ...     print(f"Bucket: {result.data['name']}")
+        """
         try:
             result = self.storage.get_bucket(bucket_id)
             return OperationResult(success=True, data=result)
@@ -1973,13 +3029,30 @@ class AppWriteFileModule:
                 error=f"Get bucket failed: {e.message}",
                 code=e.type
             )
-    
+
     def list_buckets(
         self,
         search: str = None,
         limit: int = DEFAULT_PAGE_LIMIT,
         offset: int = 0
     ) -> OperationResult:
+        """List storage buckets with optional search.
+
+        Args:
+            search: Optional search string to filter buckets by name.
+            limit: Maximum number of buckets to return. Defaults to 100.
+            offset: Number of buckets to skip for pagination.
+
+        Returns:
+            OperationResult with data containing:
+                - 'buckets': List of bucket objects
+                - 'total': Total count of matching buckets
+
+        Example:
+            >>> result = manager.list_buckets(search="forecast")
+            >>> for bucket in result.data['buckets']:
+            ...     print(f"{bucket['name']}: {bucket['$id']}")
+        """
         try:
             queries = []
             if search:
@@ -2001,7 +3074,7 @@ class AppWriteFileModule:
                 error=f"List buckets failed: {e.message}",
                 code=e.type
             )
-    
+
     def create_bucket(
         self,
         bucket_id: str,
@@ -2016,6 +3089,37 @@ class AppWriteFileModule:
         antivirus: bool = True,
         create_metadata_db: bool = True
     ) -> OperationResult:
+        """Create a new storage bucket.
+
+        Creates a bucket with specified settings and optionally creates
+        an associated metadata database.
+
+        Args:
+            bucket_id: Unique identifier for the bucket.
+            name: Human-readable bucket name. Defaults to config.bucket_name.
+            permissions: List of Appwrite permission strings.
+            file_security: Whether to enable file-level security. Defaults to True.
+            enabled: Whether bucket is enabled. Defaults to True.
+            maximum_file_size: Max file size in bytes. None for default.
+            allowed_file_extensions: List of allowed extensions. Empty for any.
+            encryption: Whether to encrypt files. Defaults to False.
+            compression: Compression type ('none', 'gzip', 'zstd').
+            antivirus: Whether to scan for viruses. Defaults to True.
+            create_metadata_db: Whether to create metadata database. Defaults to True.
+
+        Returns:
+            OperationResult with:
+                - success=True, code='CREATED' and bucket data
+                - 'metadata_database' key in data if create_metadata_db=True
+
+        Example:
+            >>> result = manager.create_bucket(
+            ...     bucket_id="new_forecasts",
+            ...     name="New Forecasts",
+            ...     maximum_file_size=100 * 1024 * 1024,  # 100MB
+            ...     allowed_file_extensions=["parquet", "csv"]
+            ... )
+        """
         # Use default name from config if not provided
         if name is None:
             name = self.config.bucket_name
@@ -2058,8 +3162,24 @@ class AppWriteFileModule:
                 error=e.message,
                 code=e.type
             )
-    
+
     def get_current_user(self) -> OperationResult:
+        """Get current authenticated user information.
+
+        Only available when using session authentication.
+
+        Returns:
+            OperationResult with user data including:
+                - user_id: User's ID
+                - email: User's email address
+                - name: User's display name
+                - email_verified: Whether email is verified
+
+        Example:
+            >>> result = manager.get_current_user()
+            >>> if result.success:
+            ...     print(f"User: {result.data['email']}")
+        """
         if not isinstance(self.auth_manager, SessionAuth):
             return OperationResult(
                 success=False,
@@ -2085,8 +3205,27 @@ class AppWriteFileModule:
                 error=e.message,
                 code=e.type
             )
-    
+
     def get_user_preferences(self, user_id: Optional[str] = None) -> OperationResult:
+        """Get user preferences from Appwrite.
+
+        For session auth, gets current user's preferences.
+        For API key auth, requires user_id parameter.
+
+        Args:
+            user_id: Required for API key auth. Optional for session auth.
+
+        Returns:
+            OperationResult with preferences data.
+                code='USER_SESSION' or code='API_KEY' indicates auth type used.
+
+        Example:
+            >>> # With session auth
+            >>> result = manager.get_user_preferences()
+            >>>
+            >>> # With API key auth
+            >>> result = manager.get_user_preferences(user_id="user123")
+        """
         try:
             if isinstance(self.auth_manager, SessionAuth):
                 preferences = self.auth_manager.account.get_prefs()
@@ -2116,22 +3255,67 @@ class AppWriteFileModule:
                 error=e.message,
                 code=e.type
             )
-    
+
     def clear_cache(
         self,
         bucket_id: str = None,
         older_than_hours: int = None
     ) -> OperationResult:
+        """Clear the local file cache.
+
+        Wrapper around CacheManager.clear_cache() for convenience.
+
+        Args:
+            bucket_id: Optional bucket to limit clearing to.
+            older_than_hours: Optional age filter for selective clearing.
+
+        Returns:
+            OperationResult with deletion statistics.
+
+        Example:
+            >>> # Clear all cache
+            >>> result = manager.clear_cache()
+            >>>
+            >>> # Clear cache older than 48 hours
+            >>> result = manager.clear_cache(older_than_hours=48)
+        """
         return self.cache_manager.clear_cache(bucket_id, older_than_hours)
-    
+
     def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics and usage information.
+
+        Wrapper around CacheManager.get_stats() for convenience.
+
+        Returns:
+            Dictionary with cache statistics including total files,
+            total size, and breakdown by bucket.
+
+        Example:
+            >>> stats = manager.get_cache_stats()
+            >>> print(f"Cache: {stats['total_files']} files, {stats['total_size_mb']}MB")
+        """
         return self.cache_manager.get_stats()
-    
+
     def debug_collection_attributes(
         self,
         collection_id: str = None,
         database_id: str = None
     ) -> OperationResult:
+        """Debug helper to list all attributes in a metadata collection.
+
+        Useful for troubleshooting schema issues or verifying attribute creation.
+
+        Args:
+            collection_id: Collection to inspect. Defaults to config.collection_id.
+            database_id: Database containing collection. Defaults to config.database_id.
+
+        Returns:
+            OperationResult with list of attributes on success.
+
+        Example:
+            >>> result = manager.debug_collection_attributes()
+            >>> # Attributes are also logged at INFO level
+        """
         db_id = database_id or self.config.database_id
         coll_id = collection_id or self.config.collection_id
         
