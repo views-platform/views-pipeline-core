@@ -38,7 +38,7 @@ class AggregationManager:
 
     def __init__(
         self,
-        index_cols: List[str] = ["time", "entity_id"],
+        index_cols: List[str] = ["month_id", "country_id"],
         target_cols: Optional[List[str]] = None,
     ):
         self.models: List[_ModelSpec] = []
@@ -741,6 +741,7 @@ class AggregationManager:
         #
         pdf_processed = ds.dataframe.reset_index()
         df = pl.from_pandas(pdf_processed)
+        logger.info(f"Data frame has the following columns: {df.columns}")
 
         # ---------- 4) Schema validation on Polars dataframe ----------
         # Validate that index columns are in dataframe
@@ -750,6 +751,7 @@ class AggregationManager:
 
         # Validate that target columns are in dataframe
         if self.target_cols:
+            logger.info(f"Validating target columns: {self.target_cols}")
             missing_targets = [c for c in self.target_cols if c not in df.columns]
             if missing_targets:
                 raise ValueError(f"Missing target columns: {missing_targets}")

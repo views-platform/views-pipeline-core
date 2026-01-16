@@ -2,7 +2,10 @@ import numpy as np
 import polars as pl
 import pytest
 
-from views_pipeline_core.modules.ensemble_aggregator import AggregationManager, _ModelSpec
+from views_pipeline_core.modules.ensemble_aggregator import (
+    AggregationManager,
+    _ModelSpec,
+)
 
 
 def _df_point_single_model(name: str, vals):
@@ -13,11 +16,12 @@ def _df_point_single_model(name: str, vals):
     """
     return pl.DataFrame(
         {
-            "time": [1, 2],
-            "entity_id": [10, 11],
+            "month_id": [1, 2],
+            "country_id": [10, 11],
             f"y_{name}": [[vals[0]], [vals[1]]],
         }
     )
+
 
 def _df_dist_single_model(name: str, rows):
     """
@@ -30,11 +34,12 @@ def _df_dist_single_model(name: str, rows):
 
     return pl.DataFrame(
         {
-            "time": time,
-            "entity_id": entity_id,
+            "month_id": time,
+            "country_id": entity_id,
             f"y_{name}": rows,
         }
     )
+
 
 # ---------- basic consistency tests (optional but useful) ----------
 
@@ -47,18 +52,24 @@ def test_check_model_consistency_type_mismatch_raises():
 
     # Second model: distribution predictions with different type
     with pytest.raises(ValueError, match="prediction type 'distribution'"):
-        mgr._check_model_consistency(pred_type="distribution", sample_size=10, model_name="m2")
+        mgr._check_model_consistency(
+            pred_type="distribution", sample_size=10, model_name="m2"
+        )
 
 
 def test_check_model_consistency_sample_size_mismatch_raises():
     mgr = AggregationManager(target_cols=["y"])
 
     # First model: distribution with sample_size=10
-    mgr._check_model_consistency(pred_type="distribution", sample_size=10, model_name="m1")
+    mgr._check_model_consistency(
+        pred_type="distribution", sample_size=10, model_name="m1"
+    )
 
     # Second model: distribution but different sample_size
     with pytest.raises(ValueError, match="has sample size 5"):
-        mgr._check_model_consistency(pred_type="distribution", sample_size=5, model_name="m2")
+        mgr._check_model_consistency(
+            pred_type="distribution", sample_size=5, model_name="m2"
+        )
 
 
 def test_inner_join_model_predictions_one_model_returns_same_df():
@@ -72,7 +83,6 @@ def test_inner_join_model_predictions_one_model_returns_same_df():
     joined = mgr._inner_join_model_predictions()
 
     pl_testing.assert_frame_equal(joined, df_m1)
-
 
 
 def test_inner_join_model_predictions_no_models_raises():
@@ -130,6 +140,7 @@ def test_aggregate_point_mean_weighted():
     # row2: 3*0.25 + 4*0.75 = 3.75
     assert result == pytest.approx([1.75, 3.75])
 
+
 @pytest.mark.parametrize("agg_func", ["min", "max", "median"])
 def test_aggregate_point_non_mean_with_weights_raises(agg_func):
     """Using weights with non-mean aggregation should raise a ValueError."""
@@ -146,16 +157,19 @@ def test_aggregate_point_non_mean_with_weights_raises(agg_func):
     mgr.sample_size = 1
 
     # updated expectation: new message mentions aggregation_func instead of method
-    with pytest.raises(ValueError, match="Weights can only be used with aggregation_func='mean'"):
+    with pytest.raises(
+        ValueError, match="Weights can only be used with aggregation_func='mean'"
+    ):
         mgr.aggregate(method=agg_func, use_weights=True)
+
 
 @pytest.mark.parametrize(
     "agg_func, expected",
     [
-        ("mean",   [2.0, 4.0]),
+        ("mean", [2.0, 4.0]),
         ("median", [2.0, 4.0]),  # with 2 models, median == mean
-        ("min",    [1.0, 3.0]),
-        ("max",    [3.0, 5.0]),
+        ("min", [1.0, 3.0]),
+        ("max", [3.0, 5.0]),
     ],
 )
 def test_aggregate_point_aggregation_functions_unweighted(agg_func, expected):
@@ -229,7 +243,7 @@ def test_aggregate_point_use_weights_true_without_weights_raises(monkeypatch):
 def test_normalize_weights_all_none_equal_weights():
     mgr = AggregationManager(target_cols=["y"])
 
-    dummy_df = pl.DataFrame({"time": [1], "entity_id": [1], "y_m1": [[1.0]]})
+    dummy_df = pl.DataFrame({"month_id": [1], "country_id": [1], "y_m1": [[1.0]]})
     mgr.models = [
         _ModelSpec(name="m1", df=dummy_df, weight=None),
         _ModelSpec(name="m2", df=dummy_df, weight=None),
@@ -244,7 +258,7 @@ def test_normalize_weights_all_none_equal_weights():
 def test_normalize_weights_mixed_and_unspecified():
     mgr = AggregationManager(target_cols=["y"])
 
-    dummy_df = pl.DataFrame({"time": [1], "entity_id": [1], "y_m1": [[1.0]]})
+    dummy_df = pl.DataFrame({"month_id": [1], "country_id": [1], "y_m1": [[1.0]]})
     mgr.models = [
         _ModelSpec(name="m1", df=dummy_df, weight=0.2),
         _ModelSpec(name="m2", df=dummy_df, weight=None),
@@ -259,7 +273,7 @@ def test_normalize_weights_mixed_and_unspecified():
 def test_normalize_weights_sum_greater_than_one_raises():
     mgr = AggregationManager(target_cols=["y"])
 
-    dummy_df = pl.DataFrame({"time": [1], "entity_id": [1], "y_m1": [[1.0]]})
+    dummy_df = pl.DataFrame({"month_id": [1], "country_id": [1], "y_m1": [[1.0]]})
     mgr.models = [
         _ModelSpec(name="m1", df=dummy_df, weight=0.7),
         _ModelSpec(name="m2", df=dummy_df, weight=0.4),
@@ -267,6 +281,7 @@ def test_normalize_weights_sum_greater_than_one_raises():
 
     with pytest.raises(ValueError, match="exceeds 1.0"):
         mgr._normalize_weights_new()
+
 
 def test_add_model_rejects_weight_ge_1(monkeypatch):
     """Adding a model with weight >= 1.0 should raise a ValueError."""
@@ -276,16 +291,14 @@ def test_add_model_rejects_weight_ge_1(monkeypatch):
     # Monkeypatch _load_to_polars so we don't need real CMDataset/PGMDataset
     dummy_df = pl.DataFrame(
         {
-            "time": [1, 2],
-            "entity_id": [10, 11],
+            "month_id": [1, 2],
+            "country_id": [10, 11],
             "y": [[1.0], [2.0]],  # valid point predictions
         }
     )
 
     monkeypatch.setattr(
-        AggregationManager,
-        "_load_to_polars",
-        lambda self, data: dummy_df
+        AggregationManager, "_load_to_polars", lambda self, data: dummy_df
     )
 
     # Now try to add the model with an invalid weight
@@ -351,6 +364,7 @@ def test_aggregate_distributions_concat_with_weights_picks_weighted_model():
 
     # Because all probability mass is on model 1, all samples must be 1.0
     assert set(samples) == {1.0}
+
 
 def test_aggregate_distributions_concat_unweighted_proportion():
     np.random.seed(0)
@@ -442,14 +456,20 @@ def test_concat_multiple_rows():
     mgr = AggregationManager(target_cols=["y"])
     n_samples = 3
 
-    df_m1 = _df_dist_single_model("m1", [
-        [1.0, 1.0, 1.0],
-        [10.0, 10.0, 10.0],
-    ])
-    df_m2 = _df_dist_single_model("m2", [
-        [2.0, 2.0, 2.0],
-        [20.0, 20.0, 20.0],
-    ])
+    df_m1 = _df_dist_single_model(
+        "m1",
+        [
+            [1.0, 1.0, 1.0],
+            [10.0, 10.0, 10.0],
+        ],
+    )
+    df_m2 = _df_dist_single_model(
+        "m2",
+        [
+            [2.0, 2.0, 2.0],
+            [20.0, 20.0, 20.0],
+        ],
+    )
 
     mgr.models = [
         _ModelSpec(name="m1", df=df_m1, weight=None),
@@ -459,8 +479,12 @@ def test_concat_multiple_rows():
     mgr.sample_size = n_samples
 
     out = mgr.aggregate(method="concat", use_weights=True)
-    samples_row1 = out.filter(pl.col("time") == 1).select("y").to_series().to_list()[0]
-    samples_row2 = out.filter(pl.col("time") == 2).select("y").to_series().to_list()[0]
+    samples_row1 = (
+        out.filter(pl.col("month_id") == 1).select("y").to_series().to_list()[0]
+    )
+    samples_row2 = (
+        out.filter(pl.col("month_id") == 2).select("y").to_series().to_list()[0]
+    )
 
     assert set(samples_row1).issubset({1.0, 2.0})
     assert set(samples_row2).issubset({10.0, 20.0})
@@ -488,6 +512,7 @@ def test_aggregate_distributions_vincentization_equal_weights():
     # or equivalently: samples = out["y"][0]
 
     assert samples == pytest.approx([1.0, 2.0, 3.0])
+
 
 def test_aggregate_distributions_vincentization_weighted_vs_unweighted():
     mgr = AggregationManager(target_cols=["y"])
@@ -520,6 +545,7 @@ def test_aggregate_distributions_vincentization_weighted_vs_unweighted():
 
     # Weighted: 0.75*0 + 0.25*2 = 0.5
     assert samples_weighted == pytest.approx([0.5, 0.5, 0.5])
+
 
 def test_aggregate_distributions_vincentization_quantiles_correct():
     mgr = AggregationManager(target_cols=["y"])
@@ -587,7 +613,7 @@ def test_aggregate_dispatch_distribution_rejects_aggregation_func():
     mgr.sample_size = n_samples
 
     # Any non-None method should be rejected for distribution predictions
-    with pytest.raises(ValueError, match="Invalid method='mean' for distribution predictions"):
+    with pytest.raises(
+        ValueError, match="Invalid method='mean' for distribution predictions"
+    ):
         mgr.aggregate(method="mean")
-
-
