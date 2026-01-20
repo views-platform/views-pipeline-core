@@ -503,6 +503,26 @@ class ConfigurationManager:
         
         return config
     
+    def get_combined_sweep_config(self) -> Dict:
+        """
+        Get merged configuration from all sources for sweep run.
+        """
+        config = {}
+        if self.partition_dict:
+            config.update(self.partition_dict)
+        if self.config_deployment:
+            config.update(self.config_deployment)
+        if self.config_meta:
+            if "targets" in self.config_meta:
+                if isinstance(self.config_meta["targets"], str):
+                    self.config_meta["targets"] = [self.config_meta["targets"]]
+            config.update(self.config_meta)
+        if self._runtime_config:
+            config.update(self._runtime_config)
+
+        return config
+        
+    
     def add_config(self, config: Dict) -> None:
         """
         Add runtime configuration values.
@@ -810,7 +830,7 @@ class ConfigurationManager:
 
         # Validate configuration
         try:
-            validate_config(self.get_combined_config())
+            validate_config(self.get_combined_sweep_config())
         except Exception as e:
             raise ConfigurationException(
                 f"Sweep configuration validation failed: {e}",

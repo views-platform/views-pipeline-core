@@ -1298,7 +1298,7 @@ class ModelManager:
     @property
     def configs(self) -> Dict:
         """Get combined configuration."""
-        return self._config_manager.get_combined_config()
+        return self._config_manager.get_combined_config() if not self._sweep else self._config_manager.get_combined_sweep_config()
     
     @configs.setter
     def configs(self, config: Dict) -> None:
