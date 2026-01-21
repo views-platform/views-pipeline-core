@@ -594,7 +594,16 @@ class EnsembleManager(ForecastingModelManager):
                 run=self._pred_store_name, name=name
             )
         else:
-            return read_dataframe(file_path)
+            # Get the latest prediction file (shell script generates with new timestamp)
+            prediction_files = model_path._get_generated_predictions_data_file_paths(run_type)
+            if not prediction_files:
+                raise PipelineException(
+                    f"No prediction files found for {model_name} after generation",
+                    wandb_module=self._wandb_module
+                )
+            latest_prediction_file = prediction_files[0]
+            logger.info(f"Loading newly generated prediction from {latest_prediction_file}")
+            return read_dataframe(latest_prediction_file)
 
     def _apply_reconciliation(self, df_prediction: pd.DataFrame) -> pd.DataFrame:
         """
