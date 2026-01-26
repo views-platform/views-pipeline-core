@@ -360,7 +360,7 @@ class EnsembleManager(ForecastingModelManager):
             # dfs.append(self._forecast_model_artifact(model_name))
 
         df_prediction = self._get_aggregated_df(
-            self, df_to_aggregate=model_dfs, aggregation=self.configs["aggregation"]
+            df_to_aggregate=model_dfs, aggregation=self.configs["aggregation"]
         )
         df_prediction = _ViewsDataset(source=df_prediction).dataframe
 
