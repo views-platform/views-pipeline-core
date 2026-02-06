@@ -73,7 +73,9 @@ class ExtractorManager(ModelManager):
 
     def run(self):
         with self._wandb_module.initialize_run(
-            project=f"{self.configs['name']}_save", entity=self._entity, job_type="save"
+            project=f"{self.configs['name']}_save", 
+            config=self.configs,
+            job_type="save"
         ):
             try:
                 self._download()
