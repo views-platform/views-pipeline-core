@@ -43,7 +43,12 @@ from .subset import SubsetModule
 from .tensor import TensorBundle, TensorConverter, TensorModule
 from .mode import ModeModule
 from .statistics import StatisticsModule
-from .metadata import MetadataModule
+from .metadata import (
+    MetadataModule,
+    PriogridMetadata,
+    CountryMetadata,
+    VIEWSER_AVAILABLE,
+)
 from .reconciliation import ReconciliationModule
 from .shape import DistributionLayout
 
@@ -114,6 +119,25 @@ def compute_cache_key(*args, **kwargs) -> str:
     """Compute a stable hash key for caching."""
     key_data = str((args, sorted(kwargs.items())))
     return hashlib.md5(key_data.encode()).hexdigest()[:16]
+
+
+def polars_to_pandas_multiindex(
+    df: pl.DataFrame,
+    index_cols: List[str],
+) -> pd.DataFrame:
+    """Convert Polars DataFrame to Pandas with MultiIndex.
+    
+    Args:
+        df: Polars DataFrame.
+        index_cols: Columns to use as MultiIndex.
+        
+    Returns:
+        Pandas DataFrame with MultiIndex.
+    """
+    pdf = df.to_pandas()
+    pdf.set_index(index_cols, inplace=True)
+    pdf.sort_index(inplace=True)
+    return pdf
 
 
 def get_optimal_workers(max_workers: Optional[int] = None) -> int:
@@ -329,7 +353,8 @@ class SpatioTemporalDataset:
         entity_ids: Optional[Union[int, List[int]]] = None,
         sample_idx: Optional[Union[int, List[int]]] = None,
         features: Optional[Union[str, List[str]]] = None,
-    ) -> pl.DataFrame:
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get filtered subset as DataFrame.
         
         Args:
@@ -337,15 +362,23 @@ class SpatioTemporalDataset:
             entity_ids: Entity IDs to include (None = all).
             sample_idx: Sample indices to include (None = all).
             features: Features to include (None = all).
+            return_pandas: If True, return pandas DataFrame with MultiIndex.
             
         Returns:
-            Filtered Polars DataFrame.
+            Filtered DataFrame (Polars by default, or Pandas with MultiIndex).
         """
-        return self._subset.filter(
+        result = self._subset.filter(
             self.df, self._index,
             time_ids=time_ids, entity_ids=entity_ids,
             sample_idx=sample_idx, features=features,
         )
+        
+        if return_pandas:
+            index_cols = [self.time_col, self.entity_col]
+            if self.sample_col and self.sample_col in result.columns:
+                index_cols.append(self.sample_col)
+            return polars_to_pandas_multiindex(result, index_cols)
+        return result
     
     def get_subset_tensor(
         self,
@@ -469,7 +502,8 @@ class SpatioTemporalDataset:
         features: Optional[Union[str, List[str]]] = None,
         time_ids: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
-    ) -> pl.DataFrame:
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Calculate Highest Density Interval for distributional data.
         
         Args:
@@ -477,6 +511,7 @@ class SpatioTemporalDataset:
             features: Features to compute HDI for.
             time_ids: Filter to specific times.
             entity_ids: Filter to specific entities.
+            return_pandas: If True, return pandas DataFrame with MultiIndex.
             
         Returns:
             DataFrame with HDI bounds.
@@ -508,7 +543,10 @@ class SpatioTemporalDataset:
                         "hdi_upper": upper[t_idx, e_idx],
                     })
         
-        return pl.DataFrame(results)
+        result = pl.DataFrame(results)
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col, self.entity_col])
+        return result
     
     def calculate_map(
         self,
@@ -516,7 +554,8 @@ class SpatioTemporalDataset:
         time_ids: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
         enforce_non_negative: bool = False,
-    ) -> pl.DataFrame:
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Calculate Maximum A Posteriori for distributional data.
         
         Args:
@@ -524,6 +563,7 @@ class SpatioTemporalDataset:
             time_ids: Filter to specific times.
             entity_ids: Filter to specific entities.
             enforce_non_negative: Clip negative values to 0.
+            return_pandas: If True, return pandas DataFrame with MultiIndex.
             
         Returns:
             DataFrame with MAP values.
@@ -554,20 +594,25 @@ class SpatioTemporalDataset:
                         "map_value": map_vals[t_idx, e_idx],
                     })
         
-        return pl.DataFrame(results)
+        result = pl.DataFrame(results)
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col, self.entity_col])
+        return result
     
     def compute_statistics(
         self,
         features: Optional[Union[str, List[str]]] = None,
         time_ids: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
-    ) -> pl.DataFrame:
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Compute comprehensive summary statistics.
         
         Args:
             features: Features to compute stats for.
             time_ids: Filter to specific times.
             entity_ids: Filter to specific entities.
+            return_pandas: If True, return pandas DataFrame with MultiIndex.
             
         Returns:
             DataFrame with summary statistics.
@@ -600,7 +645,10 @@ class SpatioTemporalDataset:
                         record[name] = arr[t_idx, e_idx]
                     results.append(record)
         
-        return pl.DataFrame(results)
+        result = pl.DataFrame(results)
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col, self.entity_col])
+        return result
     
     # -------------------------------------------------------------------------
     # Integrity
@@ -764,7 +812,8 @@ class SpatioTemporalDataset:
 class CountryMonthDataset(SpatioTemporalDataset):
     """Dataset specialized for Country-Month (CM) level data.
     
-    Provides additional date utilities specific to country-level analysis.
+    Provides additional date utilities and metadata accessors specific
+    to country-level analysis. Uses CountryMetadata for metadata operations.
     """
     
     DEFAULT_TIME_COL = "month_id"
@@ -781,6 +830,7 @@ class CountryMonthDataset(SpatioTemporalDataset):
         auto_broadcast: bool = True,
         cache_tensors: bool = True,
         metadata_path: Optional[Union[str, Path]] = None,
+        fetch_metadata: bool = False,
     ):
         """Initialize CountryMonthDataset.
         
@@ -794,6 +844,7 @@ class CountryMonthDataset(SpatioTemporalDataset):
             auto_broadcast: Broadcast scalars to match arrays.
             cache_tensors: Enable tensor caching.
             metadata_path: Path to country metadata file.
+            fetch_metadata: If True, fetch metadata via viewser Queryset.
         """
         super().__init__(
             data=data, time_col=time_col, entity_col=entity_col,
@@ -802,40 +853,132 @@ class CountryMonthDataset(SpatioTemporalDataset):
             cache_tensors=cache_tensors,
         )
         
-        self._metadata: Optional[MetadataModule] = None
+        # Initialize metadata handler
+        self._country_meta = CountryMetadata(time_col=time_col, entity_col=entity_col)
+        
         if metadata_path:
-            self._metadata = MetadataModule(entity_col)
-            self._metadata.load_from_file(metadata_path)
+            self._country_meta.load_from_file(metadata_path)
+        elif fetch_metadata:
+            self._country_meta.fetch()
     
-    def get_year(self) -> pl.DataFrame:
+    # -------------------------------------------------------------------------
+    # Date Utilities
+    # -------------------------------------------------------------------------
+    
+    def get_year(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get year for each time ID."""
         times = self.df[self.time_col].unique().sort()
         years = [month_id_to_date(int(t))[0] for t in times.to_list()]
-        return pl.DataFrame({self.time_col: times, "year": years})
+        result = pl.DataFrame({self.time_col: times, "year": years})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
     
-    def get_month(self) -> pl.DataFrame:
+    def get_month(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get month-of-year for each time ID."""
         times = self.df[self.time_col].unique().sort()
         months = [month_id_to_date(int(t))[1] for t in times.to_list()]
-        return pl.DataFrame({self.time_col: times, "month": months})
+        result = pl.DataFrame({self.time_col: times, "month": months})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
     
-    def get_date(self) -> pl.DataFrame:
-        """Get full date information."""
+    def get_date(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get full date information (year, month, date string)."""
         times = self.df[self.time_col].unique().sort()
         data = []
         for t in times.to_list():
             year, month = month_id_to_date(int(t))
             data.append((t, year, month, f"{year}-{month:02d}-01"))
-        return pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
+        result = pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
     
-    def get_quarter(self) -> pl.DataFrame:
+    def get_quarter(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get quarter for each time ID."""
         times = self.df[self.time_col].unique().sort()
         quarters = [
             (month_id_to_date(int(t))[1] - 1) // 3 + 1 
             for t in times.to_list()
         ]
-        return pl.DataFrame({self.time_col: times, "quarter": quarters})
+        result = pl.DataFrame({self.time_col: times, "quarter": quarters})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
+    
+    # -------------------------------------------------------------------------
+    # Metadata Accessors (delegated to CountryMetadata)
+    # -------------------------------------------------------------------------
+    
+    def get_isoab(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get ISO country code (2-letter)."""
+        return self._country_meta.get_isoab(self.df, return_pandas=return_pandas)
+    
+    def get_name(
+        self,
+        with_id: bool = False,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get country names."""
+        return self._country_meta.get_name(self.df, with_id=with_id, return_pandas=return_pandas)
+    
+    def get_gwcode(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get Gleditsch-Ward country code."""
+        return self._country_meta.get_gwcode(self.df, return_pandas=return_pandas)
+    
+    def get_isonum(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get ISO numeric country code."""
+        return self._country_meta.get_isonum(self.df, return_pandas=return_pandas)
+    
+    def get_capname(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get capital city name."""
+        return self._country_meta.get_capname(self.df, return_pandas=return_pandas)
+    
+    def get_cap_lat_lon(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get capital city coordinates."""
+        return self._country_meta.get_cap_lat_lon(self.df, return_pandas=return_pandas)
+    
+    def get_region(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get region information (in_africa, in_me flags)."""
+        return self._country_meta.get_region(self.df, return_pandas=return_pandas)
+    
+    def get_region_name(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get region classification based on GW codes."""
+        return self._country_meta.get_region_name(self.df, return_pandas=return_pandas)
 
 
 # =============================================================================
@@ -846,7 +989,7 @@ class PriogridMonthDataset(SpatioTemporalDataset):
     """Dataset specialized for Priogrid-Month (PGM) level data.
     
     Includes hierarchical reconciliation capabilities for grid-to-country
-    consistency.
+    consistency. Uses PriogridMetadata for metadata operations.
     """
     
     DEFAULT_TIME_COL = "month_id"
@@ -864,6 +1007,7 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         cache_tensors: bool = True,
         country_mapping: Optional[Union[str, Path, pl.DataFrame]] = None,
         metadata_path: Optional[Union[str, Path]] = None,
+        fetch_metadata: bool = False,
     ):
         """Initialize PriogridMonthDataset.
         
@@ -878,6 +1022,7 @@ class PriogridMonthDataset(SpatioTemporalDataset):
             cache_tensors: Enable tensor caching.
             country_mapping: Grid-to-country mapping (file or DataFrame).
             metadata_path: Path to grid metadata file.
+            fetch_metadata: If True, fetch metadata via viewser Queryset.
         """
         super().__init__(
             data=data, time_col=time_col, entity_col=entity_col,
@@ -886,16 +1031,18 @@ class PriogridMonthDataset(SpatioTemporalDataset):
             cache_tensors=cache_tensors,
         )
         
+        # Initialize metadata handler
+        self._pg_meta = PriogridMetadata(time_col=time_col, entity_col=entity_col)
+        
         self._metadata: Optional[MetadataModule] = None
         self._reconciler: Optional[ReconciliationModule] = None
         
         if country_mapping is not None:
             self._load_country_mapping(country_mapping)
-        elif metadata_path is not None:
-            self._metadata = MetadataModule(entity_col)
-            self._metadata.load_from_file(metadata_path)
-            if self._metadata._country_to_entities:
-                self._reconciler = ReconciliationModule(self._metadata)
+        elif metadata_path:
+            self._pg_meta.load_from_file(metadata_path)
+        elif fetch_metadata:
+            self._pg_meta.fetch()
     
     def _load_country_mapping(
         self,
@@ -931,77 +1078,145 @@ class PriogridMonthDataset(SpatioTemporalDataset):
             f"Country mapping loaded: {len(self._metadata._entity_to_country)} grids"
         )
     
-    # Date utilities
-    def get_year(self) -> pl.DataFrame:
+    # -------------------------------------------------------------------------
+    # Date Utilities
+    # -------------------------------------------------------------------------
+    
+    def get_year(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get year for each time ID."""
         times = self.df[self.time_col].unique().sort()
         years = [month_id_to_date(int(t))[0] for t in times.to_list()]
-        return pl.DataFrame({self.time_col: times, "year": years})
+        result = pl.DataFrame({self.time_col: times, "year": years})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
     
-    def get_month(self) -> pl.DataFrame:
+    def get_month(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get month-of-year for each time ID."""
         times = self.df[self.time_col].unique().sort()
         months = [month_id_to_date(int(t))[1] for t in times.to_list()]
-        return pl.DataFrame({self.time_col: times, "month": months})
+        result = pl.DataFrame({self.time_col: times, "month": months})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
     
-    def get_date(self) -> pl.DataFrame:
-        """Get full date information."""
+    def get_date(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get full date information (year, month, date string)."""
         times = self.df[self.time_col].unique().sort()
         data = []
         for t in times.to_list():
             year, month = month_id_to_date(int(t))
             data.append((t, year, month, f"{year}-{month:02d}-01"))
-        return pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
+        result = pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
     
-    # Metadata accessors
-    def get_lat_lon(self) -> pl.DataFrame:
+    # -------------------------------------------------------------------------
+    # Metadata Accessors (delegated to PriogridMetadata)
+    # -------------------------------------------------------------------------
+    
+    def get_lat_lon(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get geographic coordinates for grids."""
-        if self._metadata is None:
-            raise MetadataError("Metadata not loaded.")
-        entity_ids = self.df[self.entity_col].unique().to_list()
-        return self._metadata.get_coordinates(entity_ids)
+        return self._pg_meta.get_lat_lon(self.df, return_pandas=return_pandas)
     
-    def get_country_id(self) -> pl.DataFrame:
+    def get_row_col(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get row and column indices for each priogrid."""
+        return self._pg_meta.get_row_col(self.df, return_pandas=return_pandas)
+    
+    def get_country_id(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get country ID for each grid."""
-        if self._metadata is None or self._metadata._entity_to_country is None:
-            raise MetadataError("Country mapping not loaded.")
-        
-        entity_ids = self.df[self.entity_col].unique().to_list()
-        records = [
-            {self.entity_col: eid, "country_id": self._metadata._entity_to_country.get(eid)}
-            for eid in entity_ids if eid in self._metadata._entity_to_country
-        ]
-        return pl.DataFrame(records)
+        return self._pg_meta.get_country_id(self.df, return_pandas=return_pandas)
     
-    # Country-based operations
+    def get_isoab(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get ISO code for the country of each priogrid."""
+        return self._pg_meta.get_isoab(self.df, return_pandas=return_pandas)
+    
+    def get_name(
+        self,
+        with_id: bool = False,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get country names for each priogrid."""
+        return self._pg_meta.get_name(self.df, with_id=with_id, return_pandas=return_pandas)
+    
+    def get_gwcode(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get Gleditsch-Ward country code for each priogrid."""
+        return self._pg_meta.get_gwcode(self.df, return_pandas=return_pandas)
+    
+    def get_region(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get region classification based on GW codes."""
+        return self._pg_meta.get_region(self.df, return_pandas=return_pandas)
+    
+    # -------------------------------------------------------------------------
+    # Country-based Operations
+    # -------------------------------------------------------------------------
+    
     def get_subset_by_country_id(
         self,
         country_ids: Union[int, List[int]],
         time_ids: Optional[Union[int, List[int]]] = None,
         sample_idx: Optional[Union[int, List[int]]] = None,
         features: Optional[Union[str, List[str]]] = None,
-    ) -> pl.DataFrame:
-        """Filter dataset to grids belonging to specified countries."""
-        if self._metadata is None:
-            raise ReconciliationError("Country mapping not loaded.")
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Filter dataset to grids belonging to specified countries.
         
-        if isinstance(country_ids, int):
-            country_ids = [country_ids]
-        
-        target_grids = []
-        for cid in country_ids:
-            target_grids.extend(self._metadata.get_entities_for_country(cid))
+        Args:
+            country_ids: Country IDs to include.
+            time_ids: Time IDs to include.
+            sample_idx: Sample indices to include.
+            features: Features to include.
+            return_pandas: If True, return pandas DataFrame with MultiIndex.
+            
+        Returns:
+            Filtered DataFrame.
+        """
+        target_grids = self._pg_meta.get_grids_for_countries(country_ids)
         
         if not target_grids:
             self._logger.warning(f"No grids found for countries: {country_ids}")
+            if return_pandas:
+                return pd.DataFrame()
             return pl.DataFrame()
         
         return self.get_subset_dataframe(
             time_ids=time_ids, entity_ids=target_grids,
             sample_idx=sample_idx, features=features,
+            return_pandas=return_pandas,
         )
     
+    # -------------------------------------------------------------------------
     # Reconciliation
+    # -------------------------------------------------------------------------
+    
     def get_reconciliation_tensor(
         self,
         feature: str,
@@ -1125,8 +1340,10 @@ __all__ = [
     "compute_cache_key",
     "get_optimal_workers",
     "detect_device",
+    "polars_to_pandas_multiindex",
     # Constants
     "BASE_YEAR",
     "MONTHS_PER_YEAR",
     "TORCH_AVAILABLE",
+    "VIEWSER_AVAILABLE",
 ]

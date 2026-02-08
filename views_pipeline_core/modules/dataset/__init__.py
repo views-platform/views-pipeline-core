@@ -68,7 +68,7 @@ from .tensor import (
 )
 from .mode import ModeModule
 from .statistics import StatisticsModule, ZERO_MASS_THRESHOLD
-from .metadata import MetadataModule
+from .metadata import MetadataModule, PriogridMetadata, CountryMetadata, VIEWSER_AVAILABLE
 from .reconciliation import ReconciliationModule
 
 # Core dataset classes
@@ -114,6 +114,9 @@ __all__ = [
     "StatisticsModule",
     "ZERO_MASS_THRESHOLD",
     "MetadataModule",
+    "PriogridMetadata",
+    "CountryMetadata",
+    "VIEWSER_AVAILABLE",
     "ReconciliationModule",
     # Dataset classes
     "SpatioTemporalDataset",

@@ -30,41 +30,62 @@ class SubsetModule:
         self,
         df: pl.DataFrame,
         index_mgr: "IndexModule",
-        entity_ids: Optional[Sequence[int]] = None,
-        time_range: Optional[tuple[int, int]] = None,
-        sample_ids: Optional[Sequence[int]] = None,
+        time_ids: Optional[Union[int, Sequence[int]]] = None,
+        entity_ids: Optional[Union[int, Sequence[int]]] = None,
+        sample_idx: Optional[Union[int, Sequence[int]]] = None,
+        features: Optional[Union[str, List[str]]] = None,
     ) -> pl.DataFrame:
-        """Filter DataFrame by entity IDs, time range, and/or sample IDs.
+        """Filter DataFrame by time IDs, entity IDs, samples, and features.
         
         Args:
             df: DataFrame to filter.
             index_mgr: Index configuration.
+            time_ids: Time IDs to include (None = all).
             entity_ids: Entity IDs to include (None = all).
-            time_range: (start, end) inclusive range (None = all).
-            sample_ids: Sample IDs to include (None = all).
+            sample_idx: Sample indices to include (None = all).
+            features: Feature columns to include (None = all).
             
         Returns:
             Filtered DataFrame.
         """
-        mask = pl.lit(True)
+        result = df
         
+        # Filter by time IDs
+        if time_ids is not None:
+            if isinstance(time_ids, int):
+                time_ids = [time_ids]
+            time_list = self._cast_ids(time_ids)
+            result = result.filter(pl.col(index_mgr.time_col).is_in(time_list))
+            self._logger.debug(f"Filtering to {len(time_list)} time IDs")
+        
+        # Filter by entity IDs
         if entity_ids is not None:
+            if isinstance(entity_ids, int):
+                entity_ids = [entity_ids]
             entity_list = self._cast_ids(entity_ids)
-            mask = mask & pl.col(index_mgr.entity_col).is_in(entity_list)
+            result = result.filter(pl.col(index_mgr.entity_col).is_in(entity_list))
             self._logger.debug(f"Filtering to {len(entity_list)} entities")
         
-        if time_range is not None:
-            start, end = time_range
-            mask = mask & (pl.col(index_mgr.time_col) >= start)
-            mask = mask & (pl.col(index_mgr.time_col) <= end)
-            self._logger.debug(f"Filtering to time range [{start}, {end}]")
+        # Filter by sample indices
+        if sample_idx is not None and index_mgr.sample_col is not None:
+            if isinstance(sample_idx, int):
+                sample_idx = [sample_idx]
+            sample_list = self._cast_ids(sample_idx)
+            if index_mgr.sample_col in result.columns:
+                result = result.filter(pl.col(index_mgr.sample_col).is_in(sample_list))
+                self._logger.debug(f"Filtering to {len(sample_list)} samples")
         
-        if sample_ids is not None and index_mgr.sample_col is not None:
-            sample_list = self._cast_ids(sample_ids)
-            mask = mask & pl.col(index_mgr.sample_col).is_in(sample_list)
-            self._logger.debug(f"Filtering to {len(sample_list)} samples")
+        # Select feature columns
+        if features is not None:
+            if isinstance(features, str):
+                features = [features]
+            select_cols = [index_mgr.time_col, index_mgr.entity_col]
+            if index_mgr.sample_col and index_mgr.sample_col in result.columns:
+                select_cols.append(index_mgr.sample_col)
+            select_cols.extend([f for f in features if f in result.columns])
+            result = result.select(select_cols)
+            self._logger.debug(f"Selecting {len(features)} feature columns")
         
-        result = df.filter(mask)
         self._logger.info(f"Filtered: {len(df):,} → {len(result):,} rows")
         return result
     
