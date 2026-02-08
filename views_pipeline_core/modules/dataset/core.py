@@ -506,6 +506,9 @@ class SpatioTemporalDataset:
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Calculate Highest Density Interval for distributional data.
         
+        Matches the old dataset format with columns named {feature}_hdi_lower
+        and {feature}_hdi_upper, with a MultiIndex of (time_col, entity_col).
+        
         Args:
             alpha: Credible mass (e.g., 0.9 for 90% HDI).
             features: Features to compute HDI for.
@@ -514,17 +517,24 @@ class SpatioTemporalDataset:
             return_pandas: If True, return pandas DataFrame with MultiIndex.
             
         Returns:
-            DataFrame with HDI bounds.
+            DataFrame with HDI bounds. Columns are {feature}_hdi_lower and
+            {feature}_hdi_upper for each feature.
         """
         features = features or self.get_pred_vars() or self.get_all_data_cols()
         if isinstance(features, str):
             features = [features]
         
-        results = []
         times, entities, _ = self._index.get_unique_values(
             self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
         )
         
+        # Build base index DataFrame
+        index_df = pl.DataFrame({
+            self.time_col: [t for t in times for _ in entities],
+            self.entity_col: [e for _ in times for e in entities],
+        })
+        
+        hdi_columns = {}
         for feature in features:
             tensor = self.get_subset_tensor(time_ids, entity_ids, features=[feature])
             if tensor.size == 0:
@@ -533,19 +543,19 @@ class SpatioTemporalDataset:
             data = tensor.squeeze(axis=-1)
             lower, upper = self._stats.calculate_hdi(data, alpha)
             
-            for t_idx, t in enumerate(times):
-                for e_idx, e in enumerate(entities):
-                    results.append({
-                        self.time_col: t,
-                        self.entity_col: e,
-                        "feature": feature,
-                        "hdi_lower": lower[t_idx, e_idx],
-                        "hdi_upper": upper[t_idx, e_idx],
-                    })
+            # Flatten in row-major order (time, entity)
+            hdi_columns[f"{feature}_hdi_lower"] = lower.flatten()
+            hdi_columns[f"{feature}_hdi_upper"] = upper.flatten()
         
-        result = pl.DataFrame(results)
+        result = index_df.with_columns([
+            pl.Series(name=col_name, values=values)
+            for col_name, values in hdi_columns.items()
+        ])
+        
         if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col, self.entity_col])
+            pdf = result.to_pandas()
+            pdf = pdf.set_index([self.time_col, self.entity_col])
+            return pdf
         return result
     
     def calculate_map(
@@ -558,6 +568,9 @@ class SpatioTemporalDataset:
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Calculate Maximum A Posteriori for distributional data.
         
+        Matches the old dataset format with columns named {feature}_map,
+        with a MultiIndex of (time_col, entity_col).
+        
         Args:
             features: Features to compute MAP for.
             time_ids: Filter to specific times.
@@ -566,17 +579,23 @@ class SpatioTemporalDataset:
             return_pandas: If True, return pandas DataFrame with MultiIndex.
             
         Returns:
-            DataFrame with MAP values.
+            DataFrame with MAP values. Columns are {feature}_map for each feature.
         """
         features = features or self.get_pred_vars() or self.get_all_data_cols()
         if isinstance(features, str):
             features = [features]
         
-        results = []
         times, entities, _ = self._index.get_unique_values(
             self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
         )
         
+        # Build base index DataFrame
+        index_df = pl.DataFrame({
+            self.time_col: [t for t in times for _ in entities],
+            self.entity_col: [e for _ in times for e in entities],
+        })
+        
+        map_columns = {}
         for feature in features:
             tensor = self.get_subset_tensor(time_ids, entity_ids, features=[feature])
             if tensor.size == 0:
@@ -585,18 +604,88 @@ class SpatioTemporalDataset:
             data = tensor.squeeze(axis=-1)
             map_vals = self._stats.calculate_map(data, enforce_non_negative)
             
-            for t_idx, t in enumerate(times):
-                for e_idx, e in enumerate(entities):
-                    results.append({
-                        self.time_col: t,
-                        self.entity_col: e,
-                        "feature": feature,
-                        "map_value": map_vals[t_idx, e_idx],
-                    })
+            # Flatten in row-major order (time, entity)
+            map_columns[f"{feature}_map"] = map_vals.flatten()
         
-        result = pl.DataFrame(results)
+        result = index_df.with_columns([
+            pl.Series(name=col_name, values=values)
+            for col_name, values in map_columns.items()
+        ])
+        
         if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col, self.entity_col])
+            pdf = result.to_pandas()
+            pdf = pdf.set_index([self.time_col, self.entity_col])
+            return pdf
+        return result
+    
+    def calculate_hdi_map(
+        self,
+        alpha: float = 0.9,
+        features: Optional[Union[str, List[str]]] = None,
+        time_ids: Optional[Union[int, List[int]]] = None,
+        entity_ids: Optional[Union[int, List[int]]] = None,
+        enforce_non_negative: bool = False,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Calculate HDI and MAP in a single efficient pass.
+        
+        This is more efficient than calling calculate_hdi and calculate_map
+        separately as it processes each cell once. Uses multithreading for
+        large datasets.
+        
+        Matches the old dataset format with columns named {feature}_hdi_lower,
+        {feature}_hdi_upper, and {feature}_map.
+        
+        Args:
+            alpha: Credible mass (e.g., 0.9 for 90% HDI).
+            features: Features to compute for.
+            time_ids: Filter to specific times.
+            entity_ids: Filter to specific entities.
+            enforce_non_negative: Clip negative MAP values to 0.
+            return_pandas: If True, return pandas DataFrame with MultiIndex.
+            
+        Returns:
+            DataFrame with HDI bounds and MAP values.
+        """
+        features = features or self.get_pred_vars() or self.get_all_data_cols()
+        if isinstance(features, str):
+            features = [features]
+        
+        times, entities, _ = self._index.get_unique_values(
+            self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
+        )
+        
+        # Build base index DataFrame
+        index_df = pl.DataFrame({
+            self.time_col: [t for t in times for _ in entities],
+            self.entity_col: [e for _ in times for e in entities],
+        })
+        
+        all_columns = {}
+        for feature in features:
+            tensor = self.get_subset_tensor(time_ids, entity_ids, features=[feature])
+            if tensor.size == 0:
+                continue
+            
+            data = tensor.squeeze(axis=-1)
+            lower, upper, map_vals = self._stats.calculate_hdi_map(
+                data, alpha, enforce_non_negative
+            )
+            
+            # Flatten in row-major order (time, entity)
+            all_columns[f"{feature}_hdi_lower"] = lower.flatten()
+            all_columns[f"{feature}_hdi_upper"] = upper.flatten()
+            all_columns[f"{feature}_map"] = map_vals.flatten()
+        
+        result = index_df.with_columns([
+            pl.Series(name=col_name, values=values)
+            for col_name, values in all_columns.items()
+        ])
+        
+        if return_pandas:
+            pdf = result.to_pandas()
+            pdf = pdf.set_index([self.time_col, self.entity_col])
+            return pdf
         return result
     
     def compute_statistics(
@@ -608,6 +697,9 @@ class SpatioTemporalDataset:
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Compute comprehensive summary statistics.
         
+        Matches the old dataset format with columns named {feature}_{metric}
+        and a MultiIndex of (time_col, entity_col) when returning pandas.
+        
         Args:
             features: Features to compute stats for.
             time_ids: Filter to specific times.
@@ -615,17 +707,24 @@ class SpatioTemporalDataset:
             return_pandas: If True, return pandas DataFrame with MultiIndex.
             
         Returns:
-            DataFrame with summary statistics.
+            DataFrame with summary statistics. Columns are named {feature}_{metric}
+            where metric is one of: mean, std, q05, q25, q50, q75, q95, q98, q100.
         """
         features = features or self.get_all_data_cols()
         if isinstance(features, str):
             features = [features]
         
-        results = []
         times, entities, _ = self._index.get_unique_values(
             self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
         )
         
+        # Build base index DataFrame
+        index_df = pl.DataFrame({
+            self.time_col: [t for t in times for _ in entities],
+            self.entity_col: [e for _ in times for e in entities],
+        })
+        
+        stat_columns = {}
         for feature in features:
             tensor = self.get_subset_tensor(time_ids, entity_ids, features=[feature])
             if tensor.size == 0:
@@ -634,20 +733,29 @@ class SpatioTemporalDataset:
             data = tensor.squeeze(axis=-1)
             stats = self._stats.compute_summary_statistics(data)
             
-            for t_idx, t in enumerate(times):
-                for e_idx, e in enumerate(entities):
-                    record = {
-                        self.time_col: t,
-                        self.entity_col: e,
-                        "feature": feature,
-                    }
-                    for name, arr in stats.items():
-                        record[name] = arr[t_idx, e_idx]
-                    results.append(record)
+            # Flatten each metric in row-major order (time, entity)
+            for metric_name, metric_arr in stats.items():
+                stat_columns[f"{feature}_{metric_name}"] = metric_arr.flatten()
         
-        result = pl.DataFrame(results)
+        if not stat_columns:
+            # Return empty DataFrame with proper structure
+            if return_pandas:
+                empty_df = pd.DataFrame()
+                empty_df.index = pd.MultiIndex.from_tuples(
+                    [], names=[self.time_col, self.entity_col]
+                )
+                return empty_df
+            return index_df.head(0)
+        
+        result = index_df.with_columns([
+            pl.Series(name=col_name, values=values)
+            for col_name, values in stat_columns.items()
+        ])
+        
         if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col, self.entity_col])
+            pdf = result.to_pandas()
+            pdf = pdf.set_index([self.time_col, self.entity_col])
+            return pdf
         return result
     
     # -------------------------------------------------------------------------

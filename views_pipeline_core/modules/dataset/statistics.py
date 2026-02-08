@@ -228,9 +228,11 @@ class StatisticsModule:
     def compute_summary_statistics(
         self,
         samples: np.ndarray,
-        quantiles: Tuple[float, ...] = (0.05, 0.25, 0.5, 0.75, 0.95),
+        quantiles: Tuple[float, ...] = (0.05, 0.25, 0.5, 0.75, 0.95, 0.98, 1.0),
     ) -> Dict[str, np.ndarray]:
         """Compute comprehensive summary statistics.
+        
+        Matches the old dataset format with: mean, std, q05, q25, q50, q75, q95, q98, q100.
         
         Args:
             samples: Array with samples in last dimension.
@@ -238,13 +240,11 @@ class StatisticsModule:
             
         Returns:
             Dictionary with statistic names mapped to arrays.
+            Keys: mean, std, q05, q25, q50, q75, q95, q98, q100.
         """
         stats = {
             "mean": np.nanmean(samples, axis=-1),
             "std": np.nanstd(samples, axis=-1),
-            "min": np.nanmin(samples, axis=-1),
-            "max": np.nanmax(samples, axis=-1),
-            "median": np.nanmedian(samples, axis=-1),
         }
         
         for q in quantiles:
