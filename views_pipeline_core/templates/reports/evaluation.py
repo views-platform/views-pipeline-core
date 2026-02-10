@@ -69,8 +69,20 @@ class EvaluationReportTemplate:
         evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
         conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
-        priority_metrics = ["MSLE", "MSE", "y_hat_bar"]
-        metrics = list(set(metadata_dict.get("metrics", [])).intersection(priority_metrics))
+        
+        # Combine all metrics from explicit keys and legacy keys for prioritization
+        all_available_metrics = list(set(
+            metadata_dict.get("regression_metrics", []) + 
+            metadata_dict.get("classification_metrics", []) + 
+            metadata_dict.get("metrics", [])
+        ))
+        
+        priority_metrics = ["MSLE", "MSE", "y_hat_bar", "AP", "AUC", "Brier", "accuracy", "f1"]
+        metrics = [m for m in priority_metrics if any(am.lower() == m.lower() for am in all_available_metrics)]
+        
+        # If no priority metrics found, use all available
+        if not metrics:
+            metrics = all_available_metrics
 
         report_manager = ReportModule()
         report_manager.add_heading(

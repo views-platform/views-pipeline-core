@@ -2684,14 +2684,14 @@ class ForecastingModelManager(ModelManager):
         
         Note:
             - Loads actual values from viewser data
-            - Processes each target separately
+            - Processes each task type separately (regression/classification)
             - Groups metrics by conflict type
+            - Enforces scalar predictions for point metrics
         """
         import pandas as pd
+        import numpy as np
         from views_evaluation.evaluation.evaluation_manager import EvaluationManager
         from views_pipeline_core.files.utils import read_dataframe
-
-        evaluation_manager = EvaluationManager(self.configs["metrics"])
 
         if not ensemble:
             df_path = self._model_path._get_raw_data_file_paths(
@@ -2708,35 +2708,95 @@ class ForecastingModelManager(ModelManager):
         logger.info(f"df_viewser read from {df_path}")
         df_actual = df_viewser[self.configs["targets"]]
 
-        for target in self.configs["targets"]:
-            logger.info(f"Calculating evaluation metrics for {target}")
-            conflict_type = ForecastingModelManager._get_conflict_type(target)
+        # Task definitions for explicit dispatch
+        tasks = {
+            "regression": {
+                "targets": self.configs.get("regression_targets", []),
+                "metrics": self.configs.get("regression_metrics", [])
+            },
+            "classification": {
+                "targets": self.configs.get("classification_targets", []),
+                "metrics": self.configs.get("classification_metrics", [])
+            }
+        }
 
-            eval_result_dict = evaluation_manager.evaluate(
-                df_actual, df_predictions, target, self.configs
-            )
+        for task_type, task_config in tasks.items():
+            targets = task_config["targets"]
+            metrics = task_config["metrics"]
 
-            step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
-            time_series_wise_evaluation, df_time_series_wise_evaluation = (
-                eval_result_dict["time_series"]
-            )
-            month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
+            if not targets:
+                continue
 
-            self._wandb_module.log_evaluation_results(
-                step_wise_evaluation,
-                month_wise_evaluation,
-                time_series_wise_evaluation,
-                conflict_type,
-            )
+            logger.info(f"Processing {task_type} tasks for evaluation...")
+            evaluation_manager = EvaluationManager(metrics)
 
-            if not self.configs["sweep"]:
-                self._save_evaluations(
-                    df_step_wise_evaluation,
-                    df_time_series_wise_evaluation,
-                    df_month_wise_evaluation,
-                    self._model_path.data_generated,
+            for target in targets:
+                logger.info(f"Calculating {task_type} evaluation metrics for {target}")
+                
+                # Distribution Check (Scalar Gate)
+                # We check the first prediction sequence/dataframe
+                first_df = df_predictions[0] if isinstance(df_predictions, list) else df_predictions
+                if target in first_df.columns:
+                    # In some pipelines columns might be prefixed with 'pred_'
+                    pred_col = target
+                elif f"pred_{target}" in first_df.columns:
+                    pred_col = f"pred_{target}"
+                else:
+                    logger.warning(f"Target {target} not found in prediction columns. Skipping.")
+                    continue
+
+                # Inspect first non-null element for distribution check
+                sample_val = first_df[pred_col].dropna().iloc[0] if not first_df[pred_col].dropna().empty else 0
+                
+                is_distribution = isinstance(sample_val, (list, np.ndarray, pd.Series)) and len(sample_val) > 1
+                
+                # Check if metrics requested are point metrics (this is a simple heuristic for now)
+                # Point metrics usually can't handle distributions directly without reduction
+                point_metrics = {"MSE", "MSLE", "MAE", "RMSLE", "AP", "AUC", "Brier", "accuracy", "precision", "recall", "f1"}
+                requested_point_metrics = set(m.lower() for m in metrics).intersection(set(pm.lower() for pm in point_metrics))
+
+                if is_distribution and requested_point_metrics:
+                    error_msg = (
+                        f"Target '{target}' produces a distribution (length {len(sample_val)}), "
+                        f"but point metrics {requested_point_metrics} were requested. "
+                        "Please reduce the distribution to a point estimate (e.g., mean or median) "
+                        "before applying these metrics, or use probabilistic metrics."
+                    )
+                    logger.error(error_msg)
+                    raise TypeError(error_msg)
+
+                conflict_type = ForecastingModelManager._get_conflict_type(target)
+
+                # Call evaluation manager with task-specific metrics
+                # We pass a temporary config with only the relevant metrics
+                task_specific_config = self.configs.copy()
+                task_specific_config["metrics"] = metrics
+
+                eval_result_dict = evaluation_manager.evaluate(
+                    df_actual, df_predictions, target, task_specific_config
+                )
+
+                step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
+                time_series_wise_evaluation, df_time_series_wise_evaluation = (
+                    eval_result_dict["time_series"]
+                )
+                month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
+
+                self._wandb_module.log_evaluation_results(
+                    step_wise_evaluation,
+                    month_wise_evaluation,
+                    time_series_wise_evaluation,
                     conflict_type,
                 )
+
+                if not self.configs["sweep"]:
+                    self._save_evaluations(
+                        df_step_wise_evaluation,
+                        df_time_series_wise_evaluation,
+                        df_month_wise_evaluation,
+                        self._model_path.data_generated,
+                        conflict_type,
+                    )
 
         import wandb
 

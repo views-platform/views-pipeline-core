@@ -494,13 +494,35 @@ class ConfigurationManager:
         if self.config_deployment:
             config.update(self.config_deployment)
         if self.config_meta:
-            if "targets" in self.config_meta:
-                if isinstance(self.config_meta["targets"], str):
-                    self.config_meta["targets"] = [self.config_meta["targets"]]
             config.update(self.config_meta)
         if self._runtime_config:
             config.update(self._runtime_config)
         
+        # Internal normalization for runtime consistency
+        # This mirrors the logic in validate_config but ensures it's always available
+        if "targets" in config:
+            if "regression_targets" not in config:
+                config["regression_targets"] = config["targets"]
+        
+        if "metrics" in config:
+            if "regression_metrics" not in config:
+                config["regression_metrics"] = config["metrics"]
+
+        # Normalize all to lists
+        for key in ["regression_targets", "classification_targets", "regression_metrics", "classification_metrics"]:
+            val = config.get(key, [])
+            if isinstance(val, str):
+                config[key] = [val]
+            elif val is None:
+                config[key] = []
+            elif not isinstance(val, list):
+                config[key] = list(val) if hasattr(val, "__iter__") else [val]
+
+        # Sync back to unified 'targets' for backward compatibility
+        all_targets = list(set(config.get("regression_targets", []) + config.get("classification_targets", [])))
+        if all_targets:
+            config["targets"] = all_targets
+
         return config
     
     def get_combined_sweep_config(self) -> Dict:
@@ -513,12 +535,33 @@ class ConfigurationManager:
         if self.config_deployment:
             config.update(self.config_deployment)
         if self.config_meta:
-            if "targets" in self.config_meta:
-                if isinstance(self.config_meta["targets"], str):
-                    self.config_meta["targets"] = [self.config_meta["targets"]]
             config.update(self.config_meta)
         if self._runtime_config:
             config.update(self._runtime_config)
+
+        # Internal normalization for runtime consistency
+        if "targets" in config:
+            if "regression_targets" not in config:
+                config["regression_targets"] = config["targets"]
+        
+        if "metrics" in config:
+            if "regression_metrics" not in config:
+                config["regression_metrics"] = config["metrics"]
+
+        # Normalize all to lists
+        for key in ["regression_targets", "classification_targets", "regression_metrics", "classification_metrics"]:
+            val = config.get(key, [])
+            if isinstance(val, str):
+                config[key] = [val]
+            elif val is None:
+                config[key] = []
+            elif not isinstance(val, list):
+                config[key] = list(val) if hasattr(val, "__iter__") else [val]
+
+        # Sync back to unified 'targets'
+        all_targets = list(set(config.get("regression_targets", []) + config.get("classification_targets", [])))
+        if all_targets:
+            config["targets"] = all_targets
 
         return config
         
