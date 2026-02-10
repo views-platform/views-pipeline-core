@@ -2189,6 +2189,7 @@ class ForecastingModelManager(ModelManager):
             - Uses wandb.config for hyperparameters
             - Validation always performed during sweeps
         """
+        import gc
         import wandb
 
         with self._wandb_module.initialize_run(
@@ -2236,6 +2237,15 @@ class ForecastingModelManager(ModelManager):
                     raise PipelineException("No evaluation metrics specified in config_meta.py")
             finally:
                 self._wandb_module.finish_run()
+                # Clean up resources to avoid file descriptor exhaustion in sweeps
+                del model
+                gc.collect()
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except ImportError:
+                    pass
 
     def _execute_forecast_reporting(self) -> None:
         """
