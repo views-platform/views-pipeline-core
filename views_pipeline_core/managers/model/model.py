@@ -2776,11 +2776,31 @@ class ForecastingModelManager(ModelManager):
                     df_actual, df_predictions, target, task_specific_config
                 )
 
-                step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
-                time_series_wise_evaluation, df_time_series_wise_evaluation = (
-                    eval_result_dict["time_series"]
-                )
-                month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
+                # Initialize local variables to avoid UnboundLocalError
+                step_wise_evaluation, df_step_wise_evaluation = ({}, pd.DataFrame())
+                time_series_wise_evaluation, df_time_series_wise_evaluation = ({}, pd.DataFrame())
+                month_wise_evaluation, df_month_wise_evaluation = ({}, pd.DataFrame())
+
+                # Safety check: Ensure all expected keys are present and have enough values to unpack
+                for eval_key in ["step", "time_series", "month"]:
+                    try:
+                        # Attempt to retrieve the 2-tuple (metrics_dict, dataframe)
+                        res = eval_result_dict[eval_key]
+                        
+                        # Type and length check
+                        if not isinstance(res, (list, tuple)) or len(res) < 2:
+                            raise ValueError(f"Expected 2-tuple, got {type(res)} with length {len(res) if hasattr(res, '__len__') else 'N/A'}")
+
+                        # Unpack into local variables
+                        if eval_key == "step":
+                            step_wise_evaluation, df_step_wise_evaluation = res
+                        elif eval_key == "time_series":
+                            time_series_wise_evaluation, df_time_series_wise_evaluation = res
+                        elif eval_key == "month":
+                            month_wise_evaluation, df_month_wise_evaluation = res
+                            
+                    except (KeyError, TypeError, ValueError, IndexError) as e:
+                        logger.warning(f"Evaluation for {target} returned invalid data for '{eval_key}': {e}. Skipping WandB/File logging for this component.")
 
                 self._wandb_module.log_evaluation_results(
                     step_wise_evaluation,

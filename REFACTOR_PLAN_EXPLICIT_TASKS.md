@@ -20,20 +20,17 @@ To support existing models, the legacy keys will be mapped internally as follows
 - `targets` $ightarrow$ `regression_targets`
 - `metrics` $ightarrow$ `regression_metrics`
 
-## 3. Phase 1: Validation & Legacy Warning
+## 3. Phase 1: Validation & Mutual Exclusivity
 **Location**: `views_pipeline_core/modules/validation/model/check.py`
 
-- **Legacy Detection**: If `targets` or `metrics` are found in the config, the system will trigger a high-visibility ANSI-colored terminal warning.
-- **Normalization**: The `validate_config` function will normalize all inputs into a structured internal dictionary:
-  ```python
-  {
-      "tasks": {
-          "regression": {"targets": [...], "metrics": [...]},
-          "classification": {"targets": [...], "metrics": [...]}
-      }
-  }
-  ```
-- **Blocking Logic**: If a user attempts to use classification targets through the legacy `targets` key, the pipeline will log an error explaining that classification now requires explicit keys.
+- **Strict Gating**: The system will define two mutually exclusive sets of keys:
+  - **Legacy Set**: `{"targets", "metrics"}`
+  - **New Set**: `{"regression_targets", "regression_metrics", "classification_targets", "classification_metrics"}`
+- **The Conflict Rule**: If ANY key from the **New Set** is present, NO keys from the **Legacy Set** are allowed. Mixing these results in an immediate **terminal ValueError**.
+- **Legacy Mapping**: If ONLY the **Legacy Set** is present:
+  - The system triggers the high-visibility ANSI warning.
+  - The system internally maps `targets` $\rightarrow$ `regression_targets` and `metrics` $\rightarrow$ `regression_metrics` to maintain backward compatibility.
+- **New Approach Requirement**: Under the new approach, a model can have just one part (e.g., only regression) or both, but it MUST use the explicit keys for that part. It is forbidden to use `targets` (implicit regression) alongside `classification_targets`.
 
 ## 4. Phase 2: Evaluation Loop Refactoring
 **Location**: `views_pipeline_core/managers/model/model.py`

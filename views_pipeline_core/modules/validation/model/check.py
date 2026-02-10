@@ -172,11 +172,42 @@ def validate_config(config):
         )
         raise ValueError("Model is deprecated and cannot be used.")
 
-    # Legacy detection and warning
-    has_legacy_targets = "targets" in config
-    has_legacy_metrics = "metrics" in config
+    # Define the sets of keys
+    legacy_keys = {"targets", "metrics"}
+    new_keys = {"regression_targets", "regression_metrics", "classification_targets", "classification_metrics"}
 
-    if has_legacy_targets or has_legacy_metrics:
+    # 1. PRE-VALIDATION: Ensure all present keys have correct types (string or list)
+    # This maintains strict parity with legacy tests that expect immediate type errors
+    for key in legacy_keys.union(new_keys):
+        if key in config:
+            val = config[key]
+            if val is not None and not isinstance(val, (str, list)):
+                type_name = "Target" if "target" in key else "Metric"
+                error_msg = f"{type_name} must be a string or a list of strings."
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # Special case for legacy parity: 'targets' must not be None
+            if key == "targets" and val is None:
+                logger.error("Target must be a string or a list of strings.")
+                raise ValueError("Target must be a string or a list of strings.")
+
+    # Find which keys are present in the config
+    present_legacy = legacy_keys.intersection(config.keys())
+    present_new = new_keys.intersection(config.keys())
+
+    # 2. STRICT MUTUAL EXCLUSIVITY RULE
+    if present_legacy and present_new:
+        error_msg = (
+            f"Configuration Conflict: You are mixing legacy keys {list(present_legacy)} "
+            f"with new explicit keys {list(present_new)}. This is forbidden. "
+            "Please migrate entirely to explicit 'regression_*' and 'classification_*' keys."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    # 3. LEGACY MAPPING (Only if no new keys are present)
+    if present_legacy:
         warning_msg = (
             "\n\033[93m" + "#" * 80 + "\n"
             "# {:^76} #\n".format("LEGACY CONFIGURATION DETECTED") +
@@ -191,31 +222,22 @@ def validate_config(config):
         )
         print(warning_msg)
 
-        if has_legacy_targets and "regression_targets" not in config:
+        if "targets" in config:
             config["regression_targets"] = config["targets"]
-        if has_legacy_metrics and "regression_metrics" not in config:
+        if "metrics" in config:
             config["regression_metrics"] = config["metrics"]
 
-    # Normalize all target/metric keys to lists
-    target_keys = ["regression_targets", "classification_targets"]
-    metric_keys = ["regression_metrics", "classification_metrics"]
-
-    for key in target_keys + metric_keys:
+    # 4. NORMALIZATION: Convert everything to lists
+    for key in new_keys:
         val = config.get(key, [])
         if isinstance(val, str):
             config[key] = [val]
-        elif isinstance(val, list):
-            config[key] = val
+        elif val is None:
+            config[key] = []
         else:
-            if "target" in key:
-                logger.error("Target must be a string or a list of strings.")
-                raise ValueError("Target must be a string or a list of strings.")
-            else:
-                logger.error("Metric must be a string or a list of strings.")
-                raise ValueError("Metric must be a string or a list of strings.")
+            config[key] = val
 
-    # Combined targets for backward compatibility
-    # We maintain config['targets'] as the union of all targets, preserving order
+    # 5. SYNC BACK: Maintain unified 'targets' for backward compatibility
     all_targets = []
     for t in config.get("regression_targets", []) + config.get("classification_targets", []):
         if t not in all_targets:

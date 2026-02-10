@@ -129,13 +129,13 @@ def test_B2_numpy_string_types():
     assert True
 
 def test_B3_priority_mixed_keys():
-    """Verify explicit keys override legacy keys if both provided."""
+    """Verify that mixing explicit and legacy keys is forbidden."""
     config = {
         "name": "mixed", "deployment_status": "production",
         "targets": ["legacy"], "regression_targets": ["explicit"]
     }
-    validate_config(config)
-    assert "explicit" in config["regression_targets"]
+    with pytest.raises(ValueError, match="Configuration Conflict"):
+        validate_config(config)
 
 def test_B4_scalar_gate_with_nans():
     """Verify scalar gate handles NaN predictions without crashing."""

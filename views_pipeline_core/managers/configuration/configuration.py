@@ -408,9 +408,27 @@ class ConfigurationManager:
         """
         return list(self.get_combined_config().items())
 
+    def _get_raw_combined_config(self) -> Dict:
+        """
+        Get a pure merge of all configuration sources without normalization.
+        Used for validation to check exactly what the user provided.
+        """
+        config = {}
+        if self.partition_dict:
+            config.update(self.partition_dict)
+        if self.config_hyperparameters:
+            config.update(self.config_hyperparameters)
+        if self.config_deployment:
+            config.update(self.config_deployment)
+        if self.config_meta:
+            config.update(self.config_meta)
+        if self._runtime_config:
+            config.update(self._runtime_config)
+        return config
+
     def get_combined_config(self) -> Dict:
         """
-        Get merged configuration from all sources.
+        Get merged and normalized configuration from all sources.
 
         Combines configurations with priority ordering: partition_dict <
         hyperparameters < deployment < meta < runtime (highest priority).
@@ -484,32 +502,17 @@ class ConfigurationManager:
             - :meth:`update_for_single_run`: Update for single run
             - :meth:`update_for_sweep_run`: Update for sweep run
         """
-        config = {}
+        config = self._get_raw_combined_config()
         
-        # Merge configurations in order of priority
-        if self.partition_dict:
-            config.update(self.partition_dict)
-        if self.config_hyperparameters:
-            config.update(self.config_hyperparameters)
-        if self.config_deployment:
-            config.update(self.config_deployment)
-        if self.config_meta:
-            config.update(self.config_meta)
-        if self._runtime_config:
-            config.update(self._runtime_config)
-        
-        # Internal normalization for runtime consistency
-        # This mirrors the logic in validate_config but ensures it's always available
-        if "targets" in config:
-            if "regression_targets" not in config:
-                config["regression_targets"] = config["targets"]
-        
-        if "metrics" in config:
-            if "regression_metrics" not in config:
-                config["regression_metrics"] = config["metrics"]
+        # 1. Map legacy keys to new keys ONLY if new keys are missing
+        if "targets" in config and "regression_targets" not in config and "classification_targets" not in config:
+            config["regression_targets"] = config["targets"]
+        if "metrics" in config and "regression_metrics" not in config and "classification_metrics" not in config:
+            config["regression_metrics"] = config["metrics"]
 
-        # Normalize all to lists
-        for key in ["regression_targets", "classification_targets", "regression_metrics", "classification_metrics"]:
+        # 2. Force all task keys to be lists (normalization)
+        task_keys = ["regression_targets", "classification_targets", "regression_metrics", "classification_metrics"]
+        for key in task_keys:
             val = config.get(key, [])
             if isinstance(val, str):
                 config[key] = [val]
@@ -518,8 +521,12 @@ class ConfigurationManager:
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
 
-        # Sync back to unified 'targets' for backward compatibility
-        all_targets = list(set(config.get("regression_targets", []) + config.get("classification_targets", [])))
+        # 3. Sync back to unified 'targets' for backward compatibility
+        all_targets = []
+        for t in config.get("regression_targets", []) + config.get("classification_targets", []):
+            if t not in all_targets:
+                all_targets.append(t)
+        
         if all_targets:
             config["targets"] = all_targets
 
@@ -529,27 +536,16 @@ class ConfigurationManager:
         """
         Get merged configuration from all sources for sweep run.
         """
-        config = {}
-        if self.partition_dict:
-            config.update(self.partition_dict)
-        if self.config_deployment:
-            config.update(self.config_deployment)
-        if self.config_meta:
-            config.update(self.config_meta)
-        if self._runtime_config:
-            config.update(self._runtime_config)
+        config = self._get_raw_combined_config()
 
-        # Internal normalization for runtime consistency
-        if "targets" in config:
-            if "regression_targets" not in config:
-                config["regression_targets"] = config["targets"]
-        
-        if "metrics" in config:
-            if "regression_metrics" not in config:
-                config["regression_metrics"] = config["metrics"]
+        # Mirroring normalization from get_combined_config
+        if "targets" in config and "regression_targets" not in config and "classification_targets" not in config:
+            config["regression_targets"] = config["targets"]
+        if "metrics" in config and "regression_metrics" not in config and "classification_metrics" not in config:
+            config["regression_metrics"] = config["metrics"]
 
-        # Normalize all to lists
-        for key in ["regression_targets", "classification_targets", "regression_metrics", "classification_metrics"]:
+        task_keys = ["regression_targets", "classification_targets", "regression_metrics", "classification_metrics"]
+        for key in task_keys:
             val = config.get(key, [])
             if isinstance(val, str):
                 config[key] = [val]
@@ -558,8 +554,10 @@ class ConfigurationManager:
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
 
-        # Sync back to unified 'targets'
-        all_targets = list(set(config.get("regression_targets", []) + config.get("classification_targets", [])))
+        all_targets = []
+        for t in config.get("regression_targets", []) + config.get("classification_targets", []):
+            if t not in all_targets:
+                all_targets.append(t)
         if all_targets:
             config["targets"] = all_targets
 
@@ -703,7 +701,9 @@ class ConfigurationManager:
 
         # Validate configuration
         try:
-            validate_config(self.get_combined_config())
+            # Use raw merge for validation to check exactly what the user provided
+            # and avoid "self-fulfilling" conflict errors from normalization.
+            validate_config(self._get_raw_combined_config())
         except Exception as e:
             raise ConfigurationException(
                 f"Configuration validation failed: {e}",
@@ -873,7 +873,8 @@ class ConfigurationManager:
 
         # Validate configuration
         try:
-            validate_config(self.get_combined_sweep_config())
+            # Use raw merge for validation to check exactly what the user provided
+            validate_config(self._get_raw_combined_config())
         except Exception as e:
             raise ConfigurationException(
                 f"Sweep configuration validation failed: {e}",
