@@ -1,8 +1,6 @@
 from typing import Union
 import logging
-from pathlib import Path
 import pandas as pd
-from views_pipeline_core.files.utils import read_log_file
 
 logger = logging.getLogger(__name__)
 

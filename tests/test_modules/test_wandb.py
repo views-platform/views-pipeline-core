@@ -20,7 +20,7 @@ class TestWandBModule:
     @pytest.fixture
     def mock_wandb_run(self):
         """Create a mock wandb run."""
-        mock_run = Mock(spec=wandb.sdk.wandb_run.Run)
+        mock_run = MagicMock()
         mock_run.name = "test-run"
         return mock_run
 
