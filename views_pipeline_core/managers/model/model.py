@@ -1,14 +1,14 @@
 import sys
 import re
 import pyprojroot
-from typing import Union, Optional, List, Dict, Any
+from typing import Union, Optional, List, Dict
 import logging
 import importlib
 from abc import abstractmethod
 import hashlib
 from datetime import datetime
 import traceback
-from views_pipeline_core.cli import ForecastingModelArgs, ModelArgs
+from views_pipeline_core.cli import ForecastingModelArgs
 from views_pipeline_core.exceptions import ModelForecastingException
 import wandb
 import pandas as pd
@@ -19,7 +19,6 @@ from views_pipeline_core.modules.wandb import WandBModule
 from views_pipeline_core.managers import ConfigurationManager
 from views_pipeline_core.exceptions import (
     DataFetchException,
-    ModelForecastingException,
     ModelTrainingException,
     ModelEvaluationException,
     PipelineException,
@@ -341,7 +340,7 @@ class ModelPathManager:
                     return current_path
                 current_path = current_path.parent
                 # print("CURRENT PATH ", current_path)
-        except Exception as e:
+        except Exception:
             # logger.error(f"Error finding project root: {e}")
             raise FileNotFoundError(
                 f"{marker} not found in the directory hierarchy. Unable to find project root. {current_path}"
@@ -1103,9 +1102,9 @@ class ModelManager:
                 ),
                 partition_dict=self._partition_dict,
             )
-        except Exception as e:
+        except Exception:
             logger.error(
-                f"No Queryset detected for ViewsDataLoader. Skipping...", exc_info=False
+                "No Queryset detected for ViewsDataLoader. Skipping...", exc_info=False
             )
             self._data_loader = None
 
@@ -1192,7 +1191,6 @@ class ModelManager:
             str: The prediction store name.
         """
         if self._use_prediction_store:
-            from views_forecasts.extensions import ForecastsStore, ViewsMetadata
             from views_pipeline_core.managers.package import PackageManager
             from views_forecasts.extensions import ViewsMetadata
 
@@ -1336,11 +1334,6 @@ class ModelManager:
             raise TypeError(f"config must be a dictionary, got {type(config)}")
         self._config_manager.add_config(config)
 
-    @property
-    def config(self) -> Dict:
-        """Get combined configuration (alias for configs)."""
-        return self.configs
-
     @config.setter
     def config(self, config: Dict) -> None:
         """
@@ -1358,11 +1351,6 @@ class ModelManager:
             - :meth:`configs`: Primary setter method
         """
         self.configs = config
-
-    @property
-    def args(self) -> Optional[ModelArgs]:
-        """Get the current pipeline arguments."""
-        return self._args
 
 
 class ForecastingModelManager(ModelManager):
@@ -1435,43 +1423,6 @@ class ForecastingModelManager(ModelManager):
         """
 
         super().__init__(model_path, wandb_notifications, use_prediction_store)
-
-    @staticmethod
-    def _get_conflict_type(target: str) -> str:
-        """
-        Extract conflict type code from target variable name.
-        
-        Identifies conflict category by searching for known type codes
-        in the target variable string. Used for organizing evaluation
-        results and reports.
-        
-        Valid Types:
-            - 'sb': State-based conflict
-            - 'os': One-sided violence
-            - 'ns': Non-state conflict
-        
-        Args:
-            target: Target variable name.
-                Examples: 'ged_best_sb', 'ln_ged_os_tlag_1'
-        
-        Returns:
-            Conflict type code ('sb', 'os', or 'ns')
-        
-        Raises:
-            ValueError: If no valid conflict type found in target
-        
-        Example:
-            >>> conflict = ForecastingModelManager._get_conflict_type("ln_ged_sb")
-            >>> print(conflict)
-            'sb'
-        """
-        parts = target.split("_")
-        for conflict in ("sb", "os", "ns"):
-            if conflict in parts:
-                return conflict
-        raise ValueError(
-            f"Conflict type not found in '{target}'. Valid types: 'sb', 'os', 'ns'."
-        )
 
     @abstractmethod
     def _train_model_artifact(self) -> any:
@@ -1890,9 +1841,6 @@ class ForecastingModelManager(ModelManager):
                     override_month=self.args.override_timestep,
                 )
 
-                current_month = datetime.now().strftime("%Y-%m")
-                artifact_name = f"{self.args.run_type}_viewser_df_{current_month}"
-
                 self._wandb_module.send_alert(
                     title=f"Queryset Fetch Complete ({str(self.args.run_type)})",
                     text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully.",
@@ -2273,7 +2221,6 @@ class ForecastingModelManager(ModelManager):
             - Requires both historical and forecast data
             - Handles both model and ensemble targets
         """
-        import wandb
         import pandas as pd
         from views_pipeline_core.files.utils import read_dataframe
 
@@ -2342,7 +2289,7 @@ class ForecastingModelManager(ModelManager):
                     # forecast_transformation_module.undo_all_transformations()
                     # forecast_df = forecast_transformation_module.get_dataframe()
 
-                    logger.info(f"Using latest forecast dataframe")
+                    logger.info("Using latest forecast dataframe")
                 except Exception as e:
                     raise FileNotFoundError(
                         f"Forecast dataframe was probably not found. Please run the pipeline in forecasting mode with '--run_type forecasting' to generate the forecast dataframe. More info: {e}"
@@ -2385,7 +2332,7 @@ class ForecastingModelManager(ModelManager):
                     notifications_enabled=self._wandb_notifications,
                     models_path=self._model_path.models,
                 )
-            except Exception as e:
+            except Exception:
                 raise PipelineException(
                     f"Forecast report generation failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -2438,7 +2385,7 @@ class ForecastingModelManager(ModelManager):
                 wandb_module=self._wandb_module,
             )
 
-    def _save_eval_report(self, eval_report, path_reports, conflict_type):
+    def _save_eval_report(self, eval_report, path_reports, target_identifier):
         """
         Save evaluation metrics report as JSON.
         
@@ -2448,7 +2395,7 @@ class ForecastingModelManager(ModelManager):
         Args:
             eval_report: Dictionary of evaluation metrics
             path_reports: Directory for saving reports
-            conflict_type: Conflict type code for filename
+            target_identifier: Target identifier code for filename
         
         Raises:
             PipelineException: If save fails
@@ -2462,7 +2409,7 @@ class ForecastingModelManager(ModelManager):
 
             eval_report_path = generate_evaluation_report_name(
                 self.configs["run_type"],
-                conflict_type,
+                target_identifier,
                 self.configs["timestamp"],
                 file_extension=".json",
             )
@@ -2482,7 +2429,7 @@ class ForecastingModelManager(ModelManager):
         df_time_series_wise_evaluation: pd.DataFrame,
         df_month_wise_evaluation: pd.DataFrame,
         path_generated: Union[str, Path],
-        conflict_type: str,
+        target_identifier: str,
     ) -> None:
         """
         Save evaluation metrics to disk and WandB.
@@ -2498,7 +2445,7 @@ class ForecastingModelManager(ModelManager):
             df_time_series_wise_evaluation: Metrics per time series
             df_month_wise_evaluation: Metrics per month
             path_generated: Directory for saving files
-            conflict_type: Conflict type for filename
+            target_identifier: Target identifier for filename
         
         Side Effects:
             - Saves three parquet files
@@ -2519,21 +2466,21 @@ class ForecastingModelManager(ModelManager):
 
             eval_step_path = generate_evaluation_file_name(
                 "step",
-                conflict_type,
+                target_identifier,
                 self.configs["run_type"],
                 self.configs["timestamp"],
                 PipelineConfig().dataframe_format,
             )
             eval_ts_path = generate_evaluation_file_name(
                 "ts",
-                conflict_type,
+                target_identifier,
                 self.configs["run_type"],
                 self.configs["timestamp"],
                 PipelineConfig().dataframe_format,
             )
             eval_month_path = generate_evaluation_file_name(
                 "month",
-                conflict_type,
+                target_identifier,
                 self.configs["run_type"],
                 self.configs["timestamp"],
                 PipelineConfig().dataframe_format,
@@ -2684,14 +2631,14 @@ class ForecastingModelManager(ModelManager):
         
         Note:
             - Loads actual values from viewser data
-            - Processes each target separately
+            - Processes each task type separately (regression/classification)
             - Groups metrics by conflict type
+            - Enforces scalar predictions for point metrics
         """
         import pandas as pd
+        import numpy as np
         from views_evaluation.evaluation.evaluation_manager import EvaluationManager
         from views_pipeline_core.files.utils import read_dataframe
-
-        evaluation_manager = EvaluationManager(self.configs["metrics"])
 
         if not ensemble:
             df_path = self._model_path._get_raw_data_file_paths(
@@ -2708,35 +2655,115 @@ class ForecastingModelManager(ModelManager):
         logger.info(f"df_viewser read from {df_path}")
         df_actual = df_viewser[self.configs["targets"]]
 
-        for target in self.configs["targets"]:
-            logger.info(f"Calculating evaluation metrics for {target}")
-            conflict_type = ForecastingModelManager._get_conflict_type(target)
+        # Task definitions for explicit dispatch
+        tasks = {
+            "regression": {
+                "targets": self.configs.get("regression_targets", []),
+                "metrics": self.configs.get("regression_metrics", [])
+            },
+            "classification": {
+                "targets": self.configs.get("classification_targets", []),
+                "metrics": self.configs.get("classification_metrics", [])
+            }
+        }
 
-            eval_result_dict = evaluation_manager.evaluate(
-                df_actual, df_predictions, target, self.configs
-            )
+        for task_type, task_config in tasks.items():
+            targets = task_config["targets"]
+            metrics = task_config["metrics"]
 
-            step_wise_evaluation, df_step_wise_evaluation = eval_result_dict["step"]
-            time_series_wise_evaluation, df_time_series_wise_evaluation = (
-                eval_result_dict["time_series"]
-            )
-            month_wise_evaluation, df_month_wise_evaluation = eval_result_dict["month"]
+            if not targets:
+                continue
 
-            self._wandb_module.log_evaluation_results(
-                step_wise_evaluation,
-                month_wise_evaluation,
-                time_series_wise_evaluation,
-                conflict_type,
-            )
+            logger.info(f"Processing {task_type} tasks for evaluation...")
+            evaluation_manager = EvaluationManager(metrics)
 
-            if not self.configs["sweep"]:
-                self._save_evaluations(
-                    df_step_wise_evaluation,
-                    df_time_series_wise_evaluation,
-                    df_month_wise_evaluation,
-                    self._model_path.data_generated,
-                    conflict_type,
+            for target in targets:
+                logger.info(f"Calculating {task_type} evaluation metrics for {target}")
+                
+                # Distribution Check (Scalar Gate)
+                # We check the first prediction sequence/dataframe
+                first_df = df_predictions[0] if isinstance(df_predictions, list) else df_predictions
+                if target in first_df.columns:
+                    # In some pipelines columns might be prefixed with 'pred_'
+                    pred_col = target
+                elif f"pred_{target}" in first_df.columns:
+                    pred_col = f"pred_{target}"
+                else:
+                    logger.warning(f"Target {target} not found in prediction columns. Skipping.")
+                    continue
+
+                # Inspect first non-null element for distribution check
+                sample_val = first_df[pred_col].dropna().iloc[0] if not first_df[pred_col].dropna().empty else 0
+                
+                is_distribution = isinstance(sample_val, (list, np.ndarray, pd.Series)) and len(sample_val) > 1
+                
+                # Check if metrics requested are point metrics (this is a simple heuristic for now)
+                # Point metrics usually can't handle distributions directly without reduction
+                point_metrics = {"MSE", "MSLE", "MAE", "RMSLE", "AP", "AUC", "Brier", "accuracy", "precision", "recall", "f1"}
+                requested_point_metrics = set(m.lower() for m in metrics).intersection(set(pm.lower() for pm in point_metrics))
+
+                if is_distribution and requested_point_metrics:
+                    error_msg = (
+                        f"Target '{target}' produces a distribution (length {len(sample_val)}), "
+                        f"but point metrics {requested_point_metrics} were requested. "
+                        "Please reduce the distribution to a point estimate (e.g., mean or median) "
+                        "before applying these metrics, or use probabilistic metrics."
+                    )
+                    logger.error(error_msg)
+                    raise TypeError(error_msg)
+
+                target_identifier = target
+
+                # Call evaluation manager with task-specific metrics
+                # We pass a temporary config with only the relevant metrics
+                task_specific_config = self.configs.copy()
+                task_specific_config["metrics"] = metrics
+
+                eval_result_dict = evaluation_manager.evaluate(
+                    df_actual, df_predictions, target, task_specific_config
                 )
+
+                # Initialize local variables to avoid UnboundLocalError
+                step_wise_evaluation, df_step_wise_evaluation = ({}, pd.DataFrame())
+                time_series_wise_evaluation, df_time_series_wise_evaluation = ({}, pd.DataFrame())
+                month_wise_evaluation, df_month_wise_evaluation = ({}, pd.DataFrame())
+
+                # Safety check: Ensure all expected keys are present and have enough values to unpack
+                for eval_key in ["step", "time_series", "month"]:
+                    try:
+                        # Attempt to retrieve the 2-tuple (metrics_dict, dataframe)
+                        res = eval_result_dict[eval_key]
+                        
+                        # Type and length check
+                        if not isinstance(res, (list, tuple)) or len(res) < 2:
+                            raise ValueError(f"Expected 2-tuple, got {type(res)} with length {len(res) if hasattr(res, '__len__') else 'N/A'}")
+
+                        # Unpack into local variables
+                        if eval_key == "step":
+                            step_wise_evaluation, df_step_wise_evaluation = res
+                        elif eval_key == "time_series":
+                            time_series_wise_evaluation, df_time_series_wise_evaluation = res
+                        elif eval_key == "month":
+                            month_wise_evaluation, df_month_wise_evaluation = res
+                            
+                    except (KeyError, TypeError, ValueError, IndexError) as e:
+                        logger.warning(f"Evaluation for {target} returned invalid data for '{eval_key}': {e}. Skipping WandB/File logging for this component.")
+
+                self._wandb_module.log_evaluation_results(
+                    step_wise_evaluation,
+                    month_wise_evaluation,
+                    time_series_wise_evaluation,
+                    target_identifier,
+                )
+
+                if not self.configs["sweep"]:
+                    self._save_evaluations(
+                        df_step_wise_evaluation,
+                        df_time_series_wise_evaluation,
+                        df_month_wise_evaluation,
+                        self._model_path.data_generated,
+                        target_identifier,
+                    )
 
         import wandb
 
@@ -2784,7 +2811,7 @@ class ForecastingModelManager(ModelManager):
                         [metric_df, pd.DataFrame([{"Metric": key, "Value": value}])],
                         ignore_index=True,
                     ).sort_values(by="Metric")
-            except:
+            except Exception:
                 continue
         result = tabulate(metric_df, headers="keys", tablefmt="grid")
         print(result)
@@ -2854,7 +2881,7 @@ class ForecastingModelManager(ModelManager):
                     notifications_enabled=self._wandb_notifications,
                     models_path=self._model_path.models,
                 )
-            except Exception as e:
+            except Exception:
                 raise PipelineException(
                     f"Evaluation report generation failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,

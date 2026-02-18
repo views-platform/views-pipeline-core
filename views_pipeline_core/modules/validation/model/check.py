@@ -1,8 +1,6 @@
 from typing import Union
 import logging
-from pathlib import Path
 import pandas as pd
-from views_pipeline_core.files.utils import read_log_file
 
 logger = logging.getLogger(__name__)
 
@@ -147,47 +145,101 @@ def validate_config(config):
         config: Model configuration dictionary with keys:
             - 'deployment_status' (str): Model status
                 'production' | 'deprecated' | 'shadow'
-            - 'targets' (str | list): Target variable name(s)
-                Will be converted to list if string
+            - 'regression_targets' (list): Continuous target variable(s)
+            - 'classification_targets' (list): Categorical target variable(s)
+            - 'regression_metrics' (list): Metrics for regression
+            - 'classification_metrics' (list): Metrics for classification
+            - 'targets' (str | list): Legacy target field
+            - 'metrics' (list): Legacy metrics field
             - 'name' (str): Model name (for error messages)
 
     Raises:
         ValueError: If validation fails:
             - deployment_status is 'deprecated'
-            - targets is not str or list
-
-    Example:
-        >>> config = {
-        ...     'name': 'conflict_model_v1',
-        ...     'deployment_status': 'production',
-        ...     'targets': 'ged_sb'
-        ... }
-        >>> validate_config(config)
-        >>> print(config['targets'])
-        ['ged_sb']
-
-        >>> config = {
-        ...     'deployment_status': 'deprecated',
-        ...     'targets': ['ged_sb']
-        ... }
-        >>> validate_config(config)
-        ValueError: Model is deprecated and cannot be used.
+            - targets are missing or invalid type
 
     Note:
         - Modifies config dictionary in-place
-        - Converts string targets to single-element list
-        - Logs error before raising exception for deprecated models
+        - Handles legacy 'targets' and 'metrics' with warnings
+        - Normalizes all target/metric fields to lists
     """
     # Check if deployment status is deprecated. If so, raise an error.
-    if config["deployment_status"] == "deprecated":
+    if config.get("deployment_status") == "deprecated":
         logger.error(
-            f"Model {config['name']} has been deprecated. Please use a different model."
+            f"Model {config.get('name')} has been deprecated. Please use a different model."
         )
         raise ValueError("Model is deprecated and cannot be used.")
 
-    # Check if target is a list. If not, convert it to a list. Otherwise raise an error.
-    if isinstance(config["targets"], str):
-        config["targets"] = [config["targets"]]
-    if not isinstance(config["targets"], list):
-        logger.error("Target must be a string or a list of strings.")
-        raise ValueError("Target must be a string or a list of strings.")
+    # Define the sets of keys
+    legacy_keys = {"targets", "metrics"}
+    new_keys = {"regression_targets", "regression_metrics", "classification_targets", "classification_metrics"}
+
+    # 1. PRE-VALIDATION: Ensure all present keys have correct types (string or list)
+    # This maintains strict parity with legacy tests that expect immediate type errors
+    for key in legacy_keys.union(new_keys):
+        if key in config:
+            val = config[key]
+            if val is not None and not isinstance(val, (str, list)):
+                type_name = "Target" if "target" in key else "Metric"
+                error_msg = f"{type_name} must be a string or a list of strings."
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # Special case for legacy parity: 'targets' must not be None
+            if key == "targets" and val is None:
+                logger.error("Target must be a string or a list of strings.")
+                raise ValueError("Target must be a string or a list of strings.")
+
+    # Find which keys are present in the config
+    present_legacy = legacy_keys.intersection(config.keys())
+    present_new = new_keys.intersection(config.keys())
+
+    # 2. STRICT MUTUAL EXCLUSIVITY RULE
+    if present_legacy and present_new:
+        error_msg = (
+            f"Configuration Conflict: You are mixing legacy keys {list(present_legacy)} "
+            f"with new explicit keys {list(present_new)}. This is forbidden. "
+            "Please migrate entirely to explicit 'regression_*' and 'classification_*' keys."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    # 3. LEGACY MAPPING (Only if no new keys are present)
+    if present_legacy:
+        warning_msg = (
+            "\n\033[93m" + "#" * 80 + "\n"
+            "# {:^76} #\n".format("LEGACY CONFIGURATION DETECTED") +
+            "# {:<76} #\n".format("") +
+            "# {:<76} #\n".format("  The 'targets' and 'metrics' keys are now DEPRECATED.") +
+            "# {:<76} #\n".format("  - Your 'targets' are being treated as 'regression_targets'.") +
+            "# {:<76} #\n".format("  - Your 'metrics' are being treated as 'regression_metrics'.") +
+            "# {:<76} #\n".format("  - CLASSIFICATION will NO LONGER WORK via these legacy keys.") +
+            "# {:<76} #\n".format("") +
+            "# {:<76} #\n".format("  Please update your config_meta.py to use explicit keys.") +
+            "#" * 80 + "\033[0m\n"
+        )
+        print(warning_msg)
+
+        if "targets" in config:
+            config["regression_targets"] = config["targets"]
+        if "metrics" in config:
+            config["regression_metrics"] = config["metrics"]
+
+    # 4. NORMALIZATION: Convert everything to lists
+    for key in new_keys:
+        val = config.get(key, [])
+        if isinstance(val, str):
+            config[key] = [val]
+        elif val is None:
+            config[key] = []
+        else:
+            config[key] = val
+
+    # 5. SYNC BACK: Maintain unified 'targets' for backward compatibility
+    all_targets = []
+    for t in config.get("regression_targets", []) + config.get("classification_targets", []):
+        if t not in all_targets:
+            all_targets.append(t)
+    config["targets"] = all_targets
+
+    
