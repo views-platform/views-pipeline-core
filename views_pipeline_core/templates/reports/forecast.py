@@ -43,6 +43,7 @@ class ForecastReportTemplate:
             )
             report_manager.add_heading("Maps", level=2)
 
+            # Generate all maps first
             for target in tqdm.tqdm(
                 self.config["targets"], desc="Generating forecast maps"
             ):
@@ -76,24 +77,29 @@ class ForecastReportTemplate:
                     ),
                     height=900,
                 )
-                if isinstance(forecast_dataset, _CDataset):
-                    logger.info(
-                        "Generating historical vs forecast graphs for CM dataset"
-                    )
-                    report_manager.add_heading("Historical vs Forecasted", level=2)
-                    historical_dataset = dataset_cls(
-                        historical_dataframe, targets=self.config["targets"]
-                    )
-                    historical_line_graph = HistoricalLineGraph(
-                        historical_dataset=historical_dataset,
-                        forecast_dataset=forecast_dataset,
-                    )
+
+            # Generate line graphs AFTER all maps (only for CM datasets)
+            if isinstance(forecast_dataset, _CDataset):
+                logger.info(
+                    "Generating historical vs forecast graphs for CM dataset"
+                )
+                report_manager.add_heading("Historical vs Forecasted", level=2)
+                historical_dataset = dataset_cls(
+                    historical_dataframe, targets=self.config["targets"]
+                )
+                historical_line_graph = HistoricalLineGraph(
+                    historical_dataset=historical_dataset,
+                    forecast_dataset=forecast_dataset,
+                )
+                for target in self.config["targets"]:
+                    report_manager.add_heading(f"Time Series: {target}", level=3)
                     report_manager.add_html(
                         html=historical_line_graph.plot_predictions_vs_historical(
-                            targets=[original_target], as_html=True, alpha=0.9
+                            targets=[target], as_html=True, alpha=0.9
                         ),
                         height=700,
                     )
+
             # Generate report path
             report_path = (
                 self.model_path.reports

@@ -21,8 +21,8 @@ from views_pipeline_core.modules.reconciliation.reconciliation import (
 )
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
 from views_pipeline_core.exceptions import PipelineException
-from views_pipeline_core.modules.ensemble_aggregator.aggregator import (
-    AggregationManager,
+from views_pipeline_core.modules.aggregation import (
+    AggregationModule,
 )
 
 
@@ -808,7 +808,7 @@ class EnsembleManager(ForecastingModelManager):
         aggregation: str,
     ) -> pd.DataFrame:
         """
-        Aggregate model predictions using the AggregationManager.
+        Aggregate model predictions using the AggregationModule.
 
         Args:
             df_to_aggregate: List of model prediction DataFrames (all with the same index).
@@ -830,8 +830,8 @@ class EnsembleManager(ForecastingModelManager):
         # target_cols = [c for c in first_df.columns if c not in index_cols] ### This is not right, but how to chose target cols?
         target_cols = ["pred_" + col for col in self.configs.get("targets")]
 
-        # ---- 2) Create AggregationManager ---------------------------------------
-        manager = AggregationManager(
+        # ---- 2) Create AggregationModule ---------------------------------------
+        manager = AggregationModule(
             index_cols=index_cols,
             target_cols=target_cols,
         )
@@ -850,12 +850,12 @@ class EnsembleManager(ForecastingModelManager):
             )
 
         # ---- 4) Decide how to call aggregate() based on prediction type ---------
-        # AggregationManager infers prediction_type ("point" vs "distribution")
+        # AggregationModule infers prediction_type ("point" vs "distribution")
         # when you call add_model().
         pred_type = manager.prediction_type
         if pred_type is None:
             raise RuntimeError(
-                "AggregationManager.prediction_type is None. "
+                "AggregationModule.prediction_type is None. "
                 "Make sure at least one model was added with `add_model`."
             )
 
@@ -867,7 +867,7 @@ class EnsembleManager(ForecastingModelManager):
         # ---- 5) Convert back to pandas with MultiIndex -------------------------
         aggregated_pdf = aggregated_pl.to_pandas()
 
-        # AggregationManager returns index columns as normal columns.
+        # AggregationModule returns index columns as normal columns.
         # To match your previous behaviour, set a MultiIndex again:
         aggregated_pdf = aggregated_pdf.set_index(index_cols).sort_index()
 

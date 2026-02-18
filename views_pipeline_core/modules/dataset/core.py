@@ -219,7 +219,7 @@ class SpatioTemporalDataset:
             use_lazy_loading: If True, uses scan_parquet for large files.
         """
         self._logger = logging.getLogger(self.__class__.__name__)
-        
+        self._logger.warning("SpatioTemporalDataset and its subclasses are in early development. API may change. Use with caution and report issues.")
         # Initialize modules
         self._loader = LoaderModule(use_lazy=use_lazy_loading)
         self._grid = GridModule()
