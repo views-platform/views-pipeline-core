@@ -437,6 +437,12 @@ class AggregationModule:
         if weights is None:
             weights = [1.0 / self.n_models] * self.n_models
 
+        if self.sample_size is None:
+            raise ValueError(
+                "sample_size is not set. Make sure you added at least one "
+                "distribution model and detected its sample size."
+            )
+
         n_samples = self.sample_size
         rng = np.random.default_rng(42)
 

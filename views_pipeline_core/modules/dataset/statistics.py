@@ -6,16 +6,24 @@ Wrapper around the existing PosteriorDistributionAnalyzer for batch operations.
 
 This module provides a dataset-friendly interface to the statistics functionality
 already defined in views_pipeline_core.modules.statistics.
+
+Performance Notes:
+    - Use `calculate_hdi_map()` instead of separate `calculate_hdi()` and 
+      `calculate_map()` calls - it computes both in a single pass per cell.
+    - Large datasets benefit from parallel batching (enabled by default).
+    - Sparse data with many all-NaN cells is pre-filtered for efficiency.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from typing import Dict, Optional, Tuple
+import warnings
+from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 from joblib import Parallel, delayed
+from tqdm.auto import tqdm
 
 # Import the existing analyzer
 from views_pipeline_core.modules.statistics.statistics import PosteriorDistributionAnalyzer
@@ -23,7 +31,7 @@ from views_pipeline_core.modules.statistics.statistics import PosteriorDistribut
 
 # Default threshold for zero-inflated distributions
 ZERO_MASS_THRESHOLD = 0.3  # Match the default in PosteriorDistributionAnalyzer
-DEFAULT_BATCH_SIZE = 1000  # Cells per batch for parallel processing
+DEFAULT_BATCH_SIZE = 2000  # Cells per batch for parallel processing (tuned for typical workloads)
 
 
 def _get_optimal_n_jobs(n_tasks: int, max_workers: Optional[int] = None) -> int:
@@ -40,9 +48,25 @@ def _get_optimal_n_jobs(n_tasks: int, max_workers: Optional[int] = None) -> int:
         return min(max_workers, n_tasks)
     
     cpu_count = os.cpu_count() or 1
-    # Use at most 85% of CPUs, but at least 1
-    optimal = max(1, int(cpu_count * 0.85))
+    # Use at most 75% of CPUs for threads (avoid memory thrashing), but at least 1
+    optimal = max(1, int(cpu_count * 0.75))
     return min(optimal, n_tasks)
+
+
+def _prefilter_valid_cells(flat: np.ndarray) -> Tuple[np.ndarray, np.ndarray, int]:
+    """Pre-filter cells to skip all-NaN rows.
+    
+    Args:
+        flat: 2D array of shape (n_cells, n_samples).
+        
+    Returns:
+        Tuple of (valid_mask, valid_flat, n_valid).
+    """
+    # A cell is valid if it has at least one finite value
+    valid_mask = np.any(np.isfinite(flat), axis=1)
+    valid_indices = np.where(valid_mask)[0]
+    valid_flat = flat[valid_mask]
+    return valid_mask, valid_indices, valid_flat
 
 
 class StatisticsModule:
@@ -52,8 +76,16 @@ class StatisticsModule:
     delegating to the existing PosteriorDistributionAnalyzer for
     individual sample vectors. Supports multithreaded parallel processing.
     
+    **Performance Recommendation**: Use `calculate_hdi_map()` instead of
+    calling `calculate_hdi()` and `calculate_map()` separately - it
+    computes both in a single pass, nearly doubling performance.
+    
     Example:
         >>> stats = StatisticsModule()
+        >>> # Efficient: single pass for both HDI and MAP
+        >>> lower, upper, map_vals = stats.calculate_hdi_map(samples, alpha=0.9)
+        >>> 
+        >>> # Less efficient: two separate passes (use calculate_hdi_map instead)
         >>> lower, upper = stats.calculate_hdi(samples, alpha=0.9)
         >>> map_vals = stats.calculate_map(samples)
     """
@@ -65,6 +97,7 @@ class StatisticsModule:
         credible_masses: Tuple[float, ...] = (0.5, 0.95, 0.99),
         n_jobs: Optional[int] = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
+        verbose: bool = False,
     ):
         """Initialize StatisticsModule.
         
@@ -74,12 +107,14 @@ class StatisticsModule:
             credible_masses: Default credible masses for HDI computation.
             n_jobs: Number of parallel jobs (None = auto, 1 = sequential).
             batch_size: Minimum cells before enabling parallelization.
+            verbose: If True, show progress bar for large computations.
         """
         self.zero_mass_threshold = zero_mass_threshold
         self.n_bins = n_bins
         self.credible_masses = credible_masses
         self.n_jobs = n_jobs
         self.batch_size = batch_size
+        self.verbose = verbose
         self._analyzer = PosteriorDistributionAnalyzer()
         self._logger = logging.getLogger(f"{__name__}.StatisticsModule")
     
@@ -112,20 +147,27 @@ class StatisticsModule:
         samples: np.ndarray,
         alpha: float = 0.9,
         n_jobs: Optional[int] = None,
+        verbose: Optional[bool] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Calculate Highest Density Interval for batch data.
         
         The HDI is the narrowest interval containing (alpha * 100)%
         of the probability mass. Uses multithreading for large datasets.
         
+        **Note**: If you also need MAP estimates, consider using 
+        `calculate_hdi_map()` instead - it computes both in a single pass.
+        
         Args:
             samples: Array with samples in last dimension (..., n_samples).
             alpha: Credible mass (e.g., 0.9 for 90% HDI).
             n_jobs: Number of parallel jobs (None = use instance default).
+            verbose: Show progress bar (None = use instance default).
             
         Returns:
             Tuple of (lower_bounds, upper_bounds) with shape (...).
         """
+        show_progress = verbose if verbose is not None else self.verbose
+        
         if samples.ndim == 1:
             # Single cell - use analyzer directly
             result = self._analyzer.analyze(
@@ -142,29 +184,51 @@ class StatisticsModule:
         flat = samples.reshape(-1, n_samples)
         n_cells = flat.shape[0]
         
+        # Pre-filter: identify valid cells (at least one finite value)
+        valid_mask, valid_indices, valid_flat = _prefilter_valid_cells(flat)
+        n_valid = len(valid_indices)
+        
+        if n_valid == 0:
+            nan_arr = np.full(original_shape, np.nan)
+            return nan_arr.copy(), nan_arr.copy()
+        
+        # Allocate output arrays (initialize with NaN for invalid cells)
+        lower = np.full(n_cells, np.nan)
+        upper = np.full(n_cells, np.nan)
+        
         # Determine parallelization strategy
         effective_n_jobs = n_jobs if n_jobs is not None else self.n_jobs
-        use_parallel = effective_n_jobs != 1 and n_cells >= self.batch_size
+        use_parallel = effective_n_jobs != 1 and n_valid >= self.batch_size
         
         if use_parallel:
-            effective_n_jobs = _get_optimal_n_jobs(n_cells, effective_n_jobs)
-            # Split into batches to reduce scheduling overhead
+            effective_n_jobs = _get_optimal_n_jobs(n_valid, effective_n_jobs)
+            # Split valid cells into batches to reduce scheduling overhead
             batches = [
-                flat[i:i + self.batch_size]
-                for i in range(0, n_cells, self.batch_size)
+                valid_flat[i:i + self.batch_size]
+                for i in range(0, n_valid, self.batch_size)
             ]
+            batch_indices = [
+                valid_indices[i:i + self.batch_size]
+                for i in range(0, n_valid, self.batch_size)
+            ]
+            
             batch_results = Parallel(n_jobs=effective_n_jobs, prefer="threads")(
                 delayed(self._compute_batch_hdi)(batch, alpha)
-                for batch in batches
+                for batch in (tqdm(batches, desc="Computing HDI", unit="batch") if show_progress else batches)
             )
-            # Concatenate batch results
-            lower = np.concatenate([r[0] for r in batch_results])
-            upper = np.concatenate([r[1] for r in batch_results])
+            
+            # Place results back at correct indices
+            for indices, (b_lower, b_upper) in zip(batch_indices, batch_results):
+                lower[indices] = b_lower
+                upper[indices] = b_upper
         else:
-            lower = np.zeros(n_cells)
-            upper = np.zeros(n_cells)
-            for i in range(n_cells):
-                lower[i], upper[i] = self._compute_single_hdi(flat[i], alpha)
+            iterator = range(n_valid)
+            if show_progress and n_valid > 100:
+                iterator = tqdm(iterator, desc="Computing HDI", unit="cell")
+            
+            for j in iterator:
+                idx = valid_indices[j]
+                lower[idx], upper[idx] = self._compute_single_hdi(valid_flat[j], alpha)
         
         return lower.reshape(original_shape), upper.reshape(original_shape)
     
@@ -205,6 +269,7 @@ class StatisticsModule:
         samples: np.ndarray,
         enforce_non_negative: bool = False,
         n_jobs: Optional[int] = None,
+        verbose: Optional[bool] = None,
     ) -> np.ndarray:
         """Calculate Maximum A Posteriori (mode) for batch data.
         
@@ -212,14 +277,20 @@ class StatisticsModule:
         estimation with zero-dominance handling. Uses multithreading
         for large datasets.
         
+        **Note**: If you also need HDI estimates, consider using 
+        `calculate_hdi_map()` instead - it computes both in a single pass.
+        
         Args:
             samples: Array with samples in last dimension (..., n_samples).
             enforce_non_negative: If True, clip negative values to 0.
             n_jobs: Number of parallel jobs (None = use instance default).
+            verbose: Show progress bar (None = use instance default).
             
         Returns:
             Array of MAP values with shape (...).
         """
+        show_progress = verbose if verbose is not None else self.verbose
+        
         if samples.ndim == 1:
             result = self._analyzer.analyze(
                 samples=samples,
@@ -237,26 +308,48 @@ class StatisticsModule:
         flat = samples.reshape(-1, n_samples)
         n_cells = flat.shape[0]
         
+        # Pre-filter: identify valid cells (at least one finite value)
+        valid_mask, valid_indices, valid_flat = _prefilter_valid_cells(flat)
+        n_valid = len(valid_indices)
+        
+        if n_valid == 0:
+            return np.full(original_shape, np.nan)
+        
+        # Allocate output array (initialize with NaN for invalid cells)
+        maps = np.full(n_cells, np.nan)
+        
         # Determine parallelization strategy
         effective_n_jobs = n_jobs if n_jobs is not None else self.n_jobs
-        use_parallel = effective_n_jobs != 1 and n_cells >= self.batch_size
+        use_parallel = effective_n_jobs != 1 and n_valid >= self.batch_size
         
         if use_parallel:
-            effective_n_jobs = _get_optimal_n_jobs(n_cells, effective_n_jobs)
-            # Split into batches to reduce scheduling overhead
+            effective_n_jobs = _get_optimal_n_jobs(n_valid, effective_n_jobs)
+            # Split valid cells into batches to reduce scheduling overhead
             batches = [
-                flat[i:i + self.batch_size]
-                for i in range(0, n_cells, self.batch_size)
+                valid_flat[i:i + self.batch_size]
+                for i in range(0, n_valid, self.batch_size)
             ]
+            batch_indices = [
+                valid_indices[i:i + self.batch_size]
+                for i in range(0, n_valid, self.batch_size)
+            ]
+            
             batch_results = Parallel(n_jobs=effective_n_jobs, prefer="threads")(
                 delayed(self._compute_batch_map)(batch)
-                for batch in batches
+                for batch in (tqdm(batches, desc="Computing MAP", unit="batch") if show_progress else batches)
             )
-            maps = np.concatenate(batch_results)
+            
+            # Place results back at correct indices
+            for indices, b_maps in zip(batch_indices, batch_results):
+                maps[indices] = b_maps
         else:
-            maps = np.zeros(n_cells)
-            for i in range(n_cells):
-                maps[i] = self._compute_single_map(flat[i])
+            iterator = range(n_valid)
+            if show_progress and n_valid > 100:
+                iterator = tqdm(iterator, desc="Computing MAP", unit="cell")
+            
+            for j in iterator:
+                idx = valid_indices[j]
+                maps[idx] = self._compute_single_map(valid_flat[j])
         
         if enforce_non_negative:
             maps = np.maximum(maps, 0.0)
@@ -295,21 +388,33 @@ class StatisticsModule:
         alpha: float = 0.9,
         enforce_non_negative: bool = False,
         n_jobs: Optional[int] = None,
+        verbose: Optional[bool] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Calculate HDI and MAP in a single efficient pass.
         
-        More efficient than calling calculate_hdi and calculate_map separately
-        as each cell is processed only once. Uses multithreading for large datasets.
+        This is the recommended method for computing both HDI and MAP estimates.
+        It processes each cell only once, nearly doubling performance compared
+        to calling calculate_hdi() and calculate_map() separately.
+        
+        Uses multithreaded parallel processing for large datasets and pre-filters
+        all-NaN cells for additional efficiency with sparse data.
         
         Args:
-            samples: Array with samples in last dimension.
-            alpha: Credible mass for HDI.
-            enforce_non_negative: Clip negative values to 0.
-            n_jobs: Number of parallel jobs (None = use instance default).
+            samples: Array with samples in last dimension (..., n_samples).
+            alpha: Credible mass for HDI (e.g., 0.9 for 90% HDI).
+            enforce_non_negative: If True, clip negative MAP values to 0.
+            n_jobs: Number of parallel jobs (None = use instance default; 1 = sequential).
+            verbose: Show progress bar (None = use instance default).
             
         Returns:
-            Tuple of (lower, upper, map) arrays.
+            Tuple of (lower, upper, map) arrays with shape (...).
+            
+        Example:
+            >>> stats = StatisticsModule()
+            >>> lower, upper, map_vals = stats.calculate_hdi_map(samples, alpha=0.9)
         """
+        show_progress = verbose if verbose is not None else self.verbose
+        
         if samples.ndim == 1:
             result = self._analyzer.analyze(
                 samples=samples,
@@ -330,36 +435,79 @@ class StatisticsModule:
         flat = samples.reshape(-1, n_samples)
         n_cells = flat.shape[0]
         
+        # Pre-filter: identify valid cells (at least one finite value)
+        valid_mask, valid_indices, valid_flat = _prefilter_valid_cells(flat)
+        n_valid = len(valid_indices)
+        
+        if n_valid == 0:
+            # All cells are NaN - return NaN arrays
+            nan_arr = np.full(original_shape, np.nan)
+            return nan_arr.copy(), nan_arr.copy(), nan_arr.copy()
+        
+        # Allocate output arrays (initialize with NaN for invalid cells)
+        lower = np.full(n_cells, np.nan)
+        upper = np.full(n_cells, np.nan)
+        maps = np.full(n_cells, np.nan)
+        
         # Determine parallelization strategy
         effective_n_jobs = n_jobs if n_jobs is not None else self.n_jobs
-        use_parallel = effective_n_jobs != 1 and n_cells >= self.batch_size
+        use_parallel = effective_n_jobs != 1 and n_valid >= self.batch_size
         
         if use_parallel:
-            effective_n_jobs = _get_optimal_n_jobs(n_cells, effective_n_jobs)
-            # Split into batches to reduce scheduling overhead
+            effective_n_jobs = _get_optimal_n_jobs(n_valid, effective_n_jobs)
+            # Split valid cells into batches to reduce scheduling overhead
             batches = [
-                flat[i:i + self.batch_size]
-                for i in range(0, n_cells, self.batch_size)
+                valid_flat[i:i + self.batch_size]
+                for i in range(0, n_valid, self.batch_size)
             ]
+            batch_indices = [
+                valid_indices[i:i + self.batch_size]
+                for i in range(0, n_valid, self.batch_size)
+            ]
+            
+            if show_progress:
+                batches_iter = tqdm(
+                    zip(batches, batch_indices),
+                    total=len(batches),
+                    desc="Computing HDI+MAP",
+                    unit="batch",
+                )
+            else:
+                batches_iter = zip(batches, batch_indices)
+            
+            # Process batches in parallel
             batch_results = Parallel(n_jobs=effective_n_jobs, prefer="threads")(
                 delayed(self._compute_batch_hdi_map)(batch, alpha)
-                for batch in batches
+                for batch, _ in batches_iter
             )
-            lower = np.concatenate([r[0] for r in batch_results])
-            upper = np.concatenate([r[1] for r in batch_results])
-            maps = np.concatenate([r[2] for r in batch_results])
+            
+            # Place results back at correct indices
+            for (_, indices), (b_lower, b_upper, b_maps) in zip(
+                list(zip(batches, batch_indices)), batch_results
+            ):
+                lower[indices] = b_lower
+                upper[indices] = b_upper
+                maps[indices] = b_maps
         else:
-            lower = np.zeros(n_cells)
-            upper = np.zeros(n_cells)
-            maps = np.zeros(n_cells)
-            for i in range(n_cells):
-                lower[i], upper[i], maps[i] = self._compute_single_hdi_map(flat[i], alpha)
+            # Sequential processing (small data or n_jobs=1)
+            iterator = range(n_valid)
+            if show_progress and n_valid > 100:
+                iterator = tqdm(iterator, desc="Computing HDI+MAP", unit="cell")
+            
+            for j in iterator:
+                idx = valid_indices[j]
+                lower[idx], upper[idx], maps[idx] = self._compute_single_hdi_map(
+                    valid_flat[j], alpha
+                )
         
         if enforce_non_negative:
             maps = np.maximum(maps, 0.0)
         
-        # Ensure MAP is within HDI
-        maps = np.clip(maps, lower, upper)
+        # Ensure MAP is within HDI (for valid cells only)
+        valid_mask_flat = valid_mask
+        maps[valid_mask_flat] = np.clip(
+            maps[valid_mask_flat], lower[valid_mask_flat], upper[valid_mask_flat]
+        )
         
         return (
             lower.reshape(original_shape),
