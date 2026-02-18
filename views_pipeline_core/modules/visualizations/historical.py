@@ -231,7 +231,7 @@ class HistoricalLineGraph:
                                     y=map_series.values,
                                     mode="lines",
                                     name=f"{entity_label} (MAP)",
-                                    line=dict(color=color, width=2, dash="dash"),
+                                    line=dict(color=color, width=2),
                                     visible=idx == 0,
                                 )
                                 traces.append(map_trace)

@@ -40,8 +40,8 @@ def _get_optimal_n_jobs(n_tasks: int, max_workers: Optional[int] = None) -> int:
         return min(max_workers, n_tasks)
     
     cpu_count = os.cpu_count() or 1
-    # Use at most 75% of CPUs, but at least 1
-    optimal = max(1, int(cpu_count * 0.75))
+    # Use at most 85% of CPUs, but at least 1
+    optimal = max(1, int(cpu_count * 0.85))
     return min(optimal, n_tasks)
 
 

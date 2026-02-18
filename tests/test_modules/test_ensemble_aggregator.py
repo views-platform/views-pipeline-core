@@ -2,8 +2,8 @@ import numpy as np
 import polars as pl
 import pytest
 
-from views_pipeline_core.modules.ensemble_aggregator import (
-    AggregationManager,
+from views_pipeline_core.modules.aggregation import (
+    AggregationModule,
     _ModelSpec,
 )
 
@@ -45,7 +45,7 @@ def _df_dist_single_model(name: str, rows):
 
 
 def test_check_model_consistency_type_mismatch_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     # First model: point predictions
     mgr._check_model_consistency(pred_type="point", sample_size=1, model_name="m1")
@@ -58,7 +58,7 @@ def test_check_model_consistency_type_mismatch_raises():
 
 
 def test_check_model_consistency_sample_size_mismatch_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     # First model: distribution with sample_size=10
     mgr._check_model_consistency(
@@ -75,7 +75,7 @@ def test_check_model_consistency_sample_size_mismatch_raises():
 def test_inner_join_model_predictions_one_model_returns_same_df():
     import polars.testing as pl_testing
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_dist_single_model("m1", [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
     mgr.models = [_ModelSpec(name="m1", df=df_m1, weight=None)]
@@ -86,7 +86,7 @@ def test_inner_join_model_predictions_one_model_returns_same_df():
 
 
 def test_inner_join_model_predictions_no_models_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     mgr.models = []
 
     with pytest.raises(ValueError, match="No models to join"):
@@ -98,7 +98,7 @@ def test_inner_join_model_predictions_no_models_raises():
 
 def test_aggregate_point_mean_unweighted():
     """Unweighted mean across models for point predictions."""
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [3.0, 5.0])
@@ -120,7 +120,7 @@ def test_aggregate_point_mean_unweighted():
 
 def test_aggregate_point_mean_weighted():
     """Weighted mean across models for point predictions."""
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [2.0, 4.0])
@@ -144,7 +144,7 @@ def test_aggregate_point_mean_weighted():
 @pytest.mark.parametrize("agg_func", ["min", "max", "median"])
 def test_aggregate_point_non_mean_with_weights_raises(agg_func):
     """Using weights with non-mean aggregation should raise a ValueError."""
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [2.0, 4.0])
@@ -176,7 +176,7 @@ def test_aggregate_point_aggregation_functions_unweighted(agg_func, expected):
     """
     For point predictions, method controls how we combine across models.
     """
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [3.0, 5.0])
@@ -200,7 +200,7 @@ def test_aggregate_point_aggregation_functions_unweighted(agg_func, expected):
 
 def test_aggregate_point_invalid_aggregation_func_raises():
     """Unsupported method should raise a ValueError."""
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 2.0])
     mgr.models = [_ModelSpec(name="m1", df=df_m1, weight=None)]
@@ -216,7 +216,7 @@ def test_aggregate_point_use_weights_true_without_weights_raises(monkeypatch):
     If use_weights=True but no weights are set (all None),
     _normalized_weights_by_name() should still return equal weights, so no error.
     """
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [2.0, 4.0])
@@ -241,7 +241,7 @@ def test_aggregate_point_use_weights_true_without_weights_raises(monkeypatch):
 
 
 def test_normalize_weights_all_none_equal_weights():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     dummy_df = pl.DataFrame({"month_id": [1], "country_id": [1], "y_m1": [[1.0]]})
     mgr.models = [
@@ -256,7 +256,7 @@ def test_normalize_weights_all_none_equal_weights():
 
 
 def test_normalize_weights_mixed_and_unspecified():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     dummy_df = pl.DataFrame({"month_id": [1], "country_id": [1], "y_m1": [[1.0]]})
     mgr.models = [
@@ -271,7 +271,7 @@ def test_normalize_weights_mixed_and_unspecified():
 
 
 def test_normalize_weights_sum_greater_than_one_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     dummy_df = pl.DataFrame({"month_id": [1], "country_id": [1], "y_m1": [[1.0]]})
     mgr.models = [
@@ -286,7 +286,7 @@ def test_normalize_weights_sum_greater_than_one_raises():
 def test_add_model_rejects_weight_ge_1(monkeypatch):
     """Adding a model with weight >= 1.0 should raise a ValueError."""
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     # Monkeypatch _load_to_polars so we don't need real CMDataset/PGMDataset
     dummy_df = pl.DataFrame(
@@ -298,7 +298,7 @@ def test_add_model_rejects_weight_ge_1(monkeypatch):
     )
 
     monkeypatch.setattr(
-        AggregationManager, "_load_to_polars", lambda self, data: dummy_df
+        AggregationModule, "_load_to_polars", lambda self, data: dummy_df
     )
 
     # Now try to add the model with an invalid weight
@@ -312,7 +312,7 @@ def test_add_model_rejects_weight_ge_1(monkeypatch):
 def test_aggregate_distributions_concat_shape_and_support():
     np.random.seed(0)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 4
 
     # single row, two models, clearly distinct supports
@@ -337,7 +337,7 @@ def test_aggregate_distributions_concat_shape_and_support():
 
 
 def test_aggregate_distributions_concat_with_weights_picks_weighted_model():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 4
 
     # single row, two models with distinct supports
@@ -369,7 +369,7 @@ def test_aggregate_distributions_concat_with_weights_picks_weighted_model():
 def test_aggregate_distributions_concat_unweighted_proportion():
     np.random.seed(0)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 6  # larger sample for clearer ratio
 
     df_m1 = _df_dist_single_model("m1", [[1.0] * n_samples])
@@ -400,7 +400,7 @@ def test_aggregate_distributions_concat_unweighted_proportion():
 def test_aggregate_distributions_concat_weighted_proportional():
     np.random.seed(0)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 100
 
     df_m1 = _df_dist_single_model("m1", [[1.0] * n_samples])
@@ -427,7 +427,7 @@ def test_aggregate_distributions_concat_weighted_proportional():
 def test_concat_deterministic_with_seed():
     np.random.seed(42)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 5
 
     df_m1 = _df_dist_single_model("m1", [[1.0] * n_samples])
@@ -453,7 +453,7 @@ def test_concat_deterministic_with_seed():
 def test_concat_multiple_rows():
     np.random.seed(0)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3
 
     df_m1 = _df_dist_single_model(
@@ -491,7 +491,7 @@ def test_concat_multiple_rows():
 
 
 def test_aggregate_distributions_vincentization_equal_weights():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3  # will use quantile levels [0.0, 0.5, 1.0]
 
     # one row: model 1 has [0,1,2], model 2 has [2,3,4]
@@ -515,7 +515,7 @@ def test_aggregate_distributions_vincentization_equal_weights():
 
 
 def test_aggregate_distributions_vincentization_weighted_vs_unweighted():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3  # quantile levels [0.0, 0.5, 1.0]
 
     # one row: model 1 always 0, model 2 always 2
@@ -548,7 +548,7 @@ def test_aggregate_distributions_vincentization_weighted_vs_unweighted():
 
 
 def test_aggregate_distributions_vincentization_quantiles_correct():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 5  # quantile levels [0.0, 0.25, 0.5, 0.75, 1.0]
 
     samples_m1 = [0.0, 1.0, 2.0, 3.0, 4.0]
@@ -579,7 +579,7 @@ def test_aggregate_distributions_vincentization_quantiles_correct():
 
 
 def test_aggregate_distributions_invalid_method_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3
 
     df_m1 = _df_dist_single_model("m1", [[0.0, 1.0, 2.0]])
@@ -592,7 +592,7 @@ def test_aggregate_distributions_invalid_method_raises():
 
 
 def test_aggregate_distributions_requires_sample_size():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_dist_single_model("m1", [[0.0, 1.0, 2.0]])
     mgr.models = [_ModelSpec(name="m1", df=df_m1, weight=None)]
@@ -604,7 +604,7 @@ def test_aggregate_distributions_requires_sample_size():
 
 
 def test_aggregate_dispatch_distribution_rejects_aggregation_func():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3
 
     df_m1 = _df_dist_single_model("m1", [[0.0, 1.0, 2.0]])

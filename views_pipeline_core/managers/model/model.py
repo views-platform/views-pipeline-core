@@ -24,7 +24,6 @@ from views_pipeline_core.exceptions import (
     ModelEvaluationException,
     PipelineException,
 )
-from views_pipeline_core.modules.transformations import DatasetTransformationModule
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 import os
 
@@ -2139,21 +2138,6 @@ class ForecastingModelManager(ModelManager):
                     train=False,
                 )
 
-                # ------------------------------------
-                # TEMPORARY: Undo transformations before saving. Ensure predictions are in original space. This is a very painful hack but will be gone when a new
-                # ADR is written and enforced.
-                forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=df_predictions)
-                forecast_transformation_module = DatasetTransformationModule(
-                    dataset=forecast_dataset
-                )
-                forecast_transformation_module.undo_all_transformations()
-                df_predictions = forecast_transformation_module.get_dataframe()
-                # updated_targets = []
-                # for target in self.configs["targets"]:
-                #     updated_targets.append(forecast_transformation_module.get_current_column_name(original_name=f"pred_{target}").removeprefix("pred_"))
-                # self._config_manager.add_config({"targets": updated_targets})
-                # ------------------------------------
-
                 self._save_predictions(df_predictions, self._model_path.data_generated)
 
                 self._wandb_module.send_alert(
@@ -2344,14 +2328,6 @@ class ForecastingModelManager(ModelManager):
                             run_type=self.args.run_type
                         )[0]
                     )
-                    # TEMPORARY: Undo transformations before saving. Ensure predictions are in original space.
-                    # forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=forecast_df)
-                    # forecast_transformation_module = DatasetTransformationModule(
-                    #     dataset=forecast_dataset
-                    # )
-                    # forecast_transformation_module.undo_all_transformations()
-                    # forecast_df = forecast_transformation_module.get_dataframe()
-
                     logger.info(f"Using latest forecast dataframe")
                 except Exception as e:
                     raise FileNotFoundError(
@@ -2365,19 +2341,6 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Generating forecast report for {self._model_path.target} {self.configs['name']}..."
                 )
-
-                # ------------------------------------
-                # TEMPORARY: Update target names based on transformations. Undo transformations first if necessary.
-                historical_transformation_module = DatasetTransformationModule(
-                    dataset=self.dataset_class(loa=self.configs.get("level"))(source=historical_df, targets=self.configs.get("targets"))
-                )
-                historical_transformation_module.undo_transformations(column_names=self.configs.get("targets"))
-                updated_targets = []
-                for target in self.configs.get("targets"):
-                    updated_targets.append(historical_transformation_module.get_current_column_name(original_name=target))
-                self._config_manager.add_config({"targets": updated_targets})
-                historical_df = historical_transformation_module.get_dataframe()
-                # ------------------------------------
 
                 forecast_template = ForecastReportTemplate(
                     config=self.configs,
