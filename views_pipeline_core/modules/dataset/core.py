@@ -937,6 +937,7 @@ class CountryMonthDataset(SpatioTemporalDataset):
         fix_structure: bool = False,
         auto_broadcast: bool = True,
         cache_tensors: bool = True,
+        use_lazy_loading: bool = True,
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
     ):
@@ -951,6 +952,7 @@ class CountryMonthDataset(SpatioTemporalDataset):
             fix_structure: Fill missing grid points.
             auto_broadcast: Broadcast scalars to match arrays.
             cache_tensors: Enable tensor caching.
+            use_lazy_loading: If True, uses scan_parquet for large files.
             metadata_path: Path to country metadata file.
             fetch_metadata: If True, fetch metadata via viewser Queryset.
         """
@@ -958,7 +960,7 @@ class CountryMonthDataset(SpatioTemporalDataset):
             data=data, time_col=time_col, entity_col=entity_col,
             sample_col=sample_col, target_cols=target_cols,
             fix_structure=fix_structure, auto_broadcast=auto_broadcast,
-            cache_tensors=cache_tensors,
+            cache_tensors=cache_tensors, use_lazy_loading=use_lazy_loading,
         )
         
         # Initialize metadata handler
@@ -1113,6 +1115,7 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         fix_structure: bool = False,
         auto_broadcast: bool = True,
         cache_tensors: bool = True,
+        use_lazy_loading: bool = True,
         country_mapping: Optional[Union[str, Path, pl.DataFrame]] = None,
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
@@ -1128,6 +1131,7 @@ class PriogridMonthDataset(SpatioTemporalDataset):
             fix_structure: Fill missing grid points.
             auto_broadcast: Broadcast scalars to match arrays.
             cache_tensors: Enable tensor caching.
+            use_lazy_loading: If True, uses scan_parquet for large files.
             country_mapping: Grid-to-country mapping (file or DataFrame).
             metadata_path: Path to grid metadata file.
             fetch_metadata: If True, fetch metadata via viewser Queryset.
@@ -1136,7 +1140,7 @@ class PriogridMonthDataset(SpatioTemporalDataset):
             data=data, time_col=time_col, entity_col=entity_col,
             sample_col=sample_col, target_cols=target_cols,
             fix_structure=fix_structure, auto_broadcast=auto_broadcast,
-            cache_tensors=cache_tensors,
+            cache_tensors=cache_tensors, use_lazy_loading=use_lazy_loading,
         )
         
         # Initialize metadata handler
@@ -1144,6 +1148,9 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         
         self._metadata: Optional[MetadataModule] = None
         self._reconciler: Optional[ReconciliationModule] = None
+        
+        # Reconciled dataframe - populated by reconcile()
+        self.reconciled_dataframe: Optional[pl.DataFrame] = None
         
         if country_mapping is not None:
             self._load_country_mapping(country_mapping)
@@ -1325,14 +1332,25 @@ class PriogridMonthDataset(SpatioTemporalDataset):
     # Reconciliation
     # -------------------------------------------------------------------------
     
-    def get_reconciliation_tensor(
+    def to_reconciler(
         self,
         feature: str,
         time_id: int,
         country_id: int,
-        transform: bool = True,
     ) -> Tuple[np.ndarray, List[int]]:
-        """Extract grid values for reconciliation."""
+        """Extract grid values for ForecastReconciler.
+        
+        Extracts values in natural scale (untransformed) for reconciliation.
+        
+        Args:
+            feature: Prediction feature to extract.
+            time_id: Time ID to extract.
+            country_id: Country ID whose grids to extract.
+            
+        Returns:
+            Tuple of (values, entity_ids) where values has shape (n_samples, n_grids)
+            in natural scale (exp applied to ln_ features).
+        """
         if self._metadata is None:
             raise ReconciliationError("Country mapping not loaded.")
         
@@ -1347,41 +1365,83 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         # Shape: (1, n_grids, n_samples, 1) -> (n_samples, n_grids)
         values = tensor.squeeze(axis=(0, 3)).T
         
-        if transform:
-            values = ReconciliationModule._transform_for_reconciliation(values, feature)
+        # Transform to natural scale for reconciliation
+        values = ReconciliationModule._transform_for_reconciliation(values, feature)
         
         return values, entity_ids
     
     def reconcile(
         self,
-        feature: str,
-        time_id: int,
         country_id: int,
-        country_total: float,
-        preserve_zeros: bool = True,
-        in_place: bool = True,
-    ) -> Optional[np.ndarray]:
-        """Reconcile grid predictions to match country total."""
-        if self._reconciler is None:
-            raise ReconciliationError("Reconciler not initialized.")
+        feature: str,
+        reconciled_values: np.ndarray,
+        time_id: int,
+    ) -> None:
+        """Update reconciled_dataframe with reconciled values.
         
-        values, entity_ids = self.get_reconciliation_tensor(
-            feature, time_id, country_id, transform=True
+        Writes reconciled values back to the dataframe for a specific
+        country's grid cells at a specified time_id.
+        
+        Args:
+            country_id: Country ID whose grid cells to update.
+            feature: Prediction feature to update.
+            reconciled_values: Array of reconciled values (n_samples, n_grids)
+                              in natural scale (will be log-transformed if needed).
+            time_id: Time ID to update.
+            
+        Example:
+            >>> # Get tensor for reconciliation
+            >>> values, entity_ids = dataset.to_reconciler('pred_sb', 529, 475)
+            >>> # Reconcile using ForecastReconciler
+            >>> reconciled = reconciler.reconcile_forecast(values, country_total)
+            >>> # Write back to dataframe
+            >>> dataset.reconcile(475, 'pred_sb', reconciled.numpy(), 529)
+            >>> # Access result
+            >>> df = dataset.reconciled_dataframe
+        """
+        if self._metadata is None:
+            raise ReconciliationError("Country mapping not loaded.")
+        
+        # Initialize reconciled dataframe on first call
+        if self.reconciled_dataframe is None:
+            self.reconciled_dataframe = self.df.clone()
+        
+        entity_ids = self._metadata.get_entities_for_country(country_id)
+        if not entity_ids:
+            raise ReconciliationError(f"No grids for country {country_id}")
+        
+        if reconciled_values.shape[1] != len(entity_ids):
+            raise ReconciliationError(
+                f"Values shape {reconciled_values.shape} doesn't match "
+                f"{len(entity_ids)} grid cells in country {country_id}"
+            )
+        
+        # Transform back to original scale (log for ln_ features)
+        reconciled_values = ReconciliationModule._inverse_transform(
+            reconciled_values, feature
         )
         
-        reconciled = self._reconciler.reconcile_proportional(
-            values, country_total, preserve_zeros
-        )
-        
-        reconciled = ReconciliationModule._inverse_transform(reconciled, feature)
-        
-        if not in_place:
-            return reconciled
+        # Update each grid cell in the reconciled dataframe
+        for idx, entity_id in enumerate(entity_ids):
+            new_samples = reconciled_values[:, idx].tolist()
+            
+            # Find the row to update
+            mask = (
+                (pl.col(self.time_col) == time_id) & 
+                (pl.col(self.entity_col) == entity_id)
+            )
+            
+            # Update the feature column with new samples
+            self.reconciled_dataframe = self.reconciled_dataframe.with_columns(
+                pl.when(mask)
+                .then(pl.lit(new_samples))
+                .otherwise(pl.col(feature))
+                .alias(feature)
+            )
         
         self._logger.info(
             f"Reconciled {feature} for country {country_id} at time {time_id}"
         )
-        return None
 
 
 # =============================================================================
