@@ -1,5 +1,6 @@
 import sys
 import re
+import gc
 import pyprojroot
 from typing import Union, Optional, List, Dict
 import logging
@@ -53,6 +54,14 @@ from views_pipeline_core.configs import PipelineConfig
 # )
 
 import dotenv
+
+# Optional PyTorch support for CUDA cleanup
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None
+    TORCH_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -2175,14 +2184,9 @@ class ForecastingModelManager(ModelManager):
                 self._wandb_module.finish_run()
                 # Clean up resources to avoid file descriptor exhaustion in sweeps
                 del model
-                import gc
                 gc.collect()
-                # try:
-                #     import torch
-                #     if torch.cuda.is_available():
-                #         torch.cuda.empty_cache()
-                # except ImportError:
-                #     pass
+                # if TORCH_AVAILABLE and torch.cuda.is_available():
+                #     torch.cuda.empty_cache()
 
     def _execute_forecast_reporting(self) -> None:
         """

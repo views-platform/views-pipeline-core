@@ -224,7 +224,10 @@ class SpatioTemporalDataset:
         self._loader = LoaderModule(use_lazy=use_lazy_loading)
         self._grid = GridModule()
         self._subset = SubsetModule()
-        self._tensor_mod = TensorModule()
+        self._tensor_mod = TensorModule(
+            auto_broadcast=auto_broadcast,
+            cache_enabled=cache_tensors,
+        )
         self._stats = StatisticsModule()
         
         # Load data
