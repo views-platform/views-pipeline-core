@@ -8,7 +8,7 @@ Dataset mode management: Historical (training) vs Forecast (prediction).
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, Tuple, TYPE_CHECKING
 
 import polars as pl
 
@@ -142,7 +142,7 @@ class ModeModule:
         self,
         df: pl.DataFrame,
         index_mgr: "IndexModule",
-    ) -> tuple[List[str], List[str]]:
+    ) -> Tuple[List[str], List[str]]:
         """Split columns into features and targets.
         
         Args:
