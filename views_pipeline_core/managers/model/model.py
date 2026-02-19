@@ -992,6 +992,29 @@ class ModelManager:
 
     __instances__ = 0
 
+    @staticmethod
+    def _raise_file_limit(target: int = 4096) -> None:
+        """
+        Attempt to raise the open file descriptor limit.
+        
+        PyTorch DataLoader with num_workers > 0 spawns subprocesses that
+        each require file descriptors for inter-process communication.
+        macOS defaults to 256, which is easily exhausted.
+        
+        Args:
+            target: Desired soft limit for open files (default: 4096)
+        """
+        try:
+            import resource
+            soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+            if soft < target:
+                new_soft = min(target, hard)
+                resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
+                logger.debug(f"Raised file descriptor limit from {soft} to {new_soft}")
+        except (ImportError, ValueError, OSError) as e:
+            # resource module not available on Windows, or limit change failed
+            logger.debug(f"Could not raise file descriptor limit: {e}")
+
     def __init__(
         self,
         model_path: ModelPathManager,
@@ -1045,6 +1068,7 @@ class ModelManager:
             - :class:`WandBModule`: WandB integration
             - :meth:`execute_single_run`: Main execution method
         """
+        self._raise_file_limit()
         self.__class__.__instances__ += 1
         from views_pipeline_core.modules.logging import LoggingModule
 
@@ -2222,6 +2246,8 @@ class ForecastingModelManager(ModelManager):
                 self._wandb_module.finish_run()
                 # Clean up resources to avoid file descriptor exhaustion in sweeps
                 del model
+                import gc
+                gc.collect()
                 # try:
                 #     import torch
                 #     if torch.cuda.is_available():
