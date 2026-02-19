@@ -10,7 +10,6 @@ from views_pipeline_core.modules.wandb import (
     timestamp_to_date,
 )
 from views_pipeline_core.modules.reports import (
-    get_conflict_type_from_feature_name,
     # filter_metrics_from_dict,
     search_for_item_name,
     filter_metrics_by_eval_type_and_metrics,
@@ -68,9 +67,20 @@ class EvaluationReportTemplate:
         """Generate an evaluation report based on the evaluation DataFrame."""
         evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
-        conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
-        priority_metrics = ["MSLE", "MSE", "y_hat_bar"]
-        metrics = list(set(metadata_dict.get("metrics", [])).intersection(priority_metrics))
+        
+        # Combine all metrics from explicit keys and legacy keys for prioritization
+        all_available_metrics = list(set(
+            metadata_dict.get("regression_metrics", []) + 
+            metadata_dict.get("classification_metrics", []) + 
+            metadata_dict.get("metrics", [])
+        ))
+        
+        priority_metrics = ["MSLE", "MSE", "y_hat_bar", "AP", "AUC", "Brier", "accuracy", "f1"]
+        metrics = [m for m in priority_metrics if any(am.lower() == m.lower() for am in all_available_metrics)]
+        
+        # If no priority metrics found, use all available
+        if not metrics:
+            metrics = all_available_metrics
 
         report_manager = ReportModule()
         report_manager.add_heading(
@@ -93,9 +103,7 @@ class EvaluationReportTemplate:
         report_manager.add_markdown(markdown_text=markdown_text)
 
         task_definition_md = (
-            f"- **Target Variable**: {target}"
-            + (f" ({type_of_conflict.title()})" if type_of_conflict else "")
-            + "\n"
+            f"- **Target Variable**: {target}\n"
             f"- **Spatiotemporal Resolution**: {metadata_dict.get('level', 'N/A')}\n"
             f"- **Evaluation Scheme**: `Rolling-Origin Holdout`\n"
             f"    - **Minimum forecast lead time**: {metadata_dict.get('steps', [None, None])[0]}\n"
@@ -128,7 +136,7 @@ class EvaluationReportTemplate:
         # Model-specific report content
         if self.model_path.target in ("model", "ensemble"):
             self._add_report_content(
-                report_manager, metadata_dict, evaluation_dict, conflict_code, metrics
+                report_manager, metadata_dict, evaluation_dict, target, metrics
             )
         else:
             raise ValueError(
@@ -138,7 +146,7 @@ class EvaluationReportTemplate:
         # Generate report path
         report_path = (
             self.model_path.reports
-            / f"report_{generate_model_file_name(run_type=self.run_type, file_extension='')}_{conflict_code}.html"
+            / f"report_{generate_model_file_name(run_type=self.run_type, file_extension='')}_{target}.html"
         )
         report_manager.export_as_html(report_path)
         logger.info(f"Exported report to {report_path}")
@@ -149,7 +157,7 @@ class EvaluationReportTemplate:
         report_manager: ReportModule,
         metadata_dict: Dict,
         evaluation_dict: Dict,
-        conflict_code: str,
+        target_identifier: str,
         metrics: List[str],
     ) -> None:
         """
@@ -166,7 +174,7 @@ class EvaluationReportTemplate:
             report_manager (ReportModule): The report manager instance used to add content to the report.
             metadata_dict (Dict): Metadata dictionary for the ensemble run.
             evaluation_dict (Dict): Evaluation results dictionary for the ensemble run.
-            conflict_code (str): Code used to resolve metric conflicts.
+            target_identifier (str): Identifier for the target variable.
             metrics (List[str]): List of metric names to include in the report.
 
         Raises:
@@ -243,7 +251,7 @@ class EvaluationReportTemplate:
                     evaluation_dict=evaluation_dict,
                     eval_type=eval_type,
                     metrics=metrics,
-                    conflict_code=conflict_code,
+                    target_identifier=target_identifier,
                     model_name=metadata_dict.get("name", None),
                     keywords=["mean"],
                 )
@@ -258,7 +266,7 @@ class EvaluationReportTemplate:
                         evaluation_dict=temp_evaluation_dict,
                         eval_type=eval_type,
                         metrics=metrics,
-                        conflict_code=conflict_code,
+                        target_identifier=target_identifier,
                         model_name=temp_metadata_dict.get("name", None),
                         keywords=["mean"],
                     )

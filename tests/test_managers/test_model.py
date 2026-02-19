@@ -266,26 +266,6 @@ class TestForecastingModelManagerInit:
 
 
 class TestForecastingModelManagerStatic:
-    def test_get_conflict_type_sb(self):
-        """Test extracting state-based conflict type."""
-        conflict = ForecastingModelManager._get_conflict_type("ged_best_sb")
-        assert conflict == "sb"
-        
-    def test_get_conflict_type_os(self):
-        """Test extracting one-sided conflict type."""
-        conflict = ForecastingModelManager._get_conflict_type("ln_ged_os")
-        assert conflict == "os"
-        
-    def test_get_conflict_type_ns(self):
-        """Test extracting non-state conflict type."""
-        conflict = ForecastingModelManager._get_conflict_type("ged_ns_tlag_1")
-        assert conflict == "ns"
-        
-    def test_get_conflict_type_invalid_raises(self):
-        """Test invalid target raises ValueError."""
-        with pytest.raises(ValueError, match="Conflict type not found"):
-            ForecastingModelManager._get_conflict_type("invalid_target")
-            
     def test_resolve_evaluation_sequence_standard(self):
         """Test standard evaluation sequence count."""
         n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
@@ -381,8 +361,8 @@ class TestExecuteSingleRun:
         """Test execute_single_run sets args property."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        # Mock wandb.login during execution
-        with patch('wandb.login'):
+        # Mock the entire wandb module and manager's internal login
+        with patch.object(manager._wandb_module, 'login'):
             with patch.object(manager, '_execute_data_fetching'):
                 with patch.object(manager, '_execute_model_tasks'):
                     manager.execute_single_run(args)
@@ -393,7 +373,7 @@ class TestExecuteSingleRun:
         """Test execute_single_run updates configuration."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch('wandb.login'):
+        with patch.object(manager._wandb_module, 'login'):
             with patch.object(manager, '_execute_data_fetching'):
                 with patch.object(manager, '_execute_model_tasks'):
                     manager.execute_single_run(args)
@@ -405,7 +385,7 @@ class TestExecuteSingleRun:
         """Test execute_single_run calls data fetching."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch('wandb.login'):
+        with patch.object(manager._wandb_module, 'login'):
             with patch.object(manager, '_execute_data_fetching') as mock_fetch:
                 with patch.object(manager, '_execute_model_tasks'):
                     manager.execute_single_run(args)
@@ -416,7 +396,7 @@ class TestExecuteSingleRun:
         """Test execute_single_run calls model tasks."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch('wandb.login'):
+        with patch.object(manager._wandb_module, 'login'):
             with patch.object(manager, '_execute_data_fetching'):
                 with patch.object(manager, '_execute_model_tasks') as mock_tasks:
                     manager.execute_single_run(args)

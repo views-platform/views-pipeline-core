@@ -6,49 +6,48 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def get_conflict_type_from_feature_name(feature_name: str) -> Optional[str]:
-    """
-    Get the UCDP defined conflict type from the feature name.
-
-    Args:
-        feature_name (str): The name of the feature.
-
-    Returns:
-        Optional[str]: The conflict type if found, otherwise None.
-    """
-    valid_conflict_types = {"ns": "non state", "os": "one sided", "sb": "state based"}
-    tokens = feature_name.split("_")
-    for conflict_type in valid_conflict_types.keys():
-        if conflict_type in tokens:
-            return conflict_type, valid_conflict_types[conflict_type]
-    return "", ""
-
-
 def filter_metrics_from_dict(
     evaluation_dict: dict,
     metrics: List[str],
-    conflict_code: str,
+    target_identifier: str,
     model_name: str = None,
 ) -> pd.DataFrame:
     """
-    Filters metrics from an evaluation dictionary based on specified metric names and a conflict code.
+    Filters metrics from an evaluation dictionary based on specified metric names and a target identifier.
 
     Args:
         evaluation_dict (dict): Dictionary containing evaluation results with metric names as keys.
-        metrics (list[str]): List of metric names to filter for.
-        conflict_code (str): Conflict code to filter keys by.
+        metrics (list[str]): List of metric names to filter for (e.g. ['mse']).
+        target_identifier (str): Target identifier to filter keys by (e.g. 'ged_sb_best').
         model_name (str, optional): Name of the model to include as an index in the resulting DataFrame.
 
     Returns:
         pd.DataFrame: DataFrame containing filtered metrics. If `model_name` is provided, it is used as the index.
     """
     result = {}
+    # Use namespacing pattern for robust segment matching
+    target_kw = str(target_identifier).lower()
+    target_pattern = rf"(^|[/_\-]) {re.escape(target_kw)} ($|[/_\-])"
+    
     for key in evaluation_dict.keys():
-        tokens = re.split(r"[_/\-]", key.lower())
-        # Ensure all metrics are present in tokens
-        if all(m.lower() in tokens for m in metrics) and conflict_code.lower() in tokens:
+        key_lower = key.lower()
+        
+        # Check if target identifier is present as a discrete segment
+        if not re.search(target_pattern, key_lower, re.VERBOSE):
+            continue
+
+        # Check if all requested metrics are present in key (as segments)
+        metrics_match = True
+        for m in metrics:
+            m_kw = str(m).lower()
+            m_pattern = rf"(^|[/_\-]) {re.escape(m_kw)} ($|[/_\-])"
+            if not re.search(m_pattern, key_lower, re.VERBOSE):
+                metrics_match = False
+                break
+        
+        if metrics_match:
             result[key] = evaluation_dict[key]
-        # result[key] = search_for_item_name(searchspace=tokens, keywords=[*metrics, conflict_code])
+            
     if model_name:
         result = {"Model Name": model_name, **result}
         result = pd.DataFrame([result], columns=result.keys()).set_index("Model Name")
@@ -58,8 +57,8 @@ def filter_metrics_from_dict(
 
 def search_for_item_name(searchspace: List[str], keywords: List[str]) -> Optional[str]:
     """
-    Searches for an item name that contains all keyword parts. Returns the first match
-    if unique, warns about multiple matches, and returns None if no matches found.
+    Searches for an item name that contains all keyword parts as discrete segments.
+    Returns the first match if unique, warns about multiple matches, and returns None if no matches found.
 
     Args:
         searchspace: List of strings to search through
@@ -68,98 +67,92 @@ def search_for_item_name(searchspace: List[str], keywords: List[str]) -> Optiona
     Returns:
         First matching item if unique match found, otherwise None
     """
-    # Handle empty keywords upfront
     if not keywords:
         return None
 
-    # Preprocess keywords: split, normalize, and remove empties
-    keyword_parts = []
-    for kw in keywords:
-        parts = re.split(r"[_/\-]", kw.lower())
-        keyword_parts.extend(p for p in parts if p)
+    # Preprocess keywords: normalize
+    keyword_list = [str(kw).lower() for kw in keywords if kw]
     
-    # Handle case where keywords only contained separators
-    if not keyword_parts:
+    if not keyword_list:
         return None
 
     matches = []
     for item in searchspace:
-        # Tokenize item and remove empty tokens
-        tokens = [t for t in re.split(r"[_/\-]", item.lower()) if t]
+        item_lower = item.lower()
+        match_all = True
+        for kw in keyword_list:
+            pattern = rf"(^|[/_\-]) {re.escape(kw)} ($|[/_\-])"
+            if not re.search(pattern, item_lower, re.VERBOSE):
+                match_all = False
+                break
         
-        # Check if all keyword parts are present
-        if all(kw_part in tokens for kw_part in keyword_parts):
+        if match_all:
             matches.append(item)
 
     # Handle results
     if not matches:
         return None
-    if len(matches) == 1:
-        return matches[0]
     
-    print(f"Warning: Multiple matches found for {keywords}: {matches}. Returning first match.")
+    if len(matches) > 1:
+        print(f"Warning: Multiple matches found for {keywords}: {matches}. Returning first match.")
+    
     return matches[0]
 
 def search_for_item_name2(searchspace: List[str], keywords: List[str]) -> Optional[str]:
     """
-    Searches for an item name that contains all keyword parts. Returns the first match
-    if unique, warns about multiple matches, and returns None if no matches found.
+    Searches for an item name that contains all keyword parts as discrete segments.
+    Returns the first match if unique, warns about multiple matches, and returns None if no matches found.
 
     Args:
-        searchspace: List of strings to search through
-        keywords: List of keywords/phrases to match
+        searchspace: List of strings to search through (e.g. WandB keys)
+        keywords: List of keywords/phrases to match (e.g. ['step-wise', 'mse', 'target_name'])
 
     Returns:
         First matching item if unique match found, otherwise None
     """
-    # Handle empty keywords upfront
     if not keywords:
         return None
 
-    # Preprocess keywords: split, normalize, and remove empties
-    keyword_parts = []
-    for kw in keywords:
-        parts = re.split(r"[_/\-]", kw.lower())
-        keyword_parts.extend(p for p in parts if p)
-    # print(keyword_parts)
+    # Preprocess keywords: normalize
+    keyword_list = [str(kw).lower() for kw in keywords if kw]
     
-    # Handle case where keywords only contained separators
-    if not keyword_parts:
+    if not keyword_list:
         return None
 
     matches = []
     for item in searchspace:
-        # Tokenize item and remove empty tokens
-        tokens = [t for t in re.split(r"[_/\-]", item.lower()) if t]
-        # print(f"tokens: {tokens}")
-
-        # Check if all keyword parts are present
-        # Count how many keyword parts are present in tokens
-        match_count = sum(kw_part in tokens for kw_part in keyword_parts)
-        if match_count > 0:
-            matches.append((item, match_count))
-            # print(f"Match found: {item} ({match_count} keyword parts matched)")
+        item_lower = item.lower()
+        # Every keyword must be found as a discrete segment (delimited by / _ - or start/end)
+        # We use a simple regex-based check for word boundaries or delimiters
+        match_all = True
+        for kw in keyword_list:
+            # Pattern matches the keyword if it's surrounded by delimiters or at string boundaries
+            pattern = rf"(^|[/_\-]) {re.escape(kw)} ($|[/_\-])"
+            if not re.search(pattern, item_lower, re.VERBOSE):
+                match_all = False
+                break
+        
+        if match_all:
+            matches.append(item)
 
     # Handle results
     if not matches:
         return None
-    # Return the matches with the highest count
-    max_match = max(matches, key=lambda x: x[1])
     
-    # raise warning if all match values are the same
-    if all(m[1] == max_match[1] for m in matches):
-        logger.warning(f"Warning: All matches have the same count for {keywords}: {matches}. Returning first match.")
-    return max_match[0]
+    if len(matches) > 1:
+        logger.warning(f"Warning: Multiple matches found for {keywords}: {matches}. Returning first match.")
+    
+    return matches[0]
 
-def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: str, metrics: list, conflict_code: str, model_name: str, keywords: list = []) -> pd.DataFrame:
+def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: str, metrics: list, target_identifier: str, model_name: str, keywords: list = []) -> pd.DataFrame:
     """
-    Filters metrics from an evaluation dictionary based on evaluation type, metric names, conflict code, and optional keywords, 
+    Filters metrics from an evaluation dictionary based on evaluation type, metric names, target identifier, and optional keywords, 
     and returns the results as a pandas DataFrame indexed by the model name.
     Args:
         evaluation_dict (dict): Dictionary containing evaluation results, where keys are metric identifiers.
         eval_type (str): The evaluation type to filter by (e.g., "classification", "regression").
         metrics (list): List of metric names (strings) to filter for.
-        conflict_code (str): Conflict code to further filter metric keys.
+        target_identifier (str): Target identifier to further filter metric keys.
         model_name (str): Name of the model, used as the index in the resulting DataFrame.
         keywords (list, optional): Additional keywords to refine the search for metric keys. Defaults to an empty list.
     Returns:
@@ -173,8 +166,8 @@ def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: st
         raise ValueError(f"Metrics should be a list of strings. Got {[type(m) for m in metrics]} instead.")
     if not isinstance(eval_type, str):
         raise ValueError(f"Eval type should be a string. Got {type(eval_type)} instead.")
-    if not isinstance(conflict_code, str):
-        raise ValueError(f"Conflict code should be a string. Got {type(conflict_code)} instead.")
+    if not isinstance(target_identifier, str):
+        raise ValueError(f"Target identifier should be a string. Got {type(target_identifier)} instead.")
     if not isinstance(keywords, list):
         raise ValueError(f"Keywords should be a list. Got {type(keywords)} instead.")
     if not all(isinstance(k, str) for k in keywords):
@@ -184,7 +177,7 @@ def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: st
 
     target_metric_keys = []
     for metric in metrics:
-        result = search_for_item_name2(searchspace=list(evaluation_dict.keys()), keywords=[eval_type, metric, conflict_code, *keywords])
+        result = search_for_item_name2(searchspace=list(evaluation_dict.keys()), keywords=[eval_type, metric, target_identifier, *keywords])
         if result:
             target_metric_keys.append(result)
     

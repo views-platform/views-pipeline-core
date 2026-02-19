@@ -48,9 +48,9 @@ class TestGenerateWandbStepWiseLogDict:
         
         result = generate_wandb_step_wise_log_dict(log_dict, eval_dict, 'step01', 'sb')
         
-        assert result['step-wise/mse-sb'] == 0.1
-        assert result['step-wise/mae-sb'] == 0.2
-        assert result['step-wise/r2-sb'] == 0.9
+        assert result['step-wise/sb/mse'] == 0.1
+        assert result['step-wise/sb/mae'] == 0.2
+        assert result['step-wise/sb/r2'] == 0.9
 
     def test_skips_none_values(self):
         log_dict = {}
@@ -60,9 +60,9 @@ class TestGenerateWandbStepWiseLogDict:
         
         result = generate_wandb_step_wise_log_dict(log_dict, eval_dict, 'step01', 'ns')
         
-        assert 'step-wise/mse-ns' in result
-        assert 'step-wise/mae-ns' not in result
-        assert 'step-wise/r2-ns' in result
+        assert 'step-wise/ns/mse' in result
+        assert 'step-wise/ns/mae' not in result
+        assert 'step-wise/ns/r2' in result
 
 
 class TestGenerateWandbMonthWiseLogDict:
@@ -74,9 +74,9 @@ class TestGenerateWandbMonthWiseLogDict:
         
         result = generate_wandb_month_wise_log_dict(log_dict, eval_dict, 'month501', 'sb')
         
-        assert result['month-wise/mse-sb'] == 0.15
-        assert result['month-wise/mae-sb'] == 0.25
-        assert result['month-wise/r2-sb'] == 0.85
+        assert result['month-wise/sb/mse'] == 0.15
+        assert result['month-wise/sb/mae'] == 0.25
+        assert result['month-wise/sb/r2'] == 0.85
 
     def test_skips_none_values(self):
         log_dict = {}
@@ -86,9 +86,9 @@ class TestGenerateWandbMonthWiseLogDict:
         
         result = generate_wandb_month_wise_log_dict(log_dict, eval_dict, 'month501', 'ns')
         
-        assert 'month-wise/mse-ns' not in result
-        assert 'month-wise/mae-ns' in result
-        assert 'month-wise/r2-ns' not in result
+        assert 'month-wise/ns/mse' not in result
+        assert 'month-wise/ns/mae' in result
+        assert 'month-wise/ns/r2' not in result
 
 
 class TestGenerateWandbTimeSeriesWiseLogDict:
@@ -100,9 +100,9 @@ class TestGenerateWandbTimeSeriesWiseLogDict:
         
         result = generate_wandb_time_series_wise_log_dict(log_dict, eval_dict, 'ts01', 'sb')
         
-        assert result['time-series-wise/mse-sb'] == 0.05
-        assert result['time-series-wise/mae-sb'] == 0.1
-        assert result['time-series-wise/r2-sb'] == 0.95
+        assert result['time-series-wise/sb/mse'] == 0.05
+        assert result['time-series-wise/sb/mae'] == 0.1
+        assert result['time-series-wise/sb/r2'] == 0.95
 
     def test_skips_none_values(self):
         log_dict = {}
@@ -112,9 +112,9 @@ class TestGenerateWandbTimeSeriesWiseLogDict:
         
         result = generate_wandb_time_series_wise_log_dict(log_dict, eval_dict, 'ts01', 'ns')
         
-        assert 'time-series-wise/mse-ns' in result
-        assert 'time-series-wise/mae-ns' not in result
-        assert 'time-series-wise/r2-ns' not in result
+        assert 'time-series-wise/ns/mse' in result
+        assert 'time-series-wise/ns/mae' not in result
+        assert 'time-series-wise/ns/r2' not in result
 
 
 class TestCalculateMeanEvaluationMetrics:
