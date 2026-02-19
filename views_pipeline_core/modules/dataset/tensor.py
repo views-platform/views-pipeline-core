@@ -412,13 +412,51 @@ class TensorModule:
         if missing:
             raise ValidationError(f"Features not found: {missing}")
         
+        # Check cache if enabled
+        cache_key = None
+        if self.cache_enabled and use_cache:
+            # Build cache key from DataFrame hash and feature columns
+            cache_key = self._compute_cache_key(df, feature_cols, dist_layout)
+            if cache_key in self._cache:
+                self._logger.debug(f"Cache hit for tensor conversion")
+                return self._cache[cache_key]
+        
         # Route to appropriate conversion method based on layout
         if dist_layout.is_array_based:
-            return self._convert_array_layout(df, feature_cols, index_mgr, dist_layout)
+            result = self._convert_array_layout(df, feature_cols, index_mgr, dist_layout)
         elif dist_layout.is_row_based:
-            return self._convert_row_layout(df, feature_cols, index_mgr, dist_layout)
+            result = self._convert_row_layout(df, feature_cols, index_mgr, dist_layout)
         else:
-            return self._convert_scalar_layout(df, feature_cols, index_mgr)
+            result = self._convert_scalar_layout(df, feature_cols, index_mgr)
+        
+        # Store in cache if enabled
+        if self.cache_enabled and use_cache and cache_key is not None:
+            self._cache[cache_key] = result
+            self._logger.debug(f"Cached tensor conversion result")
+        
+        return result
+    
+    def _compute_cache_key(
+        self,
+        df: pl.DataFrame,
+        feature_cols: List[str],
+        dist_layout: "DistributionLayout",
+    ) -> str:
+        """Compute a cache key for the given conversion parameters."""
+        import hashlib
+        # Use DataFrame shape, column names, and first/last row hashes for key
+        key_parts = [
+            str(df.shape),
+            str(sorted(feature_cols)),
+            str(dist_layout.layout),
+        ]
+        # Add a hash of data content (sample first and last rows for speed)
+        if len(df) > 0:
+            first_row = str(df.head(1).to_dicts())
+            last_row = str(df.tail(1).to_dicts())
+            key_parts.extend([first_row, last_row])
+        key_str = "|".join(key_parts)
+        return hashlib.md5(key_str.encode()).hexdigest()
     
     def _convert_scalar_layout(
         self,
