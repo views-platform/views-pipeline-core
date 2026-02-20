@@ -829,11 +829,13 @@ class MappingModule:
         if interactive:
             fig = self._plot_interactive_map(mapping_dataframe, target)
             if as_html:
+                # Use unique div_id per target to avoid collisions when embedding multiple maps
+                unique_div_id = f"map-container-{target.replace('_', '-')}"
                 html_str = fig.to_html(
                     full_html=True,
                     include_plotlyjs=True,  # Should work offline
                     default_height=900,
-                    div_id="map-container",
+                    div_id=unique_div_id,
                 )
                 # Free memory after generating HTML
                 del fig

@@ -19,7 +19,7 @@ class _ModelSpec:
     weight: Optional[float] = None
 
 
-class AggregationManager:
+class AggregationModule:
     """
     New aggregation manager that can aggregate distributions and point forecasts for
     ensemble forecasting.
@@ -337,59 +337,123 @@ class AggregationManager:
 
     #### ----- Distribution Aggregation Methods ----- ####
 
+    # def _concatenate_aggregation(
+    #     self, df: pl.DataFrame, weights: Optional[List[float]] = None
+    # ) -> pl.DataFrame:
+    #     """
+    #     Perform linear pooling with resampling to combine distributions
+
+    #     Parameters:
+    #         df: Polars DataFrame with target columns containing distribution samples
+    #         weights: list of floats (default: equal weights)
+
+    #     Returns:
+    #         Polars DataFrame with pooled distributions
+    #     """
+
+    #     # set weights to equal if not specified
+    #     if weights is None:
+    #         weights = [1.0 / self.n_models] * self.n_models
+
+    #     # infer sample size from manager state
+    #     if self.sample_size is None:
+    #         raise ValueError(
+    #             "self.sample_size is not set. Make sure you added at least one "
+    #             "distribution model and detected its sample size."
+    #         )
+    #     n_samples = self.sample_size
+
+    #     pooled_cols = []
+    #     rng = np.random.default_rng(42)
+
+    #     for target_column in self.target_cols:
+
+    #         # find target columns
+    #         model_cols = [c for c in df.columns if c.startswith(target_column)]
+
+    #         #    def pool_row(row, *, rng=rng):
+
+    #         #        samples_list = [np.array(val) for val in row]
+
+    #         #        # decide how many samples to draw from each model
+    #         #        sample_counts = rng.multinomial(n_samples, weights)
+
+    #         #        pool = []
+    #         #        for s, count in zip(samples_list, sample_counts):
+    #         #                pool.extend(rng.choice(s, size=count, replace=True))
+    #         #        return (pool,)
+
+    #         #    pools = df.select(model_cols).map_rows(pool_row)
+    #         #    pooled_cols.append(pools.to_series().alias(target_column))
+    #         model_arrays = []
+    #         for col in model_cols:
+    #             # df[col].to_list() -> List[List[...]] with length n_rows
+    #             arr = np.asarray(df[col].to_list())
+    #             # Basic sanity check
+    #             if arr.ndim != 2 or arr.shape[1] != n_samples:
+    #                 raise ValueError(
+    #                     f"Column {col} does not have shape (n_rows, {n_samples}). "
+    #                     f"Got shape {arr.shape}."
+    #                 )
+    #             model_arrays.append(arr)
+
+    #         # Stack into (n_models, n_rows, n_samples)
+    #         model_stack = np.stack(model_arrays, axis=0)
+    #         # Reorder to (n_rows, n_models, n_samples)
+    #         model_stack = np.moveaxis(model_stack, 0, 1)
+
+    #         n_rows, n_models, n_samples_check = model_stack.shape
+    #         assert n_samples_check == n_samples
+
+    #         # Draw model indices and sample indices for ALL rows at once
+    #         # model_idx: (n_rows, n_samples) with values in [0, n_models)
+    #         model_idx = rng.choice(n_models, size=(n_rows, n_samples), p=weights)
+    #         # sample_idx: (n_rows, n_samples) with values in [0, n_samples)
+    #         sample_idx = rng.integers(n_samples, size=(n_rows, n_samples))
+
+    #         # row indices broadcasted to (n_rows, n_samples)
+    #         row_idx = np.arange(n_rows)[:, None]
+
+    #         # Advanced indexing: result shape (n_rows, n_samples)
+    #         pooled_array = model_stack[row_idx, model_idx, sample_idx]
+
+    #         # Convert each row to a list
+    #         pooled_lists = pooled_array.tolist()
+
+    #         # Build a Polars Series of list type
+    #         pooled_series = pl.Series(name=target_column, values=pooled_lists)
+    #         pooled_cols.append(pooled_series)
+
+    #     # combine back into polar dataframe with index columns
+    #     pooled = df.select(self.index_cols)
+    #     for col in pooled_cols:
+    #         pooled = pooled.with_columns(col)
+
+    #     return pooled
+
     def _concatenate_aggregation(
         self, df: pl.DataFrame, weights: Optional[List[float]] = None
     ) -> pl.DataFrame:
-        """
-        Perform linear pooling with resampling to combine distributions
-
-        Parameters:
-            df: Polars DataFrame with target columns containing distribution samples
-            weights: list of floats (default: equal weights)
-
-        Returns:
-            Polars DataFrame with pooled distributions
-        """
-
-        # set weights to equal if not specified
         if weights is None:
             weights = [1.0 / self.n_models] * self.n_models
 
-        # infer sample size from manager state
         if self.sample_size is None:
             raise ValueError(
-                "self.sample_size is not set. Make sure you added at least one "
+                "sample_size is not set. Make sure you added at least one "
                 "distribution model and detected its sample size."
             )
-        n_samples = self.sample_size
 
-        pooled_cols = []
+        n_samples = self.sample_size
         rng = np.random.default_rng(42)
 
-        for target_column in self.target_cols:
+        pooled_cols = []
 
-            # find target columns
+        for target_column in self.target_cols:
             model_cols = [c for c in df.columns if c.startswith(target_column)]
 
-            #    def pool_row(row, *, rng=rng):
-
-            #        samples_list = [np.array(val) for val in row]
-
-            #        # decide how many samples to draw from each model
-            #        sample_counts = rng.multinomial(n_samples, weights)
-
-            #        pool = []
-            #        for s, count in zip(samples_list, sample_counts):
-            #                pool.extend(rng.choice(s, size=count, replace=True))
-            #        return (pool,)
-
-            #    pools = df.select(model_cols).map_rows(pool_row)
-            #    pooled_cols.append(pools.to_series().alias(target_column))
             model_arrays = []
             for col in model_cols:
-                # df[col].to_list() -> List[List[...]] with length n_rows
                 arr = np.asarray(df[col].to_list())
-                # Basic sanity check
                 if arr.ndim != 2 or arr.shape[1] != n_samples:
                     raise ValueError(
                         f"Column {col} does not have shape (n_rows, {n_samples}). "
@@ -399,32 +463,21 @@ class AggregationManager:
 
             # Stack into (n_models, n_rows, n_samples)
             model_stack = np.stack(model_arrays, axis=0)
-            # Reorder to (n_rows, n_models, n_samples)
-            model_stack = np.moveaxis(model_stack, 0, 1)
+            n_models, n_rows, _ = model_stack.shape
 
-            n_rows, n_models, n_samples_check = model_stack.shape
-            assert n_samples_check == n_samples
+            # Choose model and sample index once per output sample
+            # (applies to all rows for that sample)
+            chosen_models = rng.choice(n_models, size=n_samples, p=weights)
+            chosen_samples = rng.integers(n_samples, size=n_samples)
 
-            # Draw model indices and sample indices for ALL rows at once
-            # model_idx: (n_rows, n_samples) with values in [0, n_models)
-            model_idx = rng.choice(n_models, size=(n_rows, n_samples), p=weights)
-            # sample_idx: (n_rows, n_samples) with values in [0, n_samples)
-            sample_idx = rng.integers(n_samples, size=(n_rows, n_samples))
+            # For each output sample s, take entire column from chosen_model[s], chosen_sample[s]
+            # Result: (n_rows, n_samples)
+            pooled_array = model_stack[chosen_models, :, chosen_samples].T
 
-            # row indices broadcasted to (n_rows, n_samples)
-            row_idx = np.arange(n_rows)[:, None]
-
-            # Advanced indexing: result shape (n_rows, n_samples)
-            pooled_array = model_stack[row_idx, model_idx, sample_idx]
-
-            # Convert each row to a list
             pooled_lists = pooled_array.tolist()
-
-            # Build a Polars Series of list type
             pooled_series = pl.Series(name=target_column, values=pooled_lists)
             pooled_cols.append(pooled_series)
 
-        # combine back into polar dataframe with index columns
         pooled = df.select(self.index_cols)
         for col in pooled_cols:
             pooled = pooled.with_columns(col)
