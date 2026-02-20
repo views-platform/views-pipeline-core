@@ -45,19 +45,21 @@ class LoaderModule:
         self,
         data: Union[pl.DataFrame, pl.LazyFrame, pd.DataFrame, str, Path],
         collect: bool = True,
-    ) -> pl.DataFrame:
-        """Load data from various sources into a Polars DataFrame.
+    ) -> Union[pl.DataFrame, pl.LazyFrame]:
+        """Load data from various sources into a Polars DataFrame or LazyFrame.
         
         Args:
             data: Data source - can be:
                 - pl.DataFrame: Cloned directly
-                - pl.LazyFrame: Collected if collect=True
+                - pl.LazyFrame: Collected if collect=True, otherwise returned as-is
                 - pd.DataFrame: Converted to Polars
                 - str/Path: File path (.parquet or .csv)
-            collect: If True, collect LazyFrames immediately.
+            collect: If True, collect LazyFrames immediately. If False, may return
+                a LazyFrame for pl.LazyFrame inputs or parquet files with use_lazy=True.
             
         Returns:
-            Polars DataFrame with loaded data.
+            Polars DataFrame if collect=True or input is eager.
+            Polars LazyFrame if collect=False and input is lazy or use_lazy=True for parquet.
             
         Raises:
             FileNotFoundError: If file path doesn't exist.

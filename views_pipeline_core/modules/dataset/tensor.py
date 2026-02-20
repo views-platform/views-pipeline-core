@@ -477,7 +477,7 @@ class TensorModule:
                 f"Row count {len(df)} != expected {expected_rows}. Grid may have gaps."
             )
         
-        values = df.select(feature_cols).to_numpy()
+        values = df.select(feature_cols).to_numpy().astype(self.dtype)
         tensor = values.reshape(n_times, n_entities, n_features)
         tensor = np.expand_dims(tensor, axis=2)  # Add sample dimension
         
@@ -504,7 +504,7 @@ class TensorModule:
                 f"Row count {len(df)} != expected {expected_rows}. Grid may have gaps."
             )
         
-        tensor = np.empty((n_times, n_entities, n_samples, n_features), dtype=np.float64)
+        tensor = np.empty((n_times, n_entities, n_samples, n_features), dtype=self.dtype)
         
         for f_idx, col in enumerate(feature_cols):
             dtype = df.schema[col]
@@ -514,7 +514,7 @@ class TensorModule:
                 
                 if arr.dtype == object:
                     stacked = np.stack([
-                        np.array(x) if x is not None else np.full(n_samples, np.nan)
+                        np.array(x, dtype=self.dtype) if x is not None else np.full(n_samples, np.nan, dtype=self.dtype)
                         for x in arr
                     ])
                 else:
@@ -527,7 +527,7 @@ class TensorModule:
                     if self.auto_broadcast and actual_samples == 1:
                         reshaped = np.repeat(reshaped, n_samples, axis=2)
                     else:
-                        padded = np.full((n_times, n_entities, n_samples), np.nan)
+                        padded = np.full((n_times, n_entities, n_samples), np.nan, dtype=self.dtype)
                         padded[:, :, :actual_samples] = reshaped
                         reshaped = padded
                 elif actual_samples > n_samples:
@@ -560,7 +560,7 @@ class TensorModule:
                 f"Row count {len(df)} != expected {expected_rows}. Grid may have gaps."
             )
         
-        values = df.select(feature_cols).to_numpy()
+        values = df.select(feature_cols).to_numpy().astype(self.dtype)
         tensor = values.reshape(n_samples, n_times, n_entities, n_features)
         tensor = tensor.transpose(1, 2, 0, 3)
         
