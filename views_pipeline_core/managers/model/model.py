@@ -2142,6 +2142,7 @@ class ForecastingModelManager(ModelManager):
             config=None,  # Will be set by wandb.config
             job_type="sweep",
         ):
+            model = None  # Initialize to avoid UnboundLocalError in finally block
             try:
                 # Update config for sweep run using config_manager
                 self._config_manager.update_for_sweep_run(
@@ -2183,7 +2184,8 @@ class ForecastingModelManager(ModelManager):
             finally:
                 self._wandb_module.finish_run()
                 # Clean up resources to avoid file descriptor exhaustion in sweeps
-                del model
+                if model is not None:
+                    del model
                 gc.collect()
                 # if TORCH_AVAILABLE and torch.cuda.is_available():
                 #     torch.cuda.empty_cache()

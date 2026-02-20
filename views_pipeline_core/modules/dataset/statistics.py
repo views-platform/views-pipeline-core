@@ -53,14 +53,17 @@ def _get_optimal_n_jobs(n_tasks: int, max_workers: Optional[int] = None) -> int:
     return min(optimal, n_tasks)
 
 
-def _prefilter_valid_cells(flat: np.ndarray) -> Tuple[np.ndarray, np.ndarray, int]:
+def _prefilter_valid_cells(flat: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Pre-filter cells to skip all-NaN rows.
     
     Args:
         flat: 2D array of shape (n_cells, n_samples).
         
     Returns:
-        Tuple of (valid_mask, valid_flat, n_valid).
+        Tuple of (valid_mask, valid_indices, valid_flat):
+            - valid_mask: Boolean array of shape (n_cells,) indicating valid cells.
+            - valid_indices: Integer array of indices for valid cells.
+            - valid_flat: 2D array of shape (n_valid, n_samples) with only valid rows.
     """
     # A cell is valid if it has at least one finite value
     valid_mask = np.any(np.isfinite(flat), axis=1)
