@@ -521,7 +521,7 @@ class ConfigurationManager:
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
 
-        # 3. Sync back to unified 'targets' for backward compatibility
+        # 3. Sync back to unified 'targets' and 'metrics' for backward compatibility
         all_targets = []
         for t in config.get("regression_targets", []) + config.get("classification_targets", []):
             if t not in all_targets:
@@ -529,6 +529,14 @@ class ConfigurationManager:
         
         if all_targets:
             config["targets"] = all_targets
+
+        all_metrics = []
+        for m in config.get("regression_metrics", []) + config.get("classification_metrics", []):
+            if m not in all_metrics:
+                all_metrics.append(m)
+        
+        if all_metrics:
+            config["metrics"] = all_metrics
 
         return config
     
@@ -558,8 +566,17 @@ class ConfigurationManager:
         for t in config.get("regression_targets", []) + config.get("classification_targets", []):
             if t not in all_targets:
                 all_targets.append(t)
+        
         if all_targets:
             config["targets"] = all_targets
+
+        all_metrics = []
+        for m in config.get("regression_metrics", []) + config.get("classification_metrics", []):
+            if m not in all_metrics:
+                all_metrics.append(m)
+        
+        if all_metrics:
+            config["metrics"] = all_metrics
 
         return config
         

@@ -336,7 +336,7 @@ class TestValidateConfig:
     # Failure cases - Deprecated status
     def test_validate_config_deprecated_raises_error(self, deprecated_config):
         """Test validation fails for deprecated model."""
-        with pytest.raises(ValueError, match="Model is deprecated and cannot be used"):
+        with pytest.raises(ValueError, match="is deprecated and cannot be used"):
             validate_config(deprecated_config)
 
     def test_validate_config_deprecated_logs_error(self, deprecated_config):
@@ -353,7 +353,7 @@ class TestValidateConfig:
             'targets': 123
         }
         
-        with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
+        with pytest.raises(ValueError, match="must be a string or a list of strings"):
             validate_config(config)
 
     def test_validate_config_invalid_target_type_dict(self):
@@ -363,8 +363,8 @@ class TestValidateConfig:
             'deployment_status': 'production',
             'targets': {'target': 'ged_sb'}
         }
-        
-        with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
+
+        with pytest.raises(ValueError, match="must be a string or a list of strings"):
             validate_config(config)
 
     def test_validate_config_invalid_target_type_none(self):
@@ -374,7 +374,7 @@ class TestValidateConfig:
             'deployment_status': 'production',
             'targets': None
         }
-        
+
         with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
             validate_config(config)
 
@@ -385,8 +385,8 @@ class TestValidateConfig:
             'deployment_status': 'production',
             'targets': ('ged_sb', 'ged_ns')
         }
-        
-        with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
+
+        with pytest.raises(ValueError, match="must be a string or a list of strings"):
             validate_config(config)
 
     def test_validate_config_invalid_target_type_set(self):
@@ -396,8 +396,8 @@ class TestValidateConfig:
             'deployment_status': 'production',
             'targets': {'ged_sb', 'ged_ns'}
         }
-        
-        with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
+
+        with pytest.raises(ValueError, match="must be a string or a list of strings"):
             validate_config(config)
 
     # Edge cases
@@ -412,14 +412,14 @@ class TestValidateConfig:
         assert config['targets'] == ['']
 
     def test_validate_config_empty_list_target(self):
-        """Test validation with empty list target."""
+        """Test that an empty targets list raises a ValueError (no targets specified)."""
         config = {
             'name': 'test_model',
             'deployment_status': 'production',
             'targets': []
         }
-        validate_config(config)
-        assert config['targets'] == []
+        with pytest.raises(ValueError, match="No targets specified"):
+            validate_config(config)
 
     def test_validate_config_modifies_original(self):
         """Test that validate_config modifies the original config dict."""

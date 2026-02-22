@@ -1985,7 +1985,7 @@ class ForecastingModelManager(ModelManager):
                     validate_prediction_dataframe(
                         dataframe=df, target=configs["targets"]
                     )
-                    save_predictions_func(df, model_path.data_generated, idx)
+                    save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
 
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     futures = [
@@ -2001,13 +2001,25 @@ class ForecastingModelManager(ModelManager):
                     ]
                     concurrent.futures.wait(futures)
 
+                self._wandb_module.send_alert(
+                    title="Evaluation Predictions Saved",
+                    text=f"Validated and saved {len(list_df_predictions)} prediction sequences at {self._model_path.data_generated.relative_to(self._model_path.root)}.",
+                    notifications_enabled=self._wandb_notifications,
+                )
+
                 handle_single_log_creation(
                     model_path=self._model_path,
                     config=self.configs,
                     train=False,
                 )
 
-                if self.configs.get("metrics"):
+                has_metrics = any([
+                    self.configs.get("metrics"),
+                    self.configs.get("regression_metrics"),
+                    self.configs.get("classification_metrics")
+                ])
+
+                if has_metrics:
                     self._evaluate_prediction_dataframe(
                         list_df_predictions, self._eval_type
                     )
@@ -2528,6 +2540,7 @@ class ForecastingModelManager(ModelManager):
         df_predictions: pd.DataFrame,
         path_generated: Union[str, Path],
         sequence_number: int = None,
+        send_alert: bool = True,
     ) -> None:
         """
         Save predictions to disk and prediction store.
@@ -2543,6 +2556,7 @@ class ForecastingModelManager(ModelManager):
             path_generated: Directory for saving
             sequence_number: Sequence number for evaluation runs.
                 None for forecasting runs.
+            send_alert: Whether to send a WandB alert.
         
         Side Effects:
             - Saves parquet file
@@ -2594,11 +2608,12 @@ class ForecastingModelManager(ModelManager):
                     except Exception as e:
                         logger.error(f"Error uploading predictions to datastore: {e}", exc_info=True)
 
-            self._wandb_module.send_alert(
-                title="Predictions Saved",
-                text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
-                notifications_enabled=self._wandb_notifications,
-            )
+            if send_alert:
+                self._wandb_module.send_alert(
+                    title="Predictions Saved",
+                    text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
+                    notifications_enabled=self._wandb_notifications,
+                )
 
         except Exception as e:
             raise PipelineException(
