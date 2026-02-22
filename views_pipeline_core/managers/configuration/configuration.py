@@ -503,15 +503,32 @@ class ConfigurationManager:
             - :meth:`update_for_sweep_run`: Update for sweep run
         """
         config = self._get_raw_combined_config()
-        
-        # 1. Map legacy keys to new keys ONLY if new keys are missing
+
+        # 1. Map legacy keys (Tier 1) → transitional keys (Tier 2), only if Tier 2/3 absent
         if "targets" in config and "regression_targets" not in config and "classification_targets" not in config:
             config["regression_targets"] = config["targets"]
         if "metrics" in config and "regression_metrics" not in config and "classification_metrics" not in config:
             config["regression_metrics"] = config["metrics"]
 
+        # 1b. Map transitional metric keys (Tier 2) → explicit metric keys (Tier 3),
+        #     only if Tier 3 metric keys are absent.
+        _explicit_metric_keys = {
+            "regression_point_metrics", "regression_uncertainty_metrics",
+            "classification_point_metrics", "classification_uncertainty_metrics",
+        }
+        if not (config.keys() & _explicit_metric_keys):
+            if "regression_metrics" in config:
+                config["regression_point_metrics"] = config["regression_metrics"]
+            if "classification_metrics" in config:
+                config["classification_point_metrics"] = config["classification_metrics"]
+
         # 2. Force all task keys to be lists (normalization)
-        task_keys = ["regression_targets", "classification_targets", "regression_metrics", "classification_metrics"]
+        task_keys = [
+            "regression_targets", "classification_targets",
+            "regression_metrics", "classification_metrics",
+            "regression_point_metrics", "regression_uncertainty_metrics",
+            "classification_point_metrics", "classification_uncertainty_metrics",
+        ]
         for key in task_keys:
             val = config.get(key, [])
             if isinstance(val, str):
@@ -526,15 +543,20 @@ class ConfigurationManager:
         for t in config.get("regression_targets", []) + config.get("classification_targets", []):
             if t not in all_targets:
                 all_targets.append(t)
-        
+
         if all_targets:
             config["targets"] = all_targets
 
         all_metrics = []
-        for m in config.get("regression_metrics", []) + config.get("classification_metrics", []):
+        for m in (
+            config.get("regression_point_metrics", []) +
+            config.get("regression_uncertainty_metrics", []) +
+            config.get("classification_point_metrics", []) +
+            config.get("classification_uncertainty_metrics", [])
+        ):
             if m not in all_metrics:
                 all_metrics.append(m)
-        
+
         if all_metrics:
             config["metrics"] = all_metrics
 
@@ -546,13 +568,28 @@ class ConfigurationManager:
         """
         config = self._get_raw_combined_config()
 
-        # Mirroring normalization from get_combined_config
+        # Mirroring normalization from get_combined_config (identical logic)
         if "targets" in config and "regression_targets" not in config and "classification_targets" not in config:
             config["regression_targets"] = config["targets"]
         if "metrics" in config and "regression_metrics" not in config and "classification_metrics" not in config:
             config["regression_metrics"] = config["metrics"]
 
-        task_keys = ["regression_targets", "classification_targets", "regression_metrics", "classification_metrics"]
+        _explicit_metric_keys = {
+            "regression_point_metrics", "regression_uncertainty_metrics",
+            "classification_point_metrics", "classification_uncertainty_metrics",
+        }
+        if not (config.keys() & _explicit_metric_keys):
+            if "regression_metrics" in config:
+                config["regression_point_metrics"] = config["regression_metrics"]
+            if "classification_metrics" in config:
+                config["classification_point_metrics"] = config["classification_metrics"]
+
+        task_keys = [
+            "regression_targets", "classification_targets",
+            "regression_metrics", "classification_metrics",
+            "regression_point_metrics", "regression_uncertainty_metrics",
+            "classification_point_metrics", "classification_uncertainty_metrics",
+        ]
         for key in task_keys:
             val = config.get(key, [])
             if isinstance(val, str):
@@ -566,15 +603,20 @@ class ConfigurationManager:
         for t in config.get("regression_targets", []) + config.get("classification_targets", []):
             if t not in all_targets:
                 all_targets.append(t)
-        
+
         if all_targets:
             config["targets"] = all_targets
 
         all_metrics = []
-        for m in config.get("regression_metrics", []) + config.get("classification_metrics", []):
+        for m in (
+            config.get("regression_point_metrics", []) +
+            config.get("regression_uncertainty_metrics", []) +
+            config.get("classification_point_metrics", []) +
+            config.get("classification_uncertainty_metrics", [])
+        ):
             if m not in all_metrics:
                 all_metrics.append(m)
-        
+
         if all_metrics:
             config["metrics"] = all_metrics
 

@@ -2047,7 +2047,11 @@ class ForecastingModelManager(ModelManager):
                 has_metrics = any([
                     self.configs.get("metrics"),
                     self.configs.get("regression_metrics"),
-                    self.configs.get("classification_metrics")
+                    self.configs.get("classification_metrics"),
+                    self.configs.get("regression_point_metrics"),
+                    self.configs.get("regression_uncertainty_metrics"),
+                    self.configs.get("classification_point_metrics"),
+                    self.configs.get("classification_uncertainty_metrics"),
                 ])
 
                 if has_metrics:
@@ -2702,36 +2706,38 @@ class ForecastingModelManager(ModelManager):
         df_viewser = self.prepare_actuals_df(df_viewser)
         df_actual = df_viewser[self.configs["targets"]]
 
-        # Task definitions for explicit dispatch
+        # Task definitions for explicit dispatch (config-driven point/uncertainty split)
         tasks = {
             "regression": {
                 "targets": self.configs.get("regression_targets", []),
-                "metrics": self.configs.get("regression_metrics", [])
+                "point_metrics": self.configs.get("regression_point_metrics",
+                                  self.configs.get("regression_metrics", [])),
+                "uncertainty_metrics": self.configs.get("regression_uncertainty_metrics", []),
             },
             "classification": {
                 "targets": self.configs.get("classification_targets", []),
-                "metrics": self.configs.get("classification_metrics", [])
-            }
+                "point_metrics": self.configs.get("classification_point_metrics",
+                                  self.configs.get("classification_metrics", [])),
+                "uncertainty_metrics": self.configs.get("classification_uncertainty_metrics", []),
+            },
         }
 
         for task_type, task_config in tasks.items():
             targets = task_config["targets"]
-            metrics = task_config["metrics"]
+            point_metrics = task_config["point_metrics"]
+            uncertainty_metrics = task_config["uncertainty_metrics"]
 
             if not targets:
                 continue
 
             logger.info(f"Processing {task_type} tasks for evaluation...")
-            evaluation_manager = EvaluationManager(metrics)
 
             for target in targets:
                 logger.info(f"Calculating {task_type} evaluation metrics for {target}")
-                
-                # Distribution Check (Scalar Gate)
-                # We check the first prediction sequence/dataframe
+
+                # Locate the prediction column
                 first_df = df_predictions[0] if isinstance(df_predictions, list) else df_predictions
                 if target in first_df.columns:
-                    # In some pipelines columns might be prefixed with 'pred_'
                     pred_col = target
                 elif f"pred_{target}" in first_df.columns:
                     pred_col = f"pred_{target}"
@@ -2739,32 +2745,29 @@ class ForecastingModelManager(ModelManager):
                     logger.warning(f"Target {target} not found in prediction columns. Skipping.")
                     continue
 
-                # Inspect first non-null element for distribution check
+                # Detect point estimate vs distribution from data shape — not from column names
                 sample_val = first_df[pred_col].dropna().iloc[0] if not first_df[pred_col].dropna().empty else 0
-                
                 is_distribution = isinstance(sample_val, (list, np.ndarray, pd.Series)) and len(sample_val) > 1
-                
-                # Check if metrics requested are point metrics (this is a simple heuristic for now)
-                # Point metrics usually can't handle distributions directly without reduction
-                point_metrics = {"MSE", "MSLE", "MAE", "RMSLE", "AP", "AUC", "Brier", "accuracy", "precision", "recall", "f1"}
-                requested_point_metrics = set(m.lower() for m in metrics).intersection(set(pm.lower() for pm in point_metrics))
 
-                if is_distribution and requested_point_metrics:
-                    error_msg = (
-                        f"Target '{target}' produces a distribution (length {len(sample_val)}), "
-                        f"but point metrics {requested_point_metrics} were requested. "
-                        "Please reduce the distribution to a point estimate (e.g., mean or median) "
-                        "before applying these metrics, or use probabilistic metrics."
+                # Config-driven dispatch: select the right metric list from config
+                metrics_to_use = uncertainty_metrics if is_distribution else point_metrics
+
+                if not metrics_to_use:
+                    logger.warning(
+                        f"No {'uncertainty' if is_distribution else 'point'} metrics configured for "
+                        f"{task_type} target '{target}'. Skipping evaluation for this target. "
+                        f"Add {'regression_uncertainty_metrics' if task_type == 'regression' else 'classification_uncertainty_metrics'} "
+                        f"to your config to evaluate distribution predictions."
                     )
-                    logger.error(error_msg)
-                    raise TypeError(error_msg)
+                    continue
 
                 target_identifier = target
 
-                # Call evaluation manager with task-specific metrics
-                # We pass a temporary config with only the relevant metrics
+                evaluation_manager = EvaluationManager(metrics_to_use)
+
+                # Pass a task-specific config slice with only the selected metrics
                 task_specific_config = self.configs.copy()
-                task_specific_config["metrics"] = metrics
+                task_specific_config["metrics"] = metrics_to_use
 
                 eval_result_dict = evaluation_manager.evaluate(
                     df_actual, df_predictions, target, task_specific_config

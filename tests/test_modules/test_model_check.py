@@ -434,3 +434,55 @@ class TestValidateConfig:
         # Same object, modified in place
         assert id(config) == original_id
         assert config['targets'] == ['ged_sb']
+
+    # Tier 3 explicit metric key tests
+    def test_validate_config_explicit_point_uncertainty_keys(self):
+        """Verify Tier 3 explicit metric keys are accepted and normalized."""
+        config = {
+            'name': 'explicit_model',
+            'deployment_status': 'production',
+            'regression_targets': ['t_reg'],
+            'regression_point_metrics': 'MSE',        # string → list
+            'regression_uncertainty_metrics': ['CRPS'],
+            'classification_targets': ['t_class'],
+            'classification_point_metrics': ['AP'],
+            'classification_uncertainty_metrics': [],
+        }
+        validate_config(config)
+        assert config['regression_point_metrics'] == ['MSE']
+        assert config['regression_uncertainty_metrics'] == ['CRPS']
+        assert config['classification_point_metrics'] == ['AP']
+        assert config['classification_uncertainty_metrics'] == []
+        # Sync-back: all 4 explicit metric keys aggregated into config["metrics"]
+        assert 'MSE' in config['metrics']
+        assert 'CRPS' in config['metrics']
+        assert 'AP' in config['metrics']
+
+    def test_validate_config_transitional_metrics_mapped_to_point(self):
+        """Verify regression_metrics/classification_metrics map to *_point_metrics (Tier 2 → Tier 3)."""
+        config = {
+            'name': 'transitional_model',
+            'deployment_status': 'production',
+            'regression_targets': ['t_reg'],
+            'regression_metrics': ['MSE', 'MAE'],
+            'classification_targets': ['t_class'],
+            'classification_metrics': ['AP'],
+        }
+        validate_config(config)
+        assert config.get('regression_point_metrics') == ['MSE', 'MAE']
+        assert config.get('classification_point_metrics') == ['AP']
+        assert 'MSE' in config['metrics']
+        assert 'MAE' in config['metrics']
+        assert 'AP' in config['metrics']
+
+    def test_validate_config_mixing_transitional_and_explicit_raises(self):
+        """Verify that mixing Tier 2 (regression_metrics) and Tier 3 (*_point_metrics) raises ValueError."""
+        config = {
+            'name': 'mixed_model',
+            'deployment_status': 'production',
+            'regression_targets': ['t_reg'],
+            'regression_metrics': ['MSE'],           # Tier 2
+            'regression_point_metrics': ['RMSLE'],   # Tier 3
+        }
+        with pytest.raises(ValueError, match="Cannot mix"):
+            validate_config(config)

@@ -81,32 +81,35 @@ def test_validate_config_legacy_mapping():
 @patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock())
 @patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash')
 @patch('views_pipeline_core.files.utils.read_dataframe')
-def test_scalar_gate_distribution_error(mock_read, mock_splash, mock_cfg, mock_log, mock_load):
-    """Verify that distribution estimates trigger a TypeError for point metrics."""
+def test_scalar_gate_distribution_skips_with_warning(mock_read, mock_splash, mock_cfg, mock_log, mock_load, caplog):
+    """Verify distribution predictions + only point metrics → warning + skip, no exception."""
     mock_path_manager = MagicMock()
     mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
-    
+
     manager = ForecastingModelManager(mock_path_manager)
     manager._args = MagicMock()
     manager._args.run_type = "calibration"
     manager.configs = {
         "regression_targets": ["target_sb"],
-        "regression_metrics": ["mse"],
+        "regression_point_metrics": ["mse"],   # Tier 3: only point, no uncertainty
         "targets": ["target_sb"],
         "name": "test",
-        "sweep": False
+        "sweep": False,
     }
-    
-    # Prediction contains a distribution (list of samples)
+
+    # Prediction is a distribution (list of samples)
     df_pred = pd.DataFrame({
         "target_sb": [[0.1, 0.2, 0.3]]
     }, index=pd.MultiIndex.from_tuples([(1, 1)], names=['month_id', 'entity_id']))
-    
+
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
-    
-    with patch('views_pipeline_core.managers.model.model.EvaluationManager', create=True):
-        with pytest.raises(TypeError, match="produces a distribution"):
-            manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
+
+    with patch('views_pipeline_core.managers.model.model.EvaluationManager', create=True) as mock_eval_cls:
+        # No exception raised — distribution with only point metrics skips gracefully
+        manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
+        # EvaluationManager must NOT have been called
+        assert mock_eval_cls.call_count == 0
+    assert "No uncertainty metrics configured" in caplog.text
 
 @patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={})
 @patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', return_value=MagicMock())
@@ -123,7 +126,7 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
     manager._args.run_type = "calibration"
     manager.configs = {
         "regression_targets": ["target_sb"],
-        "regression_metrics": ["mse"],
+        "regression_point_metrics": ["mse"],   # Tier 3
         "targets": ["target_sb"],
         "name": "test",
         "sweep": False,
@@ -145,3 +148,56 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
     with patch('views_pipeline_core.managers.model.model.EvaluationManager', create=True) as mock_eval_cls:
         # Should complete without error when receiving a standard scalar prediction
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
+
+
+@patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={})
+@patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', return_value=MagicMock())
+@patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock())
+@patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash')
+@patch('views_pipeline_core.files.utils.read_dataframe')
+def test_scalar_gate_distribution_with_uncertainty_metrics(mock_read, mock_splash, mock_cfg, mock_log, mock_load):
+    """Verify distribution predictions + uncertainty metrics → EvaluationManager IS called."""
+    mock_path_manager = MagicMock()
+    mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+
+    manager = ForecastingModelManager(mock_path_manager)
+    manager._args = MagicMock()
+    manager._args.run_type = "calibration"
+    manager.configs = {
+        "regression_targets": ["target_sb"],
+        "regression_point_metrics": [],          # no point metrics
+        "regression_uncertainty_metrics": ["CRPS"],  # uncertainty metrics present
+        "targets": ["target_sb"],
+        "name": "test",
+        "sweep": False,
+        "run_type": "calibration",
+        "timestamp": "20260101",
+    }
+    manager._save_evaluations = MagicMock()
+    manager._generate_evaluation_table = MagicMock(return_value="table")
+    manager._wandb_module = MagicMock()
+    manager._wandb_notifications = False
+
+    # Prediction is a distribution
+    df_pred = pd.DataFrame({
+        "target_sb": [[0.1, 0.2, 0.3]]
+    }, index=pd.MultiIndex.from_tuples([(1, 1)], names=['month_id', 'entity_id']))
+
+    mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
+
+    MOCK_EVAL_RESULT = {
+        "step": ({}, pd.DataFrame()),
+        "time_series": ({}, pd.DataFrame()),
+        "month": ({}, pd.DataFrame()),
+    }
+
+    # Patch EvaluationManager on the already-mocked sys.modules entry so that
+    # the `from views_evaluation... import EvaluationManager` inside the function body
+    # picks up our mock (same technique used in test_audit_security_robustness.py).
+    eval_module_mock = sys.modules['views_evaluation.evaluation.evaluation_manager']
+    with patch.object(eval_module_mock, 'EvaluationManager') as mock_eval_cls:
+        mock_eval_cls.return_value.evaluate.return_value = MOCK_EVAL_RESULT
+        manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
+        # EvaluationManager must have been initialised with the uncertainty metrics
+        assert mock_eval_cls.call_count == 1
+        mock_eval_cls.assert_called_once_with(["CRPS"])
