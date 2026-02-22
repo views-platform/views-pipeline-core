@@ -1338,19 +1338,50 @@ class ModelManager:
     def config(self, config: Dict) -> None:
         """
         Update runtime configuration (alias for configs setter).
-        
+
         Args:
             config: Dictionary of configuration values to add/update
-        
+
         Example:
             >>> manager.config = {'learning_rate': 0.001}
             >>> print(manager.config['learning_rate'])
             0.001
-        
+
         See Also:
             - :meth:`configs`: Primary setter method
         """
         self.configs = config
+
+    def prepare_actuals_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Hook for model-specific preparation of the actuals DataFrame.
+
+        Called during evaluation immediately after the raw ground-truth
+        DataFrame is loaded from disk and before it is sliced by target
+        column names. By default this is a no-op, so all existing models
+        are completely unaffected.
+
+        Subclasses that manufacture derived targets (e.g. binary signals
+        derived from raw counts) must override this method to add those
+        columns to the DataFrame so that the subsequent target slice
+        succeeds.
+
+        Args:
+            df: Raw actuals DataFrame as loaded from the viewser parquet
+                file. Contains whatever columns the queryset produced.
+
+        Returns:
+            The prepared DataFrame. Must contain at minimum all columns
+            listed in ``self.configs["targets"]``.
+
+        Example (override in a subclass)::
+
+            def prepare_actuals_df(self, df: pd.DataFrame) -> pd.DataFrame:
+                for target, source in self.configs["derivations"].items():
+                    df[target] = (df[source] > 0).astype(int)
+                return df
+        """
+        return df
 
 
 class ForecastingModelManager(ModelManager):
@@ -2668,6 +2699,7 @@ class ForecastingModelManager(ModelManager):
             df_viewser = read_dataframe(df_path)
 
         logger.info(f"df_viewser read from {df_path}")
+        df_viewser = self.prepare_actuals_df(df_viewser)
         df_actual = df_viewser[self.configs["targets"]]
 
         # Task definitions for explicit dispatch
