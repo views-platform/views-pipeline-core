@@ -2732,20 +2732,22 @@ class ForecastingModelManager(ModelManager):
             for target in targets:
                 logger.info(f"Calculating {task_type} evaluation metrics for {target}")
 
-                # Locate the prediction column
+                # Check that the canonical prediction column exists before evaluating
                 first_df = df_predictions[0] if isinstance(df_predictions, list) else df_predictions
-                if target in first_df.columns:
-                    pred_col = target
-                elif f"pred_{target}" in first_df.columns:
-                    pred_col = f"pred_{target}"
-                else:
-                    logger.warning(f"Target {target} not found in prediction columns. Skipping.")
+                if f"pred_{target}" not in first_df.columns:
+                    logger.warning(f"Column pred_{target} not found in prediction columns. Skipping.")
                     continue
 
                 target_identifier = target
 
+                # EvaluationManager.evaluate() operates on one target at a time and
+                # requires exactly one column named pred_{target} per prediction DataFrame.
+                raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
                 eval_result_dict = evaluation_manager.evaluate(
-                    df_actual, df_predictions, target, self.configs
+                    df_actual[[target]],
+                    [df[[f"pred_{target}"]] for df in raw_preds],
+                    target,
+                    self.configs,
                 )
 
                 # Initialize local variables to avoid UnboundLocalError

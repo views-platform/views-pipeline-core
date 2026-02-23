@@ -80,8 +80,8 @@ def test_G3_scalar_gate_allows_scalars(mock_deps):
     
     mgr = get_test_manager()
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
-    df_pred = pd.DataFrame({"t1_sb": [0.5, 0.6]}, index=pd.MultiIndex.from_tuples([(1,1), (1,2)], names=['m','e']))
-    
+    df_pred = pd.DataFrame({"pred_t1_sb": [0.5, 0.6]}, index=pd.MultiIndex.from_tuples([(1,1), (1,2)], names=['m','e']))
+
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0,0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
@@ -100,8 +100,8 @@ def test_G4_multi_task_loop_separation(mock_deps):
         "classification_targets": ["class_ns"], "classification_metrics": ["auc"],
         "targets": ["reg_sb", "class_ns"], "sweep": False
     }
-    df_pred = pd.DataFrame({"reg_sb": [0.5], "class_ns": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
-    
+    df_pred = pd.DataFrame({"pred_reg_sb": [0.5], "pred_class_ns": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"reg_sb":[0], "class_ns":[0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
@@ -151,7 +151,7 @@ def test_B4_scalar_gate_with_nans(mock_deps):
     
     mgr = get_test_manager()
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
-    df_pred = pd.DataFrame({"t1_sb": [np.nan, np.nan]}, index=pd.MultiIndex.from_tuples([(1,1), (1,2)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_t1_sb": [np.nan, np.nan]}, index=pd.MultiIndex.from_tuples([(1,1), (1,2)], names=['m','e']))
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0,0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
@@ -174,8 +174,8 @@ def test_G6_non_standard_target_names(mock_deps):
         "sweep": False
     }
     
-    df_pred = pd.DataFrame({target_name: [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
-    
+    df_pred = pd.DataFrame({f"pred_{target_name}": [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({target_name: [0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
@@ -203,7 +203,7 @@ def test_R2_scalar_gate_false_positive(mock_deps):
     mgr = get_test_manager()
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
     # Prediction is a list of length 1 (e.g. [0.5])
-    df_pred = pd.DataFrame({"t1_sb": [[0.5]]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_t1_sb": [[0.5]]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
@@ -228,8 +228,8 @@ def test_GI_1_strict_separation_proof(mock_deps):
         "targets": ["reg_t", "class_t"], "sweep": False
     }
     
-    df_pred = pd.DataFrame({"reg_t": [0.5], "class_t": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
-    
+    df_pred = pd.DataFrame({"pred_reg_t": [0.5], "pred_class_t": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"reg_t":[0], "class_t":[0]}, index=df_pred.index)):
         mock_eval_inst = mock_eval_mgr_cls.return_value
         mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
@@ -257,8 +257,8 @@ def test_GI_2_no_name_inference_proof(mock_deps):
         "targets": ["this_is_a_regression_name"], "sweep": False
     }
     
-    df_pred = pd.DataFrame({"this_is_a_regression_name": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
-    
+    df_pred = pd.DataFrame({"pred_this_is_a_regression_name": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"this_is_a_regression_name":[0]}, index=df_pred.index)):
         mock_eval_inst = mock_eval_mgr_cls.return_value
         mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
@@ -284,8 +284,8 @@ def test_GI_3_legacy_fallback_integrity(mock_deps):
     validate_config(raw_config) # This does the genome mapping
     
     mgr.configs = raw_config
-    df_pred = pd.DataFrame({"legacy_t": [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
-    
+    df_pred = pd.DataFrame({"pred_legacy_t": [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"legacy_t":[0]}, index=df_pred.index)):
         mock_eval_inst = mock_eval_mgr_cls.return_value
         mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT

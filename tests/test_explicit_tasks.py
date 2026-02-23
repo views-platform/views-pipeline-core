@@ -108,9 +108,9 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
     manager._wandb_module = MagicMock()
     manager._wandb_notifications = False
 
-    # Prediction is a distribution (list of samples)
+    # Prediction is a distribution (list of samples); column must be named pred_{target}
     df_pred = pd.DataFrame({
-        "target_sb": [[0.1, 0.2, 0.3]]
+        "pred_target_sb": [[0.1, 0.2, 0.3]]
     }, index=pd.MultiIndex.from_tuples([(1, 1)], names=['month_id', 'entity_id']))
 
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
@@ -157,11 +157,11 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
     manager._wandb_module = MagicMock()
     manager._wandb_notifications = False
     
-    # Prediction contains a scalar point estimate
+    # Prediction contains a scalar point estimate; column must be named pred_{target}
     df_pred = pd.DataFrame({
-        "target_sb": [0.15]
+        "pred_target_sb": [0.15]
     }, index=pd.MultiIndex.from_tuples([(1, 1)], names=['month_id', 'entity_id']))
-    
+
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
     
     with patch('views_pipeline_core.managers.model.model.EvaluationManager', create=True) as mock_eval_cls:
@@ -197,9 +197,9 @@ def test_scalar_gate_distribution_with_uncertainty_metrics(mock_read, mock_splas
     manager._wandb_module = MagicMock()
     manager._wandb_notifications = False
 
-    # Prediction is a distribution
+    # Prediction is a distribution; column must be named pred_{target}
     df_pred = pd.DataFrame({
-        "target_sb": [[0.1, 0.2, 0.3]]
+        "pred_target_sb": [[0.1, 0.2, 0.3]]
     }, index=pd.MultiIndex.from_tuples([(1, 1)], names=['month_id', 'entity_id']))
 
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
