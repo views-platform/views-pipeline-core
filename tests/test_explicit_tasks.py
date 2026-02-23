@@ -81,8 +81,12 @@ def test_validate_config_legacy_mapping():
 @patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock())
 @patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash')
 @patch('views_pipeline_core.files.utils.read_dataframe')
-def test_scalar_gate_distribution_skips_with_warning(mock_read, mock_splash, mock_cfg, mock_log, mock_load, caplog):
-    """Verify distribution predictions + only point metrics → warning + skip, no exception."""
+def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, mock_log, mock_load):
+    """Verify distribution predictions + only point metrics → EvaluationManager called, no exception.
+
+    Point vs uncertainty dispatch is now handled inside EvaluationManager (reads config keys
+    directly). model.py no longer skips or raises — it delegates the decision to the evaluator.
+    """
     mock_path_manager = MagicMock()
     mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
 
@@ -92,10 +96,17 @@ def test_scalar_gate_distribution_skips_with_warning(mock_read, mock_splash, moc
     manager.configs = {
         "regression_targets": ["target_sb"],
         "regression_point_metrics": ["mse"],   # Tier 3: only point, no uncertainty
+        "regression_uncertainty_metrics": [],
         "targets": ["target_sb"],
         "name": "test",
         "sweep": False,
+        "run_type": "calibration",
+        "timestamp": "20260101",
     }
+    manager._save_evaluations = MagicMock()
+    manager._generate_evaluation_table = MagicMock(return_value="table")
+    manager._wandb_module = MagicMock()
+    manager._wandb_notifications = False
 
     # Prediction is a distribution (list of samples)
     df_pred = pd.DataFrame({
@@ -104,12 +115,20 @@ def test_scalar_gate_distribution_skips_with_warning(mock_read, mock_splash, moc
 
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
 
-    with patch('views_pipeline_core.managers.model.model.EvaluationManager', create=True) as mock_eval_cls:
-        # No exception raised — distribution with only point metrics skips gracefully
+    MOCK_EVAL_RESULT = {
+        "step": ({}, pd.DataFrame()),
+        "time_series": ({}, pd.DataFrame()),
+        "month": ({}, pd.DataFrame()),
+    }
+    eval_module_mock = sys.modules['views_evaluation.evaluation.evaluation_manager']
+    with patch.object(eval_module_mock, 'EvaluationManager') as mock_eval_cls:
+        mock_eval_cls.return_value.evaluate.return_value = MOCK_EVAL_RESULT
+        # No exception raised — EvaluationManager handles point/uncertainty internally
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
-        # EvaluationManager must NOT have been called
-        assert mock_eval_cls.call_count == 0
-    assert "No uncertainty metrics configured" in caplog.text
+        # EvaluationManager WAS instantiated (no-args constructor)
+        mock_eval_cls.assert_called_once_with()
+        # evaluate WAS called for the target
+        assert mock_eval_cls.return_value.evaluate.call_count == 1
 
 @patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={})
 @patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', return_value=MagicMock())
@@ -198,6 +217,7 @@ def test_scalar_gate_distribution_with_uncertainty_metrics(mock_read, mock_splas
     with patch.object(eval_module_mock, 'EvaluationManager') as mock_eval_cls:
         mock_eval_cls.return_value.evaluate.return_value = MOCK_EVAL_RESULT
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
-        # EvaluationManager must have been initialised with the uncertainty metrics
-        assert mock_eval_cls.call_count == 1
-        mock_eval_cls.assert_called_once_with(["CRPS"])
+        # EvaluationManager instantiated once with no args (metrics are read from config inside)
+        mock_eval_cls.assert_called_once_with()
+        # evaluate was called once for the single target
+        assert mock_eval_cls.return_value.evaluate.call_count == 1

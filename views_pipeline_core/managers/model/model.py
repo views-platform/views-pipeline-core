@@ -2704,29 +2704,26 @@ class ForecastingModelManager(ModelManager):
 
         logger.info(f"df_viewser read from {df_path}")
         df_viewser = self.prepare_actuals_df(df_viewser)
-        df_actual = df_viewser[self.configs["targets"]]
+        # Read actuals for all declared targets directly from the canonical Tier 3 keys,
+        # not from the legacy "targets" alias.
+        all_targets = (
+            self.configs.get("regression_targets", []) +
+            self.configs.get("classification_targets", [])
+        )
+        df_actual = df_viewser[all_targets]
 
-        # Task definitions for explicit dispatch (config-driven point/uncertainty split)
+        # Task definitions: target lists only.
+        # EvaluationManager reads the metric keys (regression_point_metrics,
+        # regression_uncertainty_metrics, etc.) directly from the config passed to
+        # evaluate(). Point vs uncertainty dispatch is also handled internally.
         tasks = {
-            "regression": {
-                "targets": self.configs.get("regression_targets", []),
-                "point_metrics": self.configs.get("regression_point_metrics",
-                                  self.configs.get("regression_metrics", [])),
-                "uncertainty_metrics": self.configs.get("regression_uncertainty_metrics", []),
-            },
-            "classification": {
-                "targets": self.configs.get("classification_targets", []),
-                "point_metrics": self.configs.get("classification_point_metrics",
-                                  self.configs.get("classification_metrics", [])),
-                "uncertainty_metrics": self.configs.get("classification_uncertainty_metrics", []),
-            },
+            "regression":     self.configs.get("regression_targets", []),
+            "classification": self.configs.get("classification_targets", []),
         }
 
-        for task_type, task_config in tasks.items():
-            targets = task_config["targets"]
-            point_metrics = task_config["point_metrics"]
-            uncertainty_metrics = task_config["uncertainty_metrics"]
+        evaluation_manager = EvaluationManager()
 
+        for task_type, targets in tasks.items():
             if not targets:
                 continue
 
@@ -2745,32 +2742,10 @@ class ForecastingModelManager(ModelManager):
                     logger.warning(f"Target {target} not found in prediction columns. Skipping.")
                     continue
 
-                # Detect point estimate vs distribution from data shape — not from column names
-                sample_val = first_df[pred_col].dropna().iloc[0] if not first_df[pred_col].dropna().empty else 0
-                is_distribution = isinstance(sample_val, (list, np.ndarray, pd.Series)) and len(sample_val) > 1
-
-                # Config-driven dispatch: select the right metric list from config
-                metrics_to_use = uncertainty_metrics if is_distribution else point_metrics
-
-                if not metrics_to_use:
-                    logger.warning(
-                        f"No {'uncertainty' if is_distribution else 'point'} metrics configured for "
-                        f"{task_type} target '{target}'. Skipping evaluation for this target. "
-                        f"Add {'regression_uncertainty_metrics' if task_type == 'regression' else 'classification_uncertainty_metrics'} "
-                        f"to your config to evaluate distribution predictions."
-                    )
-                    continue
-
                 target_identifier = target
 
-                evaluation_manager = EvaluationManager(metrics_to_use)
-
-                # Pass a task-specific config slice with only the selected metrics
-                task_specific_config = self.configs.copy()
-                task_specific_config["metrics"] = metrics_to_use
-
                 eval_result_dict = evaluation_manager.evaluate(
-                    df_actual, df_predictions, target, task_specific_config
+                    df_actual, df_predictions, target, self.configs
                 )
 
                 # Initialize local variables to avoid UnboundLocalError

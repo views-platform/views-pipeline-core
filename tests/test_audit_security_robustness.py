@@ -235,13 +235,14 @@ def test_GI_1_strict_separation_proof(mock_deps):
         mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
         
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
-        
-        # Call 1 MUST be regression ONLY
-        assert mock_eval_mgr_cls.call_args_list[0].args[0] == ["mse"]
-        assert mock_eval_inst.evaluate.call_args_list[0].args[2] == "reg_t"
 
-        # Call 2 MUST be classification ONLY
-        assert mock_eval_mgr_cls.call_args_list[1].args[0] == ["auc"]
+        # EvaluationManager instantiated once with no args — metrics are read from config
+        # by EvaluationManager.evaluate() internally, not pre-selected by model.py
+        mock_eval_mgr_cls.assert_called_once_with()
+
+        # evaluate called twice: once per target, regression before classification
+        assert mock_eval_inst.evaluate.call_count == 2
+        assert mock_eval_inst.evaluate.call_args_list[0].args[2] == "reg_t"
         assert mock_eval_inst.evaluate.call_args_list[1].args[2] == "class_t"
 
 def test_GI_2_no_name_inference_proof(mock_deps):
@@ -264,10 +265,10 @@ def test_GI_2_no_name_inference_proof(mock_deps):
         
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
         
-        # System MUST treat it as classification because of the bucket it is in
-        # Only one init call (classification)
-        assert mock_eval_mgr_cls.call_count == 1
-        assert mock_eval_mgr_cls.call_args.args[0] == ["auc"]
+        # System MUST treat it as classification because of the bucket it is in.
+        # model.py calls evaluate with the target name; EvaluationManager resolves the
+        # task type (and therefore which metrics to apply) from the config internally.
+        mock_eval_mgr_cls.assert_called_once_with()
         assert mock_eval_inst.evaluate.call_args.args[2] == "this_is_a_regression_name"
 
 def test_GI_3_legacy_fallback_integrity(mock_deps):
@@ -291,9 +292,9 @@ def test_GI_3_legacy_fallback_integrity(mock_deps):
         
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
         
-        # Verify it went through the regression loop
-        assert mock_eval_mgr_cls.call_count == 1
-        assert mock_eval_mgr_cls.call_args.args[0] == ["mse"]
+        # Verify it went through the regression loop.
+        # EvaluationManager takes no constructor args; metrics are read from config.
+        mock_eval_mgr_cls.assert_called_once_with()
         assert mock_eval_inst.evaluate.call_args.args[2] == "legacy_t"
 
 def test_R3_garbage_metric_strings():
