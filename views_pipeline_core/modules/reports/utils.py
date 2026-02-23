@@ -94,7 +94,7 @@ def search_for_item_name(searchspace: List[str], keywords: List[str]) -> Optiona
         return None
     
     if len(matches) > 1:
-        print(f"Warning: Multiple matches found for {keywords}: {matches}. Returning first match.")
+        logger.warning(f"Warning: Multiple matches found for {keywords}: {matches}. Returning first match.")
     
     return matches[0]
 
