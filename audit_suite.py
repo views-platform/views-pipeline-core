@@ -57,14 +57,14 @@ with patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', retur
 # G1: Regression Target Logic
 try:
     ctype = ForecastingModelManager._get_conflict_type("ged_sb_count")
-    results.append(audit_log("G1", "Green", "PASS", f"Identified 'sb' from 'ged_sb_count'"))
+    results.append(audit_log("G1", "Green", "PASS", "Identified 'sb' from 'ged_sb_count'"))
 except Exception as e:
     results.append(audit_log("G1", "Green", "FAIL", str(e)))
 
 # G2: Classification Target Logic
 try:
     ctype = ForecastingModelManager._get_conflict_type("ged_ns_binary")
-    results.append(audit_log("G2", "Green", "PASS", f"Identified 'ns' from 'ged_ns_binary'"))
+    results.append(audit_log("G2", "Green", "PASS", "Identified 'ns' from 'ged_ns_binary'"))
 except Exception as e:
     results.append(audit_log("G2", "Green", "FAIL", str(e)))
 
@@ -92,7 +92,7 @@ results.append(audit_log("G4", "Green", "PASS", "Code contains 'for target in se
 try:
     if manager._resolve_evaluation_sequence_number("long") == 36:
         results.append(audit_log("G5", "Green", "PASS", "Long partition correctly maps to 36 months."))
-except:
+except Exception:
     results.append(audit_log("G5", "Green", "FAIL", "Partition mapping failed."))
 
 # --- BEIGE TEAM (5) ---

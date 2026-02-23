@@ -198,8 +198,8 @@ def validate_config(config):
     ]
     if unrecognized_target_keys:
         warning_msg = (
-            f"\n\033[91m" + "!" * 80 + "\n"
-            f"# {{:^76}} #\n".format("UNRECOGNIZED CONFIGURATION KEYS") +
+            "\n\033[91m" + "!" * 80 + "\n"
+            "# {:^76} #\n".format("UNRECOGNIZED CONFIGURATION KEYS") +
             "# {:<76} #\n".format("") +
             "# {:<76} #\n".format(f"  The following keys were found in model '{model_name}' but are NOT part") +
             "# {:<76} #\n".format("  of the standard pipeline contract:") +

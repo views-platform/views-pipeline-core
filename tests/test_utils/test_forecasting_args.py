@@ -1,7 +1,7 @@
 import pytest
 import sys
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from views_pipeline_core.cli.args import ForecastingModelArgs
 
 

@@ -18,7 +18,7 @@ def generate(script_path: Path) -> bool:
         bool:
             True if the script was written and compiled successfully, False otherwise.
     """
-    code = f"""
+    code = """
 def get_hp_config():
     \"""
     Contains the hyperparameter configurations for model training.
@@ -28,10 +28,10 @@ def get_hp_config():
     - hyperparameters (dict): A dictionary containing hyperparameters for training the model, which determine the model's behavior during the training phase.
     \"""
     
-    hyperparameters = {{
+    hyperparameters = {
         'steps': [*range(1, 36 + 1, 1)],
         # Add more hyperparameters as needed
-    }}
+    }
     return hyperparameters
 """
     return save_python_script(script_path, code)

@@ -34,11 +34,9 @@ Typical usage example:
 
 from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
-from views_pipeline_core.managers.model import ModelPathManager
 from views_pipeline_core.modules.appwrite import AppwriteConfig, AppWriteFileModule, OperationResult
 import logging
 import pandas as pd
-import os
 
 import dotenv
 

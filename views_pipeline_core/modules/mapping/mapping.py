@@ -5,11 +5,10 @@ from views_pipeline_core.data.handlers import (
     _PGDataset,
 )
 import logging
-from typing import Union, Optional, List, Dict, Any
+from typing import Union, Optional, List
 from pathlib import Path
 import matplotlib.pyplot as plt
 import geopandas as gpd
-import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
 import base64
@@ -606,7 +605,6 @@ class MappingModule:
                     "direction": "left",
                     "pad": {"r": 10, "t": 87},
                     "showactive": False,
-                    "type": "buttons",
                     "x": 0.1,
                     "xanchor": "right",
                     "y": 0,
@@ -727,7 +725,7 @@ class MappingModule:
         fig, ax = plt.subplots(1, 1, figsize=(15, 10))
         mapping_dataframe.boundary.plot(ax=ax, linewidth=0.3, color="black")
 
-        plot = mapping_dataframe.plot(
+        mapping_dataframe.plot(
             column=target,
             ax=ax,
             legend=True,

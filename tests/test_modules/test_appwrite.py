@@ -1,17 +1,14 @@
 import pytest
-from unittest.mock import Mock, MagicMock, patch, mock_open
+from unittest.mock import Mock, patch
 from pathlib import Path
 from datetime import datetime, timedelta
-import json
 import hashlib
-from typing import Dict, Any
 
 from views_pipeline_core.modules.appwrite.file import (
     AppWriteFileModule,
     AppwriteConfig,
     AuthMethod,
     OperationResult,
-    FileMetadata,
     CacheValidationResult,
     CacheManager,
     CacheMetadata,  # Add this import
@@ -306,7 +303,7 @@ class TestCacheManager:
         
         # Add multiple files
         for i in range(3):
-            test_file = temp_cache_dir / f"bucket1" / f"test{i}.txt"
+            test_file = temp_cache_dir / "bucket1" / f"test{i}.txt"
             test_file.parent.mkdir(parents=True, exist_ok=True)
             test_file.write_text(f"content {i}")
             manager.add_to_cache("bucket1", f"file{i}", test_file)

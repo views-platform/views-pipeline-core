@@ -1,7 +1,5 @@
 import pytest
 import pandas as pd
-import numpy as np
-from unittest.mock import Mock, patch
 from views_pipeline_core.modules.validation.model.check import (
     validate_prediction_dataframe,
     validate_config

@@ -32,7 +32,7 @@ def generate(script_path: Path) -> bool:
         - Ensure that the `requirements.txt` file is present in the same directory as the generated shell script.
         - The generated shell script is designed to be executed in a zsh shell.
     """
-    code = f"""#!/bin/zsh
+    code = """#!/bin/zsh
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   if ! grep -q 'export LDFLAGS="-L/opt/homebrew/opt/libomp/lib"' ~/.zshrc; then

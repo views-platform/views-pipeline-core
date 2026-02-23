@@ -1,9 +1,7 @@
 import pytest
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from unittest.mock import patch
 from pathlib import Path
-import tempfile
 import shutil
-import os
 
 from views_pipeline_core.managers.model import ModelPathManager
 

@@ -1,7 +1,5 @@
 import pytest
-import logging
 import pandas as pd
-import numpy as np
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import sys
@@ -24,9 +22,8 @@ sys.modules['views_evaluation.evaluation.evaluation_manager'] = MagicMock()
 sys.modules['wandb'] = mock_wandb
 sys.modules['art'] = MagicMock()
 
-from views_pipeline_core.modules.validation.model.check import validate_config
-from views_pipeline_core.managers.configuration import ConfigurationManager
-from views_pipeline_core.managers.model.model import ForecastingModelManager
+from views_pipeline_core.modules.validation.model.check import validate_config  # noqa: E402
+from views_pipeline_core.managers.model.model import ForecastingModelManager  # noqa: E402
 
 # ============================================================
 # CONFIGURATION VALIDATION TESTS
@@ -164,7 +161,7 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
 
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
     
-    with patch('views_pipeline_core.managers.model.model.EvaluationManager', create=True) as mock_eval_cls:
+    with patch('views_pipeline_core.managers.model.model.EvaluationManager', create=True):
         # Should complete without error when receiving a standard scalar prediction
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
 

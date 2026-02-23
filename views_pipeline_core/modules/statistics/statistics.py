@@ -475,9 +475,11 @@ class PosteriorDistributionAnalyzer:
                 map_ok = all(low <= map_val <= high for (low, high) in hdis)
                 if not map_ok:
                     failed_map.append(name)
-                    if verbose: print(f"❌ MAP NOT in all HDIs for {name}")
+                    if verbose:
+                        print(f"❌ MAP NOT in all HDIs for {name}")
                 else:
-                    if verbose: print(f"✅ MAP is contained in all HDIs for {name}")
+                    if verbose:
+                        print(f"✅ MAP is contained in all HDIs for {name}")
 
                 # Test 2: HDIs are nested
                 nested_ok = all(
@@ -486,9 +488,11 @@ class PosteriorDistributionAnalyzer:
                 )
                 if not nested_ok:
                     failed_nesting.append(name)
-                    if verbose: print(f"❌ HDIs NOT nested properly for {name}")
+                    if verbose:
+                        print(f"❌ HDIs NOT nested properly for {name}")
                 else:
-                    if verbose: print(f"✅ HDIs are nested for {name}")
+                    if verbose:
+                        print(f"✅ HDIs are nested for {name}")
 
             except Exception as e:
                 logger.exception(f"Error in test case {name}: {e}")

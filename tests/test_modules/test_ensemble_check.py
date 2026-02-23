@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from pathlib import Path
 from datetime import datetime
 from views_pipeline_core.modules.validation.ensemble.check import (

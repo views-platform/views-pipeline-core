@@ -1,7 +1,6 @@
 import pytest
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
-from typing import Dict, Any
 import pandas as pd
 
 from views_pipeline_core.modules.datastore import (

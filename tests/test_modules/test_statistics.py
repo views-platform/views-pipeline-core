@@ -1,9 +1,8 @@
 import pytest
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
 from io import StringIO
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
 from views_pipeline_core.modules.statistics.statistics import (
     PosteriorDistributionAnalyzer,
     ForecastReconciler

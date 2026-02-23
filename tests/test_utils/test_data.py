@@ -1,4 +1,3 @@
-import pytest
 import pandas as pd
 import numpy as np
 from views_pipeline_core.data.utils import ensure_float64
@@ -38,8 +37,8 @@ def test_ensure_float64_no_numeric():
         'b': ['foo', 'bar', 'baz']
     })
     result = ensure_float64(df)
-    assert result.dtypes['a'] == object
-    assert result.dtypes['b'] == object
+    assert result.dtypes['a'] == np.dtype('O')
+    assert result.dtypes['b'] == np.dtype('O')
 
 def test_ensure_float64_empty():
     """

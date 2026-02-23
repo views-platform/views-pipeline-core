@@ -250,9 +250,9 @@ class ReportModule:
 
         items = list(data.items())
         for idx, (key, value) in enumerate(items):
-            html.append(f'<div class="flex flex-col md:flex-row mb-4">')
+            html.append('<div class="flex flex-col md:flex-row mb-4">')
             html.append(f'<dt class="font-semibold text-on-surface-variant min-w-[120px] flex-shrink-0">{key}</dt>')
-            html.append(f'<dd class="text-on-surface break-words">')
+            html.append('<dd class="text-on-surface break-words">')
 
             if isinstance(value, str) and value.startswith("http"):
                 html.append(f'<a href="{value}" target="_blank" class="text-primary hover:underline">{value}</a>')

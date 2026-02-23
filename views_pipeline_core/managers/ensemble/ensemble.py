@@ -199,7 +199,7 @@ class EnsembleManager(ForecastingModelManager):
                     title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
-            except Exception as e:
+            except Exception:
                 # logger.error(
                 #     f"{self._model_path.target.title()} training: {e}",
                 #     exc_info=True,
@@ -240,7 +240,7 @@ class EnsembleManager(ForecastingModelManager):
                     title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
-            except Exception as e:
+            except Exception:
                 # logger.error(f"Error evaluating model: {e}", exc_info=True)
                 raise PipelineException(
                     f"Evaluation failed: {traceback.format_exc()}",
@@ -272,7 +272,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
-            except Exception as e:
+            except Exception:
                 # logger.error(
                 #     f"Error forecasting {self._model_path.target}: {e}",
                 #     exc_info=True,
@@ -317,7 +317,7 @@ class EnsembleManager(ForecastingModelManager):
         n_outputs = len(next(iter(eval_results.values())))
         aggregated_outputs: List[pd.DataFrame] = []
 
-        tqdm.tqdm.write(f"Aggregating metrics...")
+        tqdm.tqdm.write("Aggregating metrics...")
         for i in range(n_outputs):
             # model_dfs_i = {model_name: dfs[i] for model_name, dfs in eval_results.items()}
             model_dfs_i = {}
@@ -561,7 +561,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 logger.info(f"Loading existing prediction {name} from prediction store")
                 return pred
-            except Exception as e:
+            except Exception:
                 logger.info(
                     f"No existing {run_type} predictions found. Generating new predictions..."
                 )
@@ -634,7 +634,7 @@ class EnsembleManager(ForecastingModelManager):
             else:
                 self._wandb_module.send_alert(
                     title=f"{self._model_path.target.title()} Reconciliation Error",
-                    text=f"Reconciliation returned None. Predictions not reconciled.",
+                    text="Reconciliation returned None. Predictions not reconciled.",
                     level=wandb.AlertLevel.WARNING,
                 )
                 logger.warning(

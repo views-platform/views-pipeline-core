@@ -1,10 +1,8 @@
 import pytest
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from datetime import datetime
-import os
 
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader, UpdateViewser
 from views_pipeline_core.managers.model import ModelPathManager
@@ -307,14 +305,10 @@ class TestValidateDfPartition:
 # ============================================================================
 
 class TestFetchDataFromViewser:
-    @patch("views_pipeline_core.modules.dataloaders.dataloaders.parse_args")
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64")
-    def test_successful_fetch(self, mock_ensure_float, mock_parse_args, data_loader, sample_dataframe, sample_queryset):
+    def test_successful_fetch(self, mock_ensure_float, data_loader, sample_dataframe, sample_queryset):
         """Test successful data fetch from viewser"""
         # Setup mocks
-        mock_args = MagicMock()
-        mock_args.update_viewser = False
-        mock_parse_args.return_value = mock_args
         mock_ensure_float.return_value = sample_dataframe
         
         data_loader._model_path.get_queryset.return_value = sample_queryset
@@ -329,14 +323,10 @@ class TestFetchDataFromViewser:
         assert isinstance(df, pd.DataFrame)
         mock_ensure_float.assert_called_once()
         
-    @patch("views_pipeline_core.modules.dataloaders.dataloaders.parse_args")
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64")
-    def test_fetch_with_drift_detection_failure(self, mock_ensure_float, mock_parse_args, data_loader, sample_dataframe, sample_queryset):
+    def test_fetch_with_drift_detection_failure(self, mock_ensure_float, data_loader, sample_dataframe, sample_queryset):
         """Test fetch falls back when drift detection fails"""
         # Setup mocks
-        mock_args = MagicMock()
-        mock_args.update_viewser = False
-        mock_parse_args.return_value = mock_args
         mock_ensure_float.return_value = sample_dataframe
         
         data_loader._model_path.get_queryset.return_value = sample_queryset
@@ -570,12 +560,10 @@ class TestUpdateViewser:
 class TestDataLoaderIntegration:
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.save_dataframe")
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.create_data_fetch_log_file")
-    @patch("views_pipeline_core.modules.dataloaders.dataloaders.parse_args")
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64")
     def test_full_workflow_calibration(
         self,
         mock_ensure_float,
-        mock_parse_args,
         mock_create_log,
         mock_save_df,
         mock_model_path,
@@ -588,9 +576,6 @@ class TestDataLoaderIntegration:
         mock_model_path.data_raw = tmp_path
         mock_model_path.get_queryset.return_value = sample_queryset
         
-        mock_args = MagicMock()
-        mock_args.update_viewser = False
-        mock_parse_args.return_value = mock_args
         mock_ensure_float.return_value = sample_dataframe
         
         loader = ViewsDataLoader(mock_model_path, steps=36)

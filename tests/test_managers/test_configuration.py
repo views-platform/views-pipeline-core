@@ -1,7 +1,6 @@
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from datetime import datetime
-from pathlib import Path
 import copy
 
 from views_pipeline_core.managers.configuration.configuration import ConfigurationManager

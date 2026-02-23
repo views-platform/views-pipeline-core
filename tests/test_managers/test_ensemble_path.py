@@ -1,7 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
-import sys
+from unittest.mock import patch
 from views_pipeline_core.managers.ensemble import EnsemblePathManager
 
 @pytest.fixture
