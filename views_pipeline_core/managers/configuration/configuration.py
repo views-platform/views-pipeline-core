@@ -504,13 +504,13 @@ class ConfigurationManager:
         """
         config = self._get_raw_combined_config()
 
-        # 1. Map legacy keys (Tier 1) → transitional keys (Tier 2), only if Tier 2/3 absent
+        # 1. Map legacy keys (Tier 1) → legacy keys (Tier 2), only if Tier 2/3 absent
         if "targets" in config and "regression_targets" not in config and "classification_targets" not in config:
             config["regression_targets"] = config["targets"]
         if "metrics" in config and "regression_metrics" not in config and "classification_metrics" not in config:
             config["regression_metrics"] = config["metrics"]
 
-        # 1b. Map transitional metric keys (Tier 2) → explicit metric keys (Tier 3),
+        # 1b. Map legacy metric keys (Tier 2) → explicit metric keys (Tier 3),
         #     only if Tier 3 metric keys are absent.
         _explicit_metric_keys = {
             "regression_point_metrics", "regression_uncertainty_metrics",

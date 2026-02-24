@@ -175,10 +175,10 @@ def validate_config(config):
 
     # Define the sets of keys (three-tier hierarchy)
     # Tier 1 — legacy (deprecated)
-    legacy_keys = {"targets", "metrics"}
-    # Tier 2 — transitional target keys (permanent) and transitional metric keys (deprecated)
+    tier1_legacy_keys = {"targets", "metrics"}
+    # Tier 2 — legacy target keys (permanent) and legacy metric keys (deprecated)
     target_keys = {"regression_targets", "classification_targets"}
-    transitional_metric_keys = {"regression_metrics", "classification_metrics"}
+    tier2_legacy_metric_keys = {"regression_metrics", "classification_metrics"}
     # Tier 3 — explicit metric keys (preferred)
     explicit_metric_keys = {
         "regression_point_metrics",
@@ -186,34 +186,26 @@ def validate_config(config):
         "classification_point_metrics",
         "classification_uncertainty_metrics",
     }
-    new_keys = target_keys | transitional_metric_keys | explicit_metric_keys
-    all_valid_keys = legacy_keys | new_keys
+    new_keys = target_keys | tier2_legacy_metric_keys | explicit_metric_keys
+    all_valid_keys = tier1_legacy_keys | new_keys
 
-    # 1. TYPO / UNRECOGNIZED KEY DETECTION
-    # Look for keys that look like they should be targets or metrics but aren't
-    unrecognized_target_keys = [
-        k for k in config.keys() 
-        if ("target" in k.lower() or "metric" in k.lower()) 
-        and k not in all_valid_keys
-    ]
-    if unrecognized_target_keys:
-        warning_msg = (
-            "\n\033[91m" + "!" * 80 + "\n"
-            "# {:^76} #\n".format("UNRECOGNIZED CONFIGURATION KEYS") +
-            "# {:<76} #\n".format("") +
-            "# {:<76} #\n".format(f"  The following keys were found in model '{model_name}' but are NOT part") +
-            "# {:<76} #\n".format("  of the standard pipeline contract:") +
-            "# {:<76} #\n".format(f"  -> {unrecognized_target_keys}") +
-            "# {:<76} #\n".format("") +
-            "# {:<76} #\n".format("  Valid keys for targets and metrics are:") +
-            "# {:<76} #\n".format("  - regression_targets / classification_targets") +
-            "# {:<76} #\n".format("  - regression_point_metrics / regression_uncertainty_metrics") +
-            "# {:<76} #\n".format("  - classification_point_metrics / classification_uncertainty_metrics") +
-            "# {:<76} #\n".format("  - regression_metrics / classification_metrics (TRANSITIONAL)") +
-            "# {:<76} #\n".format("  - targets / metrics (LEGACY)") +
+    # 1. STRICT TARGET DECLARATION CHECK
+    # Identify which valid keys are actually present
+    present_target_keys = (target_keys | {"targets"}) & config.keys()
+
+    # Missing Targets Check - Critical hard stop
+    if not present_target_keys:
+        suspicious_targets = [k for k in config.keys() if "target" in k.lower() and k not in all_valid_keys]
+        error_msg = (
+            f"\n\033[91m" + "!" * 80 + "\n"
+            f"# MISSING TARGET DECLARATION in model '{model_name}'\n"
+            "# The pipeline requires at least one valid target key to function.\n"
+            f"# Suspicious keys found (potential typos): {suspicious_targets}\n"
+            "# Valid target keys: regression_targets, classification_targets, targets (legacy)\n"
             "!" * 80 + "\033[0m\n"
         )
-        print(warning_msg)
+        logger.error(f"Model {model_name} has no valid target declaration.")
+        raise ValueError(error_msg)
 
     # 2. TYPE VALIDATION
     for key in all_valid_keys:
@@ -231,17 +223,17 @@ def validate_config(config):
                 raise ValueError("Target must be a string or a list of strings.")
 
     # Find which keys are present in the config
-    present_legacy = legacy_keys & config.keys()
+    present_tier1_legacy = tier1_legacy_keys & config.keys()
     present_new = new_keys & config.keys()
-    present_transitional_metrics = transitional_metric_keys & config.keys()
+    present_tier2_legacy_metrics = tier2_legacy_metric_keys & config.keys()
     present_explicit_metrics = explicit_metric_keys & config.keys()
 
     # 3. STRICT MUTUAL EXCLUSIVITY RULES
 
     # Rule A: Tier 1 (legacy) cannot coexist with any Tier 2 or Tier 3 keys
-    if present_legacy and present_new:
+    if present_tier1_legacy and present_new:
         error_msg = (
-            f"Configuration Conflict in '{model_name}': You are mixing legacy keys {list(present_legacy)} "
+            f"Configuration Conflict in '{model_name}': You are mixing legacy keys {list(present_tier1_legacy)} "
             f"with new explicit keys {list(present_new)}. This is forbidden.\n"
             "Please migrate entirely to explicit 'regression_*' and 'classification_*' keys."
         )
@@ -249,13 +241,13 @@ def validate_config(config):
         raise ValueError(error_msg)
 
     # Rule B: Tier 2 metric keys cannot coexist with Tier 3 metric keys
-    if present_transitional_metrics and present_explicit_metrics:
+    if present_tier2_legacy_metrics and present_explicit_metrics:
         error_msg = (
             f"Configuration Conflict in '{model_name}': "
-            "Cannot mix transitional metric keys "
-            f"{sorted(present_transitional_metrics)} with explicit metric keys "
+            "Cannot mix legacy metric keys "
+            f"{sorted(present_tier2_legacy_metrics)} with explicit metric keys "
             f"{sorted(present_explicit_metrics)}.\n"
-            "Use either 'regression_metrics'/'classification_metrics' (transitional) "
+            "Use either 'regression_metrics'/'classification_metrics' (legacy) "
             "OR 'regression_point_metrics'/'regression_uncertainty_metrics'/"
             "'classification_point_metrics'/'classification_uncertainty_metrics' (preferred)."
         )
@@ -263,13 +255,13 @@ def validate_config(config):
         raise ValueError(error_msg)
 
     # 4. LEGACY MAPPING (Tier 1 → Tier 2, only if no Tier 2/3 keys are present)
-    if present_legacy:
+    if present_tier1_legacy:
         mapping_msg = (
             "\n\033[93m" + "#" * 80 + "\n"
             "# {:^76} #\n".format("LEGACY CONFIGURATION DETECTED") +
             "# {:<76} #\n".format("") +
             "# {:<76} #\n".format(f"  Model: {model_name}") +
-            "# {:<76} #\n".format("  The 'targets' and 'metrics' keys are now DEPRECATED.") +
+            "# {:<76} #\n".format("  The 'targets' and 'metrics' keys are DEPRECATED.") +
             "# {:<76} #\n".format("  Assumptions being made for backward compatibility:") +
             "# {:<76} #\n".format("  - Your 'targets' are treated as 'regression_targets'.") +
             "# {:<76} #\n".format("  - Your 'metrics' are treated as 'regression_metrics'.") +
@@ -285,17 +277,17 @@ def validate_config(config):
         if "metrics" in config:
             config["regression_metrics"] = config["metrics"]
 
-    # 4b. TRANSITIONAL MAPPING (Tier 2 metric → Tier 3, only if no Tier 3 metric keys are present)
+    # 4b. TIER 2 MAPPING (Tier 2 metric → Tier 3, only if no Tier 3 metric keys are present)
     # Re-inspect config.keys() here: the Tier 1 → Tier 2 mapping above may have added
-    # regression_metrics / classification_metrics to config since present_transitional_metrics
+    # regression_metrics / classification_metrics to config since present_tier2_legacy_metrics
     # was computed.
-    if (transitional_metric_keys & config.keys()) and not (explicit_metric_keys & config.keys()):
+    if (tier2_legacy_metric_keys & config.keys()) and not (explicit_metric_keys & config.keys()):
         mapping_msg = (
             "\n\033[93m" + "#" * 80 + "\n"
-            "# {:^76} #\n".format("TRANSITIONAL METRIC CONFIGURATION DETECTED") +
+            "# {:^76} #\n".format("LEGACY METRIC CONFIGURATION DETECTED") +
             "# {:<76} #\n".format("") +
             "# {:<76} #\n".format(f"  Model: {model_name}") +
-            "# {:<76} #\n".format("  'regression_metrics'/'classification_metrics' are TRANSITIONAL.") +
+            "# {:<76} #\n".format("  'regression_metrics'/'classification_metrics' are DEPRECATED.") +
             "# {:<76} #\n".format("  They are mapped to *_point_metrics for backward compatibility.") +
             "# {:<76} #\n".format("  Assumptions being made:") +
             "# {:<76} #\n".format("  - 'regression_metrics' → 'regression_point_metrics'") +
@@ -312,7 +304,7 @@ def validate_config(config):
             config["classification_point_metrics"] = config["classification_metrics"]
 
     # 5. NORMALIZATION: Convert everything to lists (targets + all metric tiers)
-    keys_to_normalize = target_keys | transitional_metric_keys | explicit_metric_keys
+    keys_to_normalize = target_keys | tier2_legacy_metric_keys | explicit_metric_keys
     for key in keys_to_normalize:
         val = config.get(key, [])
         if isinstance(val, str):

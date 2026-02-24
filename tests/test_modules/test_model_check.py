@@ -484,3 +484,30 @@ class TestValidateConfig:
         }
         with pytest.raises(ValueError, match="Cannot mix"):
             validate_config(config)
+
+    def test_validate_config_missing_required_keys_raises(self):
+        """Verify that missing target declaration raises ValueError with hints."""
+        # Missing targets
+        config_no_targets = {
+            'name': 'no_targets_model',
+            'target_transform': 'log', # Suspicious key
+            'regression_point_metrics': ['mse']
+        }
+        with pytest.raises(ValueError, match="MISSING TARGET DECLARATION"):
+            validate_config(config_no_targets)
+
+    def test_validate_config_allows_custom_keys(self):
+        """Verify that custom keys containing 'target' or 'metric' are allowed if valid keys are present."""
+        config = {
+            'name': 'custom_model',
+            'deployment_status': 'production',
+            'regression_targets': ['t_reg'],
+            'regression_point_metrics': ['mse'],
+            'target_transform': 'log',
+            'metric_adjustment': 0.5
+        }
+        # Should not raise any error or warning
+        validate_config(config)
+        assert config['target_transform'] == 'log'
+        assert config['metric_adjustment'] == 0.5
+    
