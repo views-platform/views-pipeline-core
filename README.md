@@ -34,6 +34,23 @@
 
 ---
 
+> [!CAUTION]
+> ### 🚨 ATTENTION: MANDATORY EXPLICIT CONFIGURATION (Tier 3)
+> As of February 2026, the pipeline enforces **Explicit Intent Declaration**. Legacy keys (`targets`, `metrics`) are **deprecated** and will trigger large warning banners.
+>
+> **1. Targets are MANDATORY:** You must declare at least one target or the pipeline will hard-stop.
+> **2. Be Explicit:** Use task-specific prefixes (`regression_` or `classification_`).
+> **3. Split Metrics:** Clearly separate Point metrics from Sample-based (Uncertainty) metrics.
+>
+> | Category | **Tier 3: Best Practice** (Explicit) | **Legacy** (Deprecated) |
+> | :--- | :--- | :--- |
+> | **Targets** | `regression_targets`, `classification_targets` | `targets` |
+> | **Metrics** | `regression_point_metrics`<br>`regression_sample_metrics`<br>`classification_point_metrics`<br>`classification_sample_metrics` | `regression_metrics`<br>`classification_metrics`<br>`metrics` |
+>
+> *Misspelled or unrecognized keys (e.g., `regression_target` without the 's') will trigger a hard stop with helpful hints.*
+
+---
+
 ## Table of Contents
 
 1. [Conceptual Overview](#1-conceptual-overview)
