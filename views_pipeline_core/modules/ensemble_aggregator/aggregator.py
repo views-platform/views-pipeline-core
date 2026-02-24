@@ -2,7 +2,7 @@ import polars as pl
 import pandas as pd
 import numpy as np
 from functools import reduce
-from typing import List, Union, Optional, Dict, Callable
+from typing import List, Union, Optional, Dict
 from pathlib import Path
 import logging
 from dataclasses import dataclass
@@ -572,8 +572,8 @@ class AggregationManager:
 
         if len(unique_lengths) != 1:
             # separate them into point vs sample
-            point_cols = [c for c, l in list_lengths.items() if l == 1]
-            sample_cols = [c for c, l in list_lengths.items() if l > 1]
+            point_cols = [c for c, length in list_lengths.items() if length == 1]
+            sample_cols = [c for c, length in list_lengths.items() if length > 1]
 
             raise ValueError(
                 "Target columns contain a mixture of point and probabilistic predictions.\n"

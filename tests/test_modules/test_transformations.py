@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import polars as pl
 from views_pipeline_core.modules.transformations.transformations import DatasetTransformationModule
-from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+from views_pipeline_core.data.handlers import CMDataset
 
 
 # ============================================================

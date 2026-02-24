@@ -4,7 +4,6 @@ import logging
 from abc import abstractmethod
 from argparse import Namespace
 from views_pipeline_core.managers.model import ModelManager, ModelPathManager
-import polars as pl
 from views_pipeline_core.exceptions import PipelineException
 
 

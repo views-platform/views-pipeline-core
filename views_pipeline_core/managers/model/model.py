@@ -1338,19 +1338,50 @@ class ModelManager:
     def config(self, config: Dict) -> None:
         """
         Update runtime configuration (alias for configs setter).
-        
+
         Args:
             config: Dictionary of configuration values to add/update
-        
+
         Example:
             >>> manager.config = {'learning_rate': 0.001}
             >>> print(manager.config['learning_rate'])
             0.001
-        
+
         See Also:
             - :meth:`configs`: Primary setter method
         """
         self.configs = config
+
+    def prepare_actuals_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Hook for model-specific preparation of the actuals DataFrame.
+
+        Called during evaluation immediately after the raw ground-truth
+        DataFrame is loaded from disk and before it is sliced by target
+        column names. By default this is a no-op, so all existing models
+        are completely unaffected.
+
+        Subclasses that manufacture derived targets (e.g. binary signals
+        derived from raw counts) must override this method to add those
+        columns to the DataFrame so that the subsequent target slice
+        succeeds.
+
+        Args:
+            df: Raw actuals DataFrame as loaded from the viewser parquet
+                file. Contains whatever columns the queryset produced.
+
+        Returns:
+            The prepared DataFrame. Must contain at minimum all columns
+            listed in ``self.configs["targets"]``.
+
+        Example (override in a subclass)::
+
+            def prepare_actuals_df(self, df: pd.DataFrame) -> pd.DataFrame:
+                for target, source in self.configs["derivations"].items():
+                    df[target] = (df[source] > 0).astype(int)
+                return df
+        """
+        return df
 
 
 class ForecastingModelManager(ModelManager):
@@ -1985,7 +2016,7 @@ class ForecastingModelManager(ModelManager):
                     validate_prediction_dataframe(
                         dataframe=df, target=configs["targets"]
                     )
-                    save_predictions_func(df, model_path.data_generated, idx)
+                    save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
 
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     futures = [
@@ -2001,13 +2032,29 @@ class ForecastingModelManager(ModelManager):
                     ]
                     concurrent.futures.wait(futures)
 
+                self._wandb_module.send_alert(
+                    title="Evaluation Predictions Saved",
+                    text=f"Validated and saved {len(list_df_predictions)} prediction sequences at {self._model_path.data_generated.relative_to(self._model_path.root)}.",
+                    notifications_enabled=self._wandb_notifications,
+                )
+
                 handle_single_log_creation(
                     model_path=self._model_path,
                     config=self.configs,
                     train=False,
                 )
 
-                if self.configs.get("metrics"):
+                has_metrics = any([
+                    self.configs.get("metrics"),
+                    self.configs.get("regression_metrics"),
+                    self.configs.get("classification_metrics"),
+                    self.configs.get("regression_point_metrics"),
+                    self.configs.get("regression_sample_metrics"),
+                    self.configs.get("classification_point_metrics"),
+                    self.configs.get("classification_sample_metrics"),
+                ])
+
+                if has_metrics:
                     self._evaluate_prediction_dataframe(
                         list_df_predictions, self._eval_type
                     )
@@ -2528,6 +2575,7 @@ class ForecastingModelManager(ModelManager):
         df_predictions: pd.DataFrame,
         path_generated: Union[str, Path],
         sequence_number: int = None,
+        send_alert: bool = True,
     ) -> None:
         """
         Save predictions to disk and prediction store.
@@ -2543,6 +2591,7 @@ class ForecastingModelManager(ModelManager):
             path_generated: Directory for saving
             sequence_number: Sequence number for evaluation runs.
                 None for forecasting runs.
+            send_alert: Whether to send a WandB alert.
         
         Side Effects:
             - Saves parquet file
@@ -2594,11 +2643,12 @@ class ForecastingModelManager(ModelManager):
                     except Exception as e:
                         logger.error(f"Error uploading predictions to datastore: {e}", exc_info=True)
 
-            self._wandb_module.send_alert(
-                title="Predictions Saved",
-                text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
-                notifications_enabled=self._wandb_notifications,
-            )
+            if send_alert:
+                self._wandb_module.send_alert(
+                    title="Predictions Saved",
+                    text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
+                    notifications_enabled=self._wandb_notifications,
+                )
 
         except Exception as e:
             raise PipelineException(
@@ -2636,7 +2686,6 @@ class ForecastingModelManager(ModelManager):
             - Enforces scalar predictions for point metrics
         """
         import pandas as pd
-        import numpy as np
         from views_evaluation.evaluation.evaluation_manager import EvaluationManager
         from views_pipeline_core.files.utils import read_dataframe
 
@@ -2653,74 +2702,51 @@ class ForecastingModelManager(ModelManager):
             df_viewser = read_dataframe(df_path)
 
         logger.info(f"df_viewser read from {df_path}")
-        df_actual = df_viewser[self.configs["targets"]]
+        df_viewser = self.prepare_actuals_df(df_viewser)
+        # Read actuals for all declared targets directly from the canonical Tier 3 keys,
+        # not from the legacy "targets" alias.
+        all_targets = (
+            self.configs.get("regression_targets", []) +
+            self.configs.get("classification_targets", [])
+        )
+        df_actual = df_viewser[all_targets]
 
-        # Task definitions for explicit dispatch
+        # Task definitions: target lists only.
+        # EvaluationManager reads the metric keys (regression_point_metrics,
+        # regression_sample_metrics, etc.) directly from the config passed to
+        # evaluate(). Point vs uncertainty dispatch is also handled internally.
         tasks = {
-            "regression": {
-                "targets": self.configs.get("regression_targets", []),
-                "metrics": self.configs.get("regression_metrics", [])
-            },
-            "classification": {
-                "targets": self.configs.get("classification_targets", []),
-                "metrics": self.configs.get("classification_metrics", [])
-            }
+            "regression":     self.configs.get("regression_targets", []),
+            "classification": self.configs.get("classification_targets", []),
         }
 
-        for task_type, task_config in tasks.items():
-            targets = task_config["targets"]
-            metrics = task_config["metrics"]
+        evaluation_manager = EvaluationManager()
 
+        for task_type, targets in tasks.items():
             if not targets:
                 continue
 
             logger.info(f"Processing {task_type} tasks for evaluation...")
-            evaluation_manager = EvaluationManager(metrics)
 
             for target in targets:
                 logger.info(f"Calculating {task_type} evaluation metrics for {target}")
-                
-                # Distribution Check (Scalar Gate)
-                # We check the first prediction sequence/dataframe
+
+                # Check that the canonical prediction column exists before evaluating
                 first_df = df_predictions[0] if isinstance(df_predictions, list) else df_predictions
-                if target in first_df.columns:
-                    # In some pipelines columns might be prefixed with 'pred_'
-                    pred_col = target
-                elif f"pred_{target}" in first_df.columns:
-                    pred_col = f"pred_{target}"
-                else:
-                    logger.warning(f"Target {target} not found in prediction columns. Skipping.")
+                if f"pred_{target}" not in first_df.columns:
+                    logger.warning(f"Column pred_{target} not found in prediction columns. Skipping.")
                     continue
-
-                # Inspect first non-null element for distribution check
-                sample_val = first_df[pred_col].dropna().iloc[0] if not first_df[pred_col].dropna().empty else 0
-                
-                is_distribution = isinstance(sample_val, (list, np.ndarray, pd.Series)) and len(sample_val) > 1
-                
-                # Check if metrics requested are point metrics (this is a simple heuristic for now)
-                # Point metrics usually can't handle distributions directly without reduction
-                point_metrics = {"MSE", "MSLE", "MAE", "RMSLE", "AP", "AUC", "Brier", "accuracy", "precision", "recall", "f1"}
-                requested_point_metrics = set(m.lower() for m in metrics).intersection(set(pm.lower() for pm in point_metrics))
-
-                if is_distribution and requested_point_metrics:
-                    error_msg = (
-                        f"Target '{target}' produces a distribution (length {len(sample_val)}), "
-                        f"but point metrics {requested_point_metrics} were requested. "
-                        "Please reduce the distribution to a point estimate (e.g., mean or median) "
-                        "before applying these metrics, or use probabilistic metrics."
-                    )
-                    logger.error(error_msg)
-                    raise TypeError(error_msg)
 
                 target_identifier = target
 
-                # Call evaluation manager with task-specific metrics
-                # We pass a temporary config with only the relevant metrics
-                task_specific_config = self.configs.copy()
-                task_specific_config["metrics"] = metrics
-
+                # EvaluationManager.evaluate() operates on one target at a time and
+                # requires exactly one column named pred_{target} per prediction DataFrame.
+                raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
                 eval_result_dict = evaluation_manager.evaluate(
-                    df_actual, df_predictions, target, task_specific_config
+                    df_actual[[target]],
+                    [df[[f"pred_{target}"]] for df in raw_preds],
+                    target,
+                    self.configs,
                 )
 
                 # Initialize local variables to avoid UnboundLocalError

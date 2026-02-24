@@ -7,10 +7,9 @@ evaluation, forecasting, and reconciliation.
 """
 
 import pytest
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 import pandas as pd
-import numpy as np
 
 from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
 from views_pipeline_core.managers.model import ModelPathManager
@@ -576,7 +575,7 @@ class TestEvaluateEnsemble:
             with patch.object(manager, '_get_aggregated_df', return_value=sample_dataframes_list[0]):
                 with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
                     with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm.write'):
-                        result = manager._evaluate_ensemble()
+                        manager._evaluate_ensemble()
                         
                         # Verify _evaluate_model_artifact was called for each model
                         assert mock_eval.call_count == 2

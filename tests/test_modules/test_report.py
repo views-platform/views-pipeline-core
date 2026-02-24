@@ -1,10 +1,7 @@
 import pytest
 import pandas as pd
 import matplotlib.pyplot as plt
-import base64
-from pathlib import Path
-from unittest.mock import Mock, patch, mock_open, MagicMock
-from io import BytesIO
+from unittest.mock import patch
 from views_pipeline_core.modules.reports.report import ReportModule
 
 
@@ -139,7 +136,6 @@ class TestAddHtml:
         report.add_html("<div>Plot 1</div>")
         assert report._plotly_js_loaded is True
         
-        content_len = len(report.content)
         report.add_html("<div>Plot 2</div>")
         
         # Should not add another Plotly script

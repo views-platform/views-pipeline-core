@@ -23,10 +23,9 @@ import traceback
 # import views_transformation_library.spatial_tree as spatial_tree
 # import views_transformation_library.spacetime_distance as spacetime_distance
 from dotenv import load_dotenv
-from typing import Dict, Tuple, List, Any
+from typing import Tuple, List, Any
 import ast
 import argparse
-from views_pipeline_core.cli.utils import parse_args
 
 logger = logging.getLogger(__name__)
 
@@ -1345,7 +1344,7 @@ class ViewsDataLoader:
                 logger.info(f"Saving data to {path_viewser_df}")
                 save_dataframe(df, path_viewser_df)
         else:
-            logger.info(f"Fetching data from viewser...")
+            logger.info("Fetching data from viewser...")
             df, alerts = self._fetch_data_from_viewser(self_test) 
             data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             create_data_fetch_log_file(

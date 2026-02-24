@@ -5,13 +5,10 @@ from pathlib import Path
 import logging
 from abc import abstractmethod
 from views_pipeline_core.managers.model import ModelManager, ModelPathManager
-from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
 
 logger = logging.getLogger(__name__)
 
-from views_pipeline_core.cli.utils import parse_args, validate_arguments
 import logging
-from abc import abstractmethod
 from views_pipeline_core.exceptions import PipelineException
 from argparse import Namespace
 logger = logging.getLogger(__name__)
@@ -112,7 +109,7 @@ class PostprocessorManager(ModelManager):
         with wandb.init(
             project=f"{self.configs['name']}_postprocessor",
             entity=self._entity,
-            job_type=f"postprocessor_run",
+            job_type="postprocessor_run",
         ):
             try:
                 # self._execute_ensemble()
@@ -121,7 +118,7 @@ class PostprocessorManager(ModelManager):
                 self._validate()
                 self._save()
                 self._wandb_module.send_alert(
-                    title=f"Postprocessor Run Completed",
+                    title="Postprocessor Run Completed",
                     text=f"Postprocessing run for {self._model_path.model_name} complete.",
                     notifications_enabled=self._wandb_notifications,
                 )

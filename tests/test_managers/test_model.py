@@ -1,18 +1,13 @@
 import pytest
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
 import pandas as pd
-from datetime import datetime
 
 from views_pipeline_core.managers.model import ModelManager, ForecastingModelManager
 from views_pipeline_core.managers import ModelPathManager
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.exceptions import (
-    ModelTrainingException,
-    ModelEvaluationException,
-    ModelForecastingException,
     DataFetchException,
-    PipelineException,
 )
 
 
@@ -133,7 +128,7 @@ class TestModelManagerInit:
                 script.replace("config_", "").replace(".py", "")
             )
             
-            with patch('views_pipeline_core.modules.wandb.WandBModule') as mock_wandb_cls:
+            with patch('views_pipeline_core.modules.wandb.WandBModule'):
                 with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
                     with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
                         with patch('views_pipeline_core.modules.logging.LoggingModule'):  # Mock LoggingModule
@@ -171,7 +166,7 @@ class TestModelManagerInit:
 class TestModelManagerConfigLoading:
     def test_load_config_success(self, mock_model_path, mock_configs):
         """Test successful config loading."""
-        with patch('importlib.util.spec_from_file_location') as mock_spec:
+        with patch('importlib.util.spec_from_file_location'):
             with patch('importlib.util.module_from_spec') as mock_module:
                 # Setup mock module with config method
                 mock_config_module = MagicMock()

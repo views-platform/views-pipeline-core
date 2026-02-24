@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
 from views_pipeline_core.modules.statistics import PosteriorDistributionAnalyzer
-import scipy.stats as stats
 
 # Fixtures for test data
 @pytest.fixture

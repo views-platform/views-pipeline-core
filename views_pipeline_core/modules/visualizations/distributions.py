@@ -7,7 +7,6 @@ class PlotDistribution:
 
     def __init__(self, dataset: "views_pipeline_core.data.handlers._ViewsDataset") -> None:
         # Imported here to avoid circular import at module level
-        from views_pipeline_core.data.handlers import _ViewsDataset
         self._dataset = dataset
 
     def plot_maximum_a_posteriori(

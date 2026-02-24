@@ -1,7 +1,5 @@
 import pytest
 import pandas as pd
-import numpy as np
-from unittest.mock import Mock, patch
 from views_pipeline_core.modules.validation.model.check import (
     validate_prediction_dataframe,
     validate_config
@@ -336,7 +334,7 @@ class TestValidateConfig:
     # Failure cases - Deprecated status
     def test_validate_config_deprecated_raises_error(self, deprecated_config):
         """Test validation fails for deprecated model."""
-        with pytest.raises(ValueError, match="Model is deprecated and cannot be used"):
+        with pytest.raises(ValueError, match="is deprecated and cannot be used"):
             validate_config(deprecated_config)
 
     def test_validate_config_deprecated_logs_error(self, deprecated_config):
@@ -353,7 +351,7 @@ class TestValidateConfig:
             'targets': 123
         }
         
-        with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
+        with pytest.raises(ValueError, match="must be a string or a list of strings"):
             validate_config(config)
 
     def test_validate_config_invalid_target_type_dict(self):
@@ -363,8 +361,8 @@ class TestValidateConfig:
             'deployment_status': 'production',
             'targets': {'target': 'ged_sb'}
         }
-        
-        with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
+
+        with pytest.raises(ValueError, match="must be a string or a list of strings"):
             validate_config(config)
 
     def test_validate_config_invalid_target_type_none(self):
@@ -374,7 +372,7 @@ class TestValidateConfig:
             'deployment_status': 'production',
             'targets': None
         }
-        
+
         with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
             validate_config(config)
 
@@ -385,8 +383,8 @@ class TestValidateConfig:
             'deployment_status': 'production',
             'targets': ('ged_sb', 'ged_ns')
         }
-        
-        with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
+
+        with pytest.raises(ValueError, match="must be a string or a list of strings"):
             validate_config(config)
 
     def test_validate_config_invalid_target_type_set(self):
@@ -396,8 +394,8 @@ class TestValidateConfig:
             'deployment_status': 'production',
             'targets': {'ged_sb', 'ged_ns'}
         }
-        
-        with pytest.raises(ValueError, match="Target must be a string or a list of strings"):
+
+        with pytest.raises(ValueError, match="must be a string or a list of strings"):
             validate_config(config)
 
     # Edge cases
@@ -412,14 +410,14 @@ class TestValidateConfig:
         assert config['targets'] == ['']
 
     def test_validate_config_empty_list_target(self):
-        """Test validation with empty list target."""
+        """Test that an empty targets list raises a ValueError (no targets specified)."""
         config = {
             'name': 'test_model',
             'deployment_status': 'production',
             'targets': []
         }
-        validate_config(config)
-        assert config['targets'] == []
+        with pytest.raises(ValueError, match="No targets specified"):
+            validate_config(config)
 
     def test_validate_config_modifies_original(self):
         """Test that validate_config modifies the original config dict."""
@@ -434,3 +432,82 @@ class TestValidateConfig:
         # Same object, modified in place
         assert id(config) == original_id
         assert config['targets'] == ['ged_sb']
+
+    # Tier 3 explicit metric key tests
+    def test_validate_config_explicit_point_uncertainty_keys(self):
+        """Verify Tier 3 explicit metric keys are accepted and normalized."""
+        config = {
+            'name': 'explicit_model',
+            'deployment_status': 'production',
+            'regression_targets': ['t_reg'],
+            'regression_point_metrics': 'MSE',        # string → list
+            'regression_sample_metrics': ['CRPS'],
+            'classification_targets': ['t_class'],
+            'classification_point_metrics': ['AP'],
+            'classification_sample_metrics': [],
+        }
+        validate_config(config)
+        assert config['regression_point_metrics'] == ['MSE']
+        assert config['regression_sample_metrics'] == ['CRPS']
+        assert config['classification_point_metrics'] == ['AP']
+        assert config['classification_sample_metrics'] == []
+        # Sync-back: all 4 explicit metric keys aggregated into config["metrics"]
+        assert 'MSE' in config['metrics']
+        assert 'CRPS' in config['metrics']
+        assert 'AP' in config['metrics']
+
+    def test_validate_config_transitional_metrics_mapped_to_point(self):
+        """Verify regression_metrics/classification_metrics map to *_point_metrics (Tier 2 → Tier 3)."""
+        config = {
+            'name': 'transitional_model',
+            'deployment_status': 'production',
+            'regression_targets': ['t_reg'],
+            'regression_metrics': ['MSE', 'MAE'],
+            'classification_targets': ['t_class'],
+            'classification_metrics': ['AP'],
+        }
+        validate_config(config)
+        assert config.get('regression_point_metrics') == ['MSE', 'MAE']
+        assert config.get('classification_point_metrics') == ['AP']
+        assert 'MSE' in config['metrics']
+        assert 'MAE' in config['metrics']
+        assert 'AP' in config['metrics']
+
+    def test_validate_config_mixing_transitional_and_explicit_raises(self):
+        """Verify that mixing Tier 2 (regression_metrics) and Tier 3 (*_point_metrics) raises ValueError."""
+        config = {
+            'name': 'mixed_model',
+            'deployment_status': 'production',
+            'regression_targets': ['t_reg'],
+            'regression_metrics': ['MSE'],           # Tier 2
+            'regression_point_metrics': ['RMSLE'],   # Tier 3
+        }
+        with pytest.raises(ValueError, match="Cannot mix"):
+            validate_config(config)
+
+    def test_validate_config_missing_required_keys_raises(self):
+        """Verify that missing target declaration raises ValueError with hints."""
+        # Missing targets
+        config_no_targets = {
+            'name': 'no_targets_model',
+            'target_transform': 'log', # Suspicious key
+            'regression_point_metrics': ['mse']
+        }
+        with pytest.raises(ValueError, match="MISSING TARGET DECLARATION"):
+            validate_config(config_no_targets)
+
+    def test_validate_config_allows_custom_keys(self):
+        """Verify that custom keys containing 'target' or 'metric' are allowed if valid keys are present."""
+        config = {
+            'name': 'custom_model',
+            'deployment_status': 'production',
+            'regression_targets': ['t_reg'],
+            'regression_point_metrics': ['mse'],
+            'target_transform': 'log',
+            'metric_adjustment': 0.5
+        }
+        # Should not raise any error or warning
+        validate_config(config)
+        assert config['target_transform'] == 'log'
+        assert config['metric_adjustment'] == 0.5
+    

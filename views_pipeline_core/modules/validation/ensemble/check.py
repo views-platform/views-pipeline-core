@@ -133,7 +133,7 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
 
     # More check conditions can be added here
     if ensemble_deployment_status == 'Deprecated':
-        logger.error(f"Deployment status is deprecated. Exiting.")
+        logger.error("Deployment status is deprecated. Exiting.")
         return False
     
     if single_model_dp_status == 'Deprecated':
