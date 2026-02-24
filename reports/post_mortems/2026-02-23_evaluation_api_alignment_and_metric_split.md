@@ -41,8 +41,8 @@ explicit after the previous refactor):
 ```
 Tier 1 (legacy):        targets / metrics
 Tier 2 (transitional):  regression_metrics / classification_metrics
-Tier 3 (explicit):      regression_point_metrics / regression_uncertainty_metrics
-                        classification_point_metrics / classification_uncertainty_metrics
+Tier 3 (explicit):      regression_point_metrics / regression_sample_metrics
+                        classification_point_metrics / classification_sample_metrics
 ```
 
 Backward compatibility is preserved via a full mapping chain:

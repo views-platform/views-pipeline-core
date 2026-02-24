@@ -71,9 +71,9 @@ class EvaluationReportTemplate:
         # Combine all metrics from all key tiers for prioritization
         all_available_metrics = list(set(
             metadata_dict.get("regression_point_metrics", []) +
-            metadata_dict.get("regression_uncertainty_metrics", []) +
+            metadata_dict.get("regression_sample_metrics", []) +
             metadata_dict.get("classification_point_metrics", []) +
-            metadata_dict.get("classification_uncertainty_metrics", []) +
+            metadata_dict.get("classification_sample_metrics", []) +
             metadata_dict.get("regression_metrics", []) +
             metadata_dict.get("classification_metrics", []) +
             metadata_dict.get("metrics", [])

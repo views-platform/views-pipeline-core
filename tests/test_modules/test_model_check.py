@@ -441,16 +441,16 @@ class TestValidateConfig:
             'deployment_status': 'production',
             'regression_targets': ['t_reg'],
             'regression_point_metrics': 'MSE',        # string → list
-            'regression_uncertainty_metrics': ['CRPS'],
+            'regression_sample_metrics': ['CRPS'],
             'classification_targets': ['t_class'],
             'classification_point_metrics': ['AP'],
-            'classification_uncertainty_metrics': [],
+            'classification_sample_metrics': [],
         }
         validate_config(config)
         assert config['regression_point_metrics'] == ['MSE']
-        assert config['regression_uncertainty_metrics'] == ['CRPS']
+        assert config['regression_sample_metrics'] == ['CRPS']
         assert config['classification_point_metrics'] == ['AP']
-        assert config['classification_uncertainty_metrics'] == []
+        assert config['classification_sample_metrics'] == []
         # Sync-back: all 4 explicit metric keys aggregated into config["metrics"]
         assert 'MSE' in config['metrics']
         assert 'CRPS' in config['metrics']

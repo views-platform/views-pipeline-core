@@ -513,8 +513,8 @@ class ConfigurationManager:
         # 1b. Map legacy metric keys (Tier 2) → explicit metric keys (Tier 3),
         #     only if Tier 3 metric keys are absent.
         _explicit_metric_keys = {
-            "regression_point_metrics", "regression_uncertainty_metrics",
-            "classification_point_metrics", "classification_uncertainty_metrics",
+            "regression_point_metrics", "regression_sample_metrics",
+            "classification_point_metrics", "classification_sample_metrics",
         }
         if not (config.keys() & _explicit_metric_keys):
             if "regression_metrics" in config:
@@ -526,8 +526,8 @@ class ConfigurationManager:
         task_keys = [
             "regression_targets", "classification_targets",
             "regression_metrics", "classification_metrics",
-            "regression_point_metrics", "regression_uncertainty_metrics",
-            "classification_point_metrics", "classification_uncertainty_metrics",
+            "regression_point_metrics", "regression_sample_metrics",
+            "classification_point_metrics", "classification_sample_metrics",
         ]
         for key in task_keys:
             val = config.get(key, [])
@@ -550,9 +550,9 @@ class ConfigurationManager:
         all_metrics = []
         for m in (
             config.get("regression_point_metrics", []) +
-            config.get("regression_uncertainty_metrics", []) +
+            config.get("regression_sample_metrics", []) +
             config.get("classification_point_metrics", []) +
-            config.get("classification_uncertainty_metrics", [])
+            config.get("classification_sample_metrics", [])
         ):
             if m not in all_metrics:
                 all_metrics.append(m)
@@ -575,8 +575,8 @@ class ConfigurationManager:
             config["regression_metrics"] = config["metrics"]
 
         _explicit_metric_keys = {
-            "regression_point_metrics", "regression_uncertainty_metrics",
-            "classification_point_metrics", "classification_uncertainty_metrics",
+            "regression_point_metrics", "regression_sample_metrics",
+            "classification_point_metrics", "classification_sample_metrics",
         }
         if not (config.keys() & _explicit_metric_keys):
             if "regression_metrics" in config:
@@ -587,8 +587,8 @@ class ConfigurationManager:
         task_keys = [
             "regression_targets", "classification_targets",
             "regression_metrics", "classification_metrics",
-            "regression_point_metrics", "regression_uncertainty_metrics",
-            "classification_point_metrics", "classification_uncertainty_metrics",
+            "regression_point_metrics", "regression_sample_metrics",
+            "classification_point_metrics", "classification_sample_metrics",
         ]
         for key in task_keys:
             val = config.get(key, [])
@@ -610,9 +610,9 @@ class ConfigurationManager:
         all_metrics = []
         for m in (
             config.get("regression_point_metrics", []) +
-            config.get("regression_uncertainty_metrics", []) +
+            config.get("regression_sample_metrics", []) +
             config.get("classification_point_metrics", []) +
-            config.get("classification_uncertainty_metrics", [])
+            config.get("classification_sample_metrics", [])
         ):
             if m not in all_metrics:
                 all_metrics.append(m)

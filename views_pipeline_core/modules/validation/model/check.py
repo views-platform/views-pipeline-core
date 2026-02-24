@@ -182,9 +182,9 @@ def validate_config(config):
     # Tier 3 — explicit metric keys (preferred)
     explicit_metric_keys = {
         "regression_point_metrics",
-        "regression_uncertainty_metrics",
+        "regression_sample_metrics",
         "classification_point_metrics",
-        "classification_uncertainty_metrics",
+        "classification_sample_metrics",
     }
     new_keys = target_keys | tier2_legacy_metric_keys | explicit_metric_keys
     all_valid_keys = tier1_legacy_keys | new_keys
@@ -248,8 +248,8 @@ def validate_config(config):
             f"{sorted(present_tier2_legacy_metrics)} with explicit metric keys "
             f"{sorted(present_explicit_metrics)}.\n"
             "Use either 'regression_metrics'/'classification_metrics' (legacy) "
-            "OR 'regression_point_metrics'/'regression_uncertainty_metrics'/"
-            "'classification_point_metrics'/'classification_uncertainty_metrics' (preferred)."
+            "OR 'regression_point_metrics'/'regression_sample_metrics'/"
+            "'classification_point_metrics'/'classification_sample_metrics' (preferred)."
         )
         logger.error(error_msg)
         raise ValueError(error_msg)
@@ -293,7 +293,7 @@ def validate_config(config):
             "# {:<76} #\n".format("  - 'regression_metrics' → 'regression_point_metrics'") +
             "# {:<76} #\n".format("  - 'classification_metrics' → 'classification_point_metrics'") +
             "# {:<76} #\n".format("") +
-            "# {:<76} #\n".format("  Please migrate to explicit *_point_metrics / *_uncertainty_metrics.") +
+            "# {:<76} #\n".format("  Please migrate to explicit *_point_metrics / *_sample_metrics.") +
             "#" * 80 + "\033[0m\n"
         )
         print(mapping_msg)
@@ -336,9 +336,9 @@ def validate_config(config):
     all_metrics = []
     for m in (
         config.get("regression_point_metrics", []) +
-        config.get("regression_uncertainty_metrics", []) +
+        config.get("regression_sample_metrics", []) +
         config.get("classification_point_metrics", []) +
-        config.get("classification_uncertainty_metrics", [])
+        config.get("classification_sample_metrics", [])
     ):
         if m not in all_metrics:
             all_metrics.append(m)

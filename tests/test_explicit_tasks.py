@@ -93,7 +93,7 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
     manager.configs = {
         "regression_targets": ["target_sb"],
         "regression_point_metrics": ["mse"],   # Tier 3: only point, no uncertainty
-        "regression_uncertainty_metrics": [],
+        "regression_sample_metrics": [],
         "targets": ["target_sb"],
         "name": "test",
         "sweep": False,
@@ -171,7 +171,7 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
 @patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock())
 @patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash')
 @patch('views_pipeline_core.files.utils.read_dataframe')
-def test_scalar_gate_distribution_with_uncertainty_metrics(mock_read, mock_splash, mock_cfg, mock_log, mock_load):
+def test_scalar_gate_distribution_with_sample_metrics(mock_read, mock_splash, mock_cfg, mock_log, mock_load):
     """Verify distribution predictions + uncertainty metrics → EvaluationManager IS called."""
     mock_path_manager = MagicMock()
     mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
@@ -182,7 +182,7 @@ def test_scalar_gate_distribution_with_uncertainty_metrics(mock_read, mock_splas
     manager.configs = {
         "regression_targets": ["target_sb"],
         "regression_point_metrics": [],          # no point metrics
-        "regression_uncertainty_metrics": ["CRPS"],  # uncertainty metrics present
+        "regression_sample_metrics": ["CRPS"],  # uncertainty metrics present
         "targets": ["target_sb"],
         "name": "test",
         "sweep": False,

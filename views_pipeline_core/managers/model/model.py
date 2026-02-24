@@ -2049,9 +2049,9 @@ class ForecastingModelManager(ModelManager):
                     self.configs.get("regression_metrics"),
                     self.configs.get("classification_metrics"),
                     self.configs.get("regression_point_metrics"),
-                    self.configs.get("regression_uncertainty_metrics"),
+                    self.configs.get("regression_sample_metrics"),
                     self.configs.get("classification_point_metrics"),
-                    self.configs.get("classification_uncertainty_metrics"),
+                    self.configs.get("classification_sample_metrics"),
                 ])
 
                 if has_metrics:
@@ -2713,7 +2713,7 @@ class ForecastingModelManager(ModelManager):
 
         # Task definitions: target lists only.
         # EvaluationManager reads the metric keys (regression_point_metrics,
-        # regression_uncertainty_metrics, etc.) directly from the config passed to
+        # regression_sample_metrics, etc.) directly from the config passed to
         # evaluate(). Point vs uncertainty dispatch is also handled internally.
         tasks = {
             "regression":     self.configs.get("regression_targets", []),
