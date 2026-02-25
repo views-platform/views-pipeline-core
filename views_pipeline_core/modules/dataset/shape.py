@@ -209,55 +209,80 @@ class DistributionLayout:
     @classmethod
     def detect(
         cls,
-        df: pl.DataFrame,
+        frame: "Union[pl.DataFrame, pl.LazyFrame]",
         sample_col: Optional[str] = None,
         data_cols: Optional[List[str]] = None,
     ) -> "DistributionLayout":
-        """Automatically detect distribution layout from DataFrame.
-        
+        """Automatically detect distribution layout from DataFrame or LazyFrame.
+
+        For LazyFrames, only the schema and tiny collects (``n_unique``,
+        ``head(1)``) are used — the full dataset is never materialised.
+
         Detection priority:
-            1. If sample_col is provided and exists → ROW_BASED
-            2. If any data column is pl.Array/pl.List → ARRAY_COLUMN
-            3. Otherwise → SCALAR
-            
+            1. If *sample_col* is provided and exists → ``ROW_BASED``
+            2. If any data column is ``pl.Array`` / ``pl.List`` → ``ARRAY_COLUMN``
+            3. Otherwise → ``SCALAR``
+
         Args:
-            df: DataFrame to analyze.
+            frame: DataFrame or LazyFrame to analyze.
             sample_col: Explicit sample column name (optional).
             data_cols: Data columns to check for arrays (optional).
-            
+
         Returns:
             DistributionLayout instance with detected configuration.
         """
-        # Check for explicit row-based layout
-        if sample_col is not None and sample_col in df.columns:
-            n_samples = df[sample_col].n_unique()
+        from typing import Union  # local to avoid circular at module level
+
+        is_lazy = isinstance(frame, pl.LazyFrame)
+        schema = frame.collect_schema() if is_lazy else frame.schema
+        columns = list(schema)
+
+        # 1. Row-based layout
+        if sample_col is not None and sample_col in schema:
+            if is_lazy:
+                n_samples = (
+                    frame.select(pl.col(sample_col).n_unique())
+                    .collect()
+                    .item()
+                )
+            else:
+                n_samples = frame[sample_col].n_unique()
             logger.debug(f"Detected ROW_BASED layout with {n_samples} samples")
             return cls(
                 layout=cls.ROW_BASED,
                 sample_size=n_samples,
                 sample_col=sample_col,
             )
-        
-        # Check for array columns
-        cols_to_check = data_cols if data_cols else df.columns
-        array_cols = []
+
+        # 2. Array-column layout (detectable from schema alone for pl.Array)
+        cols_to_check = data_cols if data_cols else columns
+        array_cols: List[str] = []
         max_array_size = 1
-        
+
         for col in cols_to_check:
-            dtype = df.schema.get(col)
+            dtype = schema.get(col)
             if dtype is None:
                 continue
-            
+
             if isinstance(dtype, pl.Array):
                 array_cols.append(col)
                 max_array_size = max(max_array_size, dtype.size)
             elif isinstance(dtype, pl.List):
                 array_cols.append(col)
-                # Sample first non-null to get size
-                first_val = df[col].drop_nulls().head(1).to_list()
+                # Need a tiny collect to discover list element count
+                if is_lazy:
+                    first_val = (
+                        frame.select(col)
+                        .drop_nulls()
+                        .head(1)
+                        .collect()[col]
+                        .to_list()
+                    )
+                else:
+                    first_val = frame[col].drop_nulls().head(1).to_list()
                 if first_val and first_val[0]:
                     max_array_size = max(max_array_size, len(first_val[0]))
-        
+
         if array_cols:
             logger.debug(
                 f"Detected ARRAY_COLUMN layout with {len(array_cols)} array columns, "
@@ -268,8 +293,8 @@ class DistributionLayout:
                 sample_size=max_array_size,
                 array_columns=array_cols,
             )
-        
-        # Default to scalar
+
+        # 3. Scalar
         logger.debug("Detected SCALAR layout (no distributions)")
         return cls(layout=cls.SCALAR, sample_size=1)
     

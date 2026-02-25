@@ -3,10 +3,16 @@ from pathlib import Path
 import tqdm
 import pandas as pd
 from views_pipeline_core.managers.model import ModelPathManager
+<<<<<<< HEAD
 from views_pipeline_core.data.handlers import (
     CMDataset,
     PGMDataset,
     _CDataset,
+=======
+from views_pipeline_core.modules.dataset.core import (
+    CountryMonthDataset,
+    PriogridMonthDataset,
+>>>>>>> 3f23268 (first pass)
 )
 from views_pipeline_core.modules.reports import ReportModule
 from views_pipeline_core.modules.mapping import MappingModule
@@ -29,11 +35,11 @@ class ForecastReportTemplate:
         historical_dataframe: pd.DataFrame = None,
     ) -> Path:
         """Generate a forecast report based on the prediction DataFrame."""
-        dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
+        dataset_classes = {"cm": CountryMonthDataset, "pgm": PriogridMonthDataset}
 
         def _create_report() -> Path:
             """Helper function to create and export report."""
-            forecast_dataset = dataset_cls(forecast_dataframe)
+            forecast_dataset = dataset_cls(data=forecast_dataframe)
 
             report_manager = ReportModule()
             # Build report content
@@ -54,7 +60,9 @@ class ForecastReportTemplate:
                         f"Sample size of {forecast_dataset.sample_size} for target {target} found. Calculating MAP..."
                     )
                     forecast_dataset_map = type(forecast_dataset)(
-                        forecast_dataset.calculate_map(features=[f"pred_{target}"])
+                        data=forecast_dataset.calculate_map(
+                            features=[f"pred_{target}"], return_pandas=True
+                        )
                     )
                     target = f"{target}_map"
 
@@ -79,13 +87,13 @@ class ForecastReportTemplate:
                 )
 
             # Generate line graphs AFTER all maps (only for CM datasets)
-            if isinstance(forecast_dataset, _CDataset):
+            if isinstance(forecast_dataset, CountryMonthDataset):
                 logger.info(
                     "Generating historical vs forecast graphs for CM dataset"
                 )
                 report_manager.add_heading("Historical vs Forecasted", level=2)
                 historical_dataset = dataset_cls(
-                    historical_dataframe, targets=self.config["targets"]
+                    data=historical_dataframe, target_cols=self.config["targets"]
                 )
                 historical_line_graph = HistoricalLineGraph(
                     historical_dataset=historical_dataset,

@@ -1,8 +1,19 @@
 from typing import Optional, List, Tuple
+import warnings
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import views_pipeline_core.data.handlers
+
+warnings.warn(
+    "views_pipeline_core.modules.visualizations.distributions is deprecated and will "
+    "be removed in a future release. Use SpatioTemporalDataset.calculate_map() and "
+    "SpatioTemporalDataset.calculate_hdi() from views_pipeline_core.modules.dataset.core "
+    "instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 class PlotDistribution:
 
     def __init__(self, dataset: "views_pipeline_core.data.handlers._ViewsDataset") -> None:

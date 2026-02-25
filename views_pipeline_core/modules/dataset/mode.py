@@ -67,76 +67,52 @@ class ModeModule:
         """Check if in forecast (prediction) mode."""
         return self.mode == "forecast"
     
-    def validate(self, df: pl.DataFrame) -> None:
+    def validate(self, frame: "Union[pl.DataFrame, pl.LazyFrame]") -> None:
         """Validate mode-specific requirements.
-        
+
         Args:
-            df: DataFrame to validate.
-            
+            frame: DataFrame or LazyFrame to validate.
+
         Raises:
             ValidationError: If requirements not met.
         """
+        columns = frame.columns
         if self.mode == "historical":
             if not self.target_cols:
                 raise ValidationError(
                     "Historical mode requires target_cols.",
-                    details={"hint": "Specify target columns when creating dataset"}
+                    details={"hint": "Specify target columns when creating dataset"},
                 )
-            missing = [t for t in self.target_cols if t not in df.columns]
+            missing = [t for t in self.target_cols if t not in columns]
             if missing:
                 raise ValidationError(
                     f"Target columns not found: {missing}",
-                    details={"available": list(df.columns[:20])}
+                    details={"available": list(columns[:20])},
                 )
-    
-    def get_targets(self, df: pl.DataFrame) -> List[str]:
-        """Get target column names.
-        
-        Args:
-            df: DataFrame to search.
-            
-        Returns:
-            List of target column names.
-        """
+
+    def get_targets(self, frame: "Union[pl.DataFrame, pl.LazyFrame]") -> List[str]:
+        """Get target column names."""
         if self.mode == "historical":
             return self.target_cols
-        
-        # Forecast mode: find prediction columns
-        return [c for c in df.columns if c.startswith(self.PREDICTION_PREFIX)]
-    
+        return [c for c in frame.columns if c.startswith(self.PREDICTION_PREFIX)]
+
     def get_features(
         self,
-        df: pl.DataFrame,
+        frame: "Union[pl.DataFrame, pl.LazyFrame]",
         index_mgr: "IndexModule",
     ) -> List[str]:
-        """Get feature columns (excluding indices and targets).
-        
-        Args:
-            df: DataFrame to search.
-            index_mgr: Index configuration.
-            
-        Returns:
-            List of feature column names.
-        """
-        targets = set(self.get_targets(df))
+        """Get feature columns (excluding indices and targets)."""
+        targets = set(self.get_targets(frame))
         ignore = index_mgr.index_cols_set.union(targets)
-        return [c for c in df.columns if c not in ignore]
-    
+        return [c for c in frame.columns if c not in ignore]
+
     def get_all_data_cols(
         self,
-        df: pl.DataFrame,
+        frame: "Union[pl.DataFrame, pl.LazyFrame]",
         index_mgr: "IndexModule",
     ) -> List[str]:
-        """Get all data columns (excluding indices).
-        
-        Args:
-            df: DataFrame to search.
-            index_mgr: Index configuration.
-            
-        Returns:
-            List of data column names.
-        """
-        return [c for c in df.columns if c not in index_mgr.index_cols_set]
+        """Get all data columns (excluding indices)."""
+        return [c for c in frame.columns if c not in index_mgr.index_cols_set]
     
     def split_features_targets(
         self,

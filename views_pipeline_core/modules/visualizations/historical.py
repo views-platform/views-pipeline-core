@@ -2,14 +2,10 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from typing import Union, List, Optional, Dict, Tuple
-from views_pipeline_core.data.handlers import (
-    CMDataset,
-    PGMDataset,
-    CYDataset,
-    PGYDataset,
-    _CDataset,
-    _PGDataset,
-    _ViewsDataset,
+from views_pipeline_core.modules.dataset.core import (
+    SpatioTemporalDataset,
+    PriogridMonthDataset,
+    CountryMonthDataset,
 )
 import logging
 
@@ -19,21 +15,15 @@ logger = logging.getLogger(__name__)
 class HistoricalLineGraph:
     def __init__(
         self,
-        historical_dataset: Union[
-            CMDataset, PGMDataset, CYDataset, PGYDataset, None
-        ] = None,
-        forecast_dataset: Union[
-            CMDataset, PGMDataset, CYDataset, PGYDataset, None
-        ] = None,
+        historical_dataset: Optional[SpatioTemporalDataset] = None,
+        forecast_dataset: Optional[SpatioTemporalDataset] = None,
     ):
         """
         Initializes the visualization with historical and/or forecast datasets.
 
         Args:
-            historical_dataset (Union[CMDataset, PGMDataset, CYDataset, PGYDataset, None]):
-                The dataset containing historical data. Can be None.
-            forecast_dataset (Union[CMDataset, PGMDataset, CYDataset, PGYDataset, None]):
-                The dataset containing forecast data. Can be None.
+            historical_dataset: The dataset containing historical data. Can be None.
+            forecast_dataset: The dataset containing forecast data. Can be None.
         """
         if historical_dataset is None and forecast_dataset is None:
             raise ValueError("At least one dataset must be provided")
@@ -52,23 +42,23 @@ class HistoricalLineGraph:
         # Determine targets based on available datasets
         if targets is None:
             if self.historical_dataset is not None:
-                targets = self.historical_dataset.targets
+                targets = self.historical_dataset.target_cols
             elif self.forecast_dataset is not None:
                 # Strip 'pred_' prefix for forecast-only targets
                 targets = [
-                    t.replace("pred_", "") for t in self.forecast_dataset.targets
+                    t.replace("pred_", "") for t in self.forecast_dataset.target_cols
                 ]
             else:
                 raise RuntimeError("No datasets available to determine targets")
         else:
             # Ensure targets are valid for available datasets
             if self.historical_dataset:
-                missing = set(targets) - set(self.historical_dataset.targets)
+                missing = set(targets) - set(self.historical_dataset.target_cols)
                 if missing:
                     logger.warning(f"Some targets not in historical dataset: {missing}")
             if self.forecast_dataset:
                 forecast_targets = [f"pred_{t}" for t in targets]
-                missing = set(forecast_targets) - set(self.forecast_dataset.targets)
+                missing = set(forecast_targets) - set(self.forecast_dataset.target_cols)
                 if missing:
                     logger.warning(f"Some targets not in forecast dataset: {missing}")
 
@@ -81,7 +71,7 @@ class HistoricalLineGraph:
         # Determine cutoff line if both datasets are available
         vline = None
         if self.historical_dataset is not None and self.forecast_dataset is not None:
-            vline = self.historical_dataset._time_values.sort_values(ascending=False)[0]
+            vline = max(self.historical_dataset._unique_times)
 
         html_plots = []
 
@@ -89,9 +79,9 @@ class HistoricalLineGraph:
         if entity_ids is None:
             entity_ids = []
             if self.historical_dataset:
-                entity_ids.extend(self.historical_dataset._entity_values)
+                entity_ids.extend(self.historical_dataset._unique_entities)
             if self.forecast_dataset:
-                entity_ids.extend(self.forecast_dataset._entity_values)
+                entity_ids.extend(self.forecast_dataset._unique_entities)
             # Use union of entities from both datasets
             entity_ids = list(set(entity_ids))
         else:
@@ -111,7 +101,7 @@ class HistoricalLineGraph:
                 forecast_target = f"pred_{target}"
                 try:
                     map_df = self.forecast_dataset.calculate_map(
-                        features=[forecast_target], alpha=alpha
+                        features=[forecast_target], return_pandas=True
                     )
                 except Exception as e:
                     logger.error(
@@ -173,7 +163,7 @@ class HistoricalLineGraph:
             if self.historical_dataset is not None:
                 try:
                     hist_df = self.historical_dataset.get_subset_dataframe(
-                        entity_ids=[entity_id]
+                        entity_ids=[entity_id], return_pandas=True
                     )[target].reset_index()
                     # Convert numpy arrays to scalars if necessary
                     hist_df[target] = hist_df[target].apply(
@@ -191,7 +181,7 @@ class HistoricalLineGraph:
                 forecast_target = f"pred_{target}"
                 try:
                     pred_df = self.forecast_dataset.get_subset_dataframe(
-                        entity_ids=[entity_id]
+                        entity_ids=[entity_id], return_pandas=True
                     )[forecast_target].reset_index()
                     pred_df[forecast_target] = pred_df[forecast_target].apply(
                         lambda x: (
@@ -224,7 +214,7 @@ class HistoricalLineGraph:
                         if map_df is not None:
                             try:
                                 map_series = map_df.xs(
-                                    entity_id, level=self.forecast_dataset._entity_id
+                                    entity_id, level=self.forecast_dataset.entity_col
                                 )[f"pred_{target}_map"]
                                 map_trace = go.Scatter(
                                     x=map_series.index,
@@ -282,13 +272,13 @@ class HistoricalLineGraph:
             valid = True
             if (
                 self.historical_dataset
-                and eid not in self.historical_dataset._entity_values
+                and eid not in self.historical_dataset._unique_entities
             ):
                 logger.warning(f"Entity {eid} not found in historical dataset")
                 valid = False
             if (
                 self.forecast_dataset
-                and eid not in self.forecast_dataset._entity_values
+                and eid not in self.forecast_dataset._unique_entities
             ):
                 logger.warning(f"Entity {eid} not found in forecast dataset")
                 valid = False
@@ -301,19 +291,19 @@ class HistoricalLineGraph:
 
     def _get_entity_name_map(self) -> Optional[Dict[int, str]]:
         try:
-            # Handle country datasets (CMDataset/CYDataset)
-            if self.forecast_dataset and isinstance(self.forecast_dataset, _CDataset):
+            # Handle country datasets
+            if self.forecast_dataset and isinstance(self.forecast_dataset, CountryMonthDataset):
                 return self._get_country_name_map(self.forecast_dataset)
             if self.historical_dataset and isinstance(
-                self.historical_dataset, _CDataset
+                self.historical_dataset, CountryMonthDataset
             ):
                 return self._get_country_name_map(self.historical_dataset)
 
-            # Handle priogrid datasets (PGMDataset/PGYDataset)
-            if self.forecast_dataset and isinstance(self.forecast_dataset, _PGDataset):
+            # Handle priogrid datasets
+            if self.forecast_dataset and isinstance(self.forecast_dataset, PriogridMonthDataset):
                 return self._get_priogrid_name_map(self.forecast_dataset)
             if self.historical_dataset and isinstance(
-                self.historical_dataset, _PGDataset
+                self.historical_dataset, PriogridMonthDataset
             ):
                 return self._get_priogrid_name_map(self.historical_dataset)
 
@@ -321,21 +311,21 @@ class HistoricalLineGraph:
             logger.warning(f"Could not retrieve entity names: {e}")
         return None
 
-    def _get_country_name_map(self, dataset: _CDataset) -> Dict[int, str]:
+    def _get_country_name_map(self, dataset: CountryMonthDataset) -> Dict[int, str]:
         """Get country_id -> name mapping for country datasets"""
         return (
-            dataset.get_name(with_id=True)
+            dataset.get_name(with_id=True, return_pandas=True)
             .reset_index()
-            .drop_duplicates(subset=["country_id"])
-            .set_index("country_id")["name"]
+            .drop_duplicates(subset=[dataset.entity_col])
+            .set_index(dataset.entity_col)["name"]
             .to_dict()
         )
 
-    def _get_priogrid_name_map(self, dataset: _PGDataset) -> Dict[int, str]:
+    def _get_priogrid_name_map(self, dataset: PriogridMonthDataset) -> Dict[int, str]:
         """Get priogrid_id -> name mapping using country names"""
         # Create {priogrid_id: country_name} mapping
-        name_df = dataset.get_name(with_id=True).reset_index()
-        return name_df.set_index(dataset._entity_id)["name"].to_dict()
+        name_df = dataset.get_name(with_id=True, return_pandas=True).reset_index()
+        return name_df.set_index(dataset.entity_col)["name"].to_dict()
 
     def _generate_entity_color(self, entity_index: int) -> str:
         hue = (entity_index * 40) % 360
@@ -352,13 +342,12 @@ class HistoricalLineGraph:
     def _get_plot_data(
         self, entity_ids: List[int], target: str
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        hist_df = self.historical_dataset.get_subset_dataframe(entity_ids=entity_ids)[
-            target
-        ].reset_index()
-        # print(self.forecast_dataset.targets)
-        pred_df = self.forecast_dataset.get_subset_dataframe(entity_ids=entity_ids)[
-            "pred_" + target
-        ].reset_index()
+        hist_df = self.historical_dataset.get_subset_dataframe(
+            entity_ids=entity_ids, return_pandas=True
+        )[target].reset_index()
+        pred_df = self.forecast_dataset.get_subset_dataframe(
+            entity_ids=entity_ids, return_pandas=True
+        )["pred_" + target].reset_index()
         # Convert numpy arrays to scalars if necessary
         hist_df[target] = hist_df[target].apply(
             lambda x: x[0] if isinstance(x, np.ndarray) and x.size == 1 else x
@@ -372,15 +361,15 @@ class HistoricalLineGraph:
         if not self.forecast_dataset:
             raise RuntimeError("Forecast dataset is required for HDI calculation")
 
-        subset = self.forecast_dataset.get_subset_dataframe(entity_ids=[entity_id])
-        dataset = _ViewsDataset(subset)
-        return dataset.calculate_hdi(alpha=alpha).reset_index()
+        return self.forecast_dataset.calculate_hdi(
+            alpha=alpha, entity_ids=[entity_id], return_pandas=True
+        ).reset_index()
 
     def _create_historical_trace(
         self, hist_df: pd.DataFrame, target: str, label: str, idx: int
     ) -> go.Scatter:
         return go.Scatter(
-            x=hist_df[self.historical_dataset._time_id],
+            x=hist_df[self.historical_dataset.time_col],
             y=hist_df[target],
             mode="lines+markers",
             name=f"{label} (Historical)",
@@ -393,7 +382,7 @@ class HistoricalLineGraph:
         self, pred_df: pd.DataFrame, target: str, label: str, color: str, idx: int
     ) -> go.Scatter:
         return go.Scatter(
-            x=pred_df[self.forecast_dataset._time_id],
+            x=pred_df[self.forecast_dataset.time_col],
             y=pred_df[f"pred_{target}"],
             mode="lines+markers",
             name=f"{label} (Forecast)",
@@ -406,8 +395,10 @@ class HistoricalLineGraph:
         self, hdi_df: pd.DataFrame, target: str, label: str, color: str, idx: int
     ) -> List[go.Scatter]:
         hue = (idx * 40) % 360
+        # Use forecast time_col since HDI comes from forecast dataset
+        _time_col = self.forecast_dataset.time_col if self.forecast_dataset else self.historical_dataset.time_col
         lower = go.Scatter(
-            x=hdi_df[self.historical_dataset._time_id],
+            x=hdi_df[_time_col],
             y=hdi_df[f"pred_{target}_hdi_lower"],
             mode="lines",
             name=f"HDI Lower ({label})",
@@ -415,7 +406,7 @@ class HistoricalLineGraph:
             visible=idx == 0,
         )
         upper = go.Scatter(
-            x=hdi_df[self.historical_dataset._time_id],
+            x=hdi_df[_time_col],
             y=hdi_df[f"pred_{target}_hdi_upper"],
             mode="lines",
             name=f"HDI Upper ({label})",
@@ -423,8 +414,8 @@ class HistoricalLineGraph:
             visible=idx == 0,
         )
         fill = go.Scatter(
-            x=hdi_df[self.historical_dataset._time_id].tolist()
-            + hdi_df[self.historical_dataset._time_id].tolist()[::-1],
+            x=hdi_df[_time_col].tolist()
+            + hdi_df[_time_col].tolist()[::-1],
             y=hdi_df[f"pred_{target}_hdi_upper"].tolist()
             + hdi_df[f"pred_{target}_hdi_lower"].tolist()[::-1],
             fill="toself",
@@ -484,9 +475,9 @@ class HistoricalLineGraph:
 
     def _format_interactive_plot(self, fig: go.Figure, target: str):
         if self.historical_dataset is not None:
-            time_id = self.historical_dataset._time_id
+            time_id = self.historical_dataset.time_col
         elif self.forecast_dataset is not None:
-            time_id = self.forecast_dataset._time_id
+            time_id = self.forecast_dataset.time_col
         else:
             raise RuntimeError("No time_id available for formatting")
         fig.update_layout(
