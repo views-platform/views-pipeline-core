@@ -24,7 +24,7 @@ from views_pipeline_core.exceptions import (
     ModelEvaluationException,
     PipelineException,
 )
-from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+from views_pipeline_core.modules.dataset.core import CountryMonthDataset, PriogridMonthDataset
 import os
 
 # from views_pipeline_core.modules.wandb import (
@@ -1584,7 +1584,7 @@ class ForecastingModelManager(ModelManager):
     
     @staticmethod
     def dataset_class(loa: str) -> Optional[type]:
-        dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
+        dataset_classes = {"cm": CountryMonthDataset, "pgm": PriogridMonthDataset}
         dataset_cls = dataset_classes.get(loa)
         if dataset_cls:
             return partial(dataset_cls)

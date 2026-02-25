@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
-from views_pipeline_core.data.handlers import (
-    _CDataset,
-    _PGDataset,
+from views_pipeline_core.modules.dataset.core import (
+    PriogridMonthDataset,
+    CountryMonthDataset,
+    SpatioTemporalDataset,
 )
 import logging
 from typing import Union, Optional, List, Dict, Any
@@ -37,7 +38,7 @@ class MappingModule:
         "ycoord",
     ]
 
-    def __init__(self, views_dataset: Union[_PGDataset, _CDataset]):
+    def __init__(self, views_dataset: Union[PriogridMonthDataset, CountryMonthDataset]):
         """
         Initialize mapping module with VIEWS dataset and load appropriate shapefiles.
 
@@ -47,16 +48,16 @@ class MappingModule:
 
         Args:
             views_dataset: Dataset to visualize. Either:
-                - _PGDataset: Priogrid-level data with cell-based geography
-                - _CDataset: Country-level data with national boundaries
+                - PriogridMonthDataset: Priogrid-level data with cell-based geography
+                - CountryMonthDataset: Country-level data with national boundaries
 
         Raises:
-            ValueError: If dataset is not _PGDataset or _CDataset instance
+            ValueError: If dataset is not PriogridMonthDataset or CountryMonthDataset instance
             FileNotFoundError: If required shapefile is missing
 
         Example:
-            >>> from views_pipeline_core.data.handlers import PGMDataset
-            >>> dataset = PGMDataset(predictions_df)
+            >>> from views_pipeline_core.modules.dataset.core import PriogridMonthDataset
+            >>> dataset = PriogridMonthDataset(predictions_df)
             >>> mapper = MappingModule(dataset)
             >>> print(mapper._location_col)
             'gid'
@@ -69,11 +70,10 @@ class MappingModule:
             - For CM: Uses Natural Earth 1:110m country boundaries
         """
         self._dataset = views_dataset
-        self._dataframe = self._dataset.dataframe
-        self._entity_id = self._dataset._entity_id
-        self._time_id = self._dataset._time_id
+        self._entity_id = self._dataset.entity_col
+        self._time_id = self._dataset.time_col
 
-        if isinstance(views_dataset, _PGDataset):
+        if isinstance(views_dataset, PriogridMonthDataset):
             self._world = self.__get_priogrid_shapefile()
             self._location_col = "gid"
             self._featureidkey = "properties.gid"
@@ -82,7 +82,7 @@ class MappingModule:
                 col for col in self._world.columns if col != "geometry"
             ]
             self._hover_columns = self._PRIOGRID_HOVER_COLS
-        elif isinstance(views_dataset, _CDataset):
+        elif isinstance(views_dataset, CountryMonthDataset):
             self._world = self.__get_country_shapefile()
             self._location_col = "ADM0_A3"
             self._featureidkey = "properties.ADM0_A3"
@@ -92,7 +92,7 @@ class MappingModule:
             ]
             self._hover_columns = self._COUNTRY_HOVER_COLS
         else:
-            raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
+            raise ValueError("Invalid dataset type. Must be a PriogridMonthDataset or CountryMonthDataset.")
 
         self._mapping_dataframe = None
         self._base_geojson = None
@@ -116,13 +116,13 @@ class MappingModule:
         base_gdf = self._world.to_crs(epsg=4326).copy()
 
         # Keep only essential properties to reduce size
-        if isinstance(self._dataset, _PGDataset):
+        if isinstance(self._dataset, PriogridMonthDataset):
             base_gdf = base_gdf[["gid", "geometry"]]
-        elif isinstance(self._dataset, _CDataset):
+        elif isinstance(self._dataset, CountryMonthDataset):
             # For country datasets, keep ADM0_A3 (which matches isoab) and geometry
             base_gdf = base_gdf[["ADM0_A3", "geometry"]]
         else:
-            raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
+            raise ValueError("Invalid dataset type. Must be a PriogridMonthDataset or CountryMonthDataset.")
 
         # Simplify geometries to reduce file size
         base_gdf["geometry"] = base_gdf.geometry.simplify(
@@ -293,17 +293,14 @@ class MappingModule:
             - For CM: Merges on ISO code (isoab)
         """
         _dataframe = dataframe.reset_index()[
-            self._dataset.targets + [self._entity_id, self._time_id]
+            self._dataset.target_cols + [self._entity_id, self._time_id]
         ]
 
         numeric_cols = _dataframe.select_dtypes(include=np.number).columns
         _dataframe[numeric_cols] = _dataframe[numeric_cols].astype(np.float32)
 
-        if isinstance(self._dataset, _CDataset):
+        if isinstance(self._dataset, CountryMonthDataset):
             _dataframe = self.__add_isoab(dataframe=_dataframe)
-
-            # _dataframe['isoab'] = _dataframe['isoab'].str.upper()
-            # self._world['ADM0_A3'] = self._world['ADM0_A3'].str.upper()
 
             # Include all country attributes in the merge
             _dataframe = _dataframe.merge(
@@ -319,7 +316,7 @@ class MappingModule:
             )
             return self.__check_missing_geometries(merged_gdf)
 
-        elif isinstance(self._dataset, _PGDataset):
+        elif isinstance(self._dataset, PriogridMonthDataset):
             # Include all priogrid attributes in the merge
             _dataframe = self.__add_isoab(dataframe=_dataframe)
             _dataframe = _dataframe.merge(
@@ -333,7 +330,7 @@ class MappingModule:
             )
 
         else:
-            raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
+            raise ValueError("Invalid dataset type. Must be a PriogridMonthDataset or CountryMonthDataset.")
 
     def __add_isoab(self, dataframe: pd.DataFrame):
         """
@@ -355,20 +352,20 @@ class MappingModule:
 
         Note:
             - Uses dataset's get_isoab() and get_name() methods
-            - Merges on time_id and entity_id
+            - Merges on entity_id (isoab/name are static entity attributes)
             - Left join preserves all input rows
         """
-        iso_df = self._dataset.get_isoab().reset_index()
-        name_df = self._dataset.get_name(with_id=True).reset_index()
+        iso_df = self._dataset.get_isoab(return_pandas=True).reset_index()
+        name_df = self._dataset.get_name(with_id=True, return_pandas=True).reset_index()
 
         dataframe = dataframe.merge(
-            iso_df[[self._time_id, self._entity_id, "isoab"]],
-            on=[self._time_id, self._entity_id],
+            iso_df[[self._entity_id, "isoab"]],
+            on=[self._entity_id],
             how="left",
         )
         dataframe = dataframe.merge(
-            name_df[[self._time_id, self._entity_id, "name"]],
-            on=[self._time_id, self._entity_id],
+            name_df[[self._entity_id, "name"]],
+            on=[self._entity_id],
             how="left",
         )
         dataframe.rename(columns={"name": "country_name"}, inplace=True)
@@ -418,7 +415,7 @@ class MappingModule:
             - Returns GeoDataFrame with valid geometries
         """
         _dataframe = self._dataset.get_subset_dataframe(
-            time_ids=time_ids, entity_ids=entity_ids
+            time_ids=time_ids, entity_ids=entity_ids, return_pandas=True
         )
         _dataframe = self.__init_mapping_dataframe(dataframe=_dataframe)
         return _dataframe
@@ -479,12 +476,12 @@ class MappingModule:
         ]
 
         # Determine location label based on dataset type
-        if isinstance(self._dataset, _PGDataset):
+        if isinstance(self._dataset, PriogridMonthDataset):
             location_label = "gid"
-        elif isinstance(self._dataset, _CDataset):
+        elif isinstance(self._dataset, CountryMonthDataset):
             location_label = "ADM0_A3"
         else:
-            raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
+            raise ValueError("Invalid dataset type. Must be a PriogridMonthDataset or CountryMonthDataset.")
 
         # Prepare base customdata (fixed properties)
         base_customdata = []
@@ -816,7 +813,7 @@ class MappingModule:
             - Array values automatically extracted if single-element
             - Memory optimized for large datasets (float32, garbage collection)
         """
-        target_options = set(self._dataset.targets).union(set(self._dataset.features))
+        target_options = set(self._dataset.target_cols).union(set(self._dataset.get_features()))
         if target not in target_options:
             raise ValueError(
                 f"Target must be a dependent variable or feature. Choose from {target_options}"

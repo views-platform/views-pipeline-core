@@ -2,8 +2,12 @@
 Data Loading Module
 ===================
 
-Handles data loading from various sources with validation.
-Supports: Polars/Pandas DataFrames, Parquet files, CSV files.
+Handles data loading from various sources into Polars LazyFrames.
+Supports: Polars DataFrames/LazyFrames, Pandas DataFrames, Parquet
+files/directories/globs, CSV files.
+
+All inputs are converted to LazyFrame for deferred execution, enabling
+predicate pushdown and memory-efficient processing of 100GB+ datasets.
 """
 
 from __future__ import annotations
@@ -19,82 +23,79 @@ from .exceptions import ValidationError
 
 
 class LoaderModule:
-    """Handles data loading from various sources with validation.
-    
-    Supports:
-        - Polars DataFrames (direct or cloned)
-        - Polars LazyFrames (with optional collection)
-        - Pandas DataFrames (converted to Polars)
-        - Parquet files (with lazy loading option)
-        - CSV files
-    
-    Attributes:
-        use_lazy: If True, uses scan_parquet for large files.
+    """Loads data from any source as a Polars LazyFrame.
+
+    Every input type is normalised to ``pl.LazyFrame`` so that downstream
+    modules can build lazy query plans with filter/projection pushdown
+    before materialising data.
+
+    Supported sources:
+        - ``pl.DataFrame`` → ``.lazy()``
+        - ``pl.LazyFrame`` → returned directly
+        - ``pd.DataFrame`` → converted to Polars then ``.lazy()``
+        - File path (``.parquet``, ``.csv``) → ``scan_parquet`` / ``scan_csv``
+        - Directory of parquet files → ``scan_parquet("dir/**/*.parquet")``
+        - Glob pattern (``"data/*.parquet"``) → ``scan_parquet(glob)``
     """
-    
-    def __init__(self, use_lazy: bool = False):
-        """Initialize LoaderModule.
-        
-        Args:
-            use_lazy: If True, use lazy loading for parquet files.
-        """
-        self.use_lazy = use_lazy
+
+    def __init__(self):
+        """Initialize LoaderModule."""
         self._logger = logging.getLogger(f"{__name__}.LoaderModule")
-    
+
     def load(
         self,
         data: Union[pl.DataFrame, pl.LazyFrame, pd.DataFrame, str, Path],
-        collect: bool = True,
-    ) -> Union[pl.DataFrame, pl.LazyFrame]:
-        """Load data from various sources into a Polars DataFrame or LazyFrame.
-        
+    ) -> pl.LazyFrame:
+        """Load *data* as a Polars LazyFrame.
+
         Args:
-            data: Data source - can be:
-                - pl.DataFrame: Cloned directly
-                - pl.LazyFrame: Collected if collect=True, otherwise returned as-is
-                - pd.DataFrame: Converted to Polars
-                - str/Path: File path (.parquet or .csv)
-            collect: If True, collect LazyFrames immediately. If False, may return
-                a LazyFrame for pl.LazyFrame inputs or parquet files with use_lazy=True.
-            
+            data: Any supported data source (see class docstring).
+
         Returns:
-            Polars DataFrame if collect=True or input is eager.
-            Polars LazyFrame if collect=False and input is lazy or use_lazy=True for parquet.
-            
+            ``pl.LazyFrame`` ready for lazy query planning.
+
         Raises:
-            FileNotFoundError: If file path doesn't exist.
-            ValidationError: If data type or file format is unsupported.
+            FileNotFoundError: If a concrete file/directory path does not exist.
+            ValidationError: If the data type or file format is unsupported.
         """
         if isinstance(data, pl.DataFrame):
-            self._logger.debug("Data provided as Polars DataFrame, cloning.")
-            return data.clone()
-        
-        elif isinstance(data, pl.LazyFrame):
-            self._logger.debug("Data provided as Polars LazyFrame.")
-            return data.collect() if collect else data
-        
-        elif isinstance(data, pd.DataFrame):
-            self._logger.debug("Converting Pandas DataFrame to Polars.")
-            return pl.from_pandas(data)
-        
-        elif isinstance(data, (str, Path)):
+            self._logger.debug("Wrapping Polars DataFrame as LazyFrame.")
+            return data.lazy()
+
+        if isinstance(data, pl.LazyFrame):
+            self._logger.debug("Data already a LazyFrame.")
+            return data
+
+        if isinstance(data, pd.DataFrame):
+            self._logger.debug("Converting Pandas → Polars → LazyFrame.")
+            return pl.from_pandas(data).lazy()
+
+        if isinstance(data, (str, Path)):
+            str_path = str(data)
+            has_glob = any(c in str_path for c in "*?[]")
+
+            if has_glob:
+                self._logger.info(f"Scanning parquet glob: {str_path}")
+                return pl.scan_parquet(str_path)
+
             path = Path(data)
             if not path.exists():
-                raise FileNotFoundError(f"Data file not found: {path}")
-            
-            self._logger.info(f"Loading data from: {path}")
-            
+                raise FileNotFoundError(f"Data path not found: {path}")
+
+            if path.is_dir():
+                pattern = str(path / "**/*.parquet")
+                self._logger.info(f"Scanning parquet directory: {path}")
+                return pl.scan_parquet(pattern)
+
+            self._logger.info(f"Scanning file: {path}")
             if path.suffix == ".parquet":
-                if self.use_lazy:
-                    lf = pl.scan_parquet(path)
-                    return lf.collect() if collect else lf
-                return pl.read_parquet(path)
-            elif path.suffix == ".csv":
-                return pl.read_csv(path)
-            else:
-                raise ValidationError(f"Unsupported file format: {path.suffix}")
-        else:
-            raise ValidationError(f"Unsupported data type: {type(data).__name__}")
+                return pl.scan_parquet(path)
+            if path.suffix == ".csv":
+                return pl.scan_csv(path)
+
+            raise ValidationError(f"Unsupported file format: {path.suffix}")
+
+        raise ValidationError(f"Unsupported data type: {type(data).__name__}")
 
 
 __all__ = ["LoaderModule"]

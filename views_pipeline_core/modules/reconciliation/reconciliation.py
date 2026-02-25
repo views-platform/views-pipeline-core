@@ -4,8 +4,10 @@ from concurrent.futures import as_completed
 import os
 from tqdm import tqdm
 import wandb
-from views_pipeline_core.data.handlers import _CDataset, _PGDataset
+from views_pipeline_core.modules.dataset.core import CountryMonthDataset, PriogridMonthDataset
 import torch
+import numpy as np
+import polars as pl
 import logging
 from views_pipeline_core.modules.statistics import ForecastReconciler
 from views_pipeline_core.modules.wandb import WandBModule
@@ -20,7 +22,7 @@ class ReconciliationModule:
     scaling to ensure country-level totals match while preserving grid-level
     spatial patterns. Supports parallel processing for large-scale datasets.
     """
-    def __init__(self, c_dataset: _CDataset, pg_dataset: _PGDataset, wandb_notifications: bool = True):
+    def __init__(self, c_dataset: CountryMonthDataset, pg_dataset: PriogridMonthDataset, wandb_notifications: bool = True):
         """
         Initialize reconciliation module with country and grid datasets.
 
@@ -34,53 +36,57 @@ class ReconciliationModule:
             wandb_notifications: Whether to send WandB alerts during processing
 
         Raises:
-            TypeError: If datasets are not correct types (_CDataset, _PGDataset)
-            ValueError: If datasets have incompatible structures:
-                - Different number of time steps
-                - Different time units (e.g., month_id vs year_id)
-                - No overlapping time periods
-                - No common prediction targets
+            TypeError: If datasets are not correct types
+            ValueError: If datasets have incompatible structures
 
         Example:
-            >>> from views_pipeline_core.data.handlers import CMDataset, PGMDataset
-            >>> c_ds = CMDataset(country_predictions)
-            >>> pg_ds = PGMDataset(grid_predictions)
+            >>> from views_pipeline_core.modules.dataset.core import CountryMonthDataset, PriogridMonthDataset
+            >>> c_ds = CountryMonthDataset(country_predictions)
+            >>> pg_ds = PriogridMonthDataset(grid_predictions, fetch_metadata=True)
             >>> reconciler = ReconciliationModule(c_ds, pg_ds)
             Using device: cuda
             All checks passed. Starting reconciliation with 180 valid countries...
 
         Note:
             - Automatically detects and uses GPU if available
-            - Pre-builds country-to-grid mapping cache
+            - Requires PGM dataset to have metadata loaded (via fetch_metadata=True or country_mapping)
             - Validates temporal and spatial alignment
             - Only reconciles targets present in both datasets
         """
         self._c_dataset = c_dataset
         self._pg_dataset = pg_dataset
         self._wandb_notifications = wandb_notifications
-        if not isinstance(c_dataset, _CDataset):
-            raise TypeError(f"Expected _CDataset, got {type(c_dataset)}")
-        if not isinstance(pg_dataset, _PGDataset):
-            raise TypeError(f"Expected _PGDataset, got {type(pg_dataset)}")
+        if not isinstance(c_dataset, CountryMonthDataset):
+            raise TypeError(f"Expected CountryMonthDataset, got {type(c_dataset)}")
+        if not isinstance(pg_dataset, PriogridMonthDataset):
+            raise TypeError(f"Expected PriogridMonthDataset, got {type(pg_dataset)}")
 
         self._device = self.__detect_torch_device()
         print(f"Using device: {self._device}")
         self._reconciler = ForecastReconciler(device=self._device)
-        self._pg_dataset._build_country_to_grids_cache()
 
-        if c_dataset.num_time_steps != pg_dataset.num_time_steps:
+        # Get country-to-grid mappings from PGM metadata
+        # _pg_meta.get_all_countries() auto-fetches if not loaded
+        mapped_country_ids = self._pg_dataset._pg_meta.get_all_countries()
+        if not mapped_country_ids:
+            raise ValueError(
+                "PGM dataset has no country-to-grid mapping. "
+                "Initialize with fetch_metadata=True or country_mapping=..."
+            )
+
+        if len(c_dataset._unique_times) != len(pg_dataset._unique_times):
             raise ValueError(
                 "The number of time steps in the country dataset and the grid dataset must match."
             )
         
-        if c_dataset._time_id != pg_dataset._time_id:
+        if c_dataset.time_col != pg_dataset.time_col:
             raise ValueError(
                 f"You are trying to reconcile datasets with different time units. "
-                f"Country dataset time unit: {c_dataset._time_id}, "
-                f"Grid dataset time unit: {pg_dataset._time_id}"
+                f"Country dataset time unit: {c_dataset.time_col}, "
+                f"Grid dataset time unit: {pg_dataset.time_col}"
             )
 
-        uncommon_time_steps = set(c_dataset._time_values) ^ set(pg_dataset._time_values)
+        uncommon_time_steps = set(c_dataset._unique_times) ^ set(pg_dataset._unique_times)
         if uncommon_time_steps:
             raise ValueError(
                 f"The datasets have different time steps: {uncommon_time_steps}. "
@@ -88,20 +94,20 @@ class ReconciliationModule:
             )
 
         self._valid_cids = list(
-            set(self._pg_dataset._country_to_grids_cache.keys())
-            & set(self._c_dataset._entity_values.to_list())
+            set(mapped_country_ids)
+            & set(self._c_dataset._unique_entities)
         )
 
-        self._valid_targets = set(self._c_dataset.targets) & set(
-            self._pg_dataset.targets
+        self._valid_targets = set(self._c_dataset.target_cols) & set(
+            self._pg_dataset.target_cols
         )
         if not self._valid_targets:
             raise ValueError(
                 "No valid targets to reconcile found in the datasets. "
                 "Ensure that both datasets have at least one common target."
             )
-        self._valid_time_ids = set(self._c_dataset._time_values) & set(
-            self._pg_dataset._time_values
+        self._valid_time_ids = set(self._c_dataset._unique_times) & set(
+            self._pg_dataset._unique_times
         )
         WandBModule.send_alert(
             title=self.__class__.__name__,
@@ -221,6 +227,51 @@ class ReconciliationModule:
     #     return self._pg_dataset.reconciled_dataframe
 
     @staticmethod
+    def _transform_to_natural(values: np.ndarray, feature: str) -> np.ndarray:
+        """Transform from model scale to natural scale for reconciliation."""
+        if "ln" in feature.split("_"):
+            return np.exp(values) - 1
+        elif "lx" in feature.split("_"):
+            return np.exp(values) - np.exp(100)
+        return values
+
+    @staticmethod
+    def _inverse_transform(values: np.ndarray, feature: str) -> np.ndarray:
+        """Transform from natural scale back to model scale after reconciliation."""
+        values = np.maximum(values, 1e-10)
+        if "ln" in feature.split("_"):
+            return np.log(values + 1)
+        elif "lx" in feature.split("_"):
+            return np.log(values + np.exp(-100))
+        return values
+
+    @staticmethod
+    def _extract_tensor_from_pandas(df: "pd.DataFrame", feature: str, time_id: int) -> np.ndarray:
+        """Extract values from a MultiIndex pandas DataFrame for reconciliation.
+        
+        Args:
+            df: Pandas DataFrame with MultiIndex (time_col, entity_col).
+            feature: Feature column to extract.
+            time_id: Time step to extract.
+            
+        Returns:
+            np.ndarray of shape (n_samples, n_entities) in natural scale.
+        """
+        # Get data for specific time_id (drops time level from index)
+        time_data = df.xs(time_id, level=0)
+        vals = time_data[feature].values
+        
+        # Handle array-valued columns (distributional predictions)
+        if isinstance(vals[0], np.ndarray):
+            data = np.stack(vals)  # (n_entities, n_samples)
+            data = data.T  # (n_samples, n_entities)
+        else:
+            data = vals.reshape(1, -1)  # (1, n_entities) for point forecasts
+        
+        # Transform to natural scale
+        return ReconciliationModule._transform_to_natural(data, feature)
+
+    @staticmethod
     def _reconcile_country_worker(args):
         """
         Perform reconciliation for a single country-time-feature task.
@@ -236,20 +287,21 @@ class ReconciliationModule:
                 - lr (float): Learning rate (currently unused)
                 - max_iters (int): Max iterations (currently unused)
                 - tol (float): Tolerance (currently unused)
-                - c_subset (pd.DataFrame): Country data subset
-                - pg_subset (pd.DataFrame): Grid data subset
+                - c_subset (pd.DataFrame): Country data subset (MultiIndex pandas)
+                - pg_subset (pd.DataFrame): Grid data subset (MultiIndex pandas)
                 - device_str (str): Device string ('cuda', 'mps', 'cpu')
 
         Returns:
-            Tuple of (country_id, time_id, feature, reconciled_tensor):
+            Tuple of (country_id, time_id, feature, reconciled_values):
                 - country_id: Input country ID
                 - time_id: Input time ID
                 - feature: Input feature name
-                - reconciled_tensor: Reconciled grid predictions on CPU
+                - reconciled_values: Reconciled grid predictions as numpy array
+                  in natural scale, shape (n_samples, n_grids)
 
         Note:
             - Creates new ForecastReconciler instance per task
-            - Converts tensors to CPU before returning
+            - Extracts tensors directly from pandas DataFrames
             - Handles log transformations automatically
         """
         country_id, time_id, feature, lr, max_iters, tol, c_subset, pg_subset, device_str = args
@@ -257,11 +309,14 @@ class ReconciliationModule:
         device = torch.device(device_str)
         reconciler = ForecastReconciler(device=device)
 
-        c_subset_dataset = _CDataset(source=c_subset)
-        pg_subset_dataset = _PGDataset(source=pg_subset)
+        # Extract values from pandas DataFrames
+        pg_values = ReconciliationModule._extract_tensor_from_pandas(pg_subset, feature, time_id)
+        c_values = ReconciliationModule._extract_tensor_from_pandas(c_subset, feature, time_id)
+        c_values = c_values.squeeze(axis=-1)  # (n_samples,) since single entity
 
-        pg_tensor = pg_subset_dataset.to_reconciler(feature=feature, time_id=time_id)
-        c_tensor = c_subset_dataset.to_reconciler(feature=feature, time_id=time_id)
+        # Convert to torch tensors for ForecastReconciler
+        pg_tensor = torch.from_numpy(pg_values).float()
+        c_tensor = torch.from_numpy(c_values).float()
         
         reconciled_tensor = reconciler.reconcile_forecast(
             grid_forecast=pg_tensor,
@@ -271,7 +326,7 @@ class ReconciliationModule:
             tol=tol,
         )
         
-        return country_id, time_id, feature, reconciled_tensor.cpu()
+        return country_id, time_id, feature, reconciled_tensor.cpu().numpy()
     
     def reconcile(self, lr=0.01, max_iters=500, tol=1e-6, max_workers=None):
         """
@@ -329,8 +384,12 @@ class ReconciliationModule:
             future_to_task_info = {}
 
             for country_id in self._valid_cids:
-                c_subset = self._c_dataset.get_subset_dataframe(entity_ids=[country_id])
-                pg_subset = self._pg_dataset.get_subset_by_country_id(country_ids=[country_id])
+                c_subset = self._c_dataset.get_subset_dataframe(
+                    entity_ids=[country_id], return_pandas=True
+                )
+                pg_subset = self._pg_dataset.get_subset_by_country_id(
+                    country_ids=[country_id], return_pandas=True
+                )
 
                 for time_id in self._valid_time_ids:
                     for feature in self._valid_targets:
@@ -370,13 +429,32 @@ class ReconciliationModule:
             # raise RuntimeError(f"{len(failed_tasks)} reconciliation tasks failed.")
         
         logger.info(f"Updating dataset with {len(results)} successful results...")
-        for country_id, time_id, feature, reconciled_tensor in tqdm(results, desc="Updating dataset"):
-            self._pg_dataset.reconcile(
-                country_id=country_id, 
-                time_id=time_id, 
-                reconciled_tensor=reconciled_tensor, 
-                feature=feature
-            )
+
+        # Initialize reconciled dataframe if needed
+        if self._pg_dataset.reconciled_dataframe is None:
+            self._pg_dataset.reconciled_dataframe = self._pg_dataset.collect()
+
+        for country_id, time_id, feature, reconciled_values in tqdm(results, desc="Updating dataset"):
+            # reconciled_values is in natural scale (n_samples, n_grids)
+            # Apply inverse transform to get back to model scale
+            inv_values = self._inverse_transform(reconciled_values, feature)
+
+            # Get entity IDs for this country
+            entity_ids = self._pg_dataset._pg_meta.get_entities_for_country(country_id)
+
+            # Update each grid cell in the reconciled dataframe
+            for idx, entity_id in enumerate(entity_ids):
+                new_samples = inv_values[:, idx].tolist()
+                mask = (
+                    (pl.col(self._pg_dataset.time_col) == time_id) &
+                    (pl.col(self._pg_dataset.entity_col) == entity_id)
+                )
+                self._pg_dataset.reconciled_dataframe = self._pg_dataset.reconciled_dataframe.with_columns(
+                    pl.when(mask)
+                    .then(pl.lit(new_samples))
+                    .otherwise(pl.col(feature))
+                    .alias(feature)
+                )
         
         logger.info("All reconciliations have been successfully completed.")
         WandBModule.send_alert(

@@ -6,7 +6,7 @@ from typing import List, Union, Optional, Dict, Callable
 from pathlib import Path
 import logging
 from dataclasses import dataclass
-from views_pipeline_core.data.handlers import CMDataset, PGMDataset, _ViewsDataset
+from views_pipeline_core.modules.dataset.core import CountryMonthDataset, PriogridMonthDataset
 
 
 logger = logging.getLogger(__name__)
@@ -757,8 +757,8 @@ class AggregationModule:
         Normalize input to a Polars DataFrame with index columns included.
         Steps:
         1. Accept polars / pandas / path.
-        2. Convert to pandas and ensure a 2-level MultiIndex.
-        3. Wrap in CMDataset or PGMDataset depending on the second index level.
+        2. Detect index column names from the input data.
+        3. Wrap in CountryMonthDataset or PriogridMonthDataset for validation.
         4. Convert the processed dataset back to Polars, keeping index as columns.
         """
 
@@ -774,25 +774,47 @@ class AggregationModule:
                 "Type must be either Polars DataFrame, Pandas DataFrame or path to a file."
             )
 
-        # Get index names
-        time_name, entity_name = _ViewsDataset(data).original_index.names
+        # ---------- 2) Detect index columns ----------
+        if isinstance(pdf, pd.DataFrame) and isinstance(pdf.index, pd.MultiIndex):
+            time_name, entity_name = pdf.index.names
+        elif isinstance(pdf, pd.DataFrame):
+            # Flat columns - infer from known column names
+            _KNOWN_TIME = {"month_id", "year_id"}
+            _KNOWN_ENTITY = {"country_id", "priogrid_id", "priogrid_gid", "pg_id"}
+            time_candidates = [c for c in pdf.columns if c in _KNOWN_TIME]
+            entity_candidates = [c for c in pdf.columns if c in _KNOWN_ENTITY]
+            if not time_candidates or not entity_candidates:
+                raise ValueError(
+                    "Cannot detect time/entity index columns from flat DataFrame. "
+                    f"Found columns: {pdf.columns.tolist()}"
+                )
+            time_name, entity_name = time_candidates[0], entity_candidates[0]
+        else:
+            raise TypeError(f"Unexpected data type after normalization: {type(pdf)}")
 
-        # ---------- 2) Wrap in CMDataset or PGMDataset ----------
-        # Decide based on the *second index level* entity_id --> country_id OR priogrid_id
+        # Handle priogrid_gid -> priogrid_gid (new API uses priogrid_gid by default)
+        if entity_name == "priogrid_id":
+            logger.warning("Renaming 'priogrid_id' to 'priogrid_gid' to match new dataset API")
+            if isinstance(pdf.index, pd.MultiIndex):
+                pdf.index = pdf.index.rename([time_name, "priogrid_gid"])
+            else:
+                pdf = pdf.rename(columns={"priogrid_id": "priogrid_gid"})
+            entity_name = "priogrid_gid"
+
+        # ---------- 3) Wrap in CountryMonthDataset or PriogridMonthDataset ----------
         if entity_name == "country_id":
-            ds = CMDataset(pdf)
-        elif entity_name in ("priogrid_id", "priogrid_gid", "pg_id"):
-            ds = PGMDataset(pdf)
+            ds = CountryMonthDataset(data=pdf, time_col=time_name, entity_col=entity_name)
+        elif entity_name in ("priogrid_gid", "pg_id"):
+            ds = PriogridMonthDataset(data=pdf, time_col=time_name, entity_col=entity_name)
         else:
             raise ValueError(
-                f"Cannot infer dataset type from second index level '{entity_name}'. "
-                "Expected 'country_id' for CMDataset or one of "
-                "['priogrid_id', 'priogrid_gid', 'pg_id'] for PGMDataset."
+                f"Cannot infer dataset type from entity column '{entity_name}'. "
+                "Expected 'country_id' for CountryMonthDataset or one of "
+                "['priogrid_id', 'priogrid_gid', 'pg_id'] for PriogridMonthDataset."
             )
 
-        # ---------- 3) Convert to Polars and keep index as columns ----------
-        #
-        pdf_processed = ds.dataframe.reset_index()
+        # ---------- 4) Convert to Polars and keep index as columns ----------
+        pdf_processed = ds.get_subset_dataframe(return_pandas=True).reset_index()
         df = pl.from_pandas(pdf_processed)
         logger.info(f"Data frame has the following columns: {df.columns}")
 

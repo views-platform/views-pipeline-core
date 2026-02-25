@@ -194,7 +194,7 @@ class SpatioTemporalDataset:
     
     def __init__(
         self,
-        data: Union[pl.DataFrame, pd.DataFrame, str, Path],
+        data: Union[pl.DataFrame, pl.LazyFrame, pd.DataFrame, str, Path],
         time_col: str,
         entity_col: str,
         sample_col: Optional[str] = None,
@@ -202,26 +202,32 @@ class SpatioTemporalDataset:
         fix_structure: bool = True,
         auto_broadcast: bool = True,
         cache_tensors: bool = True,
-        use_lazy_loading: bool = True,
     ):
         """Initialize SpatioTemporalDataset.
-        
+
+        Data is stored internally as a ``pl.LazyFrame`` for deferred
+        execution.  Call ``get_subset_dataframe()`` or ``collect()`` to
+        materialise data.
+
         Args:
-            data: Data source (DataFrame or file path).
+            data: Data source (DataFrame, LazyFrame, file, dir, or glob).
             time_col: Name of time index column.
             entity_col: Name of entity index column.
             sample_col: Name of sample column for row-based distributions.
                        Leave None for array-column or scalar layouts.
             target_cols: Target columns for historical mode.
-            fix_structure: If True, fills missing grid points.
+            fix_structure: If True, auto-completes grid at query time.
             auto_broadcast: If True, broadcasts scalars to match array dims.
             cache_tensors: If True, enables tensor caching.
-            use_lazy_loading: If True, uses scan_parquet for large files.
         """
         self._logger = logging.getLogger(self.__class__.__name__)
-        self._logger.warning("SpatioTemporalDataset and its subclasses are in early development. API may change. Use with caution and report issues.")
+        self._logger.warning(
+            "SpatioTemporalDataset and its subclasses are in early "
+            "development. API may change."
+        )
+
         # Initialize modules
-        self._loader = LoaderModule(use_lazy=use_lazy_loading)
+        self._loader = LoaderModule()
         self._grid = GridModule()
         self._subset = SubsetModule()
         self._tensor_mod = TensorModule(
@@ -229,59 +235,133 @@ class SpatioTemporalDataset:
             cache_enabled=cache_tensors,
         )
         self._stats = StatisticsModule()
-        
-        # Load data
+        self._fix_structure = fix_structure
+
+        # Load data as LazyFrame (no materialisation)
         self._logger.info(f"Loading data from: {type(data).__name__}")
-        self.df = self._loader.load(data)
-        self._logger.info(f"Data loaded: {self.df.shape[0]:,} rows, {self.df.shape[1]} columns")
-        
-        # Detect distribution layout BEFORE creating index
+        self._lf: pl.LazyFrame = self._loader.load(data)
+
+        # Detect distribution layout from schema (no collect)
+        cols = self._lf.columns
         potential_data_cols = [
-            c for c in self.df.columns 
+            c for c in cols
             if c not in {time_col, entity_col, sample_col}
         ]
         self._dist_layout = DistributionLayout.detect(
-            self.df, 
+            self._lf,
             sample_col=sample_col,
             data_cols=potential_data_cols,
         )
         self._logger.info(f"Distribution layout: {self._dist_layout}")
-        
-        # Initialize indices
-        self._index, self.df = IndexModule.create(
-            self.df, time_col, entity_col, 
+
+        # Initialize indices (validates columns, adds sort to lazy plan)
+        self._index, self._lf = IndexModule.create(
+            self._lf, time_col, entity_col,
             sample_col=sample_col,
             dist_layout=self._dist_layout,
         )
-        
+
+        # Cache lightweight index metadata (small targeted collect)
+        self._cache_index_metadata()
+
         # Detect mode
-        has_predictions = any(c.startswith("pred_") for c in self.df.columns)
+        has_predictions = any(c.startswith("pred_") for c in cols)
         detected_mode = "forecast" if has_predictions else "historical"
-        
+
         if detected_mode == "historical" and target_cols is None:
             raise ValidationError(
-                "Historical mode detected (no 'pred_' columns). Provide 'target_cols'."
+                "Historical mode detected (no 'pred_' columns). "
+                "Provide 'target_cols'."
             )
-        
+
         self._mode = ModeModule(
             mode=detected_mode,
             target_cols=target_cols if detected_mode == "historical" else None,
         )
-        
-        if fix_structure:
-            self.fix_space_time_consistency()
-        
-        self._mode.validate(self.df)
-        
+        self._mode.validate(self._lf)
+
         # Log summary
-        n_times, n_entities, n_samples = self._index.get_dimensions(
-            self.df, self._dist_layout
-        )
         self._logger.info(
-            f"Dataset ready: mode={self.mode}, layout={self._dist_layout.layout}, "
-            f"{n_times} times × {n_entities} entities × {n_samples} samples"
+            f"Dataset ready: mode={self.mode}, "
+            f"layout={self._dist_layout.layout}, "
+            f"{len(self._unique_times)} times \u00d7 "
+            f"{len(self._unique_entities)} entities \u00d7 "
+            f"{self._dist_layout.sample_size} samples"
         )
-    
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _cache_index_metadata(self) -> None:
+        """Cache lightweight index metadata from the LazyFrame."""
+        index_cols = [self._index.time_col, self._index.entity_col]
+        if self._index.sample_col:
+            index_cols.append(self._index.sample_col)
+        meta = self._lf.select(index_cols).unique().collect()
+
+        self._unique_times: List[int] = (
+            meta[self._index.time_col].unique().sort().to_list()
+        )
+        self._unique_entities: List[int] = (
+            meta[self._index.entity_col].unique().sort().to_list()
+        )
+        self._unique_samples: Optional[List[int]] = None
+        if self._index.sample_col and self._index.sample_col in meta.columns:
+            self._unique_samples = (
+                meta[self._index.sample_col].unique().sort().to_list()
+            )
+        self._n_rows: int = self._lf.select(pl.len()).collect().item()
+
+    def _ensure_grid_complete(
+        self,
+        lf: pl.LazyFrame,
+        time_ids: Optional[Union[int, List[int]]],
+        entity_ids: Optional[Union[int, List[int]]],
+        sample_idx: Optional[Union[int, List[int]]],
+    ) -> pl.LazyFrame:
+        """Auto-complete grid for a subset query."""
+        t = list(time_ids) if time_ids is not None else self._unique_times
+        if isinstance(t, int):
+            t = [t]
+        e = list(entity_ids) if entity_ids is not None else self._unique_entities
+        if isinstance(e, int):
+            e = [e]
+        s = (list(sample_idx) if sample_idx is not None
+             else self._unique_samples)
+        if isinstance(s, int):
+            s = [s]
+
+        skeleton_rows = len(t) * len(e) * (len(s) if s else 1)
+        if skeleton_rows > 500_000_000:
+            self._logger.warning(
+                f"Grid skeleton too large ({skeleton_rows:,} rows), "
+                "skipping auto-fix"
+            )
+            return lf
+
+        grid = pl.DataFrame({self._index.time_col: t}).join(
+            pl.DataFrame({self._index.entity_col: e}), how="cross",
+        )
+        if s is not None and self._index.sample_col:
+            grid = grid.join(
+                pl.DataFrame({self._index.sample_col: s}), how="cross",
+            )
+
+        result = grid.lazy().join(lf, on=self._index.index_cols, how="left")
+        data_cols = [
+            c for c in lf.columns if c not in self._index.index_cols_set
+        ]
+        if data_cols:
+            result = result.with_columns(
+                [pl.col(c).fill_null(0.0) for c in data_cols]
+            )
+        return result
+
+    def _entity_lookup_df(self) -> pl.DataFrame:
+        """Minimal DataFrame with entity IDs for metadata lookups."""
+        return pl.DataFrame({self.entity_col: self._unique_entities})
+
     # -------------------------------------------------------------------------
     # Properties
     # -------------------------------------------------------------------------
@@ -304,7 +384,7 @@ class SpatioTemporalDataset:
     @property
     def target_cols(self) -> List[str]:
         """Target column names."""
-        return self._mode.get_targets(self.df)
+        return self._mode.get_targets(self._lf)
     
     @property
     def mode(self) -> str:
@@ -324,27 +404,53 @@ class SpatioTemporalDataset:
     @property
     def shape(self) -> Tuple[int, int, int, int]:
         """Dataset shape as (n_times, n_entities, n_samples, n_features)."""
-        n_times, n_entities, n_samples = self._index.get_dimensions(
-            self.df, self._dist_layout
-        )
         n_features = len(self.get_all_data_cols())
-        return (n_times, n_entities, n_samples, n_features)
-    
+        return (
+            len(self._unique_times),
+            len(self._unique_entities),
+            self._dist_layout.sample_size,
+            n_features,
+        )
+
+    @property
+    def lazy_frame(self) -> pl.LazyFrame:
+        """Access the underlying LazyFrame."""
+        return self._lf
+
+    @property
+    def columns(self) -> List[str]:
+        """Column names."""
+        return self._lf.columns
+
+    def collect(self) -> pl.DataFrame:
+        """Materialise the full dataset as a DataFrame.
+
+        .. warning::
+            For large datasets (>10M rows) this may exceed available
+            RAM.  Prefer ``get_subset_dataframe()`` for targeted access.
+        """
+        if self._n_rows > 10_000_000:
+            self._logger.warning(
+                f"Collecting {self._n_rows:,} rows — consider using "
+                "get_subset_dataframe() for large datasets."
+            )
+        return self._lf.collect()
+
     # -------------------------------------------------------------------------
     # Column Accessors
     # -------------------------------------------------------------------------
-    
+
     def get_features(self) -> List[str]:
         """Get feature column names (excluding targets)."""
-        return self._mode.get_features(self.df, self._index)
-    
+        return self._mode.get_features(self._lf, self._index)
+
     def get_all_data_cols(self) -> List[str]:
         """Get all data columns (excluding indices)."""
-        return self._mode.get_all_data_cols(self.df, self._index)
-    
+        return self._mode.get_all_data_cols(self._lf, self._index)
+
     def get_pred_vars(self) -> List[str]:
         """Get prediction column names (prefixed with 'pred_')."""
-        return [c for c in self.df.columns if c.startswith("pred_")]
+        return [c for c in self._lf.columns if c.startswith("pred_")]
     
     # -------------------------------------------------------------------------
     # Data Access
@@ -371,11 +477,20 @@ class SpatioTemporalDataset:
             Filtered DataFrame (Polars by default, or Pandas with MultiIndex).
         """
         result = self._subset.filter(
-            self.df, self._index,
+            self._lf, self._index,
             time_ids=time_ids, entity_ids=entity_ids,
             sample_idx=sample_idx, features=features,
         )
-        
+
+        # Auto-fix grid for subset queries
+        is_subset = time_ids is not None or entity_ids is not None
+        if self._fix_structure and is_subset:
+            result = self._ensure_grid_complete(
+                result, time_ids, entity_ids, sample_idx,
+            )
+
+        result = result.sort(self._index.index_cols).collect()
+
         if return_pandas:
             index_cols = [self.time_col, self.entity_col]
             if self.sample_col and self.sample_col in result.columns:
@@ -444,7 +559,7 @@ class SpatioTemporalDataset:
         Returns:
             Tuple of (X, y) numpy arrays.
         """
-        target_cols = self._mode.get_targets(self.df)
+        target_cols = self._mode.get_targets(self._lf)
         if not target_cols:
             raise ValidationError("No target columns found")
         
@@ -475,24 +590,27 @@ class SpatioTemporalDataset:
     
     def fix_space_time_consistency(self, fill_value: Optional[Any] = None) -> None:
         """Fill missing grid points.
-        
-        Ensures every (time, entity, [sample]) combination exists.
-        
+
+        Adds the grid-fix join to the lazy plan (does not collect).
+
         Args:
             fill_value: Value to fill missing cells (None = keep as null).
         """
-        self.df = self._grid.fix_consistency(
-            self.df, self._index, self._dist_layout, fill_value
+        self._lf = self._grid.fix_consistency(
+            self._lf, self._index, self._dist_layout, fill_value,
+            known_times=self._unique_times,
+            known_entities=self._unique_entities,
+            known_samples=self._unique_samples,
         )
-    
+
     def check_grid_completeness(self) -> Tuple[bool, int]:
         """Check if grid has no missing combinations.
-        
+
         Returns:
             Tuple of (is_complete, missing_count).
         """
         return self._grid.check_completeness(
-            self.df, self._index, self._dist_layout
+            self._lf, self._index, self._dist_layout
         )
     
     # -------------------------------------------------------------------------
@@ -842,7 +960,7 @@ class SpatioTemporalDataset:
                 features=columns,
             )
         else:
-            df = self.df
+            df = self._lf.collect()
         
         converter = TensorConverter(
             time_col=self.time_col,
@@ -902,18 +1020,17 @@ class SpatioTemporalDataset:
     
     def __repr__(self) -> str:
         """String representation."""
-        n_times, n_entities, n_samples = self._index.get_dimensions(
-            self.df, self._dist_layout
-        )
         return (
             f"{self.__class__.__name__}("
             f"mode='{self.mode}', layout='{self._dist_layout.layout}', "
-            f"times={n_times}, entities={n_entities}, samples={n_samples})"
+            f"times={len(self._unique_times)}, "
+            f"entities={len(self._unique_entities)}, "
+            f"samples={self._dist_layout.sample_size})"
         )
-    
+
     def __len__(self) -> int:
         """Number of rows in dataset."""
-        return len(self.df)
+        return self._n_rows
 
 
 # =============================================================================
@@ -932,7 +1049,7 @@ class CountryMonthDataset(SpatioTemporalDataset):
     
     def __init__(
         self,
-        data: Union[pl.DataFrame, pd.DataFrame, str, Path],
+        data: Union[pl.DataFrame, pl.LazyFrame, pd.DataFrame, str, Path],
         time_col: str = DEFAULT_TIME_COL,
         entity_col: str = DEFAULT_ENTITY_COL,
         sample_col: Optional[str] = None,
@@ -940,22 +1057,20 @@ class CountryMonthDataset(SpatioTemporalDataset):
         fix_structure: bool = False,
         auto_broadcast: bool = True,
         cache_tensors: bool = True,
-        use_lazy_loading: bool = True,
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
     ):
         """Initialize CountryMonthDataset.
-        
+
         Args:
             data: Data source.
             time_col: Time column name.
             entity_col: Entity column name.
             sample_col: Sample column for row-based distributions.
             target_cols: Target columns for historical mode.
-            fix_structure: Fill missing grid points.
+            fix_structure: Auto-complete grid at query time.
             auto_broadcast: Broadcast scalars to match arrays.
             cache_tensors: Enable tensor caching.
-            use_lazy_loading: If True, uses scan_parquet for large files.
             metadata_path: Path to country metadata file.
             fetch_metadata: If True, fetch metadata via viewser Queryset.
         """
@@ -963,7 +1078,7 @@ class CountryMonthDataset(SpatioTemporalDataset):
             data=data, time_col=time_col, entity_col=entity_col,
             sample_col=sample_col, target_cols=target_cols,
             fix_structure=fix_structure, auto_broadcast=auto_broadcast,
-            cache_tensors=cache_tensors, use_lazy_loading=use_lazy_loading,
+            cache_tensors=cache_tensors,
         )
         
         # Initialize metadata handler
@@ -983,8 +1098,8 @@ class CountryMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get year for each time ID."""
-        times = self.df[self.time_col].unique().sort()
-        years = [month_id_to_date(int(t))[0] for t in times.to_list()]
+        times = pl.Series(self.time_col, self._unique_times)
+        years = [month_id_to_date(int(t))[0] for t in self._unique_times]
         result = pl.DataFrame({self.time_col: times, "year": years})
         if return_pandas:
             return polars_to_pandas_multiindex(result, [self.time_col])
@@ -995,8 +1110,8 @@ class CountryMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get month-of-year for each time ID."""
-        times = self.df[self.time_col].unique().sort()
-        months = [month_id_to_date(int(t))[1] for t in times.to_list()]
+        times = pl.Series(self.time_col, self._unique_times)
+        months = [month_id_to_date(int(t))[1] for t in self._unique_times]
         result = pl.DataFrame({self.time_col: times, "month": months})
         if return_pandas:
             return polars_to_pandas_multiindex(result, [self.time_col])
@@ -1007,9 +1122,8 @@ class CountryMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get full date information (year, month, date string)."""
-        times = self.df[self.time_col].unique().sort()
         data = []
-        for t in times.to_list():
+        for t in self._unique_times:
             year, month = month_id_to_date(int(t))
             data.append((t, year, month, f"{year}-{month:02d}-01"))
         result = pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
@@ -1022,10 +1136,10 @@ class CountryMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get quarter for each time ID."""
-        times = self.df[self.time_col].unique().sort()
+        times = pl.Series(self.time_col, self._unique_times)
         quarters = [
             (month_id_to_date(int(t))[1] - 1) // 3 + 1 
-            for t in times.to_list()
+            for t in self._unique_times
         ]
         result = pl.DataFrame({self.time_col: times, "quarter": quarters})
         if return_pandas:
@@ -1041,7 +1155,7 @@ class CountryMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get ISO country code (2-letter)."""
-        return self._country_meta.get_isoab(self.df, return_pandas=return_pandas)
+        return self._country_meta.get_isoab(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_name(
         self,
@@ -1049,49 +1163,49 @@ class CountryMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get country names."""
-        return self._country_meta.get_name(self.df, with_id=with_id, return_pandas=return_pandas)
+        return self._country_meta.get_name(self._entity_lookup_df(), with_id=with_id, return_pandas=return_pandas)
     
     def get_gwcode(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get Gleditsch-Ward country code."""
-        return self._country_meta.get_gwcode(self.df, return_pandas=return_pandas)
+        return self._country_meta.get_gwcode(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_isonum(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get ISO numeric country code."""
-        return self._country_meta.get_isonum(self.df, return_pandas=return_pandas)
+        return self._country_meta.get_isonum(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_capname(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get capital city name."""
-        return self._country_meta.get_capname(self.df, return_pandas=return_pandas)
+        return self._country_meta.get_capname(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_cap_lat_lon(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get capital city coordinates."""
-        return self._country_meta.get_cap_lat_lon(self.df, return_pandas=return_pandas)
+        return self._country_meta.get_cap_lat_lon(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_region(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get region information (in_africa, in_me flags)."""
-        return self._country_meta.get_region(self.df, return_pandas=return_pandas)
+        return self._country_meta.get_region(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_region_name(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get region classification based on GW codes."""
-        return self._country_meta.get_region_name(self.df, return_pandas=return_pandas)
+        return self._country_meta.get_region_name(self._entity_lookup_df(), return_pandas=return_pandas)
 
 
 # =============================================================================
@@ -1106,11 +1220,11 @@ class PriogridMonthDataset(SpatioTemporalDataset):
     """
     
     DEFAULT_TIME_COL = "month_id"
-    DEFAULT_ENTITY_COL = "priogrid_gid"
+    DEFAULT_ENTITY_COL = "priogrid_gd"
     
     def __init__(
         self,
-        data: Union[pl.DataFrame, pd.DataFrame, str, Path],
+        data: Union[pl.DataFrame, pl.LazyFrame, pd.DataFrame, str, Path],
         time_col: str = DEFAULT_TIME_COL,
         entity_col: str = DEFAULT_ENTITY_COL,
         sample_col: Optional[str] = None,
@@ -1118,23 +1232,21 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         fix_structure: bool = False,
         auto_broadcast: bool = True,
         cache_tensors: bool = True,
-        use_lazy_loading: bool = True,
         country_mapping: Optional[Union[str, Path, pl.DataFrame]] = None,
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
     ):
         """Initialize PriogridMonthDataset.
-        
+
         Args:
             data: Data source.
             time_col: Time column name.
             entity_col: Entity column name.
             sample_col: Sample column for row-based distributions.
             target_cols: Target columns for historical mode.
-            fix_structure: Fill missing grid points.
+            fix_structure: Auto-complete grid at query time.
             auto_broadcast: Broadcast scalars to match arrays.
             cache_tensors: Enable tensor caching.
-            use_lazy_loading: If True, uses scan_parquet for large files.
             country_mapping: Grid-to-country mapping (file or DataFrame).
             metadata_path: Path to grid metadata file.
             fetch_metadata: If True, fetch metadata via viewser Queryset.
@@ -1143,7 +1255,7 @@ class PriogridMonthDataset(SpatioTemporalDataset):
             data=data, time_col=time_col, entity_col=entity_col,
             sample_col=sample_col, target_cols=target_cols,
             fix_structure=fix_structure, auto_broadcast=auto_broadcast,
-            cache_tensors=cache_tensors, use_lazy_loading=use_lazy_loading,
+            cache_tensors=cache_tensors,
         )
         
         # Initialize metadata handler
@@ -1205,8 +1317,8 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get year for each time ID."""
-        times = self.df[self.time_col].unique().sort()
-        years = [month_id_to_date(int(t))[0] for t in times.to_list()]
+        times = pl.Series(self.time_col, self._unique_times)
+        years = [month_id_to_date(int(t))[0] for t in self._unique_times]
         result = pl.DataFrame({self.time_col: times, "year": years})
         if return_pandas:
             return polars_to_pandas_multiindex(result, [self.time_col])
@@ -1217,8 +1329,8 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get month-of-year for each time ID."""
-        times = self.df[self.time_col].unique().sort()
-        months = [month_id_to_date(int(t))[1] for t in times.to_list()]
+        times = pl.Series(self.time_col, self._unique_times)
+        months = [month_id_to_date(int(t))[1] for t in self._unique_times]
         result = pl.DataFrame({self.time_col: times, "month": months})
         if return_pandas:
             return polars_to_pandas_multiindex(result, [self.time_col])
@@ -1229,9 +1341,8 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get full date information (year, month, date string)."""
-        times = self.df[self.time_col].unique().sort()
         data = []
-        for t in times.to_list():
+        for t in self._unique_times:
             year, month = month_id_to_date(int(t))
             data.append((t, year, month, f"{year}-{month:02d}-01"))
         result = pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
@@ -1248,28 +1359,28 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get geographic coordinates for grids."""
-        return self._pg_meta.get_lat_lon(self.df, return_pandas=return_pandas)
+        return self._pg_meta.get_lat_lon(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_row_col(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get row and column indices for each priogrid."""
-        return self._pg_meta.get_row_col(self.df, return_pandas=return_pandas)
+        return self._pg_meta.get_row_col(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_country_id(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get country ID for each grid."""
-        return self._pg_meta.get_country_id(self.df, return_pandas=return_pandas)
+        return self._pg_meta.get_country_id(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_isoab(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get ISO code for the country of each priogrid."""
-        return self._pg_meta.get_isoab(self.df, return_pandas=return_pandas)
+        return self._pg_meta.get_isoab(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_name(
         self,
@@ -1277,21 +1388,21 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get country names for each priogrid."""
-        return self._pg_meta.get_name(self.df, with_id=with_id, return_pandas=return_pandas)
+        return self._pg_meta.get_name(self._entity_lookup_df(), with_id=with_id, return_pandas=return_pandas)
     
     def get_gwcode(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get Gleditsch-Ward country code for each priogrid."""
-        return self._pg_meta.get_gwcode(self.df, return_pandas=return_pandas)
+        return self._pg_meta.get_gwcode(self._entity_lookup_df(), return_pandas=return_pandas)
     
     def get_region(
         self,
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get region classification based on GW codes."""
-        return self._pg_meta.get_region(self.df, return_pandas=return_pandas)
+        return self._pg_meta.get_region(self._entity_lookup_df(), return_pandas=return_pandas)
     
     # -------------------------------------------------------------------------
     # Country-based Operations
@@ -1407,7 +1518,7 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         
         # Initialize reconciled dataframe on first call
         if self.reconciled_dataframe is None:
-            self.reconciled_dataframe = self.df.clone()
+            self.reconciled_dataframe = self._lf.collect()
         
         entity_ids = self._metadata.get_entities_for_country(country_id)
         if not entity_ids:

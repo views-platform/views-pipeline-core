@@ -605,17 +605,12 @@ class TestForecastEnsemble:
         
         with patch.object(manager, '_forecast_model_artifact', return_value=sample_dataframe):
             with patch.object(EnsembleManager, '_get_aggregated_df', return_value=sample_dataframe):
-                with patch('views_pipeline_core.managers.ensemble.ensemble._ViewsDataset') as MockDataset:
-                    mock_dataset = MagicMock()
-                    mock_dataset.dataframe = sample_dataframe
-                    MockDataset.return_value = mock_dataset
-                    
-                    with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
-                        with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm.write'):
-                            with patch.object(manager, '_apply_reconciliation', return_value=sample_dataframe):
-                                result = manager._forecast_ensemble()
-                                
-                                assert isinstance(result, pd.DataFrame)
+                with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
+                    with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm.write'):
+                        with patch.object(manager, '_apply_reconciliation', return_value=sample_dataframe):
+                            result = manager._forecast_ensemble()
+                            
+                            assert isinstance(result, pd.DataFrame)
     
     def test_forecast_ensemble_raises_on_invalid_type(self, manager, sample_dataframe):
         """Test forecasting raises TypeError for invalid prediction type."""
@@ -632,13 +627,10 @@ class TestForecastEnsemble:
         # Create a non-DataFrame result for aggregation
         with patch.object(manager, '_forecast_model_artifact', return_value=sample_dataframe):
             with patch.object(EnsembleManager, '_get_aggregated_df', return_value="not_a_dataframe"):
-                with patch('views_pipeline_core.managers.ensemble.ensemble._ViewsDataset') as MockDataset:
-                    MockDataset.side_effect = ValueError("Invalid input type for ViewsDataset")
-                    
-                    with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
-                        with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm.write'):
-                            with pytest.raises(ValueError, match="Invalid input type for ViewsDataset"):
-                                manager._forecast_ensemble()
+                with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
+                    with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm.write'):
+                        with pytest.raises(AttributeError):
+                            manager._forecast_ensemble()
 
 
 # ============================================================================
@@ -650,13 +642,13 @@ class TestLoadCDataset:
     
     def test_load_c_dataset_with_provided_dataframe(self, manager, sample_cm_dataframe):
         """Test loading C dataset from provided DataFrame."""
-        with patch('views_pipeline_core.managers.ensemble.ensemble._CDataset') as MockCDataset:
+        with patch('views_pipeline_core.managers.ensemble.ensemble.CountryMonthDataset') as MockCDataset:
             mock_dataset = MagicMock()
             MockCDataset.return_value = mock_dataset
             
             result = manager._load_c_dataset("cm_model", sample_cm_dataframe)
             
-            MockCDataset.assert_called_once_with(source=sample_cm_dataframe)
+            MockCDataset.assert_called_once_with(data=sample_cm_dataframe)
             assert result == mock_dataset
     
     def test_load_c_dataset_returns_none_when_not_found(self, manager):
