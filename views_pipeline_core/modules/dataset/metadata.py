@@ -564,10 +564,15 @@ class CountryMetadata:
                 .reset_index()
             )
             
-            # Convert to Polars
-            self._cache = pl.from_pandas(pdf)
+            # Convert to Polars and deduplicate — all columns are static
+            # per entity, so we only need one row per country_id.
+            full = pl.from_pandas(pdf)
+            static_cols = [c for c in full.columns if c != self.time_col]
+            self._cache = full.select(static_cols).unique(subset=[self.entity_col])
             
-            self._logger.info(f"Metadata fetched: {len(self._cache)} records")
+            self._logger.info(
+                f"Metadata fetched: {len(full)} raw records → {len(self._cache)} unique entities"
+            )
             
         except Exception as e:
             raise MetadataError(f"Failed to fetch metadata: {e}")
@@ -620,6 +625,11 @@ class CountryMetadata:
         if self.time_col not in meta_subset.columns:
             join_cols = [self.entity_col]
             meta_subset = meta_subset.unique(subset=[self.entity_col])
+        
+        # Also filter join_cols to what data_df actually has
+        join_cols = [c for c in join_cols if c in data_df.columns]
+        if not join_cols:
+            raise ValueError("No common join columns between data and metadata")
         
         result = data_df.select(join_cols).unique().join(
             meta_subset,

@@ -68,6 +68,8 @@ class LoaderModule:
 
         if isinstance(data, pd.DataFrame):
             self._logger.debug("Converting Pandas → Polars → LazyFrame.")
+            if isinstance(data.index, pd.MultiIndex) or data.index.name is not None:
+                data = data.reset_index()
             return pl.from_pandas(data).lazy()
 
         if isinstance(data, (str, Path)):

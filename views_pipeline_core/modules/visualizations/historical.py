@@ -201,7 +201,7 @@ class HistoricalLineGraph:
                 )
 
             # Add forecast traces if available
-            if pred_df is not None:
+            if pred_df is not None and not pred_df.empty:
                 if hdi:
                     try:
                         hdi_df = self._get_hdi_data(entity_id, target, alpha)
