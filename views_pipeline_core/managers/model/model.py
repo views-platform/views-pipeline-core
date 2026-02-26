@@ -2742,12 +2742,36 @@ class ForecastingModelManager(ModelManager):
                 # EvaluationManager.evaluate() operates on one target at a time and
                 # requires exactly one column named pred_{target} per prediction DataFrame.
                 raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
-                eval_result_dict = evaluation_manager.evaluate(
-                    df_actual[[target]],
-                    [df[[f"pred_{target}"]] for df in raw_preds],
-                    target,
-                    self.configs,
+                
+                # SHADOW RUN ADAPTATION: Create EvaluationFrame locally
+                from views_pipeline_core.modules.validation.adapter import PandasAdapter
+                
+                # Note: We must slice inputs exactly as we do for the legacy call
+                actual_slice = df_actual[[target]]
+                pred_slices = [df[[f"pred_{target}"]] for df in raw_preds]
+                
+                ef = PandasAdapter.from_dataframes(
+                    actual=actual_slice,
+                    predictions=pred_slices,
+                    target=target
                 )
+
+                # --- EXPLICIT PARITY PROVING MODE ---
+                # 1. Run Legacy (DataFrame-based)
+                legacy_result = evaluation_manager.evaluate(
+                    actual_slice, pred_slices, target, self.configs, ef=None
+                )
+                
+                # 2. Run Shadow (EvaluationFrame-based)
+                shadow_result = evaluation_manager.evaluate(
+                    actual_slice, pred_slices, target, self.configs, ef=ef
+                )
+                
+                # 3. Explicit Comparison & Audit
+                self._audit_parity(legacy_result, shadow_result, target)
+                
+                # 4. Use Shadow Result
+                eval_result_dict = shadow_result
 
                 # Initialize local variables to avoid UnboundLocalError
                 step_wise_evaluation, df_step_wise_evaluation = ({}, pd.DataFrame())
@@ -2798,6 +2822,67 @@ class ForecastingModelManager(ModelManager):
             text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
             notifications_enabled=self._wandb_notifications,
         )
+
+    def _audit_parity(self, legacy: Dict, shadow: Dict, target: str) -> None:
+        """
+        Audit and verify parity between legacy and shadow evaluation results.
+        
+        Performs a deep comparison of metric dictionaries and DataFrames.
+        Logs detailed statistics and raises ValueError on any discrepancy.
+        """
+        import pandas as pd
+        import numpy as np
+        
+        logger.info(f"AUDITING PARITY for target: {target}")
+        
+        keys = ["step", "time_series", "month"]
+        for key in keys:
+            leg_res = legacy.get(key)
+            shad_res = shadow.get(key)
+            
+            # Check structure
+            if not leg_res or not shad_res:
+                if leg_res != shad_res:
+                    raise ValueError(f"Parity Failure ({key}): Existence mismatch. Legacy={bool(leg_res)}, Shadow={bool(shad_res)}")
+                continue
+                
+            leg_metrics, leg_df = leg_res
+            shad_metrics, shad_df = shad_res
+            
+            # 1. Compare Metrics Dicts
+            all_metric_keys = set(leg_metrics.keys()) | set(shad_metrics.keys())
+            deltas = []
+            for m in all_metric_keys:
+                l_val = leg_metrics.get(m, np.nan)
+                s_val = shad_metrics.get(m, np.nan)
+                
+                # Handle NaNs
+                if pd.isna(l_val) and pd.isna(s_val):
+                    continue
+                
+                diff = abs(l_val - s_val)
+                deltas.append(diff)
+                if diff > 1e-9: # Float tolerance
+                    raise ValueError(f"Parity Failure ({key}): Metric '{m}' mismatch. Legacy={l_val}, Shadow={s_val}, Delta={diff}")
+            
+            max_delta = max(deltas) if deltas else 0.0
+            logger.info(f"  - {key.ljust(12)}: Checked {len(all_metric_keys)} metrics. Max delta: {max_delta:.2e}")
+            
+            # 2. Compare DataFrames
+            # Align indices and columns before comparing
+            try:
+                pd.testing.assert_frame_equal(
+                    leg_df.sort_index(axis=1), 
+                    shad_df.sort_index(axis=1),
+                    check_dtype=False, # Relax dtype strictness (int vs float) if values match
+                    check_exact=False, # Use default tolerance
+                    rtol=1e-5,
+                    atol=1e-8
+                )
+            except AssertionError as e:
+                raise ValueError(f"Parity Failure ({key}): DataFrame mismatch.\n{e}")
+
+        logger.info(f"\033[92mPARITY CONFIRMED for {target}. Legacy and Shadow results are identical.\033[0m")
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
         """

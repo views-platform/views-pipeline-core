@@ -19,6 +19,7 @@ REAL_EVAL_RESULT = {
 sys.modules['views_evaluation'] = MagicMock()
 sys.modules['views_evaluation.evaluation'] = MagicMock()
 sys.modules['views_evaluation.evaluation.evaluation_manager'] = MagicMock()
+sys.modules['views_evaluation.evaluation.evaluation_frame'] = MagicMock()
 sys.modules['wandb'] = mock_wandb
 sys.modules['art'] = MagicMock()
 
@@ -124,8 +125,8 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
         # EvaluationManager WAS instantiated (no-args constructor)
         mock_eval_cls.assert_called_once_with()
-        # evaluate WAS called for the target
-        assert mock_eval_cls.return_value.evaluate.call_count == 1
+        # evaluate WAS called for the target (Twice: Legacy + Shadow)
+        assert mock_eval_cls.return_value.evaluate.call_count == 2
 
 @patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={})
 @patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', return_value=MagicMock())
@@ -161,7 +162,16 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
 
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
     
-    with patch('views_pipeline_core.managers.model.model.EvaluationManager', create=True):
+    # Mock result structure required for _audit_parity
+    MOCK_EVAL_RESULT = {
+        "step": ({}, pd.DataFrame()),
+        "time_series": ({}, pd.DataFrame()),
+        "month": ({}, pd.DataFrame()),
+    }
+
+    eval_module_mock = sys.modules['views_evaluation.evaluation.evaluation_manager']
+    with patch.object(eval_module_mock, 'EvaluationManager') as mock_eval_cls:
+        mock_eval_cls.return_value.evaluate.return_value = MOCK_EVAL_RESULT
         # Should complete without error when receiving a standard scalar prediction
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
 
@@ -216,5 +226,6 @@ def test_scalar_gate_distribution_with_sample_metrics(mock_read, mock_splash, mo
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
         # EvaluationManager instantiated once with no args (metrics are read from config inside)
         mock_eval_cls.assert_called_once_with()
-        # evaluate was called once for the single target
-        assert mock_eval_cls.return_value.evaluate.call_count == 1
+        # evaluate was called twice (Legacy + Shadow) for the single target
+        assert mock_eval_cls.return_value.evaluate.call_count == 2
+        
