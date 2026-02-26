@@ -242,7 +242,7 @@ class SpatioTemporalDataset:
         self._lf: pl.LazyFrame = self._loader.load(data)
 
         # Detect distribution layout from schema (no collect)
-        cols = self._lf.columns
+        cols = self._lf.collect_schema().names()
         potential_data_cols = [
             c for c in cols
             if c not in {time_col, entity_col, sample_col}
@@ -350,7 +350,7 @@ class SpatioTemporalDataset:
 
         result = grid.lazy().join(lf, on=self._index.index_cols, how="left")
         data_cols = [
-            c for c in lf.columns if c not in self._index.index_cols_set
+            c for c in lf.collect_schema().names() if c not in self._index.index_cols_set
         ]
         if data_cols:
             result = result.with_columns(
@@ -420,7 +420,7 @@ class SpatioTemporalDataset:
     @property
     def columns(self) -> List[str]:
         """Column names."""
-        return self._lf.columns
+        return self._lf.collect_schema().names()
 
     def collect(self) -> pl.DataFrame:
         """Materialise the full dataset as a DataFrame.
@@ -450,7 +450,7 @@ class SpatioTemporalDataset:
 
     def get_pred_vars(self) -> List[str]:
         """Get prediction column names (prefixed with 'pred_')."""
-        return [c for c in self._lf.columns if c.startswith("pred_")]
+        return [c for c in self._lf.collect_schema().names() if c.startswith("pred_")]
     
     # -------------------------------------------------------------------------
     # Data Access
@@ -1220,7 +1220,7 @@ class PriogridMonthDataset(SpatioTemporalDataset):
     """
     
     DEFAULT_TIME_COL = "month_id"
-    DEFAULT_ENTITY_COL = "priogrid_gd"
+    DEFAULT_ENTITY_COL = "priogrid_id"
     
     def __init__(
         self,

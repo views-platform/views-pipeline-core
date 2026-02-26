@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<script src="https://unpkg.com/deck.gl@9.1.7/dist.min.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; }}
+  #map-container {{ position: relative; width: 100%; height: {map_height}px; }}
+  #deck-canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
+  .controls {{
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 10; background: rgba(255,255,255,0.95); border-radius: 12px;
+    padding: 12px 24px; display: flex; align-items: center; gap: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15); backdrop-filter: blur(8px);
+    min-width: 500px; max-width: 90%;
+  }}
+  .controls button {{
+    background: #6750A4; color: white; border: none; border-radius: 8px;
+    padding: 8px 20px; cursor: pointer; font-size: 14px; font-weight: 600;
+    transition: background 0.2s;
+  }}
+  .controls button:hover {{ background: #7c6db5; }}
+  .controls input[type="range"] {{ flex: 1; accent-color: #6750A4; height: 6px; cursor: pointer; }}
+  .time-label {{
+    font-size: 14px; font-weight: 600; color: #1a1a2e; min-width: 140px; text-align: center;
+  }}
+  .legend {{
+    position: absolute; top: 20px; right: 20px; z-index: 10;
+    background: rgba(255,255,255,0.95); border-radius: 10px; padding: 14px 18px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.12); min-width: 180px;
+  }}
+  .legend-title {{ font-size: 13px; font-weight: 700; color: #333; margin-bottom: 10px; }}
+  .legend-gradient {{
+    width: 100%; height: 16px; border-radius: 4px; margin-bottom: 6px;
+  }}
+  .legend-labels {{ display: flex; justify-content: space-between; font-size: 11px; color: #666; }}
+  .tooltip {{
+    position: absolute; z-index: 20; pointer-events: none;
+    background: rgba(0,0,0,0.85); color: white; padding: 10px 14px;
+    border-radius: 8px; font-size: 13px; line-height: 1.6;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3); max-width: 300px;
+    display: none;
+  }}
+  .tooltip b {{ color: #bb86fc; }}
+</style>
+</head>
+<body>
+<div id="map-container">
+  <canvas id="deck-canvas"></canvas>
+  <div class="controls">
+    <button id="play-btn" onclick="togglePlay()">&#9654; Play</button>
+    <input type="range" id="time-slider" min="0" max="0" value="0" oninput="onSlider(this.value)">
+    <span class="time-label" id="time-label">{time_col}: --</span>
+  </div>
+  <div class="legend">
+    <div class="legend-title">{target}</div>
+    <div class="legend-gradient" id="legend-gradient"></div>
+    <div class="legend-labels">
+      <span id="legend-min">0</span>
+      <span id="legend-max">1</span>
+    </div>
+  </div>
+  <div class="tooltip" id="tooltip"></div>
+</div>
+
+<script>
+// --- DATA (injected by Python) ---
+const GEOJSON = {geojson_data};
+const COLOR_DATA = {color_data};
+const HOVER_DATA = {hover_data};
+const TIME_IDS = {time_ids};
+const LOCATION_COL = "{location_col}";
+const TIME_COL = "{time_col}";
+const TARGET = "{target}";
+const Z_MIN = {z_min};
+const Z_MAX = {z_max};
+const VIEW_STATE = {view_state};
+const VALUE_DATA = {value_data};
+
+// --- STATE ---
+let currentTimeIdx = 0;
+let playing = false;
+let animFrameId = null;
+let lastFrameTime = 0;
+const FRAME_DURATION = 500;
+
+// --- INIT ---
+const slider = document.getElementById('time-slider');
+slider.max = TIME_IDS.length - 1;
+slider.value = 0;
+updateTimeLabel(0);
+
+// Legend gradient (OrRd approximation)
+const legendGrad = document.getElementById('legend-gradient');
+legendGrad.style.background = 'linear-gradient(to right, #fff7ec, #fee8c8, #fdd49e, #fdbb84, #fc8d59, #ef6548, #d7301f, #b30000, #7f0000)';
+document.getElementById('legend-min').textContent = Z_MIN >= 1 ? Math.round(Z_MIN).toLocaleString() : Z_MIN.toFixed(4);
+document.getElementById('legend-max').textContent = Z_MAX >= 1 ? Math.round(Z_MAX).toLocaleString() : Z_MAX.toFixed(4);
+
+// Pre-index: build colorMap per time step for fast lookup
+// COLOR_DATA = {{ timeId: {{ locId: [r,g,b,a] }} }}
+function getColors(timeIdx) {{
+  const tid = String(TIME_IDS[timeIdx]);
+  return COLOR_DATA[tid] || {{}};
+}}
+
+// --- DECK.GL SETUP ---
+function buildLayer(timeIdx) {{
+  const colors = getColors(timeIdx);
+  const tid = String(TIME_IDS[timeIdx]);
+  const vals = VALUE_DATA[tid] || {{}};
+  return new deck.GeoJsonLayer({{
+    id: 'choropleth-' + timeIdx,
+    data: GEOJSON,
+    filled: true,
+    stroked: true,
+    getFillColor: f => {{
+      const locId = String(f.properties[LOCATION_COL]);
+      return colors[locId] || [200, 200, 200, 40];
+    }},
+    getLineColor: [80, 80, 80, 100],
+    getLineWidth: 1,
+    lineWidthMinPixels: 0.3,
+    pickable: true,
+    updateTriggers: {{
+      getFillColor: timeIdx
+    }}
+  }});
+}}
+
+const deckgl = new deck.DeckGL({{
+  container: 'map-container',
+  initialViewState: {{
+    longitude: VIEW_STATE.longitude,
+    latitude: VIEW_STATE.latitude,
+    zoom: VIEW_STATE.zoom,
+    pitch: 0,
+    bearing: 0
+  }},
+  controller: true,
+  layers: [buildLayer(0)],
+  getTooltip: ({{object}}) => {{
+    if (!object || !object.properties) return null;
+    const locId = String(object.properties[LOCATION_COL]);
+    const hover = HOVER_DATA[locId] || {{}};
+    const tid = String(TIME_IDS[currentTimeIdx]);
+    const vals = VALUE_DATA[tid] || {{}};
+    const val = vals[locId];
+    let html = '<b>' + LOCATION_COL + '</b>: ' + locId;
+    for (const [k, v] of Object.entries(hover)) {{
+      html += '<br><b>' + k + '</b>: ' + (v !== null ? v : 'N/A');
+    }}
+    html += '<br><b>' + TIME_COL + '</b>: ' + TIME_IDS[currentTimeIdx];
+    html += '<br><b>' + TARGET + '</b>: ' + (val !== undefined && val !== null ? val.toFixed(6) : 'N/A');
+    return {{html: html, style: {{backgroundColor: 'rgba(0,0,0,0.85)', color: '#fff', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', lineHeight: '1.6'}}}};
+  }}
+}});
+
+// --- ANIMATION ---
+function updateTimeLabel(idx) {{
+  document.getElementById('time-label').textContent = TIME_COL + ': ' + TIME_IDS[idx];
+}}
+
+function setFrame(idx) {{
+  currentTimeIdx = idx;
+  slider.value = idx;
+  updateTimeLabel(idx);
+  deckgl.setProps({{ layers: [buildLayer(idx)] }});
+}}
+
+function onSlider(val) {{
+  setFrame(parseInt(val));
+}}
+
+function togglePlay() {{
+  playing = !playing;
+  const btn = document.getElementById('play-btn');
+  btn.innerHTML = playing ? '&#9646;&#9646; Pause' : '&#9654; Play';
+  if (playing) {{
+    lastFrameTime = performance.now();
+    animate();
+  }} else if (animFrameId) {{
+    cancelAnimationFrame(animFrameId);
+    animFrameId = null;
+  }}
+}}
+
+function animate() {{
+  if (!playing) return;
+  const now = performance.now();
+  if (now - lastFrameTime >= FRAME_DURATION) {{
+    lastFrameTime = now;
+    let next = currentTimeIdx + 1;
+    if (next >= TIME_IDS.length) next = 0;
+    setFrame(next);
+  }}
+  animFrameId = requestAnimationFrame(animate);
+}}
+</script>
+</body>
+</html>

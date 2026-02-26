@@ -24,6 +24,8 @@ PolarsFrame = Union[pl.DataFrame, pl.LazyFrame]
 
 def _get_columns(frame: PolarsFrame) -> List[str]:
     """Get column names from a DataFrame or LazyFrame."""
+    if isinstance(frame, pl.LazyFrame):
+        return frame.collect_schema().names()
     return frame.columns
 
 

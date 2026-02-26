@@ -13,6 +13,7 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 import polars as pl
 
 from .exceptions import ValidationError
+from .index import _get_columns
 
 if TYPE_CHECKING:
     from .index import IndexModule
@@ -76,7 +77,7 @@ class ModeModule:
         Raises:
             ValidationError: If requirements not met.
         """
-        columns = frame.columns
+        columns = _get_columns(frame)
         if self.mode == "historical":
             if not self.target_cols:
                 raise ValidationError(
@@ -94,7 +95,7 @@ class ModeModule:
         """Get target column names."""
         if self.mode == "historical":
             return self.target_cols
-        return [c for c in frame.columns if c.startswith(self.PREDICTION_PREFIX)]
+        return [c for c in _get_columns(frame) if c.startswith(self.PREDICTION_PREFIX)]
 
     def get_features(
         self,
@@ -104,7 +105,7 @@ class ModeModule:
         """Get feature columns (excluding indices and targets)."""
         targets = set(self.get_targets(frame))
         ignore = index_mgr.index_cols_set.union(targets)
-        return [c for c in frame.columns if c not in ignore]
+        return [c for c in _get_columns(frame) if c not in ignore]
 
     def get_all_data_cols(
         self,
@@ -112,7 +113,7 @@ class ModeModule:
         index_mgr: "IndexModule",
     ) -> List[str]:
         """Get all data columns (excluding indices)."""
-        return [c for c in frame.columns if c not in index_mgr.index_cols_set]
+        return [c for c in _get_columns(frame) if c not in index_mgr.index_cols_set]
     
     def split_features_targets(
         self,
