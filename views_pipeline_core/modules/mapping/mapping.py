@@ -1,5 +1,6 @@
-import pandas as pd
+import polars as pl
 import numpy as np
+import geopandas as gpd
 from views_pipeline_core.modules.dataset.core import (
     PriogridMonthDataset,
     CountryMonthDataset,
@@ -8,24 +9,68 @@ from views_pipeline_core.modules.dataset.core import (
 import logging
 from typing import Union, Optional, List
 from pathlib import Path
-import matplotlib.pyplot as plt
-import geopandas as gpd
-import plotly.graph_objects as go
-from io import BytesIO
-import base64
+import json
 import gc
 
 logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────────────
+# OrRd colormap LUT (9 stops, matching matplotlib's OrRd)
+# Used for mapping normalized [0, 1] values to RGBA.
+# ──────────────────────────────────────────────────────────────
+_ORRD_STOPS = np.array(
+    [
+        [255, 247, 236],  # 0.000
+        [254, 232, 200],  # 0.125
+        [253, 212, 158],  # 0.250
+        [253, 187, 132],  # 0.375
+        [252, 141, 89],   # 0.500
+        [239, 101, 72],   # 0.625
+        [215, 48, 31],    # 0.750
+        [179, 0, 0],      # 0.875
+        [127, 0, 0],      # 1.000
+    ],
+    dtype=np.float64,
+)
+_ORRD_POSITIONS = np.linspace(0, 1, len(_ORRD_STOPS))
+
+
+def _apply_orrd(values: np.ndarray, alpha: int = 200) -> np.ndarray:
+    """
+    Map normalised values [0, 1] → RGBA uint8 via the OrRd colormap.
+
+    Args:
+        values: 1-D array of float64 in [0, 1]. NaN → transparent.
+        alpha: Default alpha channel value (0-255).
+
+    Returns:
+        (N, 4) uint8 array of [R, G, B, A].
+    """
+    out = np.zeros((len(values), 4), dtype=np.uint8)
+    valid = ~np.isnan(values)
+    v = np.clip(values[valid], 0.0, 1.0)
+    r = np.interp(v, _ORRD_POSITIONS, _ORRD_STOPS[:, 0])
+    g = np.interp(v, _ORRD_POSITIONS, _ORRD_STOPS[:, 1])
+    b = np.interp(v, _ORRD_POSITIONS, _ORRD_STOPS[:, 2])
+    out[valid, 0] = np.round(r).astype(np.uint8)
+    out[valid, 1] = np.round(g).astype(np.uint8)
+    out[valid, 2] = np.round(b).astype(np.uint8)
+    out[valid, 3] = alpha
+    # NaN → fully transparent
+    out[~valid, 3] = 0
+    return out
 
 
 class MappingModule:
     """
     Geographic visualization module for VIEWS datasets.
-    
-    Provides interactive and static choropleth mapping for both country-level
-    and priogrid-level datasets with automatic shapefile handling and optimized
-    rendering.
+
+    Renders GPU-accelerated choropleth maps using deck.gl via standalone HTML.
+    Supports both country-level and priogrid-level datasets with automatic
+    shapefile handling, temporal animation, and optimized GeoParquet geometry
+    storage.
     """
+
     _COUNTRY_HOVER_COLS = ["country_name"]
     _PRIOGRID_HOVER_COLS = [
         "gid",
@@ -37,818 +82,475 @@ class MappingModule:
         "ycoord",
     ]
 
-    def __init__(self, views_dataset: Union[PriogridMonthDataset, CountryMonthDataset]):
+    # ------------------------------------------------------------------ init
+    def __init__(
+        self, views_dataset: Union[PriogridMonthDataset, CountryMonthDataset]
+    ):
         """
-        Initialize mapping module with VIEWS dataset and load appropriate shapefiles.
+        Initialize mapping module.
 
-        Sets up geographic infrastructure including shapefile loading, coordinate
-        reference system configuration, and GeoJSON preparation for efficient
-        rendering.
+        Loads geometry from pre-built GeoParquet files, converts to GeoJSON
+        FeatureCollection, and caches attribute tables for fast Polars joins.
 
         Args:
-            views_dataset: Dataset to visualize. Either:
-                - PriogridMonthDataset: Priogrid-level data with cell-based geography
-                - CountryMonthDataset: Country-level data with national boundaries
+            views_dataset: ``PriogridMonthDataset`` or ``CountryMonthDataset``.
 
         Raises:
-            ValueError: If dataset is not PriogridMonthDataset or CountryMonthDataset instance
-            FileNotFoundError: If required shapefile is missing
-
-        Example:
-            >>> from views_pipeline_core.modules.dataset.core import PriogridMonthDataset
-            >>> dataset = PriogridMonthDataset(predictions_df)
-            >>> mapper = MappingModule(dataset)
-            >>> print(mapper._location_col)
-            'gid'
-
-        Note:
-            - Automatically detects dataset type and loads correct shapefile
-            - Simplifies geometries to reduce file size
-            - Prepares base GeoJSON for faster subsequent renders
-            - For PGM: Uses priogrid_cell.shp with ~260k cells
-            - For CM: Uses Natural Earth 1:110m country boundaries
+            ValueError: If dataset is not a valid type.
+            FileNotFoundError: If the GeoParquet file is missing.
         """
         self._dataset = views_dataset
         self._entity_id = self._dataset.entity_col
         self._time_id = self._dataset.time_col
 
         if isinstance(views_dataset, PriogridMonthDataset):
-            self._world = self.__get_priogrid_shapefile()
             self._location_col = "gid"
-            self._featureidkey = "properties.gid"
-            # Get all available priogrid attributes (excluding geometry)
-            self._priogrid_attributes = [
-                col for col in self._world.columns if col != "geometry"
-            ]
             self._hover_columns = self._PRIOGRID_HOVER_COLS
         elif isinstance(views_dataset, CountryMonthDataset):
-            self._world = self.__get_country_shapefile()
             self._location_col = "ADM0_A3"
-            self._featureidkey = "properties.ADM0_A3"
-            # Get all available country attributes (excluding geometry)
-            self._country_attributes = [
-                col for col in self._world.columns if col != "geometry"
-            ]
             self._hover_columns = self._COUNTRY_HOVER_COLS
         else:
-            raise ValueError("Invalid dataset type. Must be a PriogridMonthDataset or CountryMonthDataset.")
+            raise ValueError(
+                "Invalid dataset type. Must be PriogridMonthDataset or CountryMonthDataset."
+            )
 
-        self._mapping_dataframe = None
-        self._base_geojson = None
-        self._prepare_base_geojson()  # Initialize base GeoJSON
+        # Load GeoParquet → GeoJSON + attribute table
+        self._geojson: Dict[str, Any] = {}          # FeatureCollection dict
+        self._attribute_table: pl.DataFrame = None   # non-geometry columns
+        self._prepare_geometry()
 
-    def _prepare_base_geojson(self):
+    # ---------------------------------------------------------- geometry prep
+    def _prepare_geometry(self):
         """
-        Create optimized GeoJSON representation for efficient map rendering.
+        Load GeoParquet, build GeoJSON FeatureCollection and attribute table.
 
-        Converts shapefile to WGS84 projection, retains only essential properties,
-        and simplifies geometries to reduce file size while preserving topology.
-
-        Internal Use:
-            Called by __init__() during module initialization.
-
-        Note:
-            - Converts to EPSG:4326 (WGS84) for web compatibility
-            - Simplifies geometries with 0.01 degree tolerance
-            - Memory freed immediately after processing
+        The GeoJSON is a Python dict kept in memory (serialised to JS at
+        render time).  The attribute table is a lightweight Polars DataFrame
+        used for joins (no geometry column).
         """
-        base_gdf = self._world.to_crs(epsg=4326).copy()
+        assets = Path(__file__).parent.parent.parent / "assets" / "shapefiles"
 
-        # Keep only essential properties to reduce size
         if isinstance(self._dataset, PriogridMonthDataset):
-            base_gdf = base_gdf[["gid", "geometry"]]
-        elif isinstance(self._dataset, CountryMonthDataset):
-            # For country datasets, keep ADM0_A3 (which matches isoab) and geometry
-            base_gdf = base_gdf[["ADM0_A3", "geometry"]]
+            parquet_path = assets / "priogrid" / "priogrid_cell.parquet"
+            shp_fallback = assets / "priogrid" / "priogrid_cell.shp"
         else:
-            raise ValueError("Invalid dataset type. Must be a PriogridMonthDataset or CountryMonthDataset.")
+            parquet_path = assets / "country" / "ne_110m_admin_0_countries.parquet"
+            shp_fallback = assets / "country" / "ne_110m_admin_0_countries.shp"
 
-        # Simplify geometries to reduce file size
-        base_gdf["geometry"] = base_gdf.geometry.simplify(
-            tolerance=0.01, preserve_topology=True
+        # Prefer GeoParquet; fall back to shapefile + geopandas
+        if parquet_path.exists():
+            gdf = gpd.read_parquet(parquet_path)
+        else:
+            logger.warning(
+                "GeoParquet not found at %s — falling back to shapefile. "
+                "Run convert_to_geoparquet.py to create it.",
+                parquet_path,
+            )
+            gdf = gpd.read_file(shp_fallback).to_crs(epsg=4326)
+            if isinstance(self._dataset, PriogridMonthDataset):
+                keep = [c for c in ["gid", "row", "col", "xcoord", "ycoord"] if c in gdf.columns]
+                gdf = gdf[keep + ["geometry"]]
+                gdf["geometry"] = gdf.geometry.simplify(0.005, preserve_topology=True)
+            else:
+                gdf = gdf[["ADM0_A3", "geometry"]]
+                gdf["geometry"] = gdf.geometry.simplify(0.01, preserve_topology=True)
+
+        # Build attribute table (Polars, no geometry)
+        attr_cols = [c for c in gdf.columns if c != "geometry"]
+        self._attribute_table = pl.from_pandas(gdf[attr_cols])
+
+        # Build GeoJSON FeatureCollection with `properties.{location_col}` set
+        features = []
+        for idx, row in gdf.iterrows():
+            props = {c: _to_json_safe(row[c]) for c in attr_cols}
+            geom = row.geometry.__geo_interface__
+            features.append(
+                {"type": "Feature", "properties": props, "geometry": geom}
+            )
+        self._geojson = {"type": "FeatureCollection", "features": features}
+
+        # Compute bounding box for default view state
+        total_bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
+        self._center_lon = float((total_bounds[0] + total_bounds[2]) / 2)
+        self._center_lat = float((total_bounds[1] + total_bounds[3]) / 2)
+        lon_span = total_bounds[2] - total_bounds[0]
+        lat_span = total_bounds[3] - total_bounds[1]
+        span = max(lon_span, lat_span)
+        # rough zoom: 360/span → log2
+        self._default_zoom = float(
+            max(0.5, np.log2(360.0 / max(span, 1e-6)) - 0.5)
         )
 
-        self._base_geojson = base_gdf.__geo_interface__
-
-        # Free memory
-        del base_gdf
+        del gdf
         gc.collect()
 
-    def __get_country_shapefile(self):
+    # ------------------------------------------------------- data preparation
+    def _prepare_data(self, df: pl.DataFrame) -> pl.DataFrame:
         """
-        Load Natural Earth country boundaries shapefile.
+        Join raw dataset with attribute table and metadata (isoab, name).
 
-        Internal Use:
-            Called by __init__() for country-level datasets.
-
-        Returns:
-            geopandas.GeoDataFrame: Country boundaries with attributes:
-                - ADM0_A3: ISO 3-letter country code
-                - geometry: Country polygon/multipolygon
-                - Additional Natural Earth attributes
-
-        Raises:
-            FileNotFoundError: If shapefile doesn't exist at expected path
-            OSError: If shapefile cannot be read
-
-        Note:
-            - Uses Natural Earth 1:110m resolution (simplified)
-            - Suitable for global-scale visualization
-            - Path: assets/shapefiles/country/ne_110m_admin_0_countries.shp
-        """
-        path = (
-            Path(__file__).parent.parent.parent
-            / "assets"
-            / "shapefiles"
-            / "country"
-            / "ne_110m_admin_0_countries.shp"
-        )
-        world = gpd.read_file(path)
-
-        # Ensure ADM0_A3 column exists and is properly formatted
-        # if 'ADM0_A3' not in world.columns:
-        #     # Try to find the ISO code column with a different name
-        #     iso_cols = [col for col in world.columns if 'iso' in col.lower() or 'a3' in col.lower()]
-        #     if iso_cols:
-        #         world = world.rename(columns={iso_cols[0]: 'ADM0_A3'})
-        #     else:
-        #         # If no ISO code column found, create one from the index
-        #         world['ADM0_A3'] = world.index.astype(str)
-
-        return world
-
-    def __get_priogrid_shapefile(self):
-        """
-        Load PRIO-GRID cell boundaries shapefile.
-
-        Internal Use:
-            Called by __init__() for priogrid-level datasets.
-
-        Returns:
-            geopandas.GeoDataFrame: Grid cell boundaries with attributes:
-                - gid: Grid cell identifier
-                - row, col: Grid coordinates
-                - geometry: Cell polygon (0.5° × 0.5°)
-                - Additional PRIO-GRID attributes
-
-        Raises:
-            FileNotFoundError: If shapefile doesn't exist at expected path
-            OSError: If shapefile cannot be read
-
-        Note:
-            - PRIO-GRID cells are 0.5° × 0.5° (~55km at equator)
-            - Global coverage with ~260,000 cells
-            - Path: assets/shapefiles/priogrid/priogrid_cell.shp
-        """
-        path = (
-            Path(__file__).parent.parent.parent
-            / "assets"
-            / "shapefiles"
-            / "priogrid"
-            / "priogrid_cell.shp"
-        )
-        return gpd.read_file(path)
-
-    def __check_missing_geometries(
-        self, mapping_dataframe: pd.DataFrame, drop_missing_geometries: bool = True
-    ):
-        """
-        Validate geometries and optionally remove invalid rows.
-
-        Identifies rows with missing or empty geometries and either removes them
-        or logs warnings about their presence.
-
-        Internal Use:
-            Called by __init_mapping_dataframe() during data preparation.
+        Takes a *Polars-native* DataFrame straight from the dataset's
+        ``get_subset_dataframe()``, enriches it with shapefile attributes
+        and country metadata, and returns a flat Polars DataFrame (no
+        geometry column).
 
         Args:
-            mapping_dataframe: GeoDataFrame to validate
-            drop_missing_geometries: If True, removes rows with invalid geometries.
-                If False, only logs warnings.
+            df: Polars DataFrame with ``time_col``, ``entity_col``, data cols.
 
         Returns:
-            pd.DataFrame: Cleaned GeoDataFrame (or original if drop=False)
-
-        Note:
-            - Logs unique ISO codes for missing geometries
-            - Reports number of dropped rows and their IDs
-            - Missing geometries typically indicate:
-              - Data outside shapefile coverage
-              - Mismatched entity IDs
-              - Corrupt geometry data
+            Enriched ``pl.DataFrame`` with added ``isoab``, ``country_name``,
+            and shapefile attribute columns.
         """
-        missing = mapping_dataframe[
-            mapping_dataframe.geometry.is_empty | mapping_dataframe.geometry.isna()
+        # Select only needed columns (target + index)
+        keep = list(self._dataset.target_cols) + [self._entity_id, self._time_id]
+        keep = [c for c in keep if c in df.columns]
+        df = df.select(keep)
+
+        # Cast numeric to Float32 for memory
+        numeric = [
+            c
+            for c in df.columns
+            if c not in (self._entity_id, self._time_id)
+            and df.schema[c] in (pl.Float64, pl.Int64, pl.Int32)
         ]
-        if not missing.empty:
-            logger.warning(f"Missing geometries for: {missing['isoab'].unique()}")
-        if drop_missing_geometries:
-            initial_count = len(mapping_dataframe)
-            cleaned_gdf = mapping_dataframe[
-                (~mapping_dataframe.geometry.is_empty)
-                & (~mapping_dataframe.geometry.isna())
-            ].copy()
+        if numeric:
+            df = df.with_columns([pl.col(c).cast(pl.Float32) for c in numeric])
 
-            dropped_count = initial_count - len(cleaned_gdf)
-            if dropped_count > 0:
-                logger.warning(
-                    f"Dropped {dropped_count} rows with missing geometries. "
-                    f"Remaining: {len(cleaned_gdf)} rows. "
-                    f"Missing IDs: {mapping_dataframe[self._entity_id][mapping_dataframe.geometry.isna()].unique().tolist()}"
-                )
-            return cleaned_gdf
-        return mapping_dataframe
+        # Add isoab + country_name from metadata
+        iso_df = self._dataset.get_isoab()   # pl.DataFrame [entity_col, isoab]
+        name_df = self._dataset.get_name(with_id=True)  # pl.DataFrame [entity_col, name]
+        df = df.join(iso_df, on=self._entity_id, how="left")
+        df = df.join(name_df, on=self._entity_id, how="left")
+        df = df.rename({"name": "country_name"})
 
-    def __init_mapping_dataframe(self, dataframe: pd.DataFrame) -> gpd.GeoDataFrame:
-        """
-        Prepare GeoDataFrame by merging data with geometries and metadata.
-
-        Processes input DataFrame by selecting relevant columns, adding geographic
-        identifiers (ISO codes, country names), merging with shapefiles, and
-        validating geometries.
-
-        Internal Use:
-            Called by get_subset_mapping_dataframe() to prepare visualization data.
-
-        Args:
-            dataframe: Input DataFrame with predictions/data to visualize
-
-        Returns:
-            gpd.GeoDataFrame: Visualization-ready GeoDataFrame with:
-                - Original target/feature columns
-                - geometry: Polygon/MultiPolygon
-                - isoab: ISO country code
-                - country_name: Country name
-                - Additional shapefile attributes
-
-        Raises:
-            KeyError: If required merge columns missing
-            ValueError: If geometries missing after merge
-
-        Note:
-            - Converts numeric columns to float32 for memory efficiency
-            - Filters to entities present in last time period
-            - For PGM: Merges on priogrid_id
-            - For CM: Merges on ISO code (isoab)
-        """
-        _dataframe = dataframe.reset_index()[
-            self._dataset.target_cols + [self._entity_id, self._time_id]
-        ]
-
-        numeric_cols = _dataframe.select_dtypes(include=np.number).columns
-        _dataframe[numeric_cols] = _dataframe[numeric_cols].astype(np.float32)
-
+        # Join with shapefile attribute table
         if isinstance(self._dataset, CountryMonthDataset):
-            _dataframe = self.__add_isoab(dataframe=_dataframe)
-
-            # Include all country attributes in the merge
-            _dataframe = _dataframe.merge(
-                self._world,
+            # shapefile keyed by ADM0_A3 == isoab
+            df = df.join(
+                self._attribute_table,
                 left_on="isoab",
                 right_on="ADM0_A3",
                 how="left",
             )
-            merged_gdf = gpd.GeoDataFrame(
-                _dataframe,
-                geometry="geometry",
-                crs=self._world.crs,
-            )
-            return self.__check_missing_geometries(merged_gdf)
-
+            # Polars drops the right key column; restore it for GeoJSON matching
+            if "ADM0_A3" not in df.columns:
+                df = df.with_columns(pl.col("isoab").alias("ADM0_A3"))
         elif isinstance(self._dataset, PriogridMonthDataset):
-            # Include all priogrid attributes in the merge
-            _dataframe = self.__add_isoab(dataframe=_dataframe)
-            _dataframe = _dataframe.merge(
-                self._world,
+            df = df.join(
+                self._attribute_table,
                 left_on=self._entity_id,
                 right_on="gid",
                 how="left",
             )
-            return self.__check_missing_geometries(
-                gpd.GeoDataFrame(_dataframe, geometry="geometry", crs=self._world.crs)
-            )
+            # Polars drops the right key column; restore it for GeoJSON matching
+            if "gid" not in df.columns:
+                df = df.with_columns(pl.col(self._entity_id).alias("gid"))
 
-        else:
-            raise ValueError("Invalid dataset type. Must be a PriogridMonthDataset or CountryMonthDataset.")
+        return df
 
-    def __add_isoab(self, dataframe: pd.DataFrame):
-        """
-        Enrich DataFrame with ISO country codes and names.
-
-        Merges country identification data (ISO codes and names) from the
-        dataset's metadata into the working DataFrame.
-
-        Internal Use:
-            Called by __init_mapping_dataframe() during data preparation.
-
-        Args:
-            dataframe: DataFrame to enrich with geographic identifiers
-
-        Returns:
-            pd.DataFrame: Input DataFrame with added columns:
-                - isoab: ISO 3-letter country code
-                - country_name: Country name
-
-        Note:
-            - Uses dataset's get_isoab() and get_name() methods
-            - Merges on entity_id (isoab/name are static entity attributes)
-            - Left join preserves all input rows
-        """
-        iso_df = self._dataset.get_isoab(return_pandas=True).reset_index()
-        name_df = self._dataset.get_name(with_id=True, return_pandas=True).reset_index()
-
-        dataframe = dataframe.merge(
-            iso_df[[self._entity_id, "isoab"]],
-            on=[self._entity_id],
-            how="left",
-        )
-        dataframe = dataframe.merge(
-            name_df[[self._entity_id, "name"]],
-            on=[self._entity_id],
-            how="left",
-        )
-        dataframe.rename(columns={"name": "country_name"}, inplace=True)
-        return dataframe
-
+    # ------------------------------------------------ public data extraction
     def get_subset_mapping_dataframe(
         self,
         time_ids: Optional[Union[int, List[int]]] = None,
         entity_ids: Optional[Union[int, List[int]]] = None,
-    ) -> pd.DataFrame:
+    ) -> pl.DataFrame:
         """
-        Extract geographically-enabled subset of dataset for visualization.
-
-        Retrieves filtered data and merges with appropriate shapefiles to create
-        a GeoDataFrame ready for mapping.
+        Extract enriched subset of data for visualization (Polars native).
 
         Args:
-            time_ids: Time periods to include. Either:
-                - Single integer: 528 (one month)
-                - List of integers: [528, 529, 530]
-                - None: All time periods
-            entity_ids: Entities to include. Either:
-                - Single integer: 180 (one country/grid)
-                - List of integers: [180, 181, 182]
-                - None: All entities
+            time_ids: Time period(s) to include (``None`` → all).
+            entity_ids: Entities to include (``None`` → all).
 
         Returns:
-            pd.DataFrame: GeoDataFrame containing:
-                - Filtered data rows
-                - geometry column with polygons
-                - Geographic metadata (ISO codes, names)
-                - Original target/feature columns
-
-        Example:
-            >>> mapper = MappingModule(dataset)
-            >>> # Get data for specific month and countries
-            >>> gdf = mapper.get_subset_mapping_dataframe(
-            ...     time_ids=528,
-            ...     entity_ids=[180, 181, 182]
-            ... )
-            >>> print(gdf.columns)
-            Index(['pred_ged_sb', 'geometry', 'isoab', 'country_name', ...])
-
-        Note:
-            - Automatically handles single values or lists
-            - Uses dataset's get_subset_dataframe() for filtering
-            - Returns GeoDataFrame with valid geometries
+            ``pl.DataFrame`` with target columns, index columns, metadata,
+            and shapefile attribute columns (no geometry — geometry lives in
+            the cached GeoJSON).
         """
-        _dataframe = self._dataset.get_subset_dataframe(
-            time_ids=time_ids, entity_ids=entity_ids, return_pandas=True
+        df = self._dataset.get_subset_dataframe(
+            time_ids=time_ids, entity_ids=entity_ids
         )
-        _dataframe = self.__init_mapping_dataframe(dataframe=_dataframe)
-        return _dataframe
+        return self._prepare_data(df)
 
-    def _plot_interactive_map(self, mapping_dataframe: gpd.GeoDataFrame, target: str):
+    # --------------------------------------------------------- color helpers
+    @staticmethod
+    def _compute_color_range(
+        values: np.ndarray,
+    ) -> tuple[float, float]:
+        """0th–98th quantile range on raw values, ignoring NaN."""
+        valid = values[~np.isnan(values)]
+        if len(valid) == 0:
+            return 0.0, 1.0
+        z_min = float(np.quantile(valid, 0.0))
+        z_max = float(np.quantile(valid, 0.98))
+        if z_max - z_min < 1e-9:
+            z_max = z_min + 1.0
+        return z_min, z_max
+
+    @staticmethod
+    def _normalize(values: np.ndarray, z_min: float, z_max: float) -> np.ndarray:
+        """Clip and normalise raw values to [0, 1]."""
+        return np.clip((values - z_min) / (z_max - z_min), 0.0, 1.0)
+
+    def _build_color_dict(
+        self,
+        location_ids: np.ndarray,
+        values: np.ndarray,
+        z_min: float,
+        z_max: float,
+    ) -> Dict[str, List[int]]:
+        """Map locations → [R,G,B,A] lists given raw values."""
+        normed = self._normalize(values, z_min, z_max)
+        rgba = _apply_orrd(normed)
+        return {
+            str(lid): rgba[i].tolist()
+            for i, lid in enumerate(location_ids)
+        }
+
+    # ------------------------------------------------------------ templates
+    @staticmethod
+    def _read_template(name: str) -> str:
+        """Read an HTML template from the templates/ directory."""
+        path = Path(__file__).parent / "templates" / name
+        return path.read_text(encoding="utf-8")
+
+    # -------------------------------------------------------- view state
+    def _view_state_for_data(
+        self, df: pl.DataFrame
+    ) -> Dict[str, float]:
+        """Compute zoom/center from data extent or fall back to defaults."""
+        if (
+            isinstance(self._dataset, PriogridMonthDataset)
+            and "xcoord" in df.columns
+            and "ycoord" in df.columns
+        ):
+            xs = df["xcoord"].drop_nulls().to_numpy()
+            ys = df["ycoord"].drop_nulls().to_numpy()
+            if len(xs) > 0:
+                lon = float((xs.min() + xs.max()) / 2)
+                lat = float((ys.min() + ys.max()) / 2)
+                span = max(float(xs.max() - xs.min()), float(ys.max() - ys.min()), 1.0)
+                zoom = float(max(0.5, np.log2(360.0 / span) - 0.5))
+                return {"longitude": lon, "latitude": lat, "zoom": zoom}
+
+        return {
+            "longitude": self._center_lon,
+            "latitude": self._center_lat,
+            "zoom": self._default_zoom,
+        }
+
+    # ------------------------------------------------------ hover helpers
+    def _build_hover_data(self, df: pl.DataFrame) -> Dict[str, Dict[str, Any]]:
         """
-        Generate animated Plotly choropleth with temporal controls.
+        Build per-location hover tooltip data.
 
-        Creates interactive web-based map with play/pause controls, time slider,
-        and hover tooltips showing location details and values.
-
-        Internal Use:
-            Called by plot_map() when interactive=True.
-
-        Args:
-            mapping_dataframe: GeoDataFrame with data to visualize
-            target: Column name to visualize on the map
-
-        Returns:
-            plotly.graph_objs._figure.Figure: Interactive Plotly figure with:
-                - Animated time slider
-                - Play/pause buttons
-                - Hover tooltips with metadata
-                - Color scale based on 50th-95th quantiles
-
-        Note:
-            - Optimizes memory by using float32 and pivot tables
-            - Color scale fixed globally across all frames
-            - Hover shows location ID, metadata, time, and value
-            - Animation duration: 500ms per frame
-            - Typical render time: 2-10 seconds for full dataset
+        Returns ``{location_id_str: {attr: value, ...}}`` for every entity
+        in the DataFrame.
         """
-        # Create pivot table for efficient data storage
-        all_locations = mapping_dataframe[self._location_col].unique()
-        all_times = sorted(mapping_dataframe[self._time_id].unique())
+        # Deduplicate to one row per location
+        deduped = df.unique(subset=[self._location_col]) if self._location_col in df.columns else df.unique(subset=[self._entity_id])
 
-        # Create pivot table
-        pivot_df = mapping_dataframe.pivot_table(
-            index=self._location_col,
-            columns=self._time_id,
-            values=target,
-            aggfunc="first",
-        ).reindex(all_locations)
-
-        # Convert to float32 to save memory
-        z_data = pivot_df[all_times].astype(np.float32).values
-
-        # Precompute fixed properties for hover data
-        fixed_props = mapping_dataframe.drop_duplicates(self._location_col).set_index(
-            self._location_col
-        )
-
-        exclude_cols = ["geometry", self._time_id, self._entity_id, target]
-        hover_columns = [
-            col
-            for col in self._hover_columns
-            if col in fixed_props.columns and col not in exclude_cols
+        exclude = {"geometry", self._time_id, self._entity_id}
+        hover_cols = [
+            c
+            for c in self._hover_columns
+            if c in deduped.columns and c not in exclude
         ]
 
-        # Determine location label based on dataset type
-        if isinstance(self._dataset, PriogridMonthDataset):
-            location_label = "gid"
-        elif isinstance(self._dataset, CountryMonthDataset):
-            location_label = "ADM0_A3"
-        else:
-            raise ValueError("Invalid dataset type. Must be a PriogridMonthDataset or CountryMonthDataset.")
+        # Use location_col if available, else entity_id
+        key_col = self._location_col if self._location_col in deduped.columns else self._entity_id
 
-        # Prepare base customdata (fixed properties)
-        base_customdata = []
-        for loc in all_locations:
-            row_data = [loc]  # Add location ID as first element
-            # Add all hover columns (excluding target)
-            for attr in hover_columns:
-                if attr in fixed_props.columns:
-                    row_data.append(fixed_props.loc[loc, attr])
-                else:
-                    row_data.append(None)
-            row_data.append(all_times[0])  # Add time
-            base_customdata.append(row_data)
+        result: Dict[str, Dict[str, Any]] = {}
+        # Materialise as dicts for speed
+        for row in deduped.select([key_col] + hover_cols).iter_rows(named=True):
+            lid = str(row[key_col])
+            result[lid] = {c: _to_json_safe(row[c]) for c in hover_cols}
 
-        # Create hovertemplate
-        hover_attrs = "<br>".join(
-            [
-                f"<b>{attr}</b>: %{{customdata[{i+1}]}}"
-                for i, attr in enumerate(hover_columns)
-            ]
-        )
-        hovertemplate = (
-            f"<b>{location_label}</b>: %{{customdata[0]}}<br>"
-            + hover_attrs
-            + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+        return result
+
+    # ----------------------------------------------- interactive (animated)
+    def _plot_interactive_map(
+        self, mapping_dataframe: pl.DataFrame, target: str
+    ) -> str:
+        """
+        Build animated deck.gl choropleth HTML with time slider.
+
+        Returns a self-contained HTML string.
+        """
+        loc_col = self._location_col if self._location_col in mapping_dataframe.columns else self._entity_id
+        all_times = sorted(mapping_dataframe[self._time_id].unique().to_list())
+
+        # Pivot data: one value per (location, time)
+        pivot = (
+            mapping_dataframe
+            .select([loc_col, self._time_id, target])
+            .group_by([loc_col, self._time_id])
+            .agg(pl.col(target).first())
         )
 
-        # Calculate global color range
-        z_min, z_max = np.nanquantile(z_data, [0.5, 0.95])
+        all_locations = pivot[loc_col].unique().sort().to_numpy()
 
-        # Create figure with graph objects for better control
-        fig = go.Figure(
-            data=go.Choropleth(
-                geojson=self._base_geojson,
-                locations=all_locations,
-                z=z_data[:, 0],  # First time step
-                featureidkey=self._featureidkey,
-                customdata=base_customdata,
-                hovertemplate=hovertemplate,
-                marker_line_width=0.5,
-                coloraxis="coloraxis",
-            )
+        # Collect all values for global color range
+        all_vals = pivot[target].to_numpy().astype(np.float64)
+        # Replace None with NaN
+        all_vals = np.where(all_vals is None, np.nan, all_vals).astype(np.float64)
+        z_min, z_max = self._compute_color_range(all_vals)
+
+        # Build color_data: {time_id_str: {loc_id_str: [r,g,b,a]}}
+        # Build value_data: {time_id_str: {loc_id_str: float}}
+        color_data: Dict[str, Dict[str, List[int]]] = {}
+        value_data: Dict[str, Dict[str, Any]] = {}
+
+        for tid in all_times:
+            frame = pivot.filter(pl.col(self._time_id) == tid)
+            locs = frame[loc_col].to_numpy()
+            vals = frame[target].to_numpy().astype(np.float64)
+            color_data[str(tid)] = self._build_color_dict(locs, vals, z_min, z_max)
+            value_data[str(tid)] = {
+                str(lid): _to_json_safe(float(v)) if not np.isnan(v) else None
+                for lid, v in zip(locs, vals)
+            }
+
+        hover_data = self._build_hover_data(mapping_dataframe)
+        view_state = self._view_state_for_data(mapping_dataframe)
+
+        template = self._read_template("deckgl_animated_map.html")
+        html = template.format(
+            title=f"{target} — animated map",
+            map_height=900,
+            geojson_data=json.dumps(self._geojson),
+            color_data=json.dumps(color_data),
+            hover_data=json.dumps(hover_data),
+            value_data=json.dumps(value_data),
+            time_ids=json.dumps([_to_json_safe(t) for t in all_times]),
+            location_col=self._location_col,
+            time_col=self._time_id,
+            target=target,
+            z_min=z_min,
+            z_max=z_max,
+            view_state=json.dumps(view_state),
         )
 
-        # Prepare frames with time-specific data
-        frames = []
-        for i, time in enumerate(all_times[1:], start=1):
-            # Prepare customdata for this frame
-            frame_customdata = []
-            for loc in all_locations:
-                row_data = [loc]  # Add location ID as first element
-                # Add all hover columns
-                for attr in hover_columns:
-                    if attr in fixed_props.columns:
-                        row_data.append(fixed_props.loc[loc, attr])
-                    else:
-                        row_data.append(None)
-                row_data.append(time)  # Add time
-                frame_customdata.append(row_data)
-
-            frame_hover_attrs = "<br>".join(
-                [
-                    f"<b>{attr}</b>: %{{customdata[{i+1}]}}"
-                    for i, attr in enumerate(hover_columns)
-                ]
-            )
-            frame_hovertemplate = (
-                f"<b>{location_label}</b>: %{{customdata[0]}}<br>"
-                + frame_hover_attrs
-                + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
-            )
-
-            frames.append(
-                go.Frame(
-                    data=[
-                        go.Choropleth(
-                            z=z_data[:, i],
-                            customdata=frame_customdata,
-                            hovertemplate=frame_hovertemplate,
-                        )
-                    ],
-                    name=str(time),
-                )
-            )
-
-        fig.frames = frames
-
-        # Add play button and slider
-        fig.update_layout(
-            updatemenus=[
-                {
-                    "type": "buttons",
-                    "buttons": [
-                        {
-                            "args": [
-                                None,
-                                {
-                                    "frame": {"duration": 500, "redraw": True},
-                                    "fromcurrent": True,
-                                    "transition": {"duration": 300},
-                                },
-                            ],
-                            "label": "Play",
-                            "method": "animate",
-                        },
-                        {
-                            "args": [
-                                [None],
-                                {
-                                    "frame": {"duration": 0, "redraw": True},
-                                    "mode": "immediate",
-                                    "transition": {"duration": 0},
-                                },
-                            ],
-                            "label": "Pause",
-                            "method": "animate",
-                        },
-                    ],
-                    "direction": "left",
-                    "pad": {"r": 10, "t": 87},
-                    "showactive": False,
-                    "x": 0.1,
-                    "xanchor": "right",
-                    "y": 0,
-                    "yanchor": "top",
-                }
-            ],
-            sliders=[
-                {
-                    "active": 0,
-                    "yanchor": "top",
-                    "xanchor": "left",
-                    "currentvalue": {
-                        "font": {"size": 14},
-                        "prefix": f"{self._time_id}: ",
-                        "visible": True,
-                        "xanchor": "right",
-                    },
-                    "transition": {"duration": 300, "easing": "cubic-in-out"},
-                    "pad": {"b": 10, "t": 50},
-                    "len": 0.9,
-                    "x": 0.1,
-                    "y": 0,
-                    "steps": [
-                        {
-                            "args": [
-                                [str(time)],
-                                {
-                                    "frame": {"duration": 300, "redraw": True},
-                                    "mode": "immediate",
-                                },
-                            ],
-                            "label": str(time),
-                            "method": "animate",
-                        }
-                        for time in all_times
-                    ],
-                }
-            ],
-        )
-
-        # Layout adjustments with increased padding
-        fig.update_layout(
-            height=900,
-            autosize=True,
-            margin={"r": 20, "t": 60, "l": 20, "b": 60},  # Increased padding
-            coloraxis=dict(colorscale="OrRd", cmin=z_min, cmax=z_max),
-            annotations=[
-                dict(
-                    x=0.5,
-                    y=-0.15,
-                    showarrow=False,
-                    text="",
-                    xref="paper",
-                    yref="paper",
-                )
-            ],
-        )
-
-        fig.update_geos(
-            fitbounds="locations",
-            visible=False,
-            showcountries=True,
-            countrycolor="rgba(100,100,100,0.3)",
-            countrywidth=0.3,
-            showlakes=True,
-            showocean=False,
-            showsubunits=True,
-            subunitcolor="rgba(200,200,200,0.2)",
-            subunitwidth=0.05,
-        )
-
-        # Free memory
-        del pivot_df, z_data, fixed_props, base_customdata
+        del pivot, color_data, value_data
         gc.collect()
+        return html
 
-        return fig
-
+    # --------------------------------------------------- static (single t)
     def _plot_static_map(
-        self, mapping_dataframe: gpd.GeoDataFrame, target: str, time_unit: int
-    ):
+        self, mapping_dataframe: pl.DataFrame, target: str, time_value: int
+    ) -> str:
         """
-        Generate static matplotlib choropleth for single time period.
+        Build static deck.gl choropleth HTML for a single time period.
 
-        Creates publication-quality static map with customizable styling and
-        color scale for a single snapshot in time.
-
-        Internal Use:
-            Called by plot_map() when interactive=False.
-
-        Args:
-            mapping_dataframe: GeoDataFrame with data to visualize
-            target: Column name to visualize on the map
-            time_unit: Time period identifier for title
-
-        Returns:
-            matplotlib.figure.Figure: Matplotlib figure object with:
-                - Choropleth with OrRd color scheme
-                - Color scale: 50th-95th quantile
-                - Black boundaries (0.3pt width)
-                - Horizontal colorbar with label
-                - Axis labels (Longitude, Latitude)
-
-        Raises:
-            ValueError: If target column not found or contains only null values
-
-        Note:
-            - Figure size: 15" × 10"
-            - Suitable for publication and reports
-            - Color range optimized to highlight variation
-            - Edge color: #404040 (dark gray)
-            - Alpha: 0.9 for slight transparency
+        Returns a self-contained HTML string.
         """
-        if target not in mapping_dataframe.columns:
-            raise ValueError(f"Target column '{target}' not found")
-        if mapping_dataframe[target].isnull().all():
-            raise ValueError(f"No valid values for target '{target}'")
+        loc_col = self._location_col if self._location_col in mapping_dataframe.columns else self._entity_id
 
-        fig, ax = plt.subplots(1, 1, figsize=(15, 10))
-        mapping_dataframe.boundary.plot(ax=ax, linewidth=0.3, color="black")
+        frame = mapping_dataframe.filter(pl.col(self._time_id) == time_value)
+        locs = frame[loc_col].to_numpy()
+        vals = frame[target].to_numpy().astype(np.float64)
+        z_min, z_max = self._compute_color_range(vals)
 
-        mapping_dataframe.plot(
-            column=target,
-            ax=ax,
-            legend=True,
-            cmap="OrRd",
-            vmin=mapping_dataframe[target].quantile(0.5),
-            vmax=mapping_dataframe[target].quantile(0.95),
-            linewidth=0.1,
-            edgecolor="#404040",
-            alpha=0.9,
+        color_dict = self._build_color_dict(locs, vals, z_min, z_max)
+        value_dict = {
+            str(lid): _to_json_safe(float(v)) if not np.isnan(v) else None
+            for lid, v in zip(locs, vals)
+        }
+
+        hover_data = self._build_hover_data(mapping_dataframe)
+        view_state = self._view_state_for_data(mapping_dataframe)
+
+        template = self._read_template("deckgl_static_map.html")
+        html = template.format(
+            title=f"{target} — {self._time_id} {time_value}",
+            map_height=900,
+            geojson_data=json.dumps(self._geojson),
+            color_data=json.dumps(color_dict),
+            hover_data=json.dumps(hover_data),
+            value_data=json.dumps(value_dict),
+            location_col=self._location_col,
+            time_col=self._time_id,
+            target=target,
+            time_value=int(time_value),
+            z_min=z_min,
+            z_max=z_max,
+            view_state=json.dumps(view_state),
         )
+        return html
 
-        plt.title(f"{target} for {self._time_id} {int(time_unit)}", fontsize=15)
-        plt.xlabel("Longitude", fontsize=12)
-        plt.ylabel("Latitude", fontsize=12)
-
-        sm = plt.cm.ScalarMappable(
-            cmap="OrRd",
-            norm=plt.Normalize(
-                vmin=self._mapping_dataframe[target].min(),
-                vmax=self._mapping_dataframe[target].max(),
-            ),
-        )
-        sm._A = []
-
-        cbar = fig.colorbar(
-            sm, ax=ax, orientation="horizontal", fraction=0.036, pad=0.1
-        )
-        cbar.set_label(f"{target}", fontsize=12)
-
-        return fig
-
+    # -------------------------------------------------------- public API
     def plot_map(
         self,
-        mapping_dataframe: pd.DataFrame,
+        mapping_dataframe: pl.DataFrame,
         target: str,
         interactive: bool = False,
         as_html: bool = False,
-    ):
+    ) -> str:
         """
-        Generate choropleth map visualization for specified target variable.
+        Generate choropleth map visualization for a given target variable.
 
-        Creates either interactive (Plotly) or static (Matplotlib) map showing
-        geographic distribution of values. Supports temporal animation and
-        HTML export.
+        Produces GPU-accelerated deck.gl maps rendered as self-contained HTML.
+        Interactive maps include a time slider with play/pause animation.
+        Static maps show a single time period.
 
         Args:
-            mapping_dataframe: GeoDataFrame from get_subset_mapping_dataframe()
-            target: Variable to visualize. Must be in dataset's targets or features.
-            interactive: If True, creates animated Plotly map with controls.
-                If False, creates static Matplotlib plot. Default: False
-            as_html: If True, returns HTML string instead of figure object.
-                Useful for embedding in reports. Default: False
+            mapping_dataframe: Data from ``get_subset_mapping_dataframe()``.
+            target: Column name to visualise. Must be in dataset targets or features.
+            interactive: If ``True``, creates an animated map with time slider.
+                If ``False``, creates a single-frame map. Default: ``False``.
+            as_html: Kept for API compatibility. The return is always an HTML
+                string regardless of this flag.
 
         Returns:
-            Union[str, matplotlib.figure.Figure, plotly.graph_objs.Figure]:
-                - If as_html=True: HTML string for web embedding
-                - If as_html=False and interactive=True: Plotly Figure
-                - If as_html=False and interactive=False: Matplotlib Figure
+            Self-contained HTML string suitable for embedding in reports.
 
         Raises:
-            ValueError: If target not in dataset's targets or features
-            ValueError: If static plot requested with multiple time periods
-
-        Example:
-            >>> # Interactive map for report
-            >>> mapper = MappingModule(dataset)
-            >>> gdf = mapper.get_subset_mapping_dataframe(time_ids=[520, 521, 522])
-            >>> html = mapper.plot_map(
-            ...     gdf,
-            ...     target='pred_ged_sb',
-            ...     interactive=True,
-            ...     as_html=True
-            ... )
-            >>> with open('map.html', 'w') as f:
-            ...     f.write(html)
-
-            >>> # Static map for publication
-            >>> gdf_single = mapper.get_subset_mapping_dataframe(time_ids=520)
-            >>> fig = mapper.plot_map(gdf_single, 'pred_ged_sb', interactive=False)
-            >>> fig.savefig('conflict_map.png', dpi=300)
-
-        Note:
-            - Interactive maps require single target across multiple times
-            - Static maps require single time period
-            - HTML output includes Plotly.js (works offline)
-            - Array values automatically extracted if single-element
-            - Memory optimized for large datasets (float32, garbage collection)
+            ValueError: If *target* is not in the dataset's targets or features.
+            ValueError: If static mode requested with multiple time periods.
         """
-        target_options = set(self._dataset.target_cols).union(set(self._dataset.get_features()))
+        target_options = set(self._dataset.target_cols) | set(
+            self._dataset.get_features()
+        )
         if target not in target_options:
             raise ValueError(
                 f"Target must be a dependent variable or feature. Choose from {target_options}"
             )
 
-        mapping_dataframe[target] = mapping_dataframe[target].apply(
-            lambda x: x[0] if isinstance(x, np.ndarray) and len(x) == 1 else x
-        )
+        # Unwrap single-element arrays (e.g. from sample distributions)
+        if target in mapping_dataframe.columns:
+            col = mapping_dataframe[target]
+            if col.dtype == pl.List:
+                mapping_dataframe = mapping_dataframe.with_columns(
+                    pl.col(target).list.first().alias(target)
+                )
 
         if interactive:
-            fig = self._plot_interactive_map(mapping_dataframe, target)
-            if as_html:
-                # Use unique div_id per target to avoid collisions when embedding multiple maps
-                unique_div_id = f"map-container-{target.replace('_', '-')}"
-                html_str = fig.to_html(
-                    full_html=True,
-                    include_plotlyjs=True,  # Should work offline
-                    default_height=900,
-                    div_id=unique_div_id,
-                )
-                # Free memory after generating HTML
-                del fig
-                gc.collect()
-                return html_str
-            else:
-                return fig
+            return self._plot_interactive_map(mapping_dataframe, target)
         else:
-            time_units = mapping_dataframe[self._time_id].dropna().unique()
-            if len(time_units) > 1:
-                raise ValueError("Static plots require single time unit")
-            fig = self._plot_static_map(mapping_dataframe, target, time_units[0])
-            if as_html:
-                buf = BytesIO()
-                fig.savefig(buf, format="png", bbox_inches="tight", dpi=150)
-                plt.close(fig)
-                buf.seek(0)
-                img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
-                return f'<img src="data:image/png;base64,{img_str}">'
-            else:
-                return fig
+            time_ids = mapping_dataframe[self._time_id].unique().to_list()
+            if len(time_ids) > 1:
+                raise ValueError("Static plots require a single time unit")
+            return self._plot_static_map(mapping_dataframe, target, time_ids[0])
+
+
+# ────────────────────────────────────────────────────────────── helpers
+
+def _to_json_safe(v: Any) -> Any:
+    """Convert numpy/polars scalars to JSON-serialisable Python types."""
+    if v is None:
+        return None
+    if isinstance(v, (np.integer,)):
+        return int(v)
+    if isinstance(v, (np.floating,)):
+        f = float(v)
+        if np.isnan(f) or np.isinf(f):
+            return None
+        return f
+    if isinstance(v, (np.bool_,)):
+        return bool(v)
+    if isinstance(v, (np.ndarray,)):
+        return v.tolist()
+    if isinstance(v, float):
+        if np.isnan(v) or np.isinf(v):
+            return None
+        return v
+    return v

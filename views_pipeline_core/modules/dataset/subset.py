@@ -66,7 +66,7 @@ class SubsetModule:
             if isinstance(sample_idx, int):
                 sample_idx = [sample_idx]
             sample_list = self._cast_ids(sample_idx)
-            cols = result.columns
+            cols = result.collect_schema().names() if isinstance(result, pl.LazyFrame) else result.columns
             if index_mgr.sample_col in cols:
                 result = result.filter(
                     pl.col(index_mgr.sample_col).is_in(sample_list)
@@ -78,7 +78,7 @@ class SubsetModule:
         if features is not None:
             if isinstance(features, str):
                 features = [features]
-            cols = result.columns
+            cols = result.collect_schema().names() if isinstance(result, pl.LazyFrame) else result.columns
             select_cols = [index_mgr.time_col, index_mgr.entity_col]
             if index_mgr.sample_col and index_mgr.sample_col in cols:
                 select_cols.append(index_mgr.sample_col)
