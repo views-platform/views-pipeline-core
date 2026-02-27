@@ -24,7 +24,12 @@ from views_pipeline_core.exceptions import (
     ModelEvaluationException,
     PipelineException,
 )
-from views_pipeline_core.modules.dataset.core import CountryMonthDataset, PriogridMonthDataset
+from views_pipeline_core.modules.dataset.core import (
+    SpatioTemporalDataset,
+    CountryMonthDataset,
+    PriogridMonthDataset,
+)
+import polars as pl
 import os
 
 # from views_pipeline_core.modules.wandb import (
@@ -1505,7 +1510,7 @@ class ForecastingModelManager(ModelManager):
     @abstractmethod
     def _evaluate_model_artifact(
         self, eval_type: str, artifact_name: str
-    ) -> Union[Dict, pd.DataFrame]:
+    ) -> List[Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path]]:
         """
         Evaluate model artifact. Must be implemented by subclasses.
         
@@ -1513,7 +1518,7 @@ class ForecastingModelManager(ModelManager):
             Must:
             - Load model from artifacts directory
             - Generate predictions for test period
-            - Return list of prediction DataFrames
+            - Return list of predictions (DataFrames, LazyFrames, or file paths)
             
             Must not:
             - Modify saved artifacts
@@ -1524,7 +1529,12 @@ class ForecastingModelManager(ModelManager):
             artifact_name: Name of model file to evaluate
         
         Returns:
-            List of prediction DataFrames, one per evaluation sequence
+            List of predictions, each may be:
+                - pd.DataFrame (legacy)
+                - pl.DataFrame or pl.LazyFrame
+                - str or Path to a data file (parquet/csv)
+            
+            The caller coerces these into dataset objects automatically.
         
         Raises:
             ModelEvaluationException: If evaluation fails
@@ -1545,7 +1555,7 @@ class ForecastingModelManager(ModelManager):
         )
 
     @abstractmethod
-    def _forecast_model_artifact(self, artifact_name: str) -> pd.DataFrame:
+    def _forecast_model_artifact(self, artifact_name: str) -> Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path]:
         """
         Generate future forecasts. Must be implemented by subclasses.
         
@@ -1553,7 +1563,7 @@ class ForecastingModelManager(ModelManager):
             Must:
             - Load model from artifacts
             - Generate predictions for future period
-            - Return DataFrame with forecasts
+            - Return predictions as DataFrame or file path
             
             Must not:
             - Use future ground truth data
@@ -1563,7 +1573,8 @@ class ForecastingModelManager(ModelManager):
             artifact_name: Name of model file for forecasting
         
         Returns:
-            DataFrame with future predictions and metadata
+            Predictions as pd.DataFrame, pl.DataFrame, or str/Path to file.
+            The caller coerces these into a dataset object automatically.
         
         Raises:
             ModelForecastingException: If forecasting fails
@@ -1580,7 +1591,7 @@ class ForecastingModelManager(ModelManager):
         )
 
     @abstractmethod
-    def _evaluate_sweep(self, eval_type: str, model: any) -> None:
+    def _evaluate_sweep(self, eval_type: str, model: any) -> List[Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path]]:
         """
         Evaluate model during sweep. Must be implemented by subclasses.
         
@@ -1588,7 +1599,7 @@ class ForecastingModelManager(ModelManager):
             Must:
             - Use provided model object (not load from disk)
             - Generate predictions for evaluation
-            - Return list of prediction DataFrames
+            - Return list of predictions (DataFrames or file paths)
             
             Must not:
             - Save model artifacts (handled by sweep)
@@ -1599,7 +1610,8 @@ class ForecastingModelManager(ModelManager):
             eval_type: Evaluation type
         
         Returns:
-            List of prediction DataFrames for metrics calculation
+            List of predictions, each may be pd.DataFrame, pl.DataFrame,
+            or str/Path to a data file.
         
         Example Implementation:
             >>> def _evaluate_sweep(self, eval_type, model):
@@ -1621,6 +1633,205 @@ class ForecastingModelManager(ModelManager):
         if dataset_cls:
             return partial(dataset_cls)
         return None
+
+    # ------------------------------------------------------------------
+    # Prediction coercion helpers
+    # ------------------------------------------------------------------
+
+    def _coerce_to_dataset(
+        self, data: Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path, SpatioTemporalDataset]
+    ) -> SpatioTemporalDataset:
+        """Convert a raw prediction payload to the appropriate dataset object.
+
+        Accepts:
+            - ``pd.DataFrame`` (legacy)
+            - ``pl.DataFrame``
+            - ``pl.LazyFrame``
+            - ``str`` or ``Path`` pointing to a parquet / CSV file
+            - An already-constructed ``SpatioTemporalDataset`` (returned as-is)
+
+        The concrete class (CountryMonthDataset vs PriogridMonthDataset) is
+        resolved from ``self.configs["level"]``.
+
+        Returns:
+            A ``CountryMonthDataset`` or ``PriogridMonthDataset`` wrapping *data*.
+
+        Raises:
+            ValueError: If the configured level of analysis is unknown.
+            TypeError:  If *data* has an unsupported type.
+        """
+        if isinstance(data, SpatioTemporalDataset):
+            return data
+
+        loa = self.configs.get("level")
+        dataset_cls_partial = self.dataset_class(loa)
+        if dataset_cls_partial is None:
+            raise ValueError(
+                f"Cannot coerce predictions: unknown level of analysis '{loa}'. "
+                "Expected 'cm' or 'pgm'."
+            )
+
+        if not isinstance(data, (pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path)):
+            raise TypeError(
+                f"Cannot coerce predictions: unsupported type {type(data).__name__}. "
+                "Expected pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path, "
+                "or SpatioTemporalDataset."
+            )
+
+        return dataset_cls_partial(data=data)
+
+    def _coerce_predictions_to_datasets(
+        self,
+        raw_predictions: List[
+            Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path, SpatioTemporalDataset]
+        ],
+    ) -> List[SpatioTemporalDataset]:
+        """Convert a list of raw prediction payloads to dataset objects."""
+        return [self._coerce_to_dataset(item) for item in raw_predictions]
+
+    # ------------------------------------------------------------------
+    # Dataset-level validation and persistence (Polars-native)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_prediction_dataset(
+        dataset: SpatioTemporalDataset,
+        targets: Union[str, List[str]],
+    ) -> None:
+        """Validate a prediction dataset structure (Polars-native).
+
+        Performs the same structural checks as the legacy
+        ``validate_prediction_dataframe`` but operates entirely on the
+        dataset object and its underlying LazyFrame — no pandas
+        conversion required.
+
+        Checks:
+            1. Dataset is non-empty.
+            2. Every declared target has a corresponding ``pred_{target}``
+               column.
+            3. The dataset contains a recognised time column
+               (``month_id``).
+
+        Args:
+            dataset: The prediction dataset to validate.
+            targets: Target variable name(s).
+
+        Raises:
+            ValueError: On any validation failure.
+        """
+        if dataset._n_rows == 0:
+            raise ValueError("Prediction dataset is empty")
+
+        if isinstance(targets, str):
+            targets = [targets]
+
+        cols = set(dataset.columns)
+        missing = [t for t in targets if f"pred_{t}" not in cols]
+        if missing:
+            raise ValueError(
+                f"Missing prediction columns for targets: {missing}. "
+                f"Expected columns: {['pred_' + t for t in missing]}"
+            )
+
+        if dataset.time_col not in cols:
+            raise ValueError(
+                f"Time column '{dataset.time_col}' not found in dataset columns"
+            )
+
+        logger.info(
+            f"Dataset validation passed: {dataset._n_rows:,} rows, "
+            f"{len(cols)} cols, targets={targets}"
+        )
+
+    def _save_prediction_dataset(
+        self,
+        dataset: SpatioTemporalDataset,
+        path_generated: Union[str, Path],
+        sequence_number: int = None,
+        send_alert: bool = True,
+    ) -> None:
+        """Save a prediction dataset to disk (Polars-native).
+
+        Writes the dataset directly to parquet via Polars, avoiding any
+        pandas conversion.  If the prediction store is enabled, conversion
+        to pandas happens only at that external-API boundary.
+
+        Args:
+            dataset: Prediction dataset to save.
+            path_generated: Target directory.
+            sequence_number: Sequence index (evaluation runs) or None.
+            send_alert: Send a WandB notification on completion.
+        """
+        from views_pipeline_core.files.utils import generate_output_file_name
+
+        try:
+            path_generated = Path(path_generated)
+            path_generated.mkdir(parents=True, exist_ok=True)
+
+            self._predictions_name = generate_output_file_name(
+                "predictions",
+                self.configs["run_type"],
+                self.configs["timestamp"],
+                sequence_number,
+                file_extension=PipelineConfig().dataframe_format,
+            )
+
+            save_path = path_generated / self._predictions_name
+
+            # Materialise and write directly via Polars
+            df_pl: pl.DataFrame = dataset.collect()
+            df_pl.write_parquet(save_path)
+
+            # Prediction store uses the pandas forecasts accessor — convert
+            # only at this external boundary.
+            if self._use_prediction_store:
+                df_pd = dataset.get_subset_dataframe(return_pandas=True)
+                name = f"{self._model_path.model_name}_{self._predictions_name.split('.')[0]}"
+                df_pd.forecasts.set_run(self._pred_store_name)
+                df_pd.forecasts.to_store(name=name, overwrite=True)
+
+                if self._datastore is not None:
+                    try:
+                        self._datastore.upload_data(
+                            file=save_path,
+                            filename=self._predictions_name,
+                            loa=self.configs.get("level"),
+                            name=self._model_path.model_name,
+                            targets=self.configs.get("targets"),
+                            category="forecast",
+                            description="",
+                            type=self._model_path.target,
+                        )
+                        logger.info(
+                            "Forecasts uploaded to Appwrite Datastore successfully."
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Error uploading predictions to datastore: {e}",
+                            exc_info=True,
+                        )
+
+            if send_alert:
+                self._wandb_module.send_alert(
+                    title="Predictions Saved",
+                    text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
+                    notifications_enabled=self._wandb_notifications,
+                )
+
+        except Exception as e:
+            raise PipelineException(
+                f"Error saving predictions: {e}",
+                wandb_module=self._wandb_module,
+            )
+
+    @staticmethod
+    def _dataset_to_pandas(dataset: SpatioTemporalDataset) -> pd.DataFrame:
+        """Extract a pandas DataFrame with MultiIndex from a dataset object.
+
+        Used only at external-API boundaries (EvaluationManager, WandB
+        Tables, prediction store) where pandas is unavoidable.
+        """
+        return dataset.get_subset_dataframe(return_pandas=True)
 
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
@@ -1998,7 +2209,6 @@ class ForecastingModelManager(ModelManager):
             - Metrics calculated only if specified in config
         """
         import traceback
-        from views_pipeline_core.modules.validation.model import validate_prediction_dataframe
         from views_pipeline_core.files.utils import handle_single_log_creation
 
         with self._wandb_module.initialize_run(
@@ -2010,40 +2220,48 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Evaluating {self._model_path.target} {self.configs['name']}..."
                 )
-                list_df_predictions = self._evaluate_model_artifact(
+                raw_predictions = self._evaluate_model_artifact(
                     self._eval_type, self.args.artifact_name
                 )
 
+                # Coerce to dataset objects (accepts pd/pl/LazyFrame/paths)
+                list_datasets = self._coerce_predictions_to_datasets(raw_predictions)
+
+                # Validate and save using Polars-native dataset operations
                 import concurrent.futures
 
-                def validate_and_save(
-                    df, idx, configs, model_path, save_predictions_func
-                ):
+                def validate_and_save(dataset, idx, total, configs, manager):
                     print(
-                        f"\nValidating evaluation dataframe of sequence {idx+1}/{len(list_df_predictions)}"
+                        f"\nValidating prediction dataset of sequence "
+                        f"{idx + 1}/{total}"
                     )
-                    validate_prediction_dataframe(
-                        dataframe=df, target=configs["targets"]
+                    manager._validate_prediction_dataset(
+                        dataset, configs["targets"]
                     )
-                    save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
+                    manager._save_prediction_dataset(
+                        dataset,
+                        manager._model_path.data_generated,
+                        idx,
+                        send_alert=False,
+                    )
 
+                n_datasets = len(list_datasets)
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     futures = [
                         executor.submit(
                             validate_and_save,
-                            df,
-                            i,
-                            self.configs,
-                            self._model_path,
-                            self._save_predictions,
+                            ds, i, n_datasets, self.configs, self,
                         )
-                        for i, df in enumerate(list_df_predictions)
+                        for i, ds in enumerate(list_datasets)
                     ]
                     concurrent.futures.wait(futures)
 
                 self._wandb_module.send_alert(
                     title="Evaluation Predictions Saved",
-                    text=f"Validated and saved {len(list_df_predictions)} prediction sequences at {self._model_path.data_generated.relative_to(self._model_path.root)}.",
+                    text=(
+                        f"Validated and saved {n_datasets} prediction sequences "
+                        f"at {self._model_path.data_generated.relative_to(self._model_path.root)}."
+                    ),
                     notifications_enabled=self._wandb_notifications,
                 )
 
@@ -2065,7 +2283,7 @@ class ForecastingModelManager(ModelManager):
 
                 if has_metrics:
                     self._evaluate_prediction_dataframe(
-                        list_df_predictions, self._eval_type
+                        list_datasets, self._eval_type
                     )
                 else:
                     logger.warning("No metrics specified in config")
@@ -2119,7 +2337,6 @@ class ForecastingModelManager(ModelManager):
             - Prediction store requires use_prediction_store=True
         """
         import traceback
-        from views_pipeline_core.modules.validation.model import validate_prediction_dataframe
         from views_pipeline_core.files.utils import handle_single_log_creation
 
         with self._wandb_module.initialize_run(
@@ -2131,10 +2348,14 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Forecasting {self._model_path.target} {self.configs['name']}..."
                 )
-                df_predictions = self._forecast_model_artifact(self.args.artifact_name)
-                
-                validate_prediction_dataframe(
-                    dataframe=df_predictions, target=self.configs["targets"]
+                raw_prediction = self._forecast_model_artifact(self.args.artifact_name)
+
+                # Coerce to dataset object (accepts pd/pl/LazyFrame/paths)
+                forecast_dataset = self._coerce_to_dataset(raw_prediction)
+
+                # Validate and save via Polars-native dataset operations
+                self._validate_prediction_dataset(
+                    forecast_dataset, self.configs["targets"]
                 )
 
                 handle_single_log_creation(
@@ -2143,7 +2364,9 @@ class ForecastingModelManager(ModelManager):
                     train=False,
                 )
 
-                self._save_predictions(df_predictions, self._model_path.data_generated)
+                self._save_prediction_dataset(
+                    forecast_dataset, self._model_path.data_generated
+                )
 
                 self._wandb_module.send_alert(
                     title=f"Forecasting for {self._model_path.target} {self.configs['name']} completed successfully.",
@@ -2211,22 +2434,19 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Evaluating {self._model_path.target} {self.configs['name']}..."
                 )
-                df_predictions = self._evaluate_sweep(self._eval_type, model)
+                raw_predictions = self._evaluate_sweep(self._eval_type, model)
 
-                for i, df in enumerate(df_predictions):
+                # Coerce to dataset objects (accepts pd/pl DataFrames, LazyFrames, and file paths)
+                list_datasets = self._coerce_predictions_to_datasets(raw_predictions)
+
+                for i, ds in enumerate(list_datasets):
                     print(
-                        f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
+                        f"\nValidating evaluation dataset of sequence {i+1}/{len(list_datasets)}"
                     )
-                    from views_pipeline_core.modules.validation.model import (
-                        validate_prediction_dataframe,
-                    )
-
-                    validate_prediction_dataframe(
-                        dataframe=df, target=self.configs["targets"]
-                    )
+                    self._validate_prediction_dataset(ds, self.configs["targets"])
 
                 if self.configs.get("metrics"):
-                    self._evaluate_prediction_dataframe(df_predictions, self._eval_type)
+                    self._evaluate_prediction_dataframe(list_datasets, self._eval_type)
                 else:
                     raise PipelineException("No evaluation metrics specified in config_meta.py")
             finally:
@@ -2637,7 +2857,7 @@ class ForecastingModelManager(ModelManager):
             )
 
     def _evaluate_prediction_dataframe(
-        self, df_predictions, eval_type, ensemble=False
+        self, predictions, eval_type, ensemble=False
     ) -> None:
         """
         Calculate evaluation metrics from predictions.
@@ -2649,7 +2869,8 @@ class ForecastingModelManager(ModelManager):
             Called by evaluation and sweep methods.
         
         Args:
-            df_predictions: List of prediction DataFrames or single DataFrame
+            predictions: List of SpatioTemporalDataset objects, a single
+                dataset, or a list of pd.DataFrames (legacy callers).
             eval_type: Evaluation type
             ensemble: Whether predictions from ensemble model
         
@@ -2664,37 +2885,37 @@ class ForecastingModelManager(ModelManager):
             - Processes each task type separately (regression/classification)
             - Groups metrics by conflict type
             - Enforces scalar predictions for point metrics
+            - Predictions stay as dataset objects; conversion to pandas
+              happens only at the EvaluationManager boundary.
         """
         import pandas as pd
         from views_evaluation.evaluation.evaluation_manager import EvaluationManager
         from views_pipeline_core.files.utils import read_dataframe
 
+        # --- Load actuals (pandas kept for prepare_actuals_df hook compat) ---
         if not ensemble:
             df_path = self._model_path._get_raw_data_file_paths(
                 run_type=self.args.run_type
             )[0]
-            df_viewser = read_dataframe(df_path)
         else:
             df_path = (
                 ModelPathManager(self.configs["models"][0]).data_raw
                 / f"{self.configs['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
             )
-            df_viewser = read_dataframe(df_path)
 
+        df_viewser = read_dataframe(df_path)
         logger.info(f"df_viewser read from {df_path}")
         df_viewser = self.prepare_actuals_df(df_viewser)
-        # Read actuals for all declared targets directly from the canonical Tier 3 keys,
-        # not from the legacy "targets" alias.
+
         all_targets = (
             self.configs.get("regression_targets", []) +
             self.configs.get("classification_targets", [])
         )
         df_actual = df_viewser[all_targets]
 
-        # Task definitions: target lists only.
-        # EvaluationManager reads the metric keys (regression_point_metrics,
-        # regression_sample_metrics, etc.) directly from the config passed to
-        # evaluate(). Point vs uncertainty dispatch is also handled internally.
+        # --- Normalise predictions to a list (datasets or DataFrames) ---
+        list_preds = predictions if isinstance(predictions, list) else [predictions]
+
         tasks = {
             "regression":     self.configs.get("regression_targets", []),
             "classification": self.configs.get("classification_targets", []),
@@ -2711,20 +2932,34 @@ class ForecastingModelManager(ModelManager):
             for target in targets:
                 logger.info(f"Calculating {task_type} evaluation metrics for {target}")
 
-                # Check that the canonical prediction column exists before evaluating
-                first_df = df_predictions[0] if isinstance(df_predictions, list) else df_predictions
-                if f"pred_{target}" not in first_df.columns:
+                # Column presence check — works with datasets and DataFrames
+                first = list_preds[0]
+                if isinstance(first, SpatioTemporalDataset):
+                    has_col = f"pred_{target}" in first.columns
+                else:
+                    has_col = f"pred_{target}" in first.columns  # pd / pl DataFrame
+                if not has_col:
                     logger.warning(f"Column pred_{target} not found in prediction columns. Skipping.")
                     continue
 
                 target_identifier = target
 
-                # EvaluationManager.evaluate() operates on one target at a time and
-                # requires exactly one column named pred_{target} per prediction DataFrame.
-                raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
+                # --- Convert predictions to pandas at the EvaluationManager boundary ---
+                raw_pred_dfs = []
+                for ds in list_preds:
+                    if isinstance(ds, SpatioTemporalDataset):
+                        df = self._dataset_to_pandas(ds)
+                    elif isinstance(ds, pl.LazyFrame):
+                        df = ds.collect().to_pandas()
+                    elif isinstance(ds, pl.DataFrame):
+                        df = ds.to_pandas()
+                    else:
+                        df = ds  # already pandas
+                    raw_pred_dfs.append(df[[f"pred_{target}"]])
+
                 eval_result_dict = evaluation_manager.evaluate(
                     df_actual[[target]],
-                    [df[[f"pred_{target}"]] for df in raw_preds],
+                    raw_pred_dfs,
                     target,
                     self.configs,
                 )

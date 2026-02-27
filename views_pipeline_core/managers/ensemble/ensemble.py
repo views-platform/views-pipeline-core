@@ -19,7 +19,12 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.modules.reconciliation.reconciliation import (
     ReconciliationModule,
 )
-from views_pipeline_core.modules.dataset.core import PriogridMonthDataset, CountryMonthDataset
+from views_pipeline_core.modules.dataset.core import (
+    SpatioTemporalDataset,
+    PriogridMonthDataset,
+    CountryMonthDataset,
+)
+import polars as pl
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.modules.aggregation import (
     AggregationModule,
@@ -223,17 +228,23 @@ class EnsembleManager(ForecastingModelManager):
         ):
             try:
                 logger.info(f"Evaluating model {self.configs['name']}...")
-                df_predictions = self._evaluate_ensemble()
+                raw_predictions = self._evaluate_ensemble()
+
+                # Coerce to dataset objects (accepts pd/pl DataFrames, LazyFrames and file paths)
+                list_datasets = self._coerce_predictions_to_datasets(raw_predictions)
 
                 handle_ensemble_log_creation(
                     model_path=self._model_path, config=self.configs
                 )
 
-                for i, df in enumerate(df_predictions):
-                    self._save_predictions(df, self._model_path.data_generated, i)
+                for i, ds in enumerate(list_datasets):
+                    self._validate_prediction_dataset(ds, self.configs["targets"])
+                    self._save_prediction_dataset(
+                        ds, self._model_path.data_generated, i, send_alert=False
+                    )
 
                 self._evaluate_prediction_dataframe(
-                    df_predictions, self._eval_type, ensemble=True
+                    list_datasets, self._eval_type, ensemble=True
                 )
 
                 self._wandb_module.send_alert(
@@ -261,7 +272,13 @@ class EnsembleManager(ForecastingModelManager):
         ):
             try:
                 logger.info(f"Forecasting model {self.configs['name']}...")
-                df_prediction = self._forecast_ensemble()
+                raw_prediction = self._forecast_ensemble()
+
+                # Coerce to dataset object (accepts pd/pl DataFrames, LazyFrames and file paths)
+                forecast_dataset = self._coerce_to_dataset(raw_prediction)
+                self._validate_prediction_dataset(
+                    forecast_dataset, self.configs["targets"]
+                )
 
                 self._wandb_module.send_alert(
                     title=f"Forecasting for {self._model_path.target} {self.configs['name']} completed successfully.",
@@ -270,7 +287,9 @@ class EnsembleManager(ForecastingModelManager):
                 handle_ensemble_log_creation(
                     model_path=self._model_path, config=self.configs
                 )
-                self._save_predictions(df_prediction, self._model_path.data_generated)
+                self._save_prediction_dataset(
+                    forecast_dataset, self._model_path.data_generated
+                )
 
             except Exception:
                 # logger.error(
