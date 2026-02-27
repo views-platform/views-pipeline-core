@@ -1,7 +1,10 @@
+import logging
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Any, Optional, Union
 from views_evaluation.evaluation.evaluation_frame import EvaluationFrame
+
+logger = logging.getLogger(__name__)
 
 class PandasAdapter:
     """
@@ -47,11 +50,54 @@ class PandasAdapter:
         if not predictions:
             # Align with legacy expected error message
             raise ValueError("No objects to concatenate")
-        
+
+        # INVARIANT I2 — Hole C: mapping list must be sized to match sequences.
+        # An IndexError on step_mapping[i] would be cryptic; make it explicit here.
+        if isinstance(step_mapping, list) and len(step_mapping) != len(predictions):
+            raise ValueError(
+                f"step_mapping list length ({len(step_mapping)}) must equal the number "
+                f"of prediction sequences ({len(predictions)}). Each sequence requires "
+                f"its own explicit origin-anchored mapping."
+            )
+
         for i, df in enumerate(predictions):
+            # Resolve the mapping for THIS sequence (ADR-031 compliance).
+            # Done before intersection so the window integrity check has access to it.
+            if isinstance(step_mapping, list):
+                seq_mapping = step_mapping[i]   # rolling-origin: one dict per sequence
+            else:
+                seq_mapping = step_mapping      # single dict or None: backward-compatible
+
+            # INVARIANT I3 — Window integrity (Hole A + Hole B).
+            # Prove that EVERY month the model produced is inside the declared step window,
+            # regardless of whether that month appears in the actuals.
+            # This closes the pre-intersection blindspot: months dropped by the actuals
+            # intersection are still checked here, before the intersection occurs.
+            #
+            # Formal guarantee (see proof in docstring):
+            #   ∀ m ∈ D_i: m ∈ keys(seq_mapping)  →  seq_mapping[m] = m - (base_origin + i)
+            if seq_mapping is not None:
+                pred_months = set(df.index.get_level_values(0).unique())
+                rogue_months = pred_months - set(seq_mapping.keys())
+                if rogue_months:
+                    raise ValueError(
+                        f"Sequence {i}: prediction contains month(s) {sorted(rogue_months)} "
+                        f"that are not in the declared step_mapping window "
+                        f"(expected months: {sorted(seq_mapping.keys())[:5]}{'...' if len(seq_mapping) > 5 else ''}). "
+                        f"This indicates that the declared base_origin does not match the "
+                        f"model's actual forecast origin for this sequence."
+                    )
+
             # 1. Align/Match Actuals (duplicated logic from EvaluationManager)
             common_idx = actual.index.intersection(df.index)
             if common_idx.empty:
+                # Warn rather than silently drop: a sequence with zero overlap is unexpected
+                # during rolling-origin evaluation but is not an error in itself (e.g. the
+                # forecast window is entirely beyond the actuals horizon).
+                logger.warning(
+                    f"Sequence {i}: no overlap between prediction index and actuals index. "
+                    f"This sequence contributes zero rows to the EvaluationFrame."
+                )
                 continue
 
             matched_pred = df.loc[common_idx]
@@ -106,11 +152,7 @@ class PandasAdapter:
             # Origin is the list index
             all_origins.append(np.full(n_rows, i))
 
-            # Resolve the mapping for THIS sequence (ADR-031 compliance)
-            if isinstance(step_mapping, list):
-                seq_mapping = step_mapping[i]   # rolling-origin: one dict per sequence
-            else:
-                seq_mapping = step_mapping      # single dict or None: backward-compatible
+            # seq_mapping was resolved at the top of the loop (before window integrity check)
 
             # Step assignment
             if seq_mapping is not None:

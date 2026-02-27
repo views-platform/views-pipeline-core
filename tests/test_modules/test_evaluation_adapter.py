@@ -141,14 +141,20 @@ class TestPandasAdapter:
         np.testing.assert_array_equal(ef.identifiers['step'], expected_steps)
 
     def test_missing_month_in_step_mapping_raises(self):
-        """Verify fail-loud if a month in the data is missing from the explicit mapping."""
+        """
+        Verify fail-loud if a prediction contains a month outside the declared mapping.
+
+        The window integrity check (pre-intersection) now fires before the post-intersection
+        step-lookup, so the error message reports the rogue month and points to a base_origin
+        mismatch rather than just "not found in step_mapping".
+        """
         idx = pd.MultiIndex.from_tuples([(100, 1)], names=['month_id', 'country_id'])
         df_actual = pd.DataFrame({'target': [1.0]}, index=idx)
         df_pred = pd.DataFrame({'pred_target': [1.1]}, index=idx)
-        
-        step_mapping = {999: 1} # 100 is missing
-        
-        with pytest.raises(ValueError, match="not found in step_mapping"):
+
+        step_mapping = {999: 1}  # month 100 is outside the declared window
+
+        with pytest.raises(ValueError, match="declared base_origin does not match"):
             PandasAdapter.from_dataframes(df_actual, [df_pred], 'target', step_mapping=step_mapping)
 
     def test_no_overlap_raises(self, sample_data):
@@ -161,6 +167,78 @@ class TestPandasAdapter:
 
         with pytest.raises(ValueError, match="need at least one array to concatenate"):
             PandasAdapter.from_dataframes(df_actual, [df_pred_bad], 'target')
+
+    # -----------------------------------------------------------------------
+    # Invariant proofs: window integrity (Holes A, B, C)
+    # -----------------------------------------------------------------------
+
+    def test_mapping_count_mismatch_raises(self):
+        """
+        Hole C — Invariant I2:
+        len(step_mapping) must equal len(predictions).
+        An IndexError on step_mapping[i] would be cryptic; we fail loud with a
+        descriptive ValueError before the loop even begins.
+        """
+        idx = pd.MultiIndex.from_tuples([(1, 1)], names=['month_id', 'country_id'])
+        df_actual = pd.DataFrame({'target': [1.0]}, index=idx)
+        df_pred   = pd.DataFrame({'pred_target': [1.1]}, index=idx)
+
+        # Two sequences but only one mapping
+        with pytest.raises(ValueError, match="step_mapping list length"):
+            PandasAdapter.from_dataframes(
+                df_actual, [df_pred, df_pred], 'target',
+                step_mapping=[{1: 1}]  # length 1, sequences=2
+            )
+
+    def test_window_integrity_catches_rogue_months_outside_actuals(self):
+        """
+        Hole A — pre-intersection blindspot:
+        A month in the prediction that is outside the declared window should raise
+        even if that month has no corresponding row in actuals (and would therefore
+        be silently dropped by the intersection).
+
+        Setup: actuals cover months 1-3 only; prediction has months 1-4; mapping
+        covers only 1-3. Month 4 is outside the mapping AND outside actuals.
+        Without the window integrity check it would be silently dropped. With it,
+        it raises because it proves the declared origin is wrong.
+        """
+        idx_actual = pd.MultiIndex.from_tuples(
+            [(1, 1), (2, 1), (3, 1)], names=['month_id', 'country_id'])
+        idx_pred   = pd.MultiIndex.from_tuples(
+            [(1, 1), (2, 1), (3, 1), (4, 1)], names=['month_id', 'country_id'])
+
+        df_actual = pd.DataFrame({'target':      [1., 2., 3.]},        index=idx_actual)
+        df_pred   = pd.DataFrame({'pred_target': [1.1, 2.1, 3.1, 4.1]}, index=idx_pred)
+
+        mapping = {1: 1, 2: 2, 3: 3}  # covers months 1-3 only; month 4 is outside
+
+        with pytest.raises(ValueError, match="declared base_origin does not match"):
+            PandasAdapter.from_dataframes(df_actual, [df_pred], 'target',
+                                          step_mapping=mapping)
+
+    def test_window_integrity_wrong_origin_caught_even_when_partially_in_actuals(self):
+        """
+        Hole A — partial overlap, wrong origin:
+        Origin declared at 0 (mapping: months 1-4). Model's actual origin is 2
+        (predicts months 3-6). Months 5-6 are outside the mapping. Even though
+        months 3-4 ARE in both actuals and the mapping, the presence of 5-6 in
+        the prediction proves the origin is wrong and must be caught.
+        """
+        idx_actual = pd.MultiIndex.from_tuples(
+            [(3, 1), (4, 1), (5, 1), (6, 1)], names=['month_id', 'country_id'])
+        idx_pred   = pd.MultiIndex.from_tuples(
+            [(3, 1), (4, 1), (5, 1), (6, 1)], names=['month_id', 'country_id'])
+
+        df_actual = pd.DataFrame({'target':      [3., 4., 5., 6.]}, index=idx_actual)
+        df_pred   = pd.DataFrame({'pred_target': [3.1, 4.1, 5.1, 6.1]}, index=idx_pred)
+
+        # Mapping anchored at origin 0: covers months {1,2,3,4} only
+        mapping = {1: 1, 2: 2, 3: 3, 4: 4}
+
+        # Months 5 and 6 are in the prediction but outside the window → must be caught
+        with pytest.raises(ValueError, match="declared base_origin does not match"):
+            PandasAdapter.from_dataframes(df_actual, [df_pred], 'target',
+                                          step_mapping=mapping)
 
     def test_static_mapping_fails_rolling_origin(self):
         """
@@ -176,10 +254,11 @@ class TestPandasAdapter:
         df_pred_0  = pd.DataFrame({'pred_target': [1.1, 2.1, 3.1]}, index=idx_0)
         df_pred_1  = pd.DataFrame({'pred_target': [2.1, 3.1, 4.1]}, index=idx_1)
 
-        # Static mapping only covers sequence 0's window; month 4 is missing.
+        # Static mapping only covers sequence 0's window; month 4 is outside it.
         static_mapping = {1: 1, 2: 2, 3: 3}
 
-        with pytest.raises(ValueError, match="not found in step_mapping"):
+        # Window integrity check fires before post-intersection step-lookup.
+        with pytest.raises(ValueError, match="declared base_origin does not match"):
             PandasAdapter.from_dataframes(df_actual, [df_pred_0, df_pred_1],
                                           'target', step_mapping=static_mapping)
 

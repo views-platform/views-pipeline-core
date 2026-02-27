@@ -2741,12 +2741,8 @@ class ForecastingModelManager(ModelManager):
 
                 # EvaluationManager.evaluate() operates on one target at a time and
                 # requires exactly one column named pred_{target} per prediction DataFrame.
-                raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
-                
-                # SHADOW RUN ADAPTATION: Create EvaluationFrame locally
                 from views_pipeline_core.modules.validation.adapter import PandasAdapter
-                
-                # Note: We must slice inputs exactly as we do for the legacy call
+
                 actual_slice = df_actual[[target]]
                 raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
                 pred_slices = [df[[f"pred_{target}"]] for df in raw_preds]
