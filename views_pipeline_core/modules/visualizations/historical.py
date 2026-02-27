@@ -268,6 +268,7 @@ class HistoricalLineGraph:
         return dict(
             df.select(ds.entity_col, "name")
             .unique(subset=[ds.entity_col])
+            .filter(pl.col("name").is_not_null())
             .iter_rows()
         )
 
@@ -451,7 +452,8 @@ class HistoricalLineGraph:
     def _entity_label(eid: int, name_map: Optional[Dict[int, str]]) -> str:
         if name_map is None:
             return f"Entity {eid}"
-        return name_map.get(eid, f"Entity {eid}")
+        label = name_map.get(eid)
+        return label if label else f"Entity {eid}"
 
     def _apply_layout(self, fig: go.Figure, target: str) -> None:
         fig.update_layout(

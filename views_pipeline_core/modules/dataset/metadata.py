@@ -665,7 +665,10 @@ class CountryMetadata:
         if with_id:
             result = self._join_with_data(data_df, ["name"])
             result = result.with_columns(
-                (pl.col(self.entity_col).cast(pl.Utf8) + " - " + pl.col("name")).alias("name")
+                pl.when(pl.col("name").is_not_null())
+                .then(pl.col(self.entity_col).cast(pl.Utf8) + " - " + pl.col("name"))
+                .otherwise(pl.col(self.entity_col).cast(pl.Utf8))
+                .alias("name")
             )
         else:
             result = self._join_with_data(data_df, ["name"])
