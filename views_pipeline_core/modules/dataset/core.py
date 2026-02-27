@@ -6,7 +6,9 @@ Main SpatioTemporalDataset class and specialized variants.
 
 This module provides:
     - SpatioTemporalDataset: Base class for spatiotemporal data
+    - CountryDataset: Spatial intermediate for country-level data
     - CountryMonthDataset: Country-month level data
+    - PriogridDataset: Spatial intermediate for priogrid-level data
     - PriogridMonthDataset: Priogrid-month level data with reconciliation
     - Factory functions for convenient loading
 
@@ -1034,23 +1036,25 @@ class SpatioTemporalDataset:
 
 
 # =============================================================================
-# Country-Month Dataset
+# Country Dataset (Spatial Intermediate)
 # =============================================================================
 
-class CountryMonthDataset(SpatioTemporalDataset):
-    """Dataset specialized for Country-Month (CM) level data.
+class CountryDataset(SpatioTemporalDataset):
+    """Spatial intermediate for country-level datasets.
     
-    Provides additional date utilities and metadata accessors specific
-    to country-level analysis. Uses CountryMetadata for metadata operations.
+    Encapsulates all country-specific spatial concerns: entity column
+    default, metadata loading, and metadata accessor methods.
+    
+    Temporal subclasses (CountryMonthDataset, CountryDayDataset, etc.)
+    add time-resolution-specific utilities.
     """
     
-    DEFAULT_TIME_COL = "month_id"
     DEFAULT_ENTITY_COL = "country_id"
     
     def __init__(
         self,
         data: Union[pl.DataFrame, pl.LazyFrame, pd.DataFrame, str, Path],
-        time_col: str = DEFAULT_TIME_COL,
+        time_col: str,
         entity_col: str = DEFAULT_ENTITY_COL,
         sample_col: Optional[str] = None,
         target_cols: Optional[List[str]] = None,
@@ -1060,11 +1064,11 @@ class CountryMonthDataset(SpatioTemporalDataset):
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
     ):
-        """Initialize CountryMonthDataset.
+        """Initialize CountryDataset.
 
         Args:
             data: Data source.
-            time_col: Time column name.
+            time_col: Time column name (set by temporal subclass).
             entity_col: Entity column name.
             sample_col: Sample column for row-based distributions.
             target_cols: Target columns for historical mode.
@@ -1088,63 +1092,6 @@ class CountryMonthDataset(SpatioTemporalDataset):
             self._country_meta.load_from_file(metadata_path)
         elif fetch_metadata:
             self._country_meta.fetch()
-    
-    # -------------------------------------------------------------------------
-    # Date Utilities
-    # -------------------------------------------------------------------------
-    
-    def get_year(
-        self,
-        return_pandas: bool = False,
-    ) -> Union[pl.DataFrame, pd.DataFrame]:
-        """Get year for each time ID."""
-        times = pl.Series(self.time_col, self._unique_times)
-        years = [month_id_to_date(int(t))[0] for t in self._unique_times]
-        result = pl.DataFrame({self.time_col: times, "year": years})
-        if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col])
-        return result
-    
-    def get_month(
-        self,
-        return_pandas: bool = False,
-    ) -> Union[pl.DataFrame, pd.DataFrame]:
-        """Get month-of-year for each time ID."""
-        times = pl.Series(self.time_col, self._unique_times)
-        months = [month_id_to_date(int(t))[1] for t in self._unique_times]
-        result = pl.DataFrame({self.time_col: times, "month": months})
-        if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col])
-        return result
-    
-    def get_date(
-        self,
-        return_pandas: bool = False,
-    ) -> Union[pl.DataFrame, pd.DataFrame]:
-        """Get full date information (year, month, date string)."""
-        data = []
-        for t in self._unique_times:
-            year, month = month_id_to_date(int(t))
-            data.append((t, year, month, f"{year}-{month:02d}-01"))
-        result = pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
-        if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col])
-        return result
-    
-    def get_quarter(
-        self,
-        return_pandas: bool = False,
-    ) -> Union[pl.DataFrame, pd.DataFrame]:
-        """Get quarter for each time ID."""
-        times = pl.Series(self.time_col, self._unique_times)
-        quarters = [
-            (month_id_to_date(int(t))[1] - 1) // 3 + 1 
-            for t in self._unique_times
-        ]
-        result = pl.DataFrame({self.time_col: times, "quarter": quarters})
-        if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col])
-        return result
     
     # -------------------------------------------------------------------------
     # Metadata Accessors (delegated to CountryMetadata)
@@ -1209,23 +1156,132 @@ class CountryMonthDataset(SpatioTemporalDataset):
 
 
 # =============================================================================
-# Priogrid-Month Dataset
+# Country-Month Dataset
 # =============================================================================
 
-class PriogridMonthDataset(SpatioTemporalDataset):
-    """Dataset specialized for Priogrid-Month (PGM) level data.
+class CountryMonthDataset(CountryDataset):
+    """Dataset specialized for Country-Month (CM) level data.
     
-    Includes hierarchical reconciliation capabilities for grid-to-country
-    consistency. Uses PriogridMetadata for metadata operations.
+    Inherits country-level spatial concerns from CountryDataset and
+    adds month-resolution date utilities.
     """
     
     DEFAULT_TIME_COL = "month_id"
-    DEFAULT_ENTITY_COL = "priogrid_id"
     
     def __init__(
         self,
         data: Union[pl.DataFrame, pl.LazyFrame, pd.DataFrame, str, Path],
         time_col: str = DEFAULT_TIME_COL,
+        entity_col: str = CountryDataset.DEFAULT_ENTITY_COL,
+        sample_col: Optional[str] = None,
+        target_cols: Optional[List[str]] = None,
+        fix_structure: bool = False,
+        auto_broadcast: bool = True,
+        cache_tensors: bool = True,
+        metadata_path: Optional[Union[str, Path]] = None,
+        fetch_metadata: bool = False,
+    ):
+        """Initialize CountryMonthDataset.
+
+        Args:
+            data: Data source.
+            time_col: Time column name.
+            entity_col: Entity column name.
+            sample_col: Sample column for row-based distributions.
+            target_cols: Target columns for historical mode.
+            fix_structure: Auto-complete grid at query time.
+            auto_broadcast: Broadcast scalars to match arrays.
+            cache_tensors: Enable tensor caching.
+            metadata_path: Path to country metadata file.
+            fetch_metadata: If True, fetch metadata via viewser Queryset.
+        """
+        super().__init__(
+            data=data, time_col=time_col, entity_col=entity_col,
+            sample_col=sample_col, target_cols=target_cols,
+            fix_structure=fix_structure, auto_broadcast=auto_broadcast,
+            cache_tensors=cache_tensors,
+            metadata_path=metadata_path, fetch_metadata=fetch_metadata,
+        )
+    
+    # -------------------------------------------------------------------------
+    # Date Utilities
+    # -------------------------------------------------------------------------
+    
+    def get_year(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get year for each time ID."""
+        times = pl.Series(self.time_col, self._unique_times)
+        years = [month_id_to_date(int(t))[0] for t in self._unique_times]
+        result = pl.DataFrame({self.time_col: times, "year": years})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
+    
+    def get_month(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get month-of-year for each time ID."""
+        times = pl.Series(self.time_col, self._unique_times)
+        months = [month_id_to_date(int(t))[1] for t in self._unique_times]
+        result = pl.DataFrame({self.time_col: times, "month": months})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
+    
+    def get_date(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get full date information (year, month, date string)."""
+        data = []
+        for t in self._unique_times:
+            year, month = month_id_to_date(int(t))
+            data.append((t, year, month, f"{year}-{month:02d}-01"))
+        result = pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
+    
+    def get_quarter(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get quarter for each time ID."""
+        times = pl.Series(self.time_col, self._unique_times)
+        quarters = [
+            (month_id_to_date(int(t))[1] - 1) // 3 + 1 
+            for t in self._unique_times
+        ]
+        result = pl.DataFrame({self.time_col: times, "quarter": quarters})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
+
+
+# =============================================================================
+# Priogrid Dataset (Spatial Intermediate)
+# =============================================================================
+
+class PriogridDataset(SpatioTemporalDataset):
+    """Spatial intermediate for priogrid-level datasets.
+    
+    Encapsulates all priogrid-specific spatial concerns: entity column
+    default, metadata/country-mapping loading, metadata accessors,
+    country-based subsetting, and hierarchical reconciliation.
+    
+    Temporal subclasses (PriogridMonthDataset, PriogridDayDataset, etc.)
+    add time-resolution-specific utilities.
+    """
+    
+    DEFAULT_ENTITY_COL = "priogrid_id"
+    
+    def __init__(
+        self,
+        data: Union[pl.DataFrame, pl.LazyFrame, pd.DataFrame, str, Path],
+        time_col: str,
         entity_col: str = DEFAULT_ENTITY_COL,
         sample_col: Optional[str] = None,
         target_cols: Optional[List[str]] = None,
@@ -1236,11 +1292,11 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
     ):
-        """Initialize PriogridMonthDataset.
+        """Initialize PriogridDataset.
 
         Args:
             data: Data source.
-            time_col: Time column name.
+            time_col: Time column name (set by temporal subclass).
             entity_col: Entity column name.
             sample_col: Sample column for row-based distributions.
             target_cols: Target columns for historical mode.
@@ -1307,48 +1363,6 @@ class PriogridMonthDataset(SpatioTemporalDataset):
         self._logger.info(
             f"Country mapping loaded: {len(self._metadata._entity_to_country)} grids"
         )
-    
-    # -------------------------------------------------------------------------
-    # Date Utilities
-    # -------------------------------------------------------------------------
-    
-    def get_year(
-        self,
-        return_pandas: bool = False,
-    ) -> Union[pl.DataFrame, pd.DataFrame]:
-        """Get year for each time ID."""
-        times = pl.Series(self.time_col, self._unique_times)
-        years = [month_id_to_date(int(t))[0] for t in self._unique_times]
-        result = pl.DataFrame({self.time_col: times, "year": years})
-        if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col])
-        return result
-    
-    def get_month(
-        self,
-        return_pandas: bool = False,
-    ) -> Union[pl.DataFrame, pd.DataFrame]:
-        """Get month-of-year for each time ID."""
-        times = pl.Series(self.time_col, self._unique_times)
-        months = [month_id_to_date(int(t))[1] for t in self._unique_times]
-        result = pl.DataFrame({self.time_col: times, "month": months})
-        if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col])
-        return result
-    
-    def get_date(
-        self,
-        return_pandas: bool = False,
-    ) -> Union[pl.DataFrame, pd.DataFrame]:
-        """Get full date information (year, month, date string)."""
-        data = []
-        for t in self._unique_times:
-            year, month = month_id_to_date(int(t))
-            data.append((t, year, month, f"{year}-{month:02d}-01"))
-        result = pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
-        if return_pandas:
-            return polars_to_pandas_multiindex(result, [self.time_col])
-        return result
     
     # -------------------------------------------------------------------------
     # Metadata Accessors (delegated to PriogridMetadata)
@@ -1559,6 +1573,101 @@ class PriogridMonthDataset(SpatioTemporalDataset):
 
 
 # =============================================================================
+# Priogrid-Month Dataset
+# =============================================================================
+
+class PriogridMonthDataset(PriogridDataset):
+    """Dataset specialized for Priogrid-Month (PGM) level data.
+    
+    Inherits priogrid-level spatial concerns from PriogridDataset
+    (metadata, reconciliation, country-based operations) and adds
+    month-resolution date utilities.
+    """
+    
+    DEFAULT_TIME_COL = "month_id"
+    
+    def __init__(
+        self,
+        data: Union[pl.DataFrame, pl.LazyFrame, pd.DataFrame, str, Path],
+        time_col: str = DEFAULT_TIME_COL,
+        entity_col: str = PriogridDataset.DEFAULT_ENTITY_COL,
+        sample_col: Optional[str] = None,
+        target_cols: Optional[List[str]] = None,
+        fix_structure: bool = False,
+        auto_broadcast: bool = True,
+        cache_tensors: bool = True,
+        country_mapping: Optional[Union[str, Path, pl.DataFrame]] = None,
+        metadata_path: Optional[Union[str, Path]] = None,
+        fetch_metadata: bool = False,
+    ):
+        """Initialize PriogridMonthDataset.
+
+        Args:
+            data: Data source.
+            time_col: Time column name.
+            entity_col: Entity column name.
+            sample_col: Sample column for row-based distributions.
+            target_cols: Target columns for historical mode.
+            fix_structure: Auto-complete grid at query time.
+            auto_broadcast: Broadcast scalars to match arrays.
+            cache_tensors: Enable tensor caching.
+            country_mapping: Grid-to-country mapping (file or DataFrame).
+            metadata_path: Path to grid metadata file.
+            fetch_metadata: If True, fetch metadata via viewser Queryset.
+        """
+        super().__init__(
+            data=data, time_col=time_col, entity_col=entity_col,
+            sample_col=sample_col, target_cols=target_cols,
+            fix_structure=fix_structure, auto_broadcast=auto_broadcast,
+            cache_tensors=cache_tensors,
+            country_mapping=country_mapping,
+            metadata_path=metadata_path, fetch_metadata=fetch_metadata,
+        )
+    
+    # -------------------------------------------------------------------------
+    # Date Utilities
+    # -------------------------------------------------------------------------
+    
+    def get_year(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get year for each time ID."""
+        times = pl.Series(self.time_col, self._unique_times)
+        years = [month_id_to_date(int(t))[0] for t in self._unique_times]
+        result = pl.DataFrame({self.time_col: times, "year": years})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
+    
+    def get_month(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get month-of-year for each time ID."""
+        times = pl.Series(self.time_col, self._unique_times)
+        months = [month_id_to_date(int(t))[1] for t in self._unique_times]
+        result = pl.DataFrame({self.time_col: times, "month": months})
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
+    
+    def get_date(
+        self,
+        return_pandas: bool = False,
+    ) -> Union[pl.DataFrame, pd.DataFrame]:
+        """Get full date information (year, month, date string)."""
+        data = []
+        for t in self._unique_times:
+            year, month = month_id_to_date(int(t))
+            data.append((t, year, month, f"{year}-{month:02d}-01"))
+        result = pl.DataFrame(data, schema=[self.time_col, "year", "month", "date"])
+        if return_pandas:
+            return polars_to_pandas_multiindex(result, [self.time_col])
+        return result
+
+
+# =============================================================================
 # Factory Functions
 # =============================================================================
 
@@ -1611,7 +1720,9 @@ def load_cm_dataset(
 __all__ = [
     # Dataset Classes
     "SpatioTemporalDataset",
+    "CountryDataset",
     "CountryMonthDataset", 
+    "PriogridDataset",
     "PriogridMonthDataset",
     # Factory Functions
     "load_pgm_dataset",

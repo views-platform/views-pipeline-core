@@ -4,6 +4,7 @@ import tqdm
 import pandas as pd
 from views_pipeline_core.managers.model import ModelPathManager
 from views_pipeline_core.modules.dataset.core import (
+    CountryDataset,
     CountryMonthDataset,
     PriogridMonthDataset,
 )
@@ -80,7 +81,7 @@ class ForecastReportTemplate:
                 )
 
             # Generate line graphs AFTER all maps (only for CM datasets)
-            if isinstance(forecast_dataset, CountryMonthDataset):
+            if isinstance(forecast_dataset, CountryDataset):
                 logger.info(
                     "Generating historical vs forecast graphs for CM dataset"
                 )

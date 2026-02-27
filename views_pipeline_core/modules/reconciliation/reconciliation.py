@@ -4,7 +4,7 @@ from concurrent.futures import as_completed
 import os
 from tqdm import tqdm
 import wandb
-from views_pipeline_core.modules.dataset.core import CountryMonthDataset, PriogridMonthDataset
+from views_pipeline_core.modules.dataset.core import CountryDataset, PriogridDataset
 import torch
 import numpy as np
 import polars as pl
@@ -22,7 +22,7 @@ class ReconciliationModule:
     scaling to ensure country-level totals match while preserving grid-level
     spatial patterns. Supports parallel processing for large-scale datasets.
     """
-    def __init__(self, c_dataset: CountryMonthDataset, pg_dataset: PriogridMonthDataset, wandb_notifications: bool = True):
+    def __init__(self, c_dataset: CountryDataset, pg_dataset: PriogridDataset, wandb_notifications: bool = True):
         """
         Initialize reconciliation module with country and grid datasets.
 
@@ -40,9 +40,9 @@ class ReconciliationModule:
             ValueError: If datasets have incompatible structures
 
         Example:
-            >>> from views_pipeline_core.modules.dataset.core import CountryMonthDataset, PriogridMonthDataset
-            >>> c_ds = CountryMonthDataset(country_predictions)
-            >>> pg_ds = PriogridMonthDataset(grid_predictions, fetch_metadata=True)
+            >>> from views_pipeline_core.modules.dataset.core import CountryDataset, PriogridDataset
+            >>> c_ds = CountryDataset(country_predictions)
+            >>> pg_ds = PriogridDataset(grid_predictions, fetch_metadata=True)
             >>> reconciler = ReconciliationModule(c_ds, pg_ds)
             Using device: cuda
             All checks passed. Starting reconciliation with 180 valid countries...
@@ -56,10 +56,10 @@ class ReconciliationModule:
         self._c_dataset = c_dataset
         self._pg_dataset = pg_dataset
         self._wandb_notifications = wandb_notifications
-        if not isinstance(c_dataset, CountryMonthDataset):
-            raise TypeError(f"Expected CountryMonthDataset, got {type(c_dataset)}")
-        if not isinstance(pg_dataset, PriogridMonthDataset):
-            raise TypeError(f"Expected PriogridMonthDataset, got {type(pg_dataset)}")
+        if not isinstance(c_dataset, CountryDataset):
+            raise TypeError(f"Expected CountryDataset, got {type(c_dataset)}")
+        if not isinstance(pg_dataset, PriogridDataset):
+            raise TypeError(f"Expected PriogridDataset, got {type(pg_dataset)}")
 
         self._device = self.__detect_torch_device()
         print(f"Using device: {self._device}")

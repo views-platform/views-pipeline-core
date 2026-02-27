@@ -6,7 +6,9 @@ High-performance spatiotemporal dataset handling for conflict forecasting.
 
 This module provides:
     - SpatioTemporalDataset: Base class for spatiotemporal data
+    - CountryDataset: Spatial intermediate for country-level data
     - CountryMonthDataset: Country-month level specialization
+    - PriogridDataset: Spatial intermediate for priogrid-level data
     - PriogridMonthDataset: Priogrid-month level with reconciliation
     - TensorBundle: Multi-dimensional array container
     - Distribution layout detection and conversion
@@ -74,7 +76,9 @@ from .reconciliation import ReconciliationModule
 # Core dataset classes
 from .core import (
     SpatioTemporalDataset,
+    CountryDataset,
     CountryMonthDataset,
+    PriogridDataset,
     PriogridMonthDataset,
     load_pgm_dataset,
     load_cm_dataset,
@@ -120,7 +124,9 @@ __all__ = [
     "ReconciliationModule",
     # Dataset classes
     "SpatioTemporalDataset",
+    "CountryDataset",
     "CountryMonthDataset",
+    "PriogridDataset",
     "PriogridMonthDataset",
     # Factory functions
     "load_pgm_dataset",

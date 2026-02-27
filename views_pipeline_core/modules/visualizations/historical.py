@@ -1,29 +1,40 @@
 import numpy as np
-import pandas as pd
+import polars as pl
 import plotly.graph_objects as go
 from typing import Union, List, Optional, Dict, Tuple
 from views_pipeline_core.modules.dataset.core import (
     SpatioTemporalDataset,
-    PriogridMonthDataset,
-    CountryMonthDataset,
+    PriogridDataset,
+    CountryDataset,
 )
 import logging
 
 logger = logging.getLogger(__name__)
 
+# Maximum entities before downsampling in auto-resolve mode
+_MAX_INTERACTIVE_ENTITIES = 500 # TODO find a way to work around this limit
+
 
 class HistoricalLineGraph:
+    """Interactive line graph — historical vs forecast.
+
+    Operates entirely on Polars DataFrames and the new spatial dataset
+    hierarchy (``CountryDataset`` / ``PriogridDataset``).
+
+    At priogrid scale (≥250 k entities) the class will downsample the
+    entity set when ``entity_ids`` is not supplied explicitly.  Pass
+    ``entity_ids`` for full control.
+    """
+
     def __init__(
         self,
         historical_dataset: Optional[SpatioTemporalDataset] = None,
         forecast_dataset: Optional[SpatioTemporalDataset] = None,
     ):
         """
-        Initializes the visualization with historical and/or forecast datasets.
-
         Args:
-            historical_dataset: The dataset containing historical data. Can be None.
-            forecast_dataset: The dataset containing forecast data. Can be None.
+            historical_dataset: Dataset with observed values.  Can be *None*.
+            forecast_dataset:   Dataset with predictions.  Can be *None*.
         """
         if historical_dataset is None and forecast_dataset is None:
             raise ValueError("At least one dataset must be provided")
@@ -31,460 +42,422 @@ class HistoricalLineGraph:
         self.historical_dataset = historical_dataset
         self.forecast_dataset = forecast_dataset
 
+        ds = forecast_dataset or historical_dataset
+        self._time_col: str = ds.time_col
+        self._entity_col: str = ds.entity_col
+
+    # ==================================================================
+    # Public API
+    # ==================================================================
+
     def plot_predictions_vs_historical(
         self,
-        entity_ids: Union[int, List[int]] = None,
+        entity_ids: Optional[Union[int, List[int]]] = None,
         interactive: bool = True,
         alpha: float = 0.9,
         targets: Optional[List[str]] = None,
         as_html: bool = False,
+        max_entities: int = _MAX_INTERACTIVE_ENTITIES,
     ):
-        # Determine targets based on available datasets
-        if targets is None:
-            if self.historical_dataset is not None:
-                targets = self.historical_dataset.target_cols
-            elif self.forecast_dataset is not None:
-                # Strip 'pred_' prefix for forecast-only targets
-                targets = [
-                    t.replace("pred_", "") for t in self.forecast_dataset.target_cols
-                ]
-            else:
-                raise RuntimeError("No datasets available to determine targets")
-        else:
-            # Ensure targets are valid for available datasets
-            if self.historical_dataset:
-                missing = set(targets) - set(self.historical_dataset.target_cols)
-                if missing:
-                    logger.warning(f"Some targets not in historical dataset: {missing}")
-            if self.forecast_dataset:
-                forecast_targets = [f"pred_{t}" for t in targets]
-                missing = set(forecast_targets) - set(self.forecast_dataset.target_cols)
-                if missing:
-                    logger.warning(f"Some targets not in forecast dataset: {missing}")
+        """Plot historical vs forecast line graphs.
 
-        # Log warnings for missing datasets
-        if self.historical_dataset is None:
-            logger.warning("Historical dataset is missing - showing only forecast data")
-        if self.forecast_dataset is None:
-            logger.warning("Forecast dataset is missing - showing only historical data")
+        Args:
+            entity_ids:   Entities to plot.  *None* → union of both datasets
+                          (capped to *max_entities*).
+            interactive:  Must be ``True`` (static not supported).
+            alpha:        Credible mass for HDI bands.
+            targets:      Target names **without** ``pred_`` prefix.
+            as_html:      Return HTML string instead of showing figures.
+            max_entities: Cap when *entity_ids* is omitted.
+        """
+        if not interactive:
+            raise NotImplementedError("Static plots are not supported")
 
-        # Determine cutoff line if both datasets are available
-        vline = None
-        if self.historical_dataset is not None and self.forecast_dataset is not None:
-            vline = max(self.historical_dataset._unique_times)
-
-        html_plots = []
-
-        # Normalize and validate entity IDs
-        if entity_ids is None:
-            entity_ids = []
-            if self.historical_dataset:
-                entity_ids.extend(self.historical_dataset._unique_entities)
-            if self.forecast_dataset:
-                entity_ids.extend(self.forecast_dataset._unique_entities)
-            # Use union of entities from both datasets
-            entity_ids = list(set(entity_ids))
-        else:
-            entity_ids = self._validate_entity_ids(entity_ids)
-
-        # Handle empty entity list
+        targets = self._resolve_targets(targets)
+        entity_ids = self._resolve_entity_ids(entity_ids, max_entities)
         if not entity_ids:
             logger.error("No valid entities found to plot")
             return None
 
+        # Log dataset availability
+        if self.historical_dataset is None:
+            logger.warning("Historical dataset missing — forecast-only mode")
+        if self.forecast_dataset is None:
+            logger.warning("Forecast dataset missing — historical-only mode")
+
+        vline: Optional[int] = None
+        if self.historical_dataset is not None and self.forecast_dataset is not None:
+            vline = max(self.historical_dataset._unique_times)
+
+        name_map = self._get_entity_name_map()
+
+        # Batch-fetch once for ALL requested entities
+        hist_df = self._batch_fetch_historical(entity_ids, targets)
+        pred_df, hdi_df, map_df = self._batch_fetch_forecast(
+            entity_ids, targets, alpha
+        )
+
+        html_parts: List[str] = []
         for target in targets:
-            # Determine if we should calculate HDI/MAP (only for forecast with multiple samples)
-            hdi = False
-            map_df = None
-            if self.forecast_dataset and self.forecast_dataset.sample_size > 1:
-                hdi = True
-                forecast_target = f"pred_{target}"
-                try:
-                    map_df = self.forecast_dataset.calculate_map(
-                        features=[forecast_target], return_pandas=True
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to calculate MAP for {forecast_target}: {str(e)}"
-                    )
-                    map_df = None
-
-            if not interactive:
-                raise NotImplementedError("Static plots are not supported")
-
-            plot_result = self._plot_interactive(
+            fig = self._build_figure(
                 entity_ids=entity_ids,
                 target=target,
-                alpha=alpha,
-                vline=vline,
-                hdi=hdi,
-                as_html=as_html,
+                name_map=name_map,
+                hist_df=hist_df,
+                pred_df=pred_df,
+                hdi_df=hdi_df,
                 map_df=map_df,
+                vline=vline,
             )
             if as_html:
-                html_plots.append(plot_result)
+                html_parts.append(fig.to_html(full_html=False))
             else:
-                plot_result.show()
+                fig.show()
 
-        return "\n".join(html_plots) if as_html else None
+        return "\n".join(html_parts) if as_html else None
 
-    def _plot_interactive(
+    # ==================================================================
+    # Batch data fetching  (Polars-native, no pandas)
+    # ==================================================================
+
+    def _batch_fetch_historical(
         self,
         entity_ids: List[int],
-        target: str,
-        alpha: float,
-        vline: Optional[int],
-        hdi: bool,
-        as_html: bool = False,
-        map_df: Optional[pd.DataFrame] = None,
-    ):
-        fig = go.Figure()
-        traces = []
-        entity_name_map = self._get_entity_name_map()
-
-        # Calculate traces per entity based on available datasets
-        traces_per_entity = 0
-        if self.historical_dataset is not None:
-            traces_per_entity += 1  # Historical trace
-        if self.forecast_dataset is not None:
-            if hdi:
-                traces_per_entity += 3  # HDI traces (lower, upper, fill)
-                if map_df is not None:
-                    traces_per_entity += 1  # MAP trace
-            else:
-                traces_per_entity += 1  # Forecast trace
-
-        for idx, entity_id in enumerate(entity_ids):
-            color = self._generate_entity_color(idx)
-            entity_label = self._get_entity_label(entity_id, entity_name_map)
-
-            # Get data only for available datasets
-            hist_df, pred_df = None, None
-            if self.historical_dataset is not None:
-                try:
-                    hist_df = self.historical_dataset.get_subset_dataframe(
-                        entity_ids=[entity_id], return_pandas=True
-                    )[target].reset_index()
-                    # Convert numpy arrays to scalars if necessary
-                    hist_df[target] = hist_df[target].apply(
-                        lambda x: (
-                            x[0] if isinstance(x, np.ndarray) and x.size == 1 else x
-                        )
-                    )
-                except KeyError:
-                    hist_df = None
-                    logger.warning(
-                        f"Target '{target}' not found in historical dataset for entity {entity_id}"
-                    )
-
-            if self.forecast_dataset is not None:
-                forecast_target = f"pred_{target}"
-                try:
-                    pred_df = self.forecast_dataset.get_subset_dataframe(
-                        entity_ids=[entity_id], return_pandas=True
-                    )[forecast_target].reset_index()
-                    pred_df[forecast_target] = pred_df[forecast_target].apply(
-                        lambda x: (
-                            x[0] if isinstance(x, np.ndarray) and x.size == 1 else x
-                        )
-                    )
-                except KeyError:
-                    pred_df = None
-                    logger.warning(
-                        f"Target '{forecast_target}' not found in forecast dataset for entity {entity_id}"
-                    )
-
-            # Add historical trace if available
-            if hist_df is not None:
-                traces.append(
-                    self._create_historical_trace(hist_df, target, entity_label, idx)
-                )
-
-            # Add forecast traces if available
-            if pred_df is not None and not pred_df.empty:
-                if hdi:
-                    try:
-                        hdi_df = self._get_hdi_data(entity_id, target, alpha)
-                        traces.extend(
-                            self._create_hdi_traces(
-                                hdi_df, target, entity_label, color, idx
-                            )
-                        )
-                        # Add MAP trace if data is available
-                        if map_df is not None:
-                            try:
-                                map_series = map_df.xs(
-                                    entity_id, level=self.forecast_dataset.entity_col
-                                )[f"pred_{target}_map"]
-                                map_trace = go.Scatter(
-                                    x=map_series.index,
-                                    y=map_series.values,
-                                    mode="lines",
-                                    name=f"{entity_label} (MAP)",
-                                    line=dict(color=color, width=2),
-                                    visible=idx == 0,
-                                )
-                                traces.append(map_trace)
-                            except KeyError:
-                                logger.warning(
-                                    f"MAP data not found for entity {entity_id}"
-                                )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to get HDI data for entity {entity_id}: {str(e)}"
-                        )
-                        # Fall back to simple forecast
-                        traces.append(
-                            self._create_forecast_trace(
-                                pred_df, target, entity_label, color, idx
-                            )
-                        )
-                else:
-                    traces.append(
-                        self._create_forecast_trace(
-                            pred_df, target, entity_label, color, idx
-                        )
-                    )
-
-        # Create dropdown buttons only if we have multiple entities
-        buttons = []
-        if len(entity_ids) > 1:
-            buttons = self._create_dropdown_buttons(
-                entity_ids, entity_name_map, traces_per_entity, target
+        targets: List[str],
+    ) -> Optional[pl.DataFrame]:
+        """One Polars query for all historical entities."""
+        if self.historical_dataset is None:
+            return None
+        try:
+            available = set(self.historical_dataset.get_all_data_cols())
+            cols = [t for t in targets if t in available]
+            if not cols:
+                return None
+            return self.historical_dataset.get_subset_dataframe(
+                entity_ids=entity_ids, features=cols,
             )
+        except Exception as e:
+            logger.error(f"Historical fetch failed: {e}")
+            return None
 
-        # Configure figure
-        fig.add_traces(traces)
-        if vline is not None:
-            self._add_cutoff_line(fig, vline)
-        if buttons:
-            self._configure_dropdown(fig, buttons)
-        self._format_interactive_plot(fig, target)
-        return fig.to_html(full_html=False) if as_html else fig
+    def _batch_fetch_forecast(
+        self,
+        entity_ids: List[int],
+        targets: List[str],
+        alpha: float,
+    ) -> Tuple[Optional[pl.DataFrame], Optional[pl.DataFrame], Optional[pl.DataFrame]]:
+        """One Polars query each for predictions, HDI, and MAP."""
+        if self.forecast_dataset is None:
+            return None, None, None
 
-    def _validate_entity_ids(self, entity_ids: Union[int, List[int]]) -> List[int]:
-        """Normalize entity IDs to list and validate against available datasets"""
-        if isinstance(entity_ids, int):
-            entity_ids = [entity_ids]
+        available = set(self.forecast_dataset.get_all_data_cols())
+        pred_cols = [f"pred_{t}" for t in targets if f"pred_{t}" in available]
+        if not pred_cols:
+            return None, None, None
 
-        valid_ids = []
+        # Predictions
+        try:
+            pred_df = self.forecast_dataset.get_subset_dataframe(
+                entity_ids=entity_ids, features=pred_cols,
+            )
+        except Exception as e:
+            logger.error(f"Forecast fetch failed: {e}")
+            return None, None, None
+
+        hdi_df: Optional[pl.DataFrame] = None
+        map_df: Optional[pl.DataFrame] = None
+
+        if self.forecast_dataset.sample_size > 1:
+            try:
+                hdi_df = self.forecast_dataset.calculate_hdi(
+                    alpha=alpha, entity_ids=entity_ids, features=pred_cols,
+                )
+            except Exception as e:
+                logger.warning(f"HDI calculation failed: {e}")
+
+            try:
+                map_df = self.forecast_dataset.calculate_map(
+                    entity_ids=entity_ids, features=pred_cols,
+                )
+            except Exception as e:
+                logger.warning(f"MAP calculation failed: {e}")
+
+        return pred_df, hdi_df, map_df
+
+    # ==================================================================
+    # Target / entity resolution
+    # ==================================================================
+
+    def _resolve_targets(self, targets: Optional[List[str]]) -> List[str]:
+        if targets is not None:
+            return targets
+        if self.historical_dataset is not None:
+            return self.historical_dataset.target_cols
+        if self.forecast_dataset is not None:
+            return [
+                t.replace("pred_", "") for t in self.forecast_dataset.target_cols
+            ]
+        raise RuntimeError("No datasets available to determine targets")
+
+    def _resolve_entity_ids(
+        self,
+        entity_ids: Optional[Union[int, List[int]]],
+        max_entities: int,
+    ) -> List[int]:
+        if entity_ids is not None:
+            if isinstance(entity_ids, int):
+                entity_ids = [entity_ids]
+            return self._validate_entity_ids(entity_ids)
+
+        ids: set = set()
+        if self.historical_dataset:
+            ids.update(self.historical_dataset._unique_entities)
+        if self.forecast_dataset:
+            ids.update(self.forecast_dataset._unique_entities)
+
+        all_ids = sorted(ids)
+        if len(all_ids) > max_entities:
+            logger.warning(
+                f"{len(all_ids)} entities found — sampling {max_entities} for "
+                "the plot.  Pass explicit entity_ids for full control."
+            )
+            step = max(1, len(all_ids) // max_entities)
+            all_ids = all_ids[::step][:max_entities]
+        return all_ids
+
+    def _validate_entity_ids(self, entity_ids: List[int]) -> List[int]:
+        valid: List[int] = []
         for eid in entity_ids:
-            valid = True
+            ok = True
             if (
                 self.historical_dataset
                 and eid not in self.historical_dataset._unique_entities
             ):
-                logger.warning(f"Entity {eid} not found in historical dataset")
-                valid = False
+                logger.warning(f"Entity {eid} not in historical dataset")
+                ok = False
             if (
                 self.forecast_dataset
                 and eid not in self.forecast_dataset._unique_entities
             ):
-                logger.warning(f"Entity {eid} not found in forecast dataset")
-                valid = False
-            if valid:
-                valid_ids.append(eid)
-
-        if not valid_ids:
+                logger.warning(f"Entity {eid} not in forecast dataset")
+                ok = False
+            if ok:
+                valid.append(eid)
+        if not valid:
             raise ValueError("No valid entities found in either dataset")
-        return valid_ids
+        return valid
+
+    # ==================================================================
+    # Entity name maps  (Polars-native)
+    # ==================================================================
 
     def _get_entity_name_map(self) -> Optional[Dict[int, str]]:
         try:
-            # Handle country datasets
-            if self.forecast_dataset and isinstance(self.forecast_dataset, CountryMonthDataset):
-                return self._get_country_name_map(self.forecast_dataset)
-            if self.historical_dataset and isinstance(
-                self.historical_dataset, CountryMonthDataset
-            ):
-                return self._get_country_name_map(self.historical_dataset)
-
-            # Handle priogrid datasets
-            if self.forecast_dataset and isinstance(self.forecast_dataset, PriogridMonthDataset):
-                return self._get_priogrid_name_map(self.forecast_dataset)
-            if self.historical_dataset and isinstance(
-                self.historical_dataset, PriogridMonthDataset
-            ):
-                return self._get_priogrid_name_map(self.historical_dataset)
-
+            ds = self.forecast_dataset or self.historical_dataset
+            if isinstance(ds, CountryDataset):
+                return self._country_name_map(ds)
+            if isinstance(ds, PriogridDataset):
+                return self._priogrid_name_map(ds)
         except Exception as e:
             logger.warning(f"Could not retrieve entity names: {e}")
         return None
 
-    def _get_country_name_map(self, dataset: CountryMonthDataset) -> Dict[int, str]:
-        """Get country_id -> name mapping for country datasets"""
-        return (
-            dataset.get_name(with_id=True, return_pandas=True)
-            .reset_index()
-            .drop_duplicates(subset=[dataset.entity_col])
-            .set_index(dataset.entity_col)["name"]
-            .to_dict()
+    @staticmethod
+    def _country_name_map(ds: CountryDataset) -> Dict[int, str]:
+        df = ds.get_name(with_id=True)  # pl.DataFrame
+        return dict(
+            df.select(ds.entity_col, "name")
+            .unique(subset=[ds.entity_col])
+            .iter_rows()
         )
 
-    def _get_priogrid_name_map(self, dataset: PriogridMonthDataset) -> Dict[int, str]:
-        """Get priogrid_id -> name mapping using country names"""
-        # Create {priogrid_id: country_name} mapping
-        name_df = dataset.get_name(with_id=True, return_pandas=True).reset_index()
-        return name_df.set_index(dataset.entity_col)["name"].to_dict()
+    @staticmethod
+    def _priogrid_name_map(ds: PriogridDataset) -> Dict[int, str]:
+        df = ds.get_name(with_id=True)  # pl.DataFrame
+        return dict(df.select(ds.entity_col, "name").iter_rows())
 
-    def _generate_entity_color(self, entity_index: int) -> str:
-        hue = (entity_index * 40) % 360
-        return f"hsl({hue}, 50%, 50%)"
+    # ==================================================================
+    # Figure construction
+    # ==================================================================
 
-    def _get_entity_label(
-        self, entity_id: int, name_map: Optional[Dict[int, str]]
-    ) -> str:
-        # Handle case where name_map is None (no country names available)
-        if name_map is None:
-            return f"Entity {entity_id}"
-        return name_map.get(entity_id, f"Entity {entity_id}")
-
-    def _get_plot_data(
-        self, entity_ids: List[int], target: str
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        hist_df = self.historical_dataset.get_subset_dataframe(
-            entity_ids=entity_ids, return_pandas=True
-        )[target].reset_index()
-        pred_df = self.forecast_dataset.get_subset_dataframe(
-            entity_ids=entity_ids, return_pandas=True
-        )["pred_" + target].reset_index()
-        # Convert numpy arrays to scalars if necessary
-        hist_df[target] = hist_df[target].apply(
-            lambda x: x[0] if isinstance(x, np.ndarray) and x.size == 1 else x
-        )
-        pred_df["pred_" + target] = pred_df["pred_" + target].apply(
-            lambda x: x[0] if isinstance(x, np.ndarray) and x.size == 1 else x
-        )
-        return hist_df, pred_df
-
-    def _get_hdi_data(self, entity_id: int, target: str, alpha: float) -> pd.DataFrame:
-        if not self.forecast_dataset:
-            raise RuntimeError("Forecast dataset is required for HDI calculation")
-
-        return self.forecast_dataset.calculate_hdi(
-            alpha=alpha, entity_ids=[entity_id], return_pandas=True
-        ).reset_index()
-
-    def _create_historical_trace(
-        self, hist_df: pd.DataFrame, target: str, label: str, idx: int
-    ) -> go.Scatter:
-        return go.Scatter(
-            x=hist_df[self.historical_dataset.time_col],
-            y=hist_df[target],
-            mode="lines+markers",
-            name=f"{label} (Historical)",
-            line=dict(color="grey", width=1.5),
-            marker=dict(size=4),
-            visible=idx == 0,
-        )
-
-    def _create_forecast_trace(
-        self, pred_df: pd.DataFrame, target: str, label: str, color: str, idx: int
-    ) -> go.Scatter:
-        return go.Scatter(
-            x=pred_df[self.forecast_dataset.time_col],
-            y=pred_df[f"pred_{target}"],
-            mode="lines+markers",
-            name=f"{label} (Forecast)",
-            line=dict(color=color, width=1.5),
-            marker=dict(size=4),
-            visible=idx == 0,
-        )
-
-    def _create_hdi_traces(
-        self, hdi_df: pd.DataFrame, target: str, label: str, color: str, idx: int
-    ) -> List[go.Scatter]:
-        hue = (idx * 40) % 360
-        # Use forecast time_col since HDI comes from forecast dataset
-        _time_col = self.forecast_dataset.time_col if self.forecast_dataset else self.historical_dataset.time_col
-        lower = go.Scatter(
-            x=hdi_df[_time_col],
-            y=hdi_df[f"pred_{target}_hdi_lower"],
-            mode="lines",
-            name=f"HDI Lower ({label})",
-            line=dict(color=color, width=1),
-            visible=idx == 0,
-        )
-        upper = go.Scatter(
-            x=hdi_df[_time_col],
-            y=hdi_df[f"pred_{target}_hdi_upper"],
-            mode="lines",
-            name=f"HDI Upper ({label})",
-            line=dict(color=color, width=1),
-            visible=idx == 0,
-        )
-        fill = go.Scatter(
-            x=hdi_df[_time_col].tolist()
-            + hdi_df[_time_col].tolist()[::-1],
-            y=hdi_df[f"pred_{target}_hdi_upper"].tolist()
-            + hdi_df[f"pred_{target}_hdi_lower"].tolist()[::-1],
-            fill="toself",
-            fillcolor=f"hsla({hue}, 50%, 50%, 0.2)",
-            line=dict(color="rgba(255,255,255,0)"),
-            name=f"HDI Range ({label})",
-            hoverinfo="skip",
-            visible=idx == 0,
-        )
-        return [lower, upper, fill]
-
-    def _create_dropdown_buttons(
+    def _build_figure(
         self,
         entity_ids: List[int],
-        name_map: Optional[Dict[int, str]],
-        traces_per_entity: int,
         target: str,
-    ) -> List[dict]:
-        buttons = []
-        for idx, entity_id in enumerate(entity_ids):
-            label = self._get_entity_label(entity_id, name_map)
-            visibility = [False] * (len(entity_ids) * traces_per_entity)
-            start = idx * traces_per_entity
-            visibility[start : start + traces_per_entity] = [True] * traces_per_entity
-            buttons.append(
-                dict(
-                    label=label,
-                    method="update",
-                    args=[{"visible": visibility}, {"title": f"{target} - {label}"}],
-                )
+        name_map: Optional[Dict[int, str]],
+        hist_df: Optional[pl.DataFrame],
+        pred_df: Optional[pl.DataFrame],
+        hdi_df: Optional[pl.DataFrame],
+        map_df: Optional[pl.DataFrame],
+        vline: Optional[int],
+    ) -> go.Figure:
+        fig = go.Figure()
+        traces: List[go.Scatter] = []
+
+        fc_target = f"pred_{target}"
+        hdi_lo_col = f"{fc_target}_hdi_lower"
+        hdi_hi_col = f"{fc_target}_hdi_upper"
+        map_col = f"{fc_target}_map"
+
+        has_hist = hist_df is not None and target in hist_df.columns
+        has_pred = pred_df is not None and fc_target in pred_df.columns
+        has_hdi = (
+            hdi_df is not None
+            and hdi_lo_col in hdi_df.columns
+            and hdi_hi_col in hdi_df.columns
+        )
+        has_map = map_df is not None and map_col in map_df.columns
+
+        # Traces-per-entity (for visibility toggling)
+        tpe = 0
+        if has_hist:
+            tpe += 1
+        if has_pred:
+            if has_hdi:
+                tpe += 3  # lower + upper + fill band
+                if has_map:
+                    tpe += 1
+            else:
+                tpe += 1
+
+        for idx, eid in enumerate(entity_ids):
+            color = self._entity_color(idx)
+            label = self._entity_label(eid, name_map)
+            visible = idx == 0
+
+            # ---- Historical ----
+            if has_hist:
+                ent = hist_df.filter(pl.col(self._entity_col) == eid)
+                traces.append(go.Scatter(
+                    x=ent[self._time_col].to_list(),
+                    y=self._scalar_values(ent, target),
+                    mode="lines+markers",
+                    name=f"{label} (Historical)",
+                    line=dict(color="grey", width=1.5),
+                    marker=dict(size=4),
+                    visible=visible,
+                ))
+
+            # ---- Forecast (HDI or plain) ----
+            if has_pred:
+                if has_hdi:
+                    hdi_ent = hdi_df.filter(pl.col(self._entity_col) == eid)
+                    t_vals = hdi_ent[self._time_col].to_list()
+                    lo = hdi_ent[hdi_lo_col].to_list()
+                    hi = hdi_ent[hdi_hi_col].to_list()
+                    hue = (idx * 40) % 360
+
+                    traces.append(go.Scatter(
+                        x=t_vals, y=lo, mode="lines",
+                        name=f"HDI Lower ({label})",
+                        line=dict(color=color, width=1),
+                        visible=visible,
+                    ))
+                    traces.append(go.Scatter(
+                        x=t_vals, y=hi, mode="lines",
+                        name=f"HDI Upper ({label})",
+                        line=dict(color=color, width=1),
+                        visible=visible,
+                    ))
+                    traces.append(go.Scatter(
+                        x=t_vals + t_vals[::-1],
+                        y=hi + lo[::-1],
+                        fill="toself",
+                        fillcolor=f"hsla({hue}, 50%, 50%, 0.2)",
+                        line=dict(color="rgba(255,255,255,0)"),
+                        name=f"HDI Range ({label})",
+                        hoverinfo="skip",
+                        visible=visible,
+                    ))
+
+                    if has_map:
+                        map_ent = map_df.filter(pl.col(self._entity_col) == eid)
+                        traces.append(go.Scatter(
+                            x=map_ent[self._time_col].to_list(),
+                            y=map_ent[map_col].to_list(),
+                            mode="lines",
+                            name=f"{label} (MAP)",
+                            line=dict(color=color, width=2),
+                            visible=visible,
+                        ))
+                else:
+                    ent = pred_df.filter(pl.col(self._entity_col) == eid)
+                    traces.append(go.Scatter(
+                        x=ent[self._time_col].to_list(),
+                        y=self._scalar_values(ent, fc_target),
+                        mode="lines+markers",
+                        name=f"{label} (Forecast)",
+                        line=dict(color=color, width=1.5),
+                        marker=dict(size=4),
+                        visible=visible,
+                    ))
+
+        fig.add_traces(traces)
+
+        if vline is not None:
+            fig.add_vline(
+                x=vline,
+                line=dict(color="black", dash="dot", width=1),
+                annotation_text="Forecast Start",
+                annotation_position="top right",
             )
-        return buttons
 
-    def _configure_dropdown(self, fig: go.Figure, buttons: List[dict]):
+        # Dropdown selector (only when >1 entity)
+        if len(entity_ids) > 1 and tpe > 0:
+            buttons = []
+            for idx, eid in enumerate(entity_ids):
+                lbl = self._entity_label(eid, name_map)
+                vis = [False] * (len(entity_ids) * tpe)
+                start = idx * tpe
+                vis[start : start + tpe] = [True] * tpe
+                buttons.append(dict(
+                    label=lbl,
+                    method="update",
+                    args=[{"visible": vis}, {"title": f"{target} - {lbl}"}],
+                ))
+            fig.update_layout(
+                updatemenus=[dict(
+                    buttons=buttons, direction="down",
+                    showactive=True, x=1.05, xanchor="left",
+                    y=1.1, yanchor="top",
+                )],
+                margin=dict(r=150),
+            )
+
+        self._apply_layout(fig, target)
+        return fig
+
+    # ==================================================================
+    # Helpers
+    # ==================================================================
+
+    @staticmethod
+    def _scalar_values(df: pl.DataFrame, col: str) -> list:
+        """Extract column values, unwrapping single-element list/array columns."""
+        s = df[col]
+        if s.dtype.base_type() in (pl.List, pl.Array):
+            return [
+                v[0] if v is not None and len(v) == 1 else v
+                for v in s.to_list()
+            ]
+        return s.to_list()
+
+    @staticmethod
+    def _entity_color(idx: int) -> str:
+        hue = (idx * 40) % 360
+        return f"hsl({hue}, 50%, 50%)"
+
+    @staticmethod
+    def _entity_label(eid: int, name_map: Optional[Dict[int, str]]) -> str:
+        if name_map is None:
+            return f"Entity {eid}"
+        return name_map.get(eid, f"Entity {eid}")
+
+    def _apply_layout(self, fig: go.Figure, target: str) -> None:
         fig.update_layout(
-            updatemenus=[
-                dict(
-                    buttons=buttons,
-                    direction="down",
-                    showactive=True,
-                    x=1.05,
-                    xanchor="left",
-                    y=1.1,
-                    yanchor="top",
-                )
-            ],
-            margin=dict(r=150),
-        )
-
-    def _add_cutoff_line(self, fig: go.Figure, vline: int):
-        fig.add_vline(
-            x=vline,
-            line=dict(color="black", dash="dot", width=1),
-            annotation_text="Forecast Start",
-            annotation_position="top right",
-        )
-
-    def _format_interactive_plot(self, fig: go.Figure, target: str):
-        if self.historical_dataset is not None:
-            time_id = self.historical_dataset.time_col
-        elif self.forecast_dataset is not None:
-            time_id = self.forecast_dataset.time_col
-        else:
-            raise RuntimeError("No time_id available for formatting")
-        fig.update_layout(
-            # title=f"{target} - Historical vs Forecast",
             title="",
-            xaxis_title=f"Time Period ({time_id})",
-            yaxis_title=f"{target}",
+            xaxis_title=f"Time Period ({self._time_col})",
+            yaxis_title=target,
             legend_title="Series",
             hovermode="x unified",
             template="plotly_white",

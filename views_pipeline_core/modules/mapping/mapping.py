@@ -2,9 +2,8 @@ import polars as pl
 import numpy as np
 import geopandas as gpd
 from views_pipeline_core.modules.dataset.core import (
-    PriogridMonthDataset,
-    CountryMonthDataset,
-    SpatioTemporalDataset,
+    PriogridDataset,
+    CountryDataset,
 )
 import logging
 from typing import Union, Optional, List
@@ -84,7 +83,7 @@ class MappingModule:
 
     # ------------------------------------------------------------------ init
     def __init__(
-        self, views_dataset: Union[PriogridMonthDataset, CountryMonthDataset]
+        self, views_dataset: Union[PriogridDataset, CountryDataset]
     ):
         """
         Initialize mapping module.
@@ -93,7 +92,7 @@ class MappingModule:
         FeatureCollection, and caches attribute tables for fast Polars joins.
 
         Args:
-            views_dataset: ``PriogridMonthDataset`` or ``CountryMonthDataset``.
+            views_dataset: ``PriogridDataset`` or ``CountryDataset``.
 
         Raises:
             ValueError: If dataset is not a valid type.
@@ -103,15 +102,15 @@ class MappingModule:
         self._entity_id = self._dataset.entity_col
         self._time_id = self._dataset.time_col
 
-        if isinstance(views_dataset, PriogridMonthDataset):
+        if isinstance(views_dataset, PriogridDataset):
             self._location_col = "gid"
             self._hover_columns = self._PRIOGRID_HOVER_COLS
-        elif isinstance(views_dataset, CountryMonthDataset):
+        elif isinstance(views_dataset, CountryDataset):
             self._location_col = "ADM0_A3"
             self._hover_columns = self._COUNTRY_HOVER_COLS
         else:
             raise ValueError(
-                "Invalid dataset type. Must be PriogridMonthDataset or CountryMonthDataset."
+                "Invalid dataset type. Must be PriogridDataset or CountryDataset."
             )
 
         # Load GeoParquet → GeoJSON + attribute table
@@ -130,7 +129,7 @@ class MappingModule:
         """
         assets = Path(__file__).parent.parent.parent / "assets" / "shapefiles"
 
-        if isinstance(self._dataset, PriogridMonthDataset):
+        if isinstance(self._dataset, PriogridDataset):
             parquet_path = assets / "priogrid" / "priogrid_cell.parquet"
             shp_fallback = assets / "priogrid" / "priogrid_cell.shp"
         else:
@@ -147,7 +146,7 @@ class MappingModule:
                 parquet_path,
             )
             gdf = gpd.read_file(shp_fallback).to_crs(epsg=4326)
-            if isinstance(self._dataset, PriogridMonthDataset):
+            if isinstance(self._dataset, PriogridDataset):
                 keep = [c for c in ["gid", "row", "col", "xcoord", "ycoord"] if c in gdf.columns]
                 gdf = gdf[keep + ["geometry"]]
                 gdf["geometry"] = gdf.geometry.simplify(0.005, preserve_topology=True)
@@ -224,7 +223,7 @@ class MappingModule:
         df = df.rename({"name": "country_name"})
 
         # Join with shapefile attribute table
-        if isinstance(self._dataset, CountryMonthDataset):
+        if isinstance(self._dataset, CountryDataset):
             # shapefile keyed by ADM0_A3 == isoab
             df = df.join(
                 self._attribute_table,
@@ -235,7 +234,7 @@ class MappingModule:
             # Polars drops the right key column; restore it for GeoJSON matching
             if "ADM0_A3" not in df.columns:
                 df = df.with_columns(pl.col("isoab").alias("ADM0_A3"))
-        elif isinstance(self._dataset, PriogridMonthDataset):
+        elif isinstance(self._dataset, PriogridDataset):
             df = df.join(
                 self._attribute_table,
                 left_on=self._entity_id,
@@ -319,7 +318,7 @@ class MappingModule:
     ) -> Dict[str, float]:
         """Compute zoom/center from data extent or fall back to defaults."""
         if (
-            isinstance(self._dataset, PriogridMonthDataset)
+            isinstance(self._dataset, PriogridDataset)
             and "xcoord" in df.columns
             and "ycoord" in df.columns
         ):
