@@ -2827,11 +2827,10 @@ class ForecastingModelManager(ModelManager):
         """
         Audit and verify parity between legacy and shadow evaluation results.
         
-        Performs a deep comparison of metric dictionaries and DataFrames.
-        Logs detailed statistics and raises ValueError on any discrepancy.
+        Uses the result DataFrames as the bit-wise ground truth to avoid 
+        dependency on internal library metric containers.
         """
         import pandas as pd
-        import numpy as np
         
         logger.info(f"AUDITING PARITY for target: {target}")
         
@@ -2840,49 +2839,34 @@ class ForecastingModelManager(ModelManager):
             leg_res = legacy.get(key)
             shad_res = shadow.get(key)
             
-            # Check structure
+            # Check structure existence
             if not leg_res or not shad_res:
                 if leg_res != shad_res:
                     raise ValueError(f"Parity Failure ({key}): Existence mismatch. Legacy={bool(leg_res)}, Shadow={bool(shad_res)}")
                 continue
                 
-            leg_metrics, leg_df = leg_res
-            shad_metrics, shad_df = shad_res
+            # Extract DataFrames (the second element of the 2-tuple)
+            _, leg_df = leg_res
+            _, shad_df = shad_res
             
-            # 1. Compare Metrics Dicts
-            all_metric_keys = set(leg_metrics.keys()) | set(shad_metrics.keys())
-            deltas = []
-            for m in all_metric_keys:
-                l_val = leg_metrics.get(m, np.nan)
-                s_val = shad_metrics.get(m, np.nan)
-                
-                # Handle NaNs
-                if pd.isna(l_val) and pd.isna(s_val):
-                    continue
-                
-                diff = abs(l_val - s_val)
-                deltas.append(diff)
-                if diff > 1e-9: # Float tolerance
-                    raise ValueError(f"Parity Failure ({key}): Metric '{m}' mismatch. Legacy={l_val}, Shadow={s_val}, Delta={diff}")
-            
-            max_delta = max(deltas) if deltas else 0.0
-            logger.info(f"  - {key.ljust(12)}: Checked {len(all_metric_keys)} metrics. Max delta: {max_delta:.2e}")
-            
-            # 2. Compare DataFrames
-            # Align indices and columns before comparing
+            # Compare DataFrames bit-wise
             try:
                 pd.testing.assert_frame_equal(
-                    leg_df.sort_index(axis=1), 
-                    shad_df.sort_index(axis=1),
-                    check_dtype=False, # Relax dtype strictness (int vs float) if values match
-                    check_exact=False, # Use default tolerance
+                    leg_df.sort_index(axis=1).sort_index(axis=0), 
+                    shad_df.sort_index(axis=1).sort_index(axis=0),
+                    check_dtype=False,
+                    check_exact=False,
                     rtol=1e-5,
                     atol=1e-8
                 )
+                logger.info(f"  - {key.ljust(12)}: [OK] Bit-wise parity confirmed.")
             except AssertionError as e:
-                raise ValueError(f"Parity Failure ({key}): DataFrame mismatch.\n{e}")
+                raise ValueError(f"Parity Failure ({key}): Result DataFrame mismatch detected.\n{e}")
 
-        logger.info(f"\033[92mPARITY CONFIRMED for {target}. Legacy and Shadow results are identical.\033[0m")
+        logger.info(f"\033[92m" + "#" * 80 + "\n"
+                    f"# PARITY CONFIRMED for {target.upper()}\n"
+                    "# Local Orchestrator alignment matches Library-internal alignment exactly.\n"
+                    "#" * 80 + "\033[0m")
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
         """

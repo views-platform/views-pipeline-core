@@ -4,25 +4,23 @@ import numpy as np
 from unittest.mock import MagicMock
 import sys
 
-# Mock views_evaluation if not installed, or to control behavior
-try:
-    from views_evaluation.evaluation.evaluation_frame import EvaluationFrame
-except ImportError:
-    # Create a dummy class for testing if package missing
-    class EvaluationFrame:
-        def __init__(self, y_true, y_pred, identifiers, metadata):
-            self.y_true = y_true
-            self.y_pred = y_pred
-            self.identifiers = identifiers
-            self.metadata = metadata
+# 1. Create a dummy EvaluationFrame that behaves like a real object (not a mock)
+class DummyEvaluationFrame:
+    def __init__(self, y_true, y_pred, identifiers, metadata):
+        self.y_true = y_true
+        self.y_pred = y_pred
+        self.identifiers = identifiers
+        self.metadata = metadata
 
-    # Patch modules so adapter can import it
-    mock_eval = MagicMock()
-    mock_eval.evaluation.evaluation_frame.EvaluationFrame = EvaluationFrame
-    sys.modules['views_evaluation'] = mock_eval
-    sys.modules['views_evaluation.evaluation'] = mock_eval.evaluation
-    sys.modules['views_evaluation.evaluation.evaluation_frame'] = mock_eval.evaluation.evaluation_frame
+# 2. Setup mocking BEFORE importing PandasAdapter
+# Ensure views_evaluation structure is present so adapter can import from it
+mock_eval = MagicMock()
+mock_eval.evaluation.evaluation_frame.EvaluationFrame = DummyEvaluationFrame
+sys.modules['views_evaluation'] = mock_eval
+sys.modules['views_evaluation.evaluation'] = mock_eval.evaluation
+sys.modules['views_evaluation.evaluation.evaluation_frame'] = mock_eval.evaluation.evaluation_frame
 
+# 3. Now import PandasAdapter (it will pick up DummyEvaluationFrame)
 from views_pipeline_core.modules.validation.adapter import PandasAdapter
 
 class TestPandasAdapter:
@@ -48,6 +46,9 @@ class TestPandasAdapter:
         df_actual, df_pred = sample_data
         
         ef = PandasAdapter.from_dataframes(df_actual, [df_pred], 'target')
+        
+        # Should be an instance of our dummy class
+        assert isinstance(ef, DummyEvaluationFrame)
         
         # Should contain 3 rows (intersection)
         assert len(ef.y_true) == 3
@@ -114,4 +115,3 @@ class TestPandasAdapter:
         
         with pytest.raises(ValueError, match="need at least one array to concatenate"):
             PandasAdapter.from_dataframes(df_actual, [df_pred_bad], 'target')
-
