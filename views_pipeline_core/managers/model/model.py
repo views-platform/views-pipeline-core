@@ -2745,15 +2745,23 @@ class ForecastingModelManager(ModelManager):
                 
                 # SHADOW RUN ADAPTATION: Create EvaluationFrame locally
                 from views_pipeline_core.modules.validation.adapter import PandasAdapter
+                from views_pipeline_core.data.prediction_frame import PredictionFrame
                 
                 # Note: We must slice inputs exactly as we do for the legacy call
                 actual_slice = df_actual[[target]]
+                raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
                 pred_slices = [df[[f"pred_{target}"]] for df in raw_preds]
                 
+                # Fulfill ADR-012: Explicit Step Mapping
+                # Derived from the forecast origin and requested steps in config
+                step_mapping = self._get_evaluation_step_mapping()
+
+                # Local Adaptation
                 ef = PandasAdapter.from_dataframes(
                     actual=actual_slice,
                     predictions=pred_slices,
-                    target=target
+                    target=target,
+                    step_mapping=step_mapping
                 )
 
                 # --- EXPLICIT PARITY PROVING MODE ---
@@ -2822,6 +2830,35 @@ class ForecastingModelManager(ModelManager):
             text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
             notifications_enabled=self._wandb_notifications,
         )
+
+    def _get_evaluation_step_mapping(self) -> Dict[int, int]:
+        """
+        Build an explicit mapping of month_id to step_id based on the forecast origin.
+        
+        Fulfills ADR-012 (Authority over Inference) by providing explicit lead-times
+        derived from the pipeline configuration.
+        """
+        # Origin month depends on run_type
+        if self.args.run_type == "forecasting" and hasattr(self, '_data_loader') and self._data_loader:
+            month_origin = self._data_loader.month_last # The month before forecasting starts
+        elif self._partition_dict and 'train' in self._partition_dict:
+            # For calibration/validation, the 'origin' is the last month of the training set
+            # partition_dict format: {'train': (start, end), 'test': (start, end)}
+            month_origin = self._partition_dict['train'][1]
+        else:
+            # Fallback for unit tests where partitions might be mocked/empty
+            logger.debug("Partition 'train' not found in config. Defaulting origin to 0 for step mapping.")
+            month_origin = 0
+
+        # Use the steps defined in hyperparameters as the authority
+        steps = self.configs.get("steps", [*range(1, 36 + 1, 1)])
+        
+        mapping = {
+            month_origin + s: s for s in steps
+        }
+        
+        logger.debug(f"Step mapping built for origin {month_origin}: {mapping}")
+        return mapping
 
     def _audit_parity(self, legacy: Dict, shadow: Dict, target: str) -> None:
         """

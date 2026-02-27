@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from typing import List
+from typing import List, Dict, Any
 from views_evaluation.evaluation.evaluation_frame import EvaluationFrame
 
 class PandasAdapter:
@@ -16,6 +16,7 @@ class PandasAdapter:
         actual: pd.DataFrame,
         predictions: List[pd.DataFrame],
         target: str,
+        step_mapping: Dict[int, int] = None,
     ) -> EvaluationFrame:
         """
         Convert the current List[DataFrame] structure into a single EvaluationFrame.
@@ -24,6 +25,9 @@ class PandasAdapter:
             actual: DataFrame with MultiIndex [time, unit]
             predictions: List of DataFrames with MultiIndex [time, unit]
             target: The name of the target column
+            step_mapping: Optional dictionary mapping month_id to step_id.
+                          If provided, used for explicit step assignment.
+                          If None, steps are inferred positionally (Legacy).
         """
         
         all_y_true = []
@@ -100,10 +104,21 @@ class PandasAdapter:
             # Origin is the list index
             all_origins.append(np.full(n_rows, i))
             
-            # Step is positional lead-time per unique month in the sequence
-            unique_times = matched_pred.index.get_level_values(0).unique()
-            time_to_step = {t: step_idx + 1 for step_idx, t in enumerate(unique_times)}
-            steps = np.array([time_to_step[t] for t in times])
+            # Step assignment (ADR-012 compliance)
+            if step_mapping is not None:
+                # Explicit assignment
+                steps = []
+                for t in times:
+                    if t not in step_mapping:
+                        raise ValueError(f"Month ID {t} not found in step_mapping.")
+                    steps.append(step_mapping[t])
+                steps = np.array(steps)
+            else:
+                # Step is positional lead-time per unique month in the sequence (Legacy)
+                unique_times = matched_pred.index.get_level_values(0).unique()
+                time_to_step = {t: step_idx + 1 for step_idx, t in enumerate(unique_times)}
+                steps = np.array([time_to_step[t] for t in times])
+            
             all_steps.append(steps)
             
         if not all_y_true:
@@ -126,6 +141,82 @@ class PandasAdapter:
                 'unit': np.concatenate(all_units),
                 'origin': np.concatenate(all_origins),
                 'step': np.concatenate(all_steps),
+            },
+            metadata={'target': target}
+        )
+
+    @staticmethod
+    def from_prediction_frame(
+        actual: pd.DataFrame,
+        prediction_frame: Any,  # Avoid circular import, type is PredictionFrame
+        target: str,
+        step_mapping: Dict[int, int] = None,
+    ) -> EvaluationFrame:
+        """
+        Convert a PredictionFrame into an EvaluationFrame by aligning with actuals.
+        
+        Args:
+            actual: DataFrame with MultiIndex [time, unit]
+            prediction_frame: PredictionFrame containing arrays
+            target: The name of the target column in actuals
+            step_mapping: Optional explicit lead-time mapping
+        """
+        if target not in actual.columns:
+            raise KeyError(f"Target column '{target}' not found in actuals.")
+
+        # 1. Alignment (Intersection)
+        # We must align the prediction_frame arrays with the actuals index.
+        # Since PredictionFrame has flat arrays, we'll use pandas to perform 
+        # the intersection efficiently.
+        
+        # Create a temporary index from PF identifiers to perform intersection
+        pf_index = pd.MultiIndex.from_arrays(
+            [prediction_frame.identifiers['time'], prediction_frame.identifiers['unit']],
+            names=actual.index.names
+        )
+        
+        common_idx = actual.index.intersection(pf_index)
+        if common_idx.empty:
+            raise ValueError("need at least one array to concatenate")
+
+        # 2. Extract matched data
+        # We need to find the integer locations in pf_index that match common_idx
+        # This preserves the "Join" semantics exactly.
+        pf_locs = pf_index.get_indexer(common_idx)
+        
+        y_pred = prediction_frame.y_pred[pf_locs]
+        y_true = actual.loc[common_idx, target].values
+        
+        # Coerce legacy actuals if needed
+        if y_true.dtype == object:
+            y_true = np.array([
+                x[0] if isinstance(x, (list, np.ndarray)) and len(x) > 0 else x 
+                for x in y_true
+            ])
+
+        # 3. Identifiers
+        times = prediction_frame.identifiers['time'][pf_locs]
+        units = prediction_frame.identifiers['unit'][pf_locs]
+        
+        # 4. Synthesize Origin and Step
+        origin = np.zeros(len(y_true), dtype=int) # Single sequence for PredictionFrame
+        
+        if step_mapping is not None:
+            steps = np.array([step_mapping[t] for t in times])
+        else:
+            # Positional inference (consistent with legacy from_dataframes)
+            unique_times = pd.Series(times).unique()
+            time_to_step = {t: i + 1 for i, t in enumerate(unique_times)}
+            steps = np.array([time_to_step[t] for t in times])
+
+        return EvaluationFrame(
+            y_true=y_true,
+            y_pred=y_pred,
+            identifiers={
+                'time': times,
+                'unit': units,
+                'origin': origin,
+                'step': steps,
             },
             metadata={'target': target}
         )

@@ -302,6 +302,23 @@ def test_GI_3_legacy_fallback_integrity(mock_deps):
         mock_eval_mgr_cls.assert_called_once_with()
         assert mock_eval_inst.evaluate.call_args.args[2] == "legacy_t"
 
+def test_GI_4_explicit_step_mapping_authority(mock_deps):
+    """PROVE that lead-times are derived from explicit mapping, fulfilling ADR-012."""
+    mock_eval_mgr_cls, _ = mock_deps
+    mgr = get_test_manager()
+    
+    # Train end is 100. Requested steps are 1 and 3.
+    mgr._partition_dict = {'train': (1, 100), 'test': (101, 103)}
+    mgr.configs = {
+        "regression_targets": ["t1"], "regression_point_metrics": ["mse"],
+        "targets": ["t1"], "steps": [1, 3], "sweep": False
+    }
+    
+    mapping = mgr._get_evaluation_step_mapping()
+    
+    # Expected: {101: 1, 103: 3}
+    assert mapping == {101: 1, 103: 3}
+
 def test_R3_garbage_metric_strings():
     """Verify passing non-metric strings doesn't trigger the scalar gate."""
     mgr = get_test_manager()
