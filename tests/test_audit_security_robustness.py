@@ -314,10 +314,12 @@ def test_GI_4_explicit_step_mapping_authority(mock_deps):
         "targets": ["t1"], "steps": [1, 3], "sweep": False
     }
     
-    mapping = mgr._get_evaluation_step_mapping()
-    
-    # Expected: {101: 1, 103: 3}
-    assert mapping == {101: 1, 103: 3}
+    mappings = mgr._get_evaluation_step_mappings(n_sequences=1)
+
+    # For a single-sequence run, the first (and only) mapping covers base_origin+s → s.
+    # base_origin = partition_dict['train'][1] = 100, steps = [1, 3]
+    # Expected: [{101: 1, 103: 3}]
+    assert mappings[0] == {101: 1, 103: 3}
 
 def test_R3_garbage_metric_strings():
     """Verify passing non-metric strings doesn't trigger the scalar gate."""

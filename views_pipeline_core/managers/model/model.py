@@ -2745,23 +2745,22 @@ class ForecastingModelManager(ModelManager):
                 
                 # SHADOW RUN ADAPTATION: Create EvaluationFrame locally
                 from views_pipeline_core.modules.validation.adapter import PandasAdapter
-                from views_pipeline_core.data.prediction_frame import PredictionFrame
                 
                 # Note: We must slice inputs exactly as we do for the legacy call
                 actual_slice = df_actual[[target]]
                 raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
                 pred_slices = [df[[f"pred_{target}"]] for df in raw_preds]
                 
-                # Fulfill ADR-012: Explicit Step Mapping
-                # Derived from the forecast origin and requested steps in config
-                step_mapping = self._get_evaluation_step_mapping()
+                # Fulfill ADR-031: Explicit per-sequence step mappings for rolling-origin evaluation.
+                # Each sequence i is anchored at base_origin + i, so its mapping shifts accordingly.
+                step_mappings = self._get_evaluation_step_mappings(n_sequences=len(pred_slices))
 
                 # Local Adaptation
                 ef = PandasAdapter.from_dataframes(
                     actual=actual_slice,
                     predictions=pred_slices,
                     target=target,
-                    step_mapping=step_mapping
+                    step_mapping=step_mappings
                 )
 
                 # --- EXPLICIT PARITY PROVING MODE ---
@@ -2831,34 +2830,44 @@ class ForecastingModelManager(ModelManager):
             notifications_enabled=self._wandb_notifications,
         )
 
-    def _get_evaluation_step_mapping(self) -> Dict[int, int]:
+    def _get_evaluation_step_mappings(self, n_sequences: int) -> List[Dict[int, int]]:
         """
-        Build an explicit mapping of month_id to step_id based on the forecast origin.
-        
-        Fulfills ADR-012 (Authority over Inference) by providing explicit lead-times
-        derived from the pipeline configuration.
-        """
-        # Origin month depends on run_type
-        if self.args.run_type == "forecasting" and hasattr(self, '_data_loader') and self._data_loader:
-            month_origin = self._data_loader.month_last # The month before forecasting starts
-        elif self._partition_dict and 'train' in self._partition_dict:
-            # For calibration/validation, the 'origin' is the last month of the training set
-            # partition_dict format: {'train': (start, end), 'test': (start, end)}
-            month_origin = self._partition_dict['train'][1]
-        else:
-            # Fallback for unit tests where partitions might be mocked/empty
-            logger.debug("Partition 'train' not found in config. Defaulting origin to 0 for step mapping.")
-            month_origin = 0
+        Build one step mapping per evaluation sequence for rolling-origin evaluation.
 
-        # Use the steps defined in hyperparameters as the authority
+        Fulfills ADR-031 (Authority over Inference): the orchestrator is the sole
+        authority on lead-times. Each sequence i is anchored at (base_origin + i),
+        shifting the origin by one month per sequence as in standard rolling-origin
+        cross-validation.
+
+        Args:
+            n_sequences: Number of prediction sequences (len of df_predictions list).
+
+        Returns:
+            List of dicts, one per sequence: [{base_origin+i+s: s for s in steps} ...]
+        """
+        if self.args.run_type == "forecasting" and hasattr(self, '_data_loader') and self._data_loader:
+            base_origin = self._data_loader.month_last
+        elif self._partition_dict and 'train' in self._partition_dict:
+            # For calibration/validation the base origin is the last month of training
+            base_origin = self._partition_dict['train'][1]
+        else:
+            # Fallback for unit tests where partitions may be mocked/empty
+            logger.debug("Partition 'train' not found. Defaulting base_origin to 0.")
+            base_origin = 0
+
         steps = self.configs.get("steps", [*range(1, 36 + 1, 1)])
-        
-        mapping = {
-            month_origin + s: s for s in steps
-        }
-        
-        logger.debug(f"Step mapping built for origin {month_origin}: {mapping}")
-        return mapping
+
+        mappings = [
+            {base_origin + i + s: s for s in steps}
+            for i in range(n_sequences)
+        ]
+
+        logger.debug(
+            f"Step mappings built for {n_sequences} sequences "
+            f"from base_origin {base_origin}: "
+            f"seq[0]={mappings[0] if mappings else {}}"
+        )
+        return mappings
 
     def _audit_parity(self, legacy: Dict, shadow: Dict, target: str) -> None:
         """
@@ -2900,7 +2909,7 @@ class ForecastingModelManager(ModelManager):
             except AssertionError as e:
                 raise ValueError(f"Parity Failure ({key}): Result DataFrame mismatch detected.\n{e}")
 
-        logger.info(f"\033[92m" + "#" * 80 + "\n"
+        logger.info("\033[92m" + "#" * 80 + "\n"
                     f"# PARITY CONFIRMED for {target.upper()}\n"
                     "# Local Orchestrator alignment matches Library-internal alignment exactly.\n"
                     "#" * 80 + "\033[0m")

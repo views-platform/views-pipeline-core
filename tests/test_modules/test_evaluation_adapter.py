@@ -154,10 +154,63 @@ class TestPandasAdapter:
     def test_no_overlap_raises(self, sample_data):
         """Verify fail-loud on zero overlap."""
         df_actual, _ = sample_data
-        
+
         # Disjoint index
         idx_no_overlap = pd.MultiIndex.from_tuples([(999, 999)], names=['month_id', 'country_id'])
         df_pred_bad = pd.DataFrame({'pred_target': [0.0]}, index=idx_no_overlap)
-        
+
         with pytest.raises(ValueError, match="need at least one array to concatenate"):
             PandasAdapter.from_dataframes(df_actual, [df_pred_bad], 'target')
+
+    def test_static_mapping_fails_rolling_origin(self):
+        """
+        Regression test: a single static step_mapping crashes when a later rolling-origin
+        sequence predicts months beyond the first sequence's window.
+
+        This documents the production bug: Month ID {N} not found in step_mapping.
+        """
+        idx_0 = pd.MultiIndex.from_tuples([(1, 1), (2, 1), (3, 1)], names=['month_id', 'country_id'])
+        idx_1 = pd.MultiIndex.from_tuples([(2, 1), (3, 1), (4, 1)], names=['month_id', 'country_id'])
+        idx_all = pd.MultiIndex.from_product([[1, 2, 3, 4], [1]], names=['month_id', 'country_id'])
+        df_actual  = pd.DataFrame({'target':      [1., 2., 3., 4.]}, index=idx_all)
+        df_pred_0  = pd.DataFrame({'pred_target': [1.1, 2.1, 3.1]}, index=idx_0)
+        df_pred_1  = pd.DataFrame({'pred_target': [2.1, 3.1, 4.1]}, index=idx_1)
+
+        # Static mapping only covers sequence 0's window; month 4 is missing.
+        static_mapping = {1: 1, 2: 2, 3: 3}
+
+        with pytest.raises(ValueError, match="not found in step_mapping"):
+            PandasAdapter.from_dataframes(df_actual, [df_pred_0, df_pred_1],
+                                          'target', step_mapping=static_mapping)
+
+    def test_rolling_origin_per_sequence_mapping(self):
+        """
+        Verify that passing a List[Dict] gives each sequence its own step mapping,
+        correctly labelling months that appear in multiple rolling-origin windows.
+
+        Month 2 appears in both sequences:
+          - sequence 0 (origin 0): month 2 → step 2
+          - sequence 1 (origin 1): month 2 → step 1
+        A single static mapping cannot represent both; the per-sequence list can.
+        """
+        idx_0 = pd.MultiIndex.from_tuples([(1, 1), (2, 1), (3, 1)], names=['month_id', 'country_id'])
+        idx_1 = pd.MultiIndex.from_tuples([(2, 1), (3, 1), (4, 1)], names=['month_id', 'country_id'])
+        idx_all = pd.MultiIndex.from_product([[1, 2, 3, 4], [1]], names=['month_id', 'country_id'])
+        df_actual  = pd.DataFrame({'target':      [1., 2., 3., 4.]}, index=idx_all)
+        df_pred_0  = pd.DataFrame({'pred_target': [1.1, 2.1, 3.1]}, index=idx_0)
+        df_pred_1  = pd.DataFrame({'pred_target': [2.1, 3.1, 4.1]}, index=idx_1)
+
+        step_mappings = [
+            {1: 1, 2: 2, 3: 3},  # sequence 0: origin 0
+            {2: 1, 3: 2, 4: 3},  # sequence 1: origin 1
+        ]
+
+        ef = PandasAdapter.from_dataframes(
+            df_actual, [df_pred_0, df_pred_1], 'target', step_mapping=step_mappings
+        )
+
+        # 6 rows total (3 from each sequence)
+        assert len(ef.y_true) == 6
+        # Steps must follow each sequence's own origin, not a global mapping
+        np.testing.assert_array_equal(ef.identifiers['step'],   np.array([1, 2, 3, 1, 2, 3]))
+        np.testing.assert_array_equal(ef.identifiers['origin'], np.array([0, 0, 0, 1, 1, 1]))

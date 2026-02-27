@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Any
+from typing import Dict, List, Any, Optional, Union
 from views_evaluation.evaluation.evaluation_frame import EvaluationFrame
 
 class PandasAdapter:
@@ -16,18 +16,20 @@ class PandasAdapter:
         actual: pd.DataFrame,
         predictions: List[pd.DataFrame],
         target: str,
-        step_mapping: Dict[int, int] = None,
+        step_mapping: Optional[Union[Dict[int, int], List[Dict[int, int]]]] = None,
     ) -> EvaluationFrame:
         """
         Convert the current List[DataFrame] structure into a single EvaluationFrame.
-        
+
         Args:
             actual: DataFrame with MultiIndex [time, unit]
             predictions: List of DataFrames with MultiIndex [time, unit]
             target: The name of the target column
-            step_mapping: Optional dictionary mapping month_id to step_id.
-                          If provided, used for explicit step assignment.
-                          If None, steps are inferred positionally (Legacy).
+            step_mapping: Optional step assignment authority.
+                - Dict[int, int]: a single mapping applied to all sequences (single-origin).
+                - List[Dict[int, int]]: one mapping per sequence for rolling-origin evaluation
+                  where each sequence is anchored at a different origin month.
+                - None: steps are inferred positionally (Legacy fallback).
         """
         
         all_y_true = []
@@ -103,15 +105,22 @@ class PandasAdapter:
             # 4. Synthesize Origin and Step
             # Origin is the list index
             all_origins.append(np.full(n_rows, i))
-            
-            # Step assignment (ADR-012 compliance)
-            if step_mapping is not None:
-                # Explicit assignment
+
+            # Resolve the mapping for THIS sequence (ADR-031 compliance)
+            if isinstance(step_mapping, list):
+                seq_mapping = step_mapping[i]   # rolling-origin: one dict per sequence
+            else:
+                seq_mapping = step_mapping      # single dict or None: backward-compatible
+
+            # Step assignment
+            if seq_mapping is not None:
                 steps = []
                 for t in times:
-                    if t not in step_mapping:
-                        raise ValueError(f"Month ID {t} not found in step_mapping.")
-                    steps.append(step_mapping[t])
+                    if t not in seq_mapping:
+                        raise ValueError(
+                            f"Month ID {t} not found in step_mapping for sequence {i}."
+                        )
+                    steps.append(seq_mapping[t])
                 steps = np.array(steps)
             else:
                 # Step is positional lead-time per unique month in the sequence (Legacy)

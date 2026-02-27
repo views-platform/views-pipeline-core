@@ -283,6 +283,70 @@ class TestForecastingModelManagerStatic:
 
 
 # ============================================================================
+# Test _get_evaluation_step_mappings (rolling-origin fix, ADR-031)
+# ============================================================================
+
+class TestGetEvaluationStepMappings:
+    @pytest.fixture
+    def manager(self, mock_model_path):
+        """Create a minimally configured manager for method-level tests."""
+        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+            with patch('views_pipeline_core.modules.wandb.WandBModule'):
+                with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
+                    with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
+                        with patch('views_pipeline_core.modules.logging.LoggingModule'):
+                            m = ForecastingModelManager(model_path=mock_model_path)
+                            m.configs = {'steps': [1, 2, 3]}
+                            m._partition_dict = {'train': (100, 200), 'test': (201, 203)}
+                            m._args = ForecastingModelArgs(run_type='calibration', train=True)
+                            return m
+
+    def test_returns_one_dict_per_sequence(self, manager):
+        """List length equals n_sequences."""
+        result = manager._get_evaluation_step_mappings(n_sequences=3)
+        assert len(result) == 3
+
+    def test_first_sequence_anchored_at_base_origin(self, manager):
+        """Sequence 0 maps base_origin+s → s for all steps."""
+        result = manager._get_evaluation_step_mappings(n_sequences=1)
+        # base_origin = partition_dict['train'][1] = 200, steps = [1,2,3]
+        assert result[0] == {201: 1, 202: 2, 203: 3}
+
+    def test_each_sequence_shifts_by_one_month(self, manager):
+        """Sequence i is anchored at base_origin + i."""
+        result = manager._get_evaluation_step_mappings(n_sequences=3)
+        assert result[0] == {201: 1, 202: 2, 203: 3}   # origin 200
+        assert result[1] == {202: 1, 203: 2, 204: 3}   # origin 201
+        assert result[2] == {203: 1, 204: 2, 205: 3}   # origin 202
+
+    def test_no_shared_month_id_maps_to_same_step_across_sequences(self, manager):
+        """Month 202 appears in seq 0 (step 2) and seq 1 (step 1): different steps."""
+        result = manager._get_evaluation_step_mappings(n_sequences=2)
+        assert result[0][202] == 2
+        assert result[1][202] == 1
+
+    def test_forecasting_run_type_uses_data_loader_origin(self, manager):
+        """For forecasting, base_origin comes from _data_loader.month_last."""
+        manager._args = ForecastingModelArgs(run_type='forecasting', train=True)
+        mock_loader = Mock()
+        mock_loader.month_last = 500
+        manager._data_loader = mock_loader
+        manager.configs = {'steps': [1, 2]}
+
+        result = manager._get_evaluation_step_mappings(n_sequences=1)
+        assert result[0] == {501: 1, 502: 2}
+
+    def test_missing_partition_defaults_to_zero_origin(self, manager):
+        """When partition dict is absent, base_origin defaults to 0."""
+        manager._partition_dict = {}
+        manager._args = ForecastingModelArgs(run_type='calibration', train=True)
+        manager.configs = {'steps': [1, 2]}
+
+        result = manager._get_evaluation_step_mappings(n_sequences=1)
+        assert result[0] == {1: 1, 2: 2}
+
+
+# ============================================================================
 # Test ForecastingModelManager Abstract Methods
 # ============================================================================
 
