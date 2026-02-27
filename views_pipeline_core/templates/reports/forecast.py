@@ -56,7 +56,8 @@ class ForecastReportTemplate:
                     forecast_dataset_map = type(forecast_dataset)(
                         data=forecast_dataset.calculate_map(
                             features=[f"pred_{target}"], return_pandas=True
-                        )
+                        ),
+                        fetch_metadata=True,
                     )
                     target = f"{target}_map"
 

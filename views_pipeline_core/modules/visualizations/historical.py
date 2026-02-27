@@ -213,7 +213,7 @@ class HistoricalLineGraph:
         if self.historical_dataset:
             ids.update(self.historical_dataset._unique_entities)
         if self.forecast_dataset:
-            ids.update(self.forecast_dataset._unique_entities)
+            ids.update(self.forecastP_dataset._unique_entities)
 
         all_ids = sorted(ids)
         if len(all_ids) > max_entities:
@@ -265,17 +265,30 @@ class HistoricalLineGraph:
     @staticmethod
     def _country_name_map(ds: CountryDataset) -> Dict[int, str]:
         df = ds.get_name(with_id=True)  # pl.DataFrame
+        unique_df = df.select(ds.entity_col, "name").unique(subset=[ds.entity_col])
+        null_ids = unique_df.filter(pl.col("name").is_null())[ds.entity_col].to_list()
+        if null_ids:
+            logger.warning(
+                f"{len(null_ids)} country entities have no name in metadata and will "
+                f"show as 'Entity <id>': {null_ids}"
+            )
         return dict(
-            df.select(ds.entity_col, "name")
-            .unique(subset=[ds.entity_col])
-            .filter(pl.col("name").is_not_null())
-            .iter_rows()
+            unique_df.filter(pl.col("name").is_not_null()).iter_rows()
         )
 
     @staticmethod
     def _priogrid_name_map(ds: PriogridDataset) -> Dict[int, str]:
         df = ds.get_name(with_id=True)  # pl.DataFrame
-        return dict(df.select(ds.entity_col, "name").iter_rows())
+        unique_df = df.select(ds.entity_col, "name").unique(subset=[ds.entity_col])
+        null_ids = unique_df.filter(pl.col("name").is_null())[ds.entity_col].to_list()
+        if null_ids:
+            logger.warning(
+                f"{len(null_ids)} priogrid entities have no name in metadata and will "
+                f"show as 'Entity <id>': {null_ids[:20]}{'...' if len(null_ids) > 20 else ''}"
+            )
+        return dict(
+            unique_df.filter(pl.col("name").is_not_null()).iter_rows()
+        )
 
     # ==================================================================
     # Figure construction

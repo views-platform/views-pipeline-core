@@ -114,8 +114,11 @@ class ReportModule:
         """
         Add interactive HTML visualization to report.
 
-        Embeds custom HTML (e.g., Plotly charts) in a styled container with
-        scrolling and optional hyperlink wrapper.
+        Embeds custom HTML (e.g., Plotly charts, deck.gl maps) in a styled
+        container. Full HTML documents (containing ``<!DOCTYPE`` or ``<html``)
+        are isolated in an ``<iframe srcdoc>`` so that multiple maps or
+        visualizations on the same page do not collide on global JS
+        variables, DOM ids, or WebGL contexts.
 
         Args:
             html: HTML string to embed (e.g., Plotly figure HTML)
@@ -140,13 +143,28 @@ class ReportModule:
         # Wrap with hyperlink if provided
         if link:
             html = f'<a href="{escape(link)}" target="_blank">{html}</a>'
-            
+
+        # Full HTML documents must be isolated in an iframe so that
+        # multiple deck.gl maps (or any full-page JS apps) on the
+        # same report page do not collide on global variables / DOM ids.
+        is_full_document = "<!DOCTYPE" in html[:100] or "<html" in html[:200]
+        if is_full_document:
+            srcdoc = escape(html, quote=True)
+            inner = (
+                f'<iframe srcdoc="{srcdoc}" '
+                f'style="width:100%;height:{height}px;border:none;" '
+                f'sandbox="allow-scripts allow-same-origin" '
+                f'loading="lazy"></iframe>'
+            )
+        else:
+            inner = html
+
         # Removed padding from the container div
         container = f"""
         <div class="visualization-card bg-white rounded-xl shadow-card overflow-hidden transition-all duration-300 hover:shadow-card-hover mb-7">
             <div class="gradient-bar"></div>
             <div class="overflow-auto" style="height: {height}px">
-                {html}
+                {inner}
             </div>
         </div>
         """
