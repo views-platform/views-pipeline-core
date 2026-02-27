@@ -6,7 +6,7 @@ from views_pipeline_core.modules.dataset.core import (
     CountryDataset,
 )
 import logging
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Dict
 from pathlib import Path
 import json
 import gc
