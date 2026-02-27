@@ -101,6 +101,10 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
         "run_type": "calibration",
         "timestamp": "20260101",
     }
+    # Inject standard partition structure for strict validation
+    manager._partition_dict = {
+        'calibration': {'train': (1, 100), 'test': (101, 120)}
+    }
     manager._save_evaluations = MagicMock()
     manager._generate_evaluation_table = MagicMock(return_value="table")
     manager._wandb_module = MagicMock()
@@ -109,7 +113,7 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
     # Prediction is a distribution (list of samples); column must be named pred_{target}
     df_pred = pd.DataFrame({
         "pred_target_sb": [[0.1, 0.2, 0.3]]
-    }, index=pd.MultiIndex.from_tuples([(1, 1)], names=['month_id', 'entity_id']))
+    }, index=pd.MultiIndex.from_tuples([(101, 1)], names=['month_id', 'entity_id']))
 
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
 
@@ -150,6 +154,10 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
         "run_type": "calibration",
         "timestamp": "20260101"
     }
+    # Inject standard partition structure for strict validation
+    manager._partition_dict = {
+        'calibration': {'train': (1, 100), 'test': (101, 120)}
+    }
     manager._save_evaluations = MagicMock()
     manager._generate_evaluation_table = MagicMock(return_value="table")
     manager._wandb_module = MagicMock()
@@ -158,7 +166,7 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
     # Prediction contains a scalar point estimate; column must be named pred_{target}
     df_pred = pd.DataFrame({
         "pred_target_sb": [0.15]
-    }, index=pd.MultiIndex.from_tuples([(1, 1)], names=['month_id', 'entity_id']))
+    }, index=pd.MultiIndex.from_tuples([(101, 1)], names=['month_id', 'entity_id']))
 
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
     
@@ -199,6 +207,10 @@ def test_scalar_gate_distribution_with_sample_metrics(mock_read, mock_splash, mo
         "run_type": "calibration",
         "timestamp": "20260101",
     }
+    # Inject standard partition structure for strict validation
+    manager._partition_dict = {
+        'calibration': {'train': (1, 100), 'test': (101, 120)}
+    }
     manager._save_evaluations = MagicMock()
     manager._generate_evaluation_table = MagicMock(return_value="table")
     manager._wandb_module = MagicMock()
@@ -207,7 +219,7 @@ def test_scalar_gate_distribution_with_sample_metrics(mock_read, mock_splash, mo
     # Prediction is a distribution; column must be named pred_{target}
     df_pred = pd.DataFrame({
         "pred_target_sb": [[0.1, 0.2, 0.3]]
-    }, index=pd.MultiIndex.from_tuples([(1, 1)], names=['month_id', 'entity_id']))
+    }, index=pd.MultiIndex.from_tuples([(101, 1)], names=['month_id', 'entity_id']))
 
     mock_read.return_value = pd.DataFrame({"target_sb": [0.1]}, index=df_pred.index)
 

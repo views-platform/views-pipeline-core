@@ -2841,15 +2841,25 @@ class ForecastingModelManager(ModelManager):
         Returns:
             List of dicts, one per sequence: [{base_origin+i+s: s for s in steps} ...]
         """
-        if self.args.run_type == "forecasting" and hasattr(self, '_data_loader') and self._data_loader:
+        run_type = self.args.run_type
+
+        # 1. Resolve Base Origin from Authority (DNA)
+        if run_type == "forecasting":
+            # Forecasting origin is dynamic based on current data state (explicit override)
+            if not (hasattr(self, '_data_loader') and self._data_loader):
+                # Should be impossible if initialization succeeded, but rigorous check
+                raise ValueError("Forecasting run requires an initialized data loader to determine origin.")
             base_origin = self._data_loader.month_last
-        elif self._partition_dict and 'train' in self._partition_dict:
-            # For calibration/validation the base origin is the last month of training
-            base_origin = self._partition_dict['train'][1]
         else:
-            # Fallback for unit tests where partitions may be mocked/empty
-            logger.debug("Partition 'train' not found. Defaulting base_origin to 0.")
-            base_origin = 0
+            # Calibration/Validation origin is static from partition config
+            # Structure: self._partition_dict[run_type]['train'] -> (start, end)
+            
+            if run_type not in self._partition_dict:
+                raise KeyError(
+                    f"Partition configuration for run_type '{run_type}' not found. "
+                    f"Available keys: {list(self._partition_dict.keys())}"
+                )
+            base_origin = self._partition_dict[run_type]['train'][1]
 
         steps = self.configs.get("steps", [*range(1, 36 + 1, 1)])
 

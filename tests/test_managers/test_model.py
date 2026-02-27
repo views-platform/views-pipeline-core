@@ -297,7 +297,10 @@ class TestGetEvaluationStepMappings:
                         with patch('views_pipeline_core.modules.logging.LoggingModule'):
                             m = ForecastingModelManager(model_path=mock_model_path)
                             m.configs = {'steps': [1, 2, 3]}
-                            m._partition_dict = {'train': (100, 200), 'test': (201, 203)}
+                            # Correct nested structure for strict validation
+                            m._partition_dict = {
+                                'calibration': {'train': (100, 200), 'test': (201, 203)}
+                            }
                             m._args = ForecastingModelArgs(run_type='calibration', train=True)
                             return m
 
@@ -336,14 +339,14 @@ class TestGetEvaluationStepMappings:
         result = manager._get_evaluation_step_mappings(n_sequences=1)
         assert result[0] == {501: 1, 502: 2}
 
-    def test_missing_partition_defaults_to_zero_origin(self, manager):
-        """When partition dict is absent, base_origin defaults to 0."""
+    def test_missing_partition_raises_keyerror(self, manager):
+        """When partition dict is missing required run_type, raise KeyError."""
         manager._partition_dict = {}
         manager._args = ForecastingModelArgs(run_type='calibration', train=True)
         manager.configs = {'steps': [1, 2]}
 
-        result = manager._get_evaluation_step_mappings(n_sequences=1)
-        assert result[0] == {1: 1, 2: 2}
+        with pytest.raises(KeyError, match="Partition configuration for run_type 'calibration' not found"):
+            manager._get_evaluation_step_mappings(n_sequences=1)
 
 
 # ============================================================================

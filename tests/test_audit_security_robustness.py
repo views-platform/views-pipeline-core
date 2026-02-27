@@ -44,6 +44,12 @@ def get_test_manager():
             with patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock()):
                 with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash'):
                     manager = ForecastingModelManager(mock_path_manager)
+                    # Inject standard partition structure to pass strict origin resolution
+                    manager._partition_dict = {
+                        "calibration": {"train": (1, 100), "test": (101, 120)},
+                        "validation": {"train": (1, 120), "test": (121, 140)},
+                        "forecasting": {"train": (1, 140), "test": (141, 160)}
+                    }
                     manager._args = MagicMock()
                     manager._args.run_type = "calibration"
                     manager._save_evaluations = MagicMock()
@@ -80,7 +86,7 @@ def test_G3_scalar_gate_allows_scalars(mock_deps):
     
     mgr = get_test_manager()
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
-    df_pred = pd.DataFrame({"pred_t1_sb": [0.5, 0.6]}, index=pd.MultiIndex.from_tuples([(1,1), (1,2)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_t1_sb": [0.5, 0.6]}, index=pd.MultiIndex.from_tuples([(101,1), (101,2)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0,0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
@@ -100,7 +106,7 @@ def test_G4_multi_task_loop_separation(mock_deps):
         "classification_targets": ["class_ns"], "classification_metrics": ["auc"],
         "targets": ["reg_sb", "class_ns"], "sweep": False
     }
-    df_pred = pd.DataFrame({"pred_reg_sb": [0.5], "pred_class_ns": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_reg_sb": [0.5], "pred_class_ns": [1]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"reg_sb":[0], "class_ns":[0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
@@ -151,7 +157,7 @@ def test_B4_scalar_gate_with_nans(mock_deps):
     
     mgr = get_test_manager()
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
-    df_pred = pd.DataFrame({"pred_t1_sb": [np.nan, np.nan]}, index=pd.MultiIndex.from_tuples([(1,1), (1,2)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_t1_sb": [np.nan, np.nan]}, index=pd.MultiIndex.from_tuples([(101,1), (101,2)], names=['m','e']))
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0,0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
@@ -163,25 +169,25 @@ def test_B4_scalar_gate_with_nans(mock_deps):
 def test_G6_non_standard_target_names(mock_deps):
     """Verify that targets without conflict codes (sb/os/ns) are now accepted."""
     mock_eval_mgr_cls, mock_wandb = mock_deps
-    
+
     mgr = get_test_manager()
     # Target name has no conflict code
     target_name = "water_scarcity"
     mgr.configs = {
-        "regression_targets": [target_name], 
-        "regression_metrics": ["mse"], 
-        "targets": [target_name], 
+        "regression_targets": [target_name],
+        "regression_metrics": ["mse"],
+        "targets": [target_name],
         "sweep": False
     }
-    
-    df_pred = pd.DataFrame({f"pred_{target_name}": [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+
+    df_pred = pd.DataFrame({f"pred_{target_name}": [0.5]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({target_name: [0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
-        
+
         mock_eval_inst = mock_eval_mgr_cls.return_value
         mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
-        
+
         # This call would previously crash due to _get_conflict_type raising ValueError
         # Now it should pass, using 'water_scarcity' as the identifier
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
@@ -203,7 +209,7 @@ def test_R2_scalar_gate_false_positive(mock_deps):
     mgr = get_test_manager()
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
     # Prediction is a list of length 1 (e.g. [0.5])
-    df_pred = pd.DataFrame({"pred_t1_sb": [[0.5]]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_t1_sb": [[0.5]]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
@@ -221,14 +227,14 @@ def test_GI_1_strict_separation_proof(mock_deps):
     """PROVE that regression and classification metrics never cross-pollinate."""
     mock_eval_mgr_cls, _ = mock_deps
     mgr = get_test_manager()
-    
+
     mgr.configs = {
         "regression_targets": ["reg_t"], "regression_metrics": ["mse"],
         "classification_targets": ["class_t"], "classification_metrics": ["auc"],
         "targets": ["reg_t", "class_t"], "sweep": False
     }
-    
-    df_pred = pd.DataFrame({"pred_reg_t": [0.5], "pred_class_t": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+
+    df_pred = pd.DataFrame({"pred_reg_t": [0.5], "pred_class_t": [1]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"reg_t":[0], "class_t":[0]}, index=df_pred.index)):
         mock_eval_inst = mock_eval_mgr_cls.return_value
@@ -262,7 +268,7 @@ def test_GI_2_no_name_inference_proof(mock_deps):
         "targets": ["this_is_a_regression_name"], "sweep": False
     }
     
-    df_pred = pd.DataFrame({"pred_this_is_a_regression_name": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_this_is_a_regression_name": [1]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"this_is_a_regression_name":[0]}, index=df_pred.index)):
         mock_eval_inst = mock_eval_mgr_cls.return_value
@@ -289,7 +295,7 @@ def test_GI_3_legacy_fallback_integrity(mock_deps):
     validate_config(raw_config) # This does the genome mapping
     
     mgr.configs = raw_config
-    df_pred = pd.DataFrame({"pred_legacy_t": [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_legacy_t": [0.5]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"legacy_t":[0]}, index=df_pred.index)):
         mock_eval_inst = mock_eval_mgr_cls.return_value
@@ -308,7 +314,10 @@ def test_GI_4_explicit_step_mapping_authority(mock_deps):
     mgr = get_test_manager()
     
     # Train end is 100. Requested steps are 1 and 3.
-    mgr._partition_dict = {'train': (1, 100), 'test': (101, 103)}
+    # Enforce standard nested structure
+    mgr._partition_dict = {
+        'calibration': {'train': (1, 100), 'test': (101, 103)}
+    }
     mgr.configs = {
         "regression_targets": ["t1"], "regression_point_metrics": ["mse"],
         "targets": ["t1"], "steps": [1, 3], "sweep": False
@@ -345,7 +354,7 @@ def test_R5_mismatched_target_column_names(mock_deps):
     mgr = get_test_manager()
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
     # Dataframe has column 'wrong_name'
-    df_pred = pd.DataFrame({"wrong_name": [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"wrong_name": [0.5]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
