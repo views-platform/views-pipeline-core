@@ -1059,7 +1059,6 @@ class ModelManager:
             - :class:`WandBModule`: WandB integration
             - :meth:`execute_single_run`: Main execution method
         """
-        self._raise_file_limit()
         self.__class__.__instances__ += 1
         from views_pipeline_core.modules.logging import LoggingModule
 
