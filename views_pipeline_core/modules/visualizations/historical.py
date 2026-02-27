@@ -213,7 +213,7 @@ class HistoricalLineGraph:
         if self.historical_dataset:
             ids.update(self.historical_dataset._unique_entities)
         if self.forecast_dataset:
-            ids.update(self.forecastP_dataset._unique_entities)
+            ids.update(self.forecast_dataset._unique_entities)
 
         all_ids = sorted(ids)
         if len(all_ids) > max_entities:
