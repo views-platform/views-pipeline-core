@@ -58,6 +58,12 @@ from views_pipeline_core.configs import PipelineConfig
 #     validate_config,
 # )
 
+# Internal mixins — keep the three concerns of ForecastingModelManager
+# separated into focused modules while leaving all classes in this file.
+from views_pipeline_core.managers.model._prediction_io import PredictionIOMixin
+from views_pipeline_core.managers.model._evaluation import EvaluationMixin
+from views_pipeline_core.managers.model._pipeline_stages import PipelineStagesMixin
+
 import dotenv
 
 # Optional PyTorch support for CUDA cleanup
@@ -418,6 +424,7 @@ class ModelPathManager:
         dotenv.load_dotenv(dotenv_path=self.dotenv)
         self._initialize_directories()
         self._initialize_scripts()
+        self._registry = None
         logger.debug(
             f"ModelPathManager instance {ModelPathManager.__instances__} initialized for {self.model_name}."
         )
@@ -664,16 +671,16 @@ class ModelPathManager:
         ]
         return sorted(paths, reverse=True)
 
-    def _get_eval_file_paths(self, run_type: str, conflict_type: str) -> List[Path]:
+    def _get_eval_file_paths(self, run_type: str, target_identifier: str) -> List[Path]:
         """
-        Get evaluation file paths for run type and conflict type.
+        Get evaluation file paths for run type and target identifier.
 
         Internal Use:
             Used by evaluation reporting methods.
 
         Args:
             run_type: Run type
-            conflict_type: Conflict type ('sb', 'os', 'ns')
+            target_identifier: Target name (e.g. 'ged_sb', 'ged_ns')
 
         Returns:
             Sorted list of evaluation file paths (newest first)
@@ -682,7 +689,7 @@ class ModelPathManager:
             f
             for f in self.data_generated.iterdir()
             if f.is_file()
-            and f.stem.startswith(f"eval_{run_type}_{conflict_type}")
+            and f.stem.startswith(f"eval_{run_type}_{target_identifier}")
             and f.suffix == PipelineConfig().dataframe_format
         ]
         return sorted(paths, reverse=True)
@@ -726,6 +733,137 @@ class ModelPathManager:
         logger.info(f"Artifact used: {model_files[0]}")
 
         return self.artifacts / model_files[0]
+
+    # ------------------------------------------------------------------
+    # Registry-aware info helpers
+    # ------------------------------------------------------------------
+
+    def _get_registry(self):
+        """
+        Lazily create an ArtifactRegistry scoped to this model directory.
+
+        Returns:
+            ArtifactRegistry instance for this model.
+        """
+        if self._registry is None:
+            from views_pipeline_core.modules.artifacts import ArtifactRegistry
+            self._registry = ArtifactRegistry(self.model_dir)
+        return self._registry
+
+    def get_model_info(self) -> Dict:
+        """
+        Return a summary dictionary about this model, including path layout
+        and artifact statistics from the registry.
+
+        Returns:
+            Dict with keys: name, target, model_dir, artifact_count,
+            run_types, stages, latest_by_run_type.
+        """
+        registry = self._get_registry()
+        run_types = sorted({e.run_type for e in registry.entries})
+        stages = sorted({e.stage for e in registry.entries})
+
+        latest = {}
+        for rt in run_types:
+            for st in stages:
+                entry = registry.get_latest(rt, st)
+                if entry:
+                    latest.setdefault(rt, {})[st] = {
+                        "id": entry.id,
+                        "filename": entry.filename,
+                        "created_at": entry.created_at,
+                        "sha256_short": entry.sha256[:12],
+                        "size_bytes": entry.size_bytes,
+                    }
+
+        return {
+            "name": self.model_name,
+            "target": self.target,
+            "model_dir": str(self.model_dir),
+            "artifact_count": registry.count,
+            "run_types": run_types,
+            "stages": stages,
+            "latest_by_run_type": latest,
+        }
+
+    def get_latest_artifact_info(self, run_type: str, stage: str = "train") -> Optional[Dict]:
+        """
+        Return metadata for the latest artifact of a given run_type + stage.
+
+        Args:
+            run_type: calibration | validation | forecasting
+            stage: train | evaluate | forecast | data_fetch | report
+
+        Returns:
+            Dict with entry metadata, or None.
+        """
+        registry = self._get_registry()
+        entry = registry.get_latest(run_type, stage)
+        if entry is None:
+            return None
+        return {
+            "id": entry.id,
+            "filename": entry.filename,
+            "directory": entry.directory,
+            "sha256": entry.sha256,
+            "size_bytes": entry.size_bytes,
+            "created_at": entry.created_at,
+            "parent_id": entry.parent_id,
+            "metadata": entry.metadata,
+            "path": str(registry.resolve_path(entry)),
+        }
+
+    def list_artifacts(self, run_type: str = None, stage: str = None) -> List[Dict]:
+        """
+        List all registered artifacts, optionally filtered.
+
+        Args:
+            run_type: Filter by run type (optional).
+            stage: Filter by stage (optional).
+
+        Returns:
+            List of dicts, each representing an ArtifactEntry.
+        """
+        registry = self._get_registry()
+        entries = registry.get_all(run_type=run_type, stage=stage)
+        return [e.to_dict() for e in entries]
+
+    def verify_artifact_integrity(self, run_type: str = None, stage: str = None) -> Dict[str, bool]:
+        """
+        Verify SHA-256 integrity of registered artifacts.
+
+        If run_type/stage are given, only the latest for that combo is checked.
+        Otherwise verifies all.
+
+        Returns:
+            Dict mapping entry IDs to pass/fail booleans.
+        """
+        registry = self._get_registry()
+        if run_type and stage:
+            entry = registry.get_latest(run_type, stage)
+            if entry is None:
+                return {}
+            return {entry.id: registry.verify(entry.id)}
+        return registry.verify_all()
+
+    def get_artifact_lineage(self, entry_id: str) -> List[Dict]:
+        """
+        Walk the parent chain of an artifact and return the lineage.
+
+        Args:
+            entry_id: Short hex id from the registry.
+
+        Returns:
+            List of entry dicts from given entry back to its root ancestor.
+        """
+        registry = self._get_registry()
+        chain = registry.get_lineage(entry_id)
+        return [e.to_dict() for e in chain]
+
+    def print_artifact_summary(self) -> None:
+        """Print a formatted table of all registered artifacts."""
+        registry = self._get_registry()
+        print(registry.summary())
 
     def get_queryset(self) -> Optional[Dict[str, str]]:
         """
@@ -1061,11 +1199,13 @@ class ModelManager:
         """
         self.__class__.__instances__ += 1
         from views_pipeline_core.modules.logging import LoggingModule
+        from views_pipeline_core.modules.artifacts import ArtifactRegistry
 
         self._model_repo = "views-models"
         self._entity = "views_pipeline"
 
         self._model_path = model_path
+        self._artifact_registry = ArtifactRegistry(model_path.model_dir)
         self._wandb_notifications = wandb_notifications
         self._use_prediction_store = use_prediction_store
         self._sweep = False
@@ -1146,6 +1286,11 @@ class ModelManager:
         self.set_dataframe_format(format=".parquet")
         if self.__class__.__instances__ == 1:
             self.__ascii_splash()
+
+    @property
+    def artifact_registry(self):
+        """Access the artifact registry for this model."""
+        return self._artifact_registry
 
     def __ascii_splash(self) -> None:
         from art import text2art
@@ -1397,27 +1542,54 @@ class ModelManager:
         return df
 
 
-class ForecastingModelManager(ModelManager):
+class ForecastingModelManager(
+    PipelineStagesMixin,
+    EvaluationMixin,
+    PredictionIOMixin,
+    ModelManager,
+):
     """
     Orchestrate forecasting model pipeline operations.
-    
-    Manages complete lifecycle of forecasting models including data loading,
-    training, evaluation, future forecasting, and reporting. Supports both
-    single runs and hyperparameter sweeps with WandB integration.
-    
-    Pipeline Stages:
-        - data_fetch: Load and validate time-series data
-        - train: Train model with hyperparameters
-        - evaluate: Multi-horizon performance evaluation
-        - forecast: Generate future predictions
-        - report: Create evaluation/forecast reports
-    
+
+    Manages the complete lifecycle of forecasting models including data
+    loading, training, evaluation, future forecasting, and reporting.
+    Supports both single runs and hyperparameter sweeps with WandB
+    integration.
+
+    Responsibility split
+    --------------------
+    The class is composed through three focused mixins (all defined in the
+    ``managers/model/`` package) so that each concern has a clear home:
+
+    ``PipelineStagesMixin`` (``_pipeline_stages.py``)
+        Public entry-points (``execute_single_run``, ``execute_sweep_run``)
+        and every ``_execute_*`` stage method.  This is the *runner*.
+
+    ``EvaluationMixin`` (``_evaluation.py``)
+        Metric computation (``_evaluate_prediction_dataframe``) and the
+        WandB summary-table formatter.
+
+    ``PredictionIOMixin`` (``_prediction_io.py``)
+        Prediction coercion, dataset validation, and all ``_save_*`` /
+        ``_resolve_*`` helpers.  Pure data-layer; no pipeline logic.
+
+    This class itself retains only its *identity*: the constructor,
+    the four abstract method contracts that subclasses must fulfil, and
+    the ``__repr__`` / ``__str__`` descriptors.
+
+    Pipeline Stages
+    ---------------
+    - ``data_fetch``  – load and validate time-series data
+    - ``train``       – train model with hyperparameters
+    - ``evaluate``    – multi-horizon performance evaluation
+    - ``forecast``    – generate future predictions
+    - ``report``      – create evaluation / forecast reports
+
     Attributes:
-        _data_loader (ViewsDataLoader): Data loading utility
         _eval_type (str): Current evaluation type
         _sweep (bool): Whether running as sweep
         _predictions_name (str): Current predictions filename
-    
+
     Example:
         >>> model_path = ModelPathManager("purple_alien")
         >>> manager = ForecastingModelManager(
@@ -1426,7 +1598,7 @@ class ForecastingModelManager(ModelManager):
         ... )
         >>> args = ForecastingModelArgs.parse_args()
         >>> manager.execute_single_run(args)
-    
+
     Note:
         - Inherits core functionality from ModelManager
         - Requires queryset configuration for data loading
@@ -1467,6 +1639,10 @@ class ForecastingModelManager(ModelManager):
         """
 
         super().__init__(model_path, wandb_notifications, use_prediction_store)
+
+    # ------------------------------------------------------------------
+    # Abstract contracts — subclasses must implement these four methods
+    # ------------------------------------------------------------------
 
     @abstractmethod
     def _train_model_artifact(self) -> any:
@@ -1509,7 +1685,7 @@ class ForecastingModelManager(ModelManager):
     @abstractmethod
     def _evaluate_model_artifact(
         self, eval_type: str, artifact_name: str
-    ) -> List[Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path]]:
+    ) -> List[Path]:
         """
         Evaluate model artifact. Must be implemented by subclasses.
         
@@ -1517,36 +1693,39 @@ class ForecastingModelManager(ModelManager):
             Must:
             - Load model from artifacts directory
             - Generate predictions for test period
-            - Return list of predictions (DataFrames, LazyFrames, or file paths)
+            - Save each prediction sequence to a parquet file
+            - Return list of file paths to the saved predictions
             
             Must not:
             - Modify saved artifacts
             - Skip validation
+            - Return raw DataFrames (save to disk and return paths)
         
         Args:
             eval_type: Evaluation type ('standard'|'long'|'complete'|'live')
             artifact_name: Name of model file to evaluate
         
         Returns:
-            List of predictions, each may be:
-                - pd.DataFrame (legacy)
-                - pl.DataFrame or pl.LazyFrame
-                - str or Path to a data file (parquet/csv)
-            
-            The caller coerces these into dataset objects automatically.
+            List of ``Path`` objects pointing to parquet files, one per
+            evaluation sequence.  The caller wraps each path in the
+            appropriate ``SpatioTemporalDataset`` subclass (with lazy
+            scanning and schema verification) via ``_coerce_to_dataset()``.
         
         Raises:
             ModelEvaluationException: If evaluation fails
         
-        Example Implementation:
-            >>> def _evaluate_model_artifact(self, eval_type, artifact_name):
-            ...     model = load_model(artifact_name)
-            ...     predictions = []
-            ...     for seq in range(n_sequences):
-            ...         X = self._get_test_data(seq)
-            ...         pred = model.predict(X)
-            ...         predictions.append(pred)
-            ...     return predictions
+        Example Implementation::
+
+            def _evaluate_model_artifact(self, eval_type, artifact_name):
+                model = load_model(artifact_name)
+                paths = []
+                for seq in range(n_sequences):
+                    X = self._get_test_data(seq)
+                    pred = model.predict(X)
+                    path = self._model_path.data_generated / f"pred_{seq:02d}.parquet"
+                    pred.to_parquet(path)
+                    paths.append(path)
+                return paths
         """
 
         raise NotImplementedError(
@@ -1554,7 +1733,7 @@ class ForecastingModelManager(ModelManager):
         )
 
     @abstractmethod
-    def _forecast_model_artifact(self, artifact_name: str) -> Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path]:
+    def _forecast_model_artifact(self, artifact_name: str) -> Path:
         """
         Generate future forecasts. Must be implemented by subclasses.
         
@@ -1562,35 +1741,42 @@ class ForecastingModelManager(ModelManager):
             Must:
             - Load model from artifacts
             - Generate predictions for future period
-            - Return predictions as DataFrame or file path
+            - Save predictions to a parquet file
+            - Return the file path
             
             Must not:
             - Use future ground truth data
             - Modify model artifact
+            - Return raw DataFrames (save to disk and return a path)
         
         Args:
             artifact_name: Name of model file for forecasting
         
         Returns:
-            Predictions as pd.DataFrame, pl.DataFrame, or str/Path to file.
-            The caller coerces these into a dataset object automatically.
+            ``Path`` to the saved parquet file.  The caller wraps
+            it in the appropriate ``SpatioTemporalDataset`` subclass
+            (with lazy scanning and schema verification) via
+            ``_coerce_to_dataset()``.
         
         Raises:
             ModelForecastingException: If forecasting fails
         
-        Example Implementation:
-            >>> def _forecast_model_artifact(self, artifact_name):
-            ...     model = load_model(artifact_name)
-            ...     X_future = self._prepare_future_data()
-            ...     forecasts = model.predict(X_future)
-            ...     return self._format_forecasts(forecasts)
+        Example Implementation::
+
+            def _forecast_model_artifact(self, artifact_name):
+                model = load_model(artifact_name)
+                X_future = self._prepare_future_data()
+                forecasts = model.predict(X_future)
+                path = self._model_path.data_generated / "forecast.parquet"
+                forecasts.to_parquet(path)
+                return path
         """
         raise NotImplementedError(
             "_forecast_model_artifact method must be implemented by subclasses."
         )
 
     @abstractmethod
-    def _evaluate_sweep(self, eval_type: str, model: any) -> List[Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path]]:
+    def _evaluate_sweep(self, eval_type: str, model: any) -> List[Path]:
         """
         Evaluate model during sweep. Must be implemented by subclasses.
         
@@ -1598,1536 +1784,37 @@ class ForecastingModelManager(ModelManager):
             Must:
             - Use provided model object (not load from disk)
             - Generate predictions for evaluation
-            - Return list of predictions (DataFrames or file paths)
+            - Save each prediction sequence to a parquet file
+            - Return list of file paths
             
             Must not:
             - Save model artifacts (handled by sweep)
             - Modify hyperparameters
+            - Return raw DataFrames (save to disk and return paths)
         
         Args:
             model: Trained model object from current sweep iteration
             eval_type: Evaluation type
         
         Returns:
-            List of predictions, each may be pd.DataFrame, pl.DataFrame,
-            or str/Path to a data file.
+            List of ``Path`` objects pointing to parquet files.
+            The caller wraps each in a ``SpatioTemporalDataset``.
         
-        Example Implementation:
-            >>> def _evaluate_sweep(self, eval_type, model):
-            ...     predictions = []
-            ...     for seq in range(n_sequences):
-            ...         X = self._get_test_data(seq)
-            ...         pred = model.predict(X)
-            ...         predictions.append(pred)
-            ...     return predictions
+        Example Implementation::
+
+            def _evaluate_sweep(self, eval_type, model):
+                paths = []
+                for seq in range(n_sequences):
+                    X = self._get_test_data(seq)
+                    pred = model.predict(X)
+                    path = self._model_path.data_generated / f"sweep_{seq:02d}.parquet"
+                    pred.to_parquet(path)
+                    paths.append(path)
+                return paths
         """
         raise NotImplementedError(
             "_evaluate_sweep method must be implemented by subclasses."
         )
-    
-    @staticmethod
-    def dataset_class(loa: str) -> Optional[type]:
-        dataset_classes = {"cm": CountryMonthDataset, "pgm": PriogridMonthDataset}
-        dataset_cls = dataset_classes.get(loa)
-        if dataset_cls:
-            return partial(dataset_cls)
-        return None
-
-    # ------------------------------------------------------------------
-    # Prediction coercion helpers
-    # ------------------------------------------------------------------
-
-    def _coerce_to_dataset(
-        self, data: Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path, SpatioTemporalDataset]
-    ) -> SpatioTemporalDataset:
-        """Convert a raw prediction payload to the appropriate dataset object.
-
-        Accepts:
-            - ``pd.DataFrame`` (legacy)
-            - ``pl.DataFrame``
-            - ``pl.LazyFrame``
-            - ``str`` or ``Path`` pointing to a parquet / CSV file
-            - An already-constructed ``SpatioTemporalDataset`` (returned as-is)
-
-        The concrete class (CountryMonthDataset vs PriogridMonthDataset) is
-        resolved from ``self.configs["level"]``.
-
-        Returns:
-            A ``CountryMonthDataset`` or ``PriogridMonthDataset`` wrapping *data*.
-
-        Raises:
-            ValueError: If the configured level of analysis is unknown.
-            TypeError:  If *data* has an unsupported type.
-        """
-        if isinstance(data, SpatioTemporalDataset):
-            return data
-
-        loa = self.configs.get("level")
-        dataset_cls_partial = self.dataset_class(loa)
-        if dataset_cls_partial is None:
-            raise ValueError(
-                f"Cannot coerce predictions: unknown level of analysis '{loa}'. "
-                "Expected 'cm' or 'pgm'."
-            )
-
-        if not isinstance(data, (pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path)):
-            raise TypeError(
-                f"Cannot coerce predictions: unsupported type {type(data).__name__}. "
-                "Expected pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path, "
-                "or SpatioTemporalDataset."
-            )
-
-        return dataset_cls_partial(data=data)
-
-    def _coerce_predictions_to_datasets(
-        self,
-        raw_predictions: List[
-            Union[pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path, SpatioTemporalDataset]
-        ],
-    ) -> List[SpatioTemporalDataset]:
-        """Convert a list of raw prediction payloads to dataset objects."""
-        return [self._coerce_to_dataset(item) for item in raw_predictions]
-
-    # ------------------------------------------------------------------
-    # Dataset-level validation and persistence (Polars-native)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _validate_prediction_dataset(
-        dataset: SpatioTemporalDataset,
-        targets: Union[str, List[str]],
-    ) -> None:
-        """Validate a prediction dataset structure (Polars-native).
-
-        Performs the same structural checks as the legacy
-        ``validate_prediction_dataframe`` but operates entirely on the
-        dataset object and its underlying LazyFrame — no pandas
-        conversion required.
-
-        Checks:
-            1. Dataset is non-empty.
-            2. Every declared target has a corresponding ``pred_{target}``
-               column.
-            3. The dataset contains a recognised time column
-               (``month_id``).
-
-        Args:
-            dataset: The prediction dataset to validate.
-            targets: Target variable name(s).
-
-        Raises:
-            ValueError: On any validation failure.
-        """
-        if dataset._n_rows == 0:
-            raise ValueError("Prediction dataset is empty")
-
-        if isinstance(targets, str):
-            targets = [targets]
-
-        cols = set(dataset.columns)
-        missing = [t for t in targets if f"pred_{t}" not in cols]
-        if missing:
-            raise ValueError(
-                f"Missing prediction columns for targets: {missing}. "
-                f"Expected columns: {['pred_' + t for t in missing]}"
-            )
-
-        if dataset.time_col not in cols:
-            raise ValueError(
-                f"Time column '{dataset.time_col}' not found in dataset columns"
-            )
-
-        logger.info(
-            f"Dataset validation passed: {dataset._n_rows:,} rows, "
-            f"{len(cols)} cols, targets={targets}"
-        )
-
-    def _save_prediction_dataset(
-        self,
-        dataset: SpatioTemporalDataset,
-        path_generated: Union[str, Path],
-        sequence_number: int = None,
-        send_alert: bool = True,
-    ) -> None:
-        """Save a prediction dataset to disk (Polars-native).
-
-        Writes the dataset directly to parquet via Polars, avoiding any
-        pandas conversion.  If the prediction store is enabled, conversion
-        to pandas happens only at that external-API boundary.
-
-        Args:
-            dataset: Prediction dataset to save.
-            path_generated: Target directory.
-            sequence_number: Sequence index (evaluation runs) or None.
-            send_alert: Send a WandB notification on completion.
-        """
-        from views_pipeline_core.files.utils import generate_output_file_name
-
-        try:
-            path_generated = Path(path_generated)
-            path_generated.mkdir(parents=True, exist_ok=True)
-
-            self._predictions_name = generate_output_file_name(
-                "predictions",
-                self.configs["run_type"],
-                self.configs["timestamp"],
-                sequence_number,
-                file_extension=PipelineConfig().dataframe_format,
-            )
-
-            save_path = path_generated / self._predictions_name
-
-            # Materialise and write directly via Polars
-            df_pl: pl.DataFrame = dataset.collect()
-            df_pl.write_parquet(save_path)
-
-            # Prediction store uses the pandas forecasts accessor — convert
-            # only at this external boundary.
-            if self._use_prediction_store:
-                df_pd = dataset.get_subset_dataframe(return_pandas=True)
-                name = f"{self._model_path.model_name}_{self._predictions_name.split('.')[0]}"
-                df_pd.forecasts.set_run(self._pred_store_name)
-                df_pd.forecasts.to_store(name=name, overwrite=True)
-
-                if self._datastore is not None:
-                    try:
-                        self._datastore.upload_data(
-                            file=save_path,
-                            filename=self._predictions_name,
-                            loa=self.configs.get("level"),
-                            name=self._model_path.model_name,
-                            targets=self.configs.get("targets"),
-                            category="forecast",
-                            description="",
-                            type=self._model_path.target,
-                        )
-                        logger.info(
-                            "Forecasts uploaded to Appwrite Datastore successfully."
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Error uploading predictions to datastore: {e}",
-                            exc_info=True,
-                        )
-
-            if send_alert:
-                self._wandb_module.send_alert(
-                    title="Predictions Saved",
-                    text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
-                    notifications_enabled=self._wandb_notifications,
-                )
-
-        except Exception as e:
-            raise PipelineException(
-                f"Error saving predictions: {e}",
-                wandb_module=self._wandb_module,
-            )
-
-    @staticmethod
-    def _dataset_to_pandas(dataset: SpatioTemporalDataset) -> pd.DataFrame:
-        """Extract a pandas DataFrame with MultiIndex from a dataset object.
-
-        Used only at external-API boundaries (EvaluationManager, WandB
-        Tables, prediction store) where pandas is unavoidable.
-        """
-        return dataset.get_subset_dataframe(return_pandas=True)
-
-    @staticmethod
-    def _resolve_evaluation_sequence_number(eval_type: str) -> int:
-        """
-        Get number of evaluation sequences for type.
-        
-        Maps evaluation type to sequence count for temporal evaluation.
-        
-        Evaluation Types:
-            - standard: 12 sequences (1 year)
-            - long: 36 sequences (3 years)
-            - complete: None (full period, needs calculation)
-            - live: 12 sequences (current year)
-        
-        Args:
-            eval_type: Type of evaluation
-        
-        Returns:
-            Number of sequences, or None for complete type
-        
-        Raises:
-            ValueError: If eval_type invalid
-        
-        Example:
-            >>> n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
-            >>> print(n)
-            12
-        """
-        if eval_type == "standard":
-            return 12
-        elif eval_type == "long":
-            return 36
-        elif eval_type == "complete":
-            return None  # currently set as None because sophisticated calculation is needed
-        elif eval_type == "live":
-            return 12
-        else:
-            raise ValueError(f"Invalid evaluation type: {eval_type}")
-
-    def execute_single_run(self, args: ForecastingModelArgs) -> None:
-        """
-        Execute single pipeline run with given arguments.
-        
-        Main entry point for model pipeline operations. Orchestrates
-        data fetching, training, evaluation, forecasting, and reporting
-        based on command line arguments.
-        
-        Execution Flow:
-            1. Validate and store arguments
-            2. Initialize WandB session
-            3. Update configuration
-            4. Fetch/load data
-            5. Execute requested stages (train/evaluate/forecast/report)
-        
-        Args:
-            args: Validated command line arguments.
-                Must be ForecastingModelArgs instance.
-        
-        Raises:
-            ValueError: If args not ForecastingModelArgs instance
-            PipelineException: If pipeline execution fails
-            ModelTrainingException: If training fails
-            ModelEvaluationException: If evaluation fails
-            ModelForecastingException: If forecasting fails
-        
-        Side Effects:
-            - Sets self._args
-            - Initializes WandB session
-            - Creates artifacts/predictions/reports
-            - Sends WandB notifications
-        
-        Example:
-            >>> manager = ForecastingModelManager(model_path)
-            >>> args = ForecastingModelArgs.parse_args()
-            >>> manager.execute_single_run(args)
-        
-        Note:
-            - Typical runtime: Minutes to hours
-            - GPU recommended for large models
-        """
-        if not isinstance(args, ForecastingModelArgs):
-            raise ValueError(
-                f"args must be an instance of ForecastingModelArgs. Got {type(args)} instead."
-            )
-
-        # Store args FIRST before using them
-        self._args = args
-
-        self._wandb_module.login()
-
-        # Now we can use self.args in config_manager
-        self._config_manager.update_for_single_run(
-            self.args,
-            wandb_module=self._wandb_module,
-        )
-
-        self._project = f"{self.configs['name']}_{self.args.run_type}"
-        self._eval_type = self.args.eval_type
-        self._config_manager.add_config({"eval_type": self._eval_type})
-
-        # Fetch data
-        self._execute_data_fetching()
-
-        # Execute model tasks
-        self._execute_model_tasks()
-
-    def execute_sweep_run(self, args: ForecastingModelArgs) -> None:
-        """
-        Execute hyperparameter sweep with WandB.
-        
-        Runs WandB sweep agent for hyperparameter optimization.
-        Trains and evaluates models with different configurations.
-        
-        Args:
-            args: Command line arguments.
-                Must have sweep=True.
-        
-        Raises:
-            ValueError: If args not ForecastingModelArgs instance
-        
-        Side Effects:
-            - Creates WandB sweep
-            - Initializes sweep agent
-            - Runs multiple training iterations
-        
-        Example:
-            >>> args = ForecastingModelArgs(
-            ...     run_type='calibration',
-            ...     sweep=True
-            ... )
-            >>> manager.execute_sweep_run(args)
-        
-        Note:
-            - Fetches data once, reuses for all iterations
-            - Sweep config must be defined in config_sweep.py
-        """
-        if not isinstance(args, ForecastingModelArgs):
-            raise ValueError(
-                f"args must be an instance of ForecastingModelArgs. Got {type(args)} instead."
-            )
-        import wandb
-
-        # Store args FIRST before using them
-        self._args = args
-
-        self._wandb_module.login()
-
-        self._project = f"{self._config_manager.config_sweep['name']}_sweep"
-        self._eval_type = self.args.eval_type
-        self._sweep = True
-
-        # Fetch data
-        self._execute_data_fetching()
-
-        # Execute sweep
-        sweep_id = wandb.sweep(
-            self._config_manager.config_sweep,
-            project=self._project,
-            entity=self._entity,
-        )
-        wandb.agent(sweep_id, self._execute_model_tasks, entity=self._entity)
-
-    def _execute_model_tasks(self) -> None:
-        """
-        Execute requested pipeline stages.
-        
-        Orchestrates training, evaluation, forecasting, and reporting
-        based on arguments. Handles both single runs and sweeps.
-        
-        Internal Use:
-            Called by execute_single_run() and execute_sweep_run().
-        
-        Execution Flow:
-            If sweep:
-                - Execute sweep training and evaluation
-            
-            If single run:
-                - Train model (if args.train)
-                - Evaluate model (if args.evaluate)
-                - Generate forecasts (if args.forecast)
-                - Create reports (if args.report)
-        
-        Side Effects:
-            - Executes pipeline stages
-            - Creates artifacts/predictions
-            - Logs to WandB
-            - Sends notifications
-        
-        Note:
-            - Logs total runtime at completion
-            - All exceptions handled by stage methods
-        """
-        import time
-
-        start_t = time.time()
-
-        if self._sweep:
-            self._execute_model_sweeping()
-        else:
-            if self.args.train:
-                self._execute_model_training()
-            if self.args.evaluate:
-                self._execute_model_evaluation()
-            if self.args.forecast:
-                self._execute_model_forecasting()
-            if self.args.report and self.args.forecast:
-                self._execute_forecast_reporting()
-            if self.args.report and self.args.evaluate:
-                self._execute_evaluation_reporting()
-
-        end_t = time.time()
-        minutes = (end_t - start_t) / 60
-        logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
-
-    def _execute_data_fetching(self) -> None:
-        """
-        Fetch and validate data from ViEWS viewser.
-        
-        Downloads or loads data, applies queryset filters, validates
-        quality, and saves processed data. Creates WandB artifact.
-        
-        Pipeline Stage:
-            data_fetch
-        
-        Side Effects:
-            - Creates WandB run (job_type="fetch_data")
-            - Downloads/loads data from viewser
-            - Saves to self._model_path.data_raw
-            - Creates WandB artifact
-            - Sends completion notification
-        
-        Raises:
-            DataFetchException: If fetching or validation fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_data_fetching()
-            INFO: Fetching data for calibration...
-            INFO: Data saved to data/raw/calibration_viewser_df.parquet
-        
-        Note:
-            - Uses args.saved to skip download if data exists
-            - Respects args.override_timestep for custom ranges
-            - Updates viewser if args.update_viewser=True
-        """
-
-        with self._wandb_module.initialize_run(
-            project=self._project,
-            config={},
-            job_type="fetch_data",
-        ):
-            try:
-                self._data_loader.get_data(
-                    use_saved=self.args.saved,
-                    validate=True,
-                    self_test=self.args.drift_self_test,
-                    partition=self.args.run_type,
-                    override_month=self.args.override_timestep,
-                )
-
-                self._wandb_module.send_alert(
-                    title=f"Queryset Fetch Complete ({str(self.args.run_type)})",
-                    text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully.",
-                    notifications_enabled=self._wandb_notifications,
-                )
-
-            except Exception as e:
-                raise DataFetchException(
-                    f"Data fetching failed: {e}",
-                    wandb_module=self._wandb_module,
-                )
-            finally:
-                self._wandb_module.finish_run()
-
-    def _execute_model_training(self) -> None:
-        """
-        Train model and save artifact.
-        
-        Executes model training using configured hyperparameters,
-        saves trained artifact, logs metrics to WandB, and creates
-        execution logs.
-        
-        Pipeline Stage:
-            train
-        
-        Side Effects:
-            - Creates WandB run (job_type="train")
-            - Creates artifact in self._model_path.artifacts
-            - Creates training log entry
-            - Logs metrics to WandB
-            - Sends completion notification
-        
-        Raises:
-            ModelTrainingException: If training fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_model_training()
-            INFO: Training purple_alien...
-            INFO: Training completed. Model saved.
-        
-        Note:
-            - Calls abstract _train_model_artifact()
-            - Artifact naming: {run_type}_model_{timestamp}.{ext}
-            - WandB run finished in parent context
-        """
-        import traceback
-        from views_pipeline_core.files.utils import handle_single_log_creation
-
-        with self._wandb_module.initialize_run(
-            project=self._project,
-            config=self.configs,
-            job_type="train",
-        ):
-            try:
-                logger.info(
-                    f"Training {self._model_path.target} {self.configs['name']}..."
-                )
-                self._train_model_artifact()
-
-                handle_single_log_creation(
-                    model_path=self._model_path,
-                    config=self.configs,
-                    train=True,
-                )
-
-                self._wandb_module.send_alert(
-                    title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
-                    text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```",
-                    notifications_enabled=self._wandb_notifications,
-                )
-
-            except Exception as e:
-                logger.error(
-                    f"{self._model_path.target.title()} training model: {e}",
-                    exc_info=True,
-                )
-                raise ModelTrainingException(
-                    f"Training failed: {traceback.format_exc()}",
-                    wandb_module=self._wandb_module,
-                )
-            finally:
-                self._wandb_module.finish_run()
-
-    def _execute_model_evaluation(self) -> None:
-        """
-        Evaluate model on test data.
-        
-        Generates predictions, validates structure, calculates metrics,
-        and saves evaluation results. Supports multi-sequence evaluation.
-        
-        Pipeline Stage:
-            evaluate
-        
-        Side Effects:
-            - Creates WandB run (job_type="evaluate")
-            - Generates predictions for each sequence
-            - Validates prediction DataFrames
-            - Calculates and saves metrics
-            - Logs to WandB
-            - Sends completion notification
-        
-        Raises:
-            ModelEvaluationException: If evaluation fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_model_evaluation()
-            INFO: Evaluating purple_alien...
-            INFO: Validating 12 prediction sequences...
-            INFO: Evaluation completed.
-        
-        Note:
-            - Uses threadpool for parallel validation
-            - Metrics calculated only if specified in config
-        """
-        import traceback
-        from views_pipeline_core.files.utils import handle_single_log_creation
-
-        with self._wandb_module.initialize_run(
-            project=self._project,
-            config=self.configs,
-            job_type="evaluate",
-        ):
-            try:
-                logger.info(
-                    f"Evaluating {self._model_path.target} {self.configs['name']}..."
-                )
-                raw_predictions = self._evaluate_model_artifact(
-                    self._eval_type, self.args.artifact_name
-                )
-
-                # Coerce to dataset objects (accepts pd/pl/LazyFrame/paths)
-                list_datasets = self._coerce_predictions_to_datasets(raw_predictions)
-
-                # Validate and save using Polars-native dataset operations
-                import concurrent.futures
-
-                def validate_and_save(dataset, idx, total, configs, manager):
-                    print(
-                        f"\nValidating prediction dataset of sequence "
-                        f"{idx + 1}/{total}"
-                    )
-                    manager._validate_prediction_dataset(
-                        dataset, configs["targets"]
-                    )
-                    manager._save_prediction_dataset(
-                        dataset,
-                        manager._model_path.data_generated,
-                        idx,
-                        send_alert=False,
-                    )
-
-                n_datasets = len(list_datasets)
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    futures = [
-                        executor.submit(
-                            validate_and_save,
-                            ds, i, n_datasets, self.configs, self,
-                        )
-                        for i, ds in enumerate(list_datasets)
-                    ]
-                    concurrent.futures.wait(futures)
-
-                self._wandb_module.send_alert(
-                    title="Evaluation Predictions Saved",
-                    text=(
-                        f"Validated and saved {n_datasets} prediction sequences "
-                        f"at {self._model_path.data_generated.relative_to(self._model_path.root)}."
-                    ),
-                    notifications_enabled=self._wandb_notifications,
-                )
-
-                handle_single_log_creation(
-                    model_path=self._model_path,
-                    config=self.configs,
-                    train=False,
-                )
-
-                has_metrics = any([
-                    self.configs.get("metrics"),
-                    self.configs.get("regression_metrics"),
-                    self.configs.get("classification_metrics"),
-                    self.configs.get("regression_point_metrics"),
-                    self.configs.get("regression_sample_metrics"),
-                    self.configs.get("classification_point_metrics"),
-                    self.configs.get("classification_sample_metrics"),
-                ])
-
-                if has_metrics:
-                    self._evaluate_prediction_dataframe(
-                        list_datasets, self._eval_type
-                    )
-                else:
-                    logger.warning("No metrics specified in config")
-
-                self._wandb_module.send_alert(
-                    title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully.",
-                    notifications_enabled=self._wandb_notifications,
-                )
-
-            except Exception as e:
-                logger.error(
-                    f"{self._model_path.target.title()} evaluating model: {e}",
-                    exc_info=True,
-                )
-                raise ModelEvaluationException(
-                    f"Evaluation failed: {traceback.format_exc()}",
-                    wandb_module=self._wandb_module,
-                )
-            finally:
-                self._wandb_module.finish_run()
-
-    def _execute_model_forecasting(self) -> None:
-        """
-        Generate future predictions.
-        
-        Creates forecasts for future time periods, validates structure,
-        and saves predictions to disk and optionally to prediction store.
-        
-        Pipeline Stage:
-            forecast
-        
-        Side Effects:
-            - Creates WandB run (job_type="forecast")
-            - Generates future predictions
-            - Validates prediction DataFrame
-            - Saves to data/generated
-            - Uploads to prediction store (if enabled)
-            - Sends completion notification
-        
-        Raises:
-            ModelForecastingException: If forecasting fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_model_forecasting()
-            INFO: Forecasting purple_alien...
-            INFO: Forecasts saved.
-        
-        Note:
-            - Only valid for run_type='forecasting'
-            - Prediction store requires use_prediction_store=True
-        """
-        import traceback
-        from views_pipeline_core.files.utils import handle_single_log_creation
-
-        with self._wandb_module.initialize_run(
-            project=self._project,
-            config=self.configs,
-            job_type="forecast",
-        ):
-            try:
-                logger.info(
-                    f"Forecasting {self._model_path.target} {self.configs['name']}..."
-                )
-                raw_prediction = self._forecast_model_artifact(self.args.artifact_name)
-
-                # Coerce to dataset object (accepts pd/pl/LazyFrame/paths)
-                forecast_dataset = self._coerce_to_dataset(raw_prediction)
-
-                # Validate and save via Polars-native dataset operations
-                self._validate_prediction_dataset(
-                    forecast_dataset, self.configs["targets"]
-                )
-
-                handle_single_log_creation(
-                    model_path=self._model_path,
-                    config=self.configs,
-                    train=False,
-                )
-
-                self._save_prediction_dataset(
-                    forecast_dataset, self._model_path.data_generated
-                )
-
-                self._wandb_module.send_alert(
-                    title=f"Forecasting for {self._model_path.target} {self.configs['name']} completed successfully.",
-                    notifications_enabled=self._wandb_notifications,
-                )
-
-            except Exception as e:
-                logger.error(
-                    f"Error forecasting {self._model_path.target}: {e}", exc_info=True
-                )
-                raise ModelForecastingException(
-                    f"Forecasting failed: {traceback.format_exc()}",
-                    wandb_module=self._wandb_module,
-                )
-            finally:
-                self._wandb_module.finish_run()
-
-    def _execute_model_sweeping(self) -> None:
-        """
-        Execute single sweep iteration.
-        
-        Trains model with current sweep parameters, evaluates performance,
-        and logs metrics to WandB for optimization.
-        
-        Internal Use:
-            Called by WandB sweep agent for each hyperparameter combination.
-        
-        Side Effects:
-            - Creates WandB run (job_type="sweep")
-            - Updates config with sweep parameters
-            - Trains model
-            - Evaluates model
-            - Calculates metrics
-            - Logs to WandB
-        
-        Note:
-            - Uses wandb.config for hyperparameters
-            - Validation always performed during sweeps
-        """
-        import wandb
-
-        with self._wandb_module.initialize_run(
-            project=self._project,
-            config=None,  # Will be set by wandb.config
-            job_type="sweep",
-        ):
-            model = None  # Initialize to avoid UnboundLocalError in finally block
-            try:
-                # Update config for sweep run using config_manager
-                self._config_manager.update_for_sweep_run(
-                    wandb.config,
-                    self.args,
-                    wandb_module=self._wandb_module,
-                )
-
-                logger.info(f"Sweeping {self._model_path.target} {self.configs['name']}...")
-                model = self._train_model_artifact()
-
-                self._wandb_module.send_alert(
-                    title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
-                    text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```",
-                    notifications_enabled=self._wandb_notifications,
-                )
-
-                logger.info(
-                    f"Evaluating {self._model_path.target} {self.configs['name']}..."
-                )
-                raw_predictions = self._evaluate_sweep(self._eval_type, model)
-
-                # Coerce to dataset objects (accepts pd/pl DataFrames, LazyFrames, and file paths)
-                list_datasets = self._coerce_predictions_to_datasets(raw_predictions)
-
-                for i, ds in enumerate(list_datasets):
-                    print(
-                        f"\nValidating evaluation dataset of sequence {i+1}/{len(list_datasets)}"
-                    )
-                    self._validate_prediction_dataset(ds, self.configs["targets"])
-
-                if self.configs.get("metrics"):
-                    self._evaluate_prediction_dataframe(list_datasets, self._eval_type)
-                else:
-                    raise PipelineException("No evaluation metrics specified in config_meta.py")
-            finally:
-                self._wandb_module.finish_run()
-                # Clean up resources to avoid file descriptor exhaustion in sweeps
-                if model is not None:
-                    del model
-                gc.collect()
-                # if TORCH_AVAILABLE and torch.cuda.is_available():
-                #     torch.cuda.empty_cache()
-
-    def _execute_forecast_reporting(self) -> None:
-        """
-        Generate forecast visualization report.
-        
-        Creates HTML report with maps and time-series visualizations
-        of forecasts. Combines historical data with future predictions.
-        
-        Pipeline Stage:
-            report (forecasting)
-        
-        Side Effects:
-            - Creates WandB run (job_type="report")
-            - Loads historical and forecast data
-            - Generates interactive maps
-            - Creates time-series plots
-            - Saves HTML report to reports/
-            - Sends completion notification
-        
-        Raises:
-            PipelineException: If report generation fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_forecast_reporting()
-            INFO: Generating forecast report...
-            INFO: Report saved to reports/report_forecasting_*.html
-        
-        Note:
-            - Requires both historical and forecast data
-            - Handles both model and ensemble targets
-        """
-        import pandas as pd
-        from views_pipeline_core.files.utils import read_dataframe
-
-        with self._wandb_module.initialize_run(
-            project=self._project,
-            config=self.configs,
-            job_type="report",
-        ):
-            try:
-                logger.info(
-                    f"Generating forecast report for {self._model_path.target} {self.configs['name']}..."
-                )
-                if self._model_path._target == "ensemble":
-                    models = self.configs.get("models")
-                    reference_index = None
-                    historical_df = None
-                    for model in models:
-                        mp = ModelPathManager(model_path=model, validate=True)
-                        config = ModelManager(
-                            model_path=mp,
-                            wandb_notifications=False,
-                            use_prediction_store=False,
-                        ).configs
-                        df = read_dataframe(
-                            file_path=mp._get_raw_data_file_paths(
-                                run_type=self.args.run_type
-                            )[0]
-                        )
-                        if reference_index is None or historical_df is None:
-                            reference_index = df.index
-                            historical_df = pd.DataFrame(index=reference_index)
-                        targets = config.get("targets")
-                        targets = targets if isinstance(targets, list) else [targets]
-                        for target in targets:
-                            if target not in historical_df.columns:
-                                if df.index.equals(reference_index):
-                                    historical_df[target] = df[target]
-                                else:
-                                    logger.warning(
-                                        f"Index mismatch for target {target} in model {model}. Skipping this target."
-                                    )
-                                    continue
-                elif self._model_path._target == "model":
-                    historical_df = read_dataframe(
-                        self._model_path._get_raw_data_file_paths(
-                            run_type=self.args.run_type
-                        )[0]
-                    )
-
-                else:
-                    raise ValueError(
-                        f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
-                    )
-                
-                try:
-                    forecast_df = read_dataframe(
-                        self._model_path._get_generated_predictions_data_file_paths(
-                            run_type=self.args.run_type
-                        )[0]
-                    )
-                    logger.info(f"Using latest forecast dataframe")
-                except Exception as e:
-                    raise FileNotFoundError(
-                        f"Forecast dataframe was probably not found. Please run the pipeline in forecasting mode with '--run_type forecasting' to generate the forecast dataframe. More info: {e}"
-                    )
-
-                from views_pipeline_core.templates.reports.forecast import (
-                    ForecastReportTemplate,
-                )
-
-                logger.info(
-                    f"Generating forecast report for {self._model_path.target} {self.configs['name']}..."
-                )
-
-                forecast_template = ForecastReportTemplate(
-                    config=self.configs,
-                    model_path=self._model_path,
-                    run_type=self.args.run_type,
-                )
-                report_path = forecast_template.generate(
-                    forecast_dataframe=forecast_df, historical_dataframe=historical_df
-                )
-
-                self._wandb_module.send_alert(
-                    title="Forecast Report Generated",
-                    text=f"Forecast report for {self._model_path.target} {self._model_path.model_name} has been successfully "
-                    f"generated and saved locally at {report_path}.",
-                    notifications_enabled=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
-            except Exception:
-                raise PipelineException(
-                    f"Forecast report generation failed: {traceback.format_exc()}",
-                    wandb_module=self._wandb_module,
-                )
-            finally:
-                self._wandb_module.finish_run()
-
-    def _save_model_artifact(self, run_type: str) -> None:
-        """
-        Upload model artifact to WandB.
-        
-        Creates WandB artifact from saved model file for versioning
-        and tracking.
-        
-        Internal Use:
-            Called after training to version model artifacts.
-        
-        Args:
-            run_type: Run type for artifact naming
-        
-        Raises:
-            PipelineException: If artifact upload fails
-        
-        Side Effects:
-            - Creates WandB artifact
-            - Uploads model file
-            - Logs artifact reference
-        """
-        # Save the artifact to WandB
-        try:
-            _latest_model_artifact_path = (
-                self._model_path.get_latest_model_artifact_path(run_type=run_type)
-            )
-
-            self._wandb_module.log_artifact(
-                artifact_path=_latest_model_artifact_path,
-                artifact_name=f"{run_type}_{self._model_path.target}_artifact",
-                artifact_type=self._model_path.target,
-                description=f"Latest {run_type} {self._model_path.target} artifact",
-            )
-
-            logger.info(
-                f"Artifact for run type: {run_type} saved to WandB successfully."
-            )
-
-        except Exception as e:
-            # logger.error(f"Error saving artifact to WandB: {e}", exc_info=True)
-            raise PipelineException(
-                f"Error saving artifact to WandB: {e}",
-                wandb_module=self._wandb_module,
-            )
-
-    def _save_eval_report(self, eval_report, path_reports, target_identifier):
-        """
-        Save evaluation metrics report as JSON.
-        
-        Internal Use:
-            Called during evaluation reporting.
-        
-        Args:
-            eval_report: Dictionary of evaluation metrics
-            path_reports: Directory for saving reports
-            target_identifier: Target identifier code for filename
-        
-        Raises:
-            PipelineException: If save fails
-        """
-        import json
-        from views_pipeline_core.files.utils import generate_evaluation_report_name
-
-        try:
-            path_reports = Path(path_reports)
-            path_reports.mkdir(parents=True, exist_ok=True)
-
-            eval_report_path = generate_evaluation_report_name(
-                self.configs["run_type"],
-                target_identifier,
-                self.configs["timestamp"],
-                file_extension=".json",
-            )
-
-            with open(path_reports / eval_report_path, "w") as f:
-                json.dump(eval_report, f)
-
-        except Exception as e:
-            raise PipelineException(
-                f"Error saving evaluation report: {e}",
-                wandb_module=self._wandb_module,
-            )
-
-    def _save_evaluations(
-        self,
-        df_step_wise_evaluation: pd.DataFrame,
-        df_time_series_wise_evaluation: pd.DataFrame,
-        df_month_wise_evaluation: pd.DataFrame,
-        path_generated: Union[str, Path],
-        target_identifier: str,
-    ) -> None:
-        """
-        Save evaluation metrics to disk and WandB.
-        
-        Saves three levels of evaluation metrics (step, time-series, month)
-        to parquet files and logs to WandB.
-        
-        Internal Use:
-            Called by _evaluate_prediction_dataframe().
-        
-        Args:
-            df_step_wise_evaluation: Metrics per prediction step
-            df_time_series_wise_evaluation: Metrics per time series
-            df_month_wise_evaluation: Metrics per month
-            path_generated: Directory for saving files
-            target_identifier: Target identifier for filename
-        
-        Side Effects:
-            - Saves three parquet files
-            - Logs tables to WandB
-            - Sends completion notification
-        
-        Raises:
-            PipelineException: If save fails
-        """
-        from views_pipeline_core.files.utils import (
-            save_dataframe,
-            generate_evaluation_file_name,
-        )
-
-        try:
-            path_generated = Path(path_generated)
-            path_generated.mkdir(parents=True, exist_ok=True)
-
-            eval_step_path = generate_evaluation_file_name(
-                "step",
-                target_identifier,
-                self.configs["run_type"],
-                self.configs["timestamp"],
-                PipelineConfig().dataframe_format,
-            )
-            eval_ts_path = generate_evaluation_file_name(
-                "ts",
-                target_identifier,
-                self.configs["run_type"],
-                self.configs["timestamp"],
-                PipelineConfig().dataframe_format,
-            )
-            eval_month_path = generate_evaluation_file_name(
-                "month",
-                target_identifier,
-                self.configs["run_type"],
-                self.configs["timestamp"],
-                PipelineConfig().dataframe_format,
-            )
-
-            save_dataframe(df_month_wise_evaluation, path_generated / eval_month_path)
-            save_dataframe(
-                df_time_series_wise_evaluation, path_generated / eval_ts_path
-            )
-            save_dataframe(df_step_wise_evaluation, path_generated / eval_step_path)
-
-            self._wandb_module.save(str(path_generated / eval_month_path))
-            self._wandb_module.save(str(path_generated / eval_ts_path))
-            self._wandb_module.save(str(path_generated / eval_step_path))
-
-            self._wandb_module.log(
-                {
-                    "evaluation_metrics_month": wandb.Table(
-                        dataframe=df_month_wise_evaluation
-                    ),
-                    "evaluation_metrics_ts": wandb.Table(
-                        dataframe=df_time_series_wise_evaluation
-                    ),
-                    "evaluation_metrics_step": wandb.Table(
-                        dataframe=df_step_wise_evaluation
-                    ),
-                }
-            )
-
-            self._wandb_module.send_alert(
-                title=f"{self._model_path.target.title()} Outputs Saved",
-                text=f"Evaluation metrics saved at {path_generated.relative_to(self._model_path.root)}.",
-                notifications_enabled=self._wandb_notifications,
-            )
-
-        except Exception as e:
-            logger.error(f"Error saving model outputs: {e}", exc_info=True)
-            raise PipelineException(
-                f"Error saving model outputs: {e}",
-                wandb_module=self._wandb_module,
-            )
-
-    def _save_predictions(
-        self,
-        df_predictions: pd.DataFrame,
-        path_generated: Union[str, Path],
-        sequence_number: int = None,
-        send_alert: bool = True,
-    ) -> None:
-        """
-        Save predictions to disk and prediction store.
-        
-        Saves prediction DataFrame to parquet file and optionally
-        uploads to central VIEWS prediction store.
-        
-        Internal Use:
-            Called after evaluation and forecasting.
-        
-        Args:
-            df_predictions: Predictions DataFrame
-            path_generated: Directory for saving
-            sequence_number: Sequence number for evaluation runs.
-                None for forecasting runs.
-            send_alert: Whether to send a WandB alert.
-        
-        Side Effects:
-            - Saves parquet file
-            - Uploads to prediction store (if enabled)
-            - Sends completion notification
-        
-        Raises:
-            PipelineException: If save fails
-        
-        Note:
-            - Filename includes timestamp and sequence number
-            - Prediction store requires use_prediction_store=True
-        """
-        from views_pipeline_core.files.utils import (
-            save_dataframe,
-            generate_output_file_name,
-        )
-
-        try:
-            path_generated = Path(path_generated)
-            path_generated.mkdir(parents=True, exist_ok=True)
-
-            self._predictions_name = generate_output_file_name(
-                "predictions",
-                self.configs["run_type"],
-                self.configs["timestamp"],
-                sequence_number,
-                file_extension=PipelineConfig().dataframe_format,
-            )
-
-            save_dataframe(df_predictions, path_generated / self._predictions_name)
-
-            if self._use_prediction_store:
-                name = f"{self._model_path.model_name}_{self._predictions_name.split('.')[0]}"
-                df_predictions.forecasts.set_run(self._pred_store_name)
-                df_predictions.forecasts.to_store(name=name, overwrite=True)
-
-                if self._datastore is not None:
-                    try:
-                        self._datastore.upload_data(file=path_generated / self._predictions_name,
-                                                        filename=self._predictions_name,
-                                                        loa=self.configs.get("level"),
-                                                        name=self._model_path.model_name,
-                                                        targets=self.configs.get("targets"),
-                                                        category="forecast",
-                                                        description="",
-                                                        type=self._model_path.target),
-                        logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
-                    except Exception as e:
-                        logger.error(f"Error uploading predictions to datastore: {e}", exc_info=True)
-
-            if send_alert:
-                self._wandb_module.send_alert(
-                    title="Predictions Saved",
-                    text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
-                    notifications_enabled=self._wandb_notifications,
-                )
-
-        except Exception as e:
-            raise PipelineException(
-                f"Error saving predictions: {e}",
-                wandb_module=self._wandb_module,
-            )
-
-    def _evaluate_prediction_dataframe(
-        self, predictions, eval_type, ensemble=False
-    ) -> None:
-        """
-        Calculate evaluation metrics from predictions.
-        
-        Computes metrics at multiple aggregation levels (step, time-series,
-        month) and logs to WandB. Saves results to disk.
-        
-        Internal Use:
-            Called by evaluation and sweep methods.
-        
-        Args:
-            predictions: List of SpatioTemporalDataset objects, a single
-                dataset, or a list of pd.DataFrames (legacy callers).
-            eval_type: Evaluation type
-            ensemble: Whether predictions from ensemble model
-        
-        Side Effects:
-            - Calculates metrics using EvaluationManager
-            - Logs metrics to WandB
-            - Saves evaluation files
-            - Sends summary notification
-        
-        Note:
-            - Loads actual values from viewser data
-            - Processes each task type separately (regression/classification)
-            - Groups metrics by conflict type
-            - Enforces scalar predictions for point metrics
-            - Predictions stay as dataset objects; conversion to pandas
-              happens only at the EvaluationManager boundary.
-        """
-        import pandas as pd
-        from views_evaluation.evaluation.evaluation_manager import EvaluationManager
-        from views_pipeline_core.files.utils import read_dataframe
-
-        # --- Load actuals (pandas kept for prepare_actuals_df hook compat) ---
-        if not ensemble:
-            df_path = self._model_path._get_raw_data_file_paths(
-                run_type=self.args.run_type
-            )[0]
-        else:
-            df_path = (
-                ModelPathManager(self.configs["models"][0]).data_raw
-                / f"{self.configs['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
-            )
-
-        df_viewser = read_dataframe(df_path)
-        logger.info(f"df_viewser read from {df_path}")
-        df_viewser = self.prepare_actuals_df(df_viewser)
-
-        all_targets = (
-            self.configs.get("regression_targets", []) +
-            self.configs.get("classification_targets", [])
-        )
-        df_actual = df_viewser[all_targets]
-
-        # --- Normalise predictions to a list (datasets or DataFrames) ---
-        list_preds = predictions if isinstance(predictions, list) else [predictions]
-
-        tasks = {
-            "regression":     self.configs.get("regression_targets", []),
-            "classification": self.configs.get("classification_targets", []),
-        }
-
-        evaluation_manager = EvaluationManager()
-
-        for task_type, targets in tasks.items():
-            if not targets:
-                continue
-
-            logger.info(f"Processing {task_type} tasks for evaluation...")
-
-            for target in targets:
-                logger.info(f"Calculating {task_type} evaluation metrics for {target}")
-
-                # Column presence check — works with datasets and DataFrames
-                first = list_preds[0]
-                if isinstance(first, SpatioTemporalDataset):
-                    has_col = f"pred_{target}" in first.columns
-                else:
-                    has_col = f"pred_{target}" in first.columns  # pd / pl DataFrame
-                if not has_col:
-                    logger.warning(f"Column pred_{target} not found in prediction columns. Skipping.")
-                    continue
-
-                target_identifier = target
-
-                # --- Convert predictions to pandas at the EvaluationManager boundary ---
-                raw_pred_dfs = []
-                for ds in list_preds:
-                    if isinstance(ds, SpatioTemporalDataset):
-                        df = self._dataset_to_pandas(ds)
-                    elif isinstance(ds, pl.LazyFrame):
-                        df = ds.collect().to_pandas()
-                    elif isinstance(ds, pl.DataFrame):
-                        df = ds.to_pandas()
-                    else:
-                        df = ds  # already pandas
-                    raw_pred_dfs.append(df[[f"pred_{target}"]])
-
-                eval_result_dict = evaluation_manager.evaluate(
-                    df_actual[[target]],
-                    raw_pred_dfs,
-                    target,
-                    self.configs,
-                )
-
-                # Initialize local variables to avoid UnboundLocalError
-                step_wise_evaluation, df_step_wise_evaluation = ({}, pd.DataFrame())
-                time_series_wise_evaluation, df_time_series_wise_evaluation = ({}, pd.DataFrame())
-                month_wise_evaluation, df_month_wise_evaluation = ({}, pd.DataFrame())
-
-                # Safety check: Ensure all expected keys are present and have enough values to unpack
-                for eval_key in ["step", "time_series", "month"]:
-                    try:
-                        # Attempt to retrieve the 2-tuple (metrics_dict, dataframe)
-                        res = eval_result_dict[eval_key]
-                        
-                        # Type and length check
-                        if not isinstance(res, (list, tuple)) or len(res) < 2:
-                            raise ValueError(f"Expected 2-tuple, got {type(res)} with length {len(res) if hasattr(res, '__len__') else 'N/A'}")
-
-                        # Unpack into local variables
-                        if eval_key == "step":
-                            step_wise_evaluation, df_step_wise_evaluation = res
-                        elif eval_key == "time_series":
-                            time_series_wise_evaluation, df_time_series_wise_evaluation = res
-                        elif eval_key == "month":
-                            month_wise_evaluation, df_month_wise_evaluation = res
-                            
-                    except (KeyError, TypeError, ValueError, IndexError) as e:
-                        logger.warning(f"Evaluation for {target} returned invalid data for '{eval_key}': {e}. Skipping WandB/File logging for this component.")
-
-                self._wandb_module.log_evaluation_results(
-                    step_wise_evaluation,
-                    month_wise_evaluation,
-                    time_series_wise_evaluation,
-                    target_identifier,
-                )
-
-                if not self.configs["sweep"]:
-                    self._save_evaluations(
-                        df_step_wise_evaluation,
-                        df_time_series_wise_evaluation,
-                        df_month_wise_evaluation,
-                        self._model_path.data_generated,
-                        target_identifier,
-                    )
-
-        import wandb
-
-        self._wandb_module.send_alert(
-            title=f"Metrics for {self._model_path.model_name}",
-            text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
-            notifications_enabled=self._wandb_notifications,
-        )
-
-    def _generate_evaluation_table(self, metric_dict: Dict) -> str:
-        """
-        Format metrics as markdown table.
-        
-        Creates readable table from WandB summary metrics for
-        notifications and reports.
-        
-        Internal Use:
-            Called when sending evaluation notifications.
-        
-        Args:
-            metric_dict: WandB summary metrics dictionary
-        
-        Returns:
-            Formatted markdown table string
-        
-        Example:
-            >>> table = self._generate_evaluation_table(wandb.summary._as_dict())
-            >>> print(table)
-            ```
-            | Metric | Value |
-            |--------|-------|
-            | MSE    | 0.045 |
-            ```
-        """
-        from tabulate import tabulate
-
-        # create an empty dataframe with columns 'Metric' and 'Value'
-        metric_df = pd.DataFrame(columns=["Metric", "Value"])
-        for key, value in metric_dict.items():
-            try:
-                if not str(key).startswith("_"):
-                    value = float(value)
-                    # add metric and value to the dataframe
-                    metric_df = pd.concat(
-                        [metric_df, pd.DataFrame([{"Metric": key, "Value": value}])],
-                        ignore_index=True,
-                    ).sort_values(by="Metric")
-            except Exception:
-                continue
-        result = tabulate(metric_df, headers="keys", tablefmt="grid")
-        print(result)
-        return f"```\n{result}\n```"
-
-    def _execute_evaluation_reporting(self) -> None:
-        """
-        Generate evaluation visualization report.
-        
-        Creates HTML report with evaluation metrics, comparisons to
-        baselines, and performance visualizations.
-        
-        Pipeline Stage:
-            report (evaluation)
-        
-        Side Effects:
-            - Creates WandB run (job_type="report")
-            - Loads latest WandB run data
-            - Generates evaluation report
-            - Saves HTML to reports/
-            - Sends completion notification
-        
-        Raises:
-            PipelineException: If report generation fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_evaluation_reporting()
-            INFO: Generating evaluation report...
-            INFO: Report saved to reports/report_calibration_*.html
-        
-        Note:
-            - Retrieves metrics from latest WandB run
-            - Includes comparison to baseline models
-        """
-
-        latest_run = get_latest_run(
-            entity=self._entity,
-            model_name=self._model_path.model_name,
-            run_type=self.args.run_type,
-        )
-
-        with self._wandb_module.initialize_run(
-            project=self._project,
-            config=self.configs,
-            job_type="report",
-        ):
-            try:
-                from views_pipeline_core.templates.reports.evaluation import (
-                    EvaluationReportTemplate,
-                )
-
-                for target in self.configs["targets"]:
-                    evaluation_template = EvaluationReportTemplate(
-                        config=self.configs,
-                        model_path=self._model_path,
-                        run_type=self.args.run_type,
-                    )
-                    report_path = evaluation_template.generate(
-                        wandb_run=latest_run, target=target
-                    )
-
-                self._wandb_module.send_alert(
-                    title="Evaluation Report Generated",
-                    text=f"Evaluation report for {self._model_path.model_name} has been successfully "
-                    f"generated and saved locally at {report_path}.",
-                    notifications_enabled=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
-            except Exception:
-                raise PipelineException(
-                    f"Evaluation report generation failed: {traceback.format_exc()}",
-                    wandb_module=self._wandb_module,
-                )
-            finally:
-                self._wandb_module.finish_run()
 
     def __repr__(self) -> str:
         """

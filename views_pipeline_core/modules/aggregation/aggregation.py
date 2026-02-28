@@ -6,7 +6,11 @@ from typing import List, Union, Optional, Dict
 from pathlib import Path
 import logging
 from dataclasses import dataclass
-from views_pipeline_core.modules.dataset.core import CountryMonthDataset, PriogridMonthDataset
+from views_pipeline_core.modules.dataset.core import (
+    CountryMonthDataset,
+    PriogridMonthDataset,
+    SpatioTemporalDataset,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -58,7 +62,7 @@ class AggregationModule:
 
     def add_model(
         self,
-        data: Union[pl.DataFrame, pd.DataFrame, str, Path],
+        data: Union[pl.DataFrame, pd.DataFrame, str, Path, SpatioTemporalDataset],
         weight: Optional[float] = None,
         name: Optional[str] = None,
     ) -> None:
@@ -66,7 +70,10 @@ class AggregationModule:
         Add a model's predictions to the aggregation pool.
 
         Parameters:
-            data: Polars DataFrame, Pandas DataFrame or path to parquet/csv file containing predictions
+            data: Polars DataFrame, Pandas DataFrame, path to parquet/csv
+                file, or a SpatioTemporalDataset containing predictions.
+                Datasets are the preferred input — they skip the pandas
+                round-trip and are already validated.
             weight: Optional weight for the model (float < 1.0)
             name: Optional name for the model (used in column renaming)
         """
@@ -751,34 +758,64 @@ class AggregationModule:
         return point_df, point_agg
 
     def _load_to_polars(
-        self, data: Union[pl.DataFrame, pd.DataFrame, str, Path]
+        self, data: Union[pl.DataFrame, pd.DataFrame, str, Path, SpatioTemporalDataset]
     ) -> pl.DataFrame:
         """
         Normalize input to a Polars DataFrame with index columns included.
-        Steps:
-        1. Accept polars / pandas / path.
-        2. Detect index column names from the input data.
-        3. Wrap in CountryMonthDataset or PriogridMonthDataset for validation.
-        4. Convert the processed dataset back to Polars, keeping index as columns.
+
+        Accepts:
+            - ``SpatioTemporalDataset``: extracted directly as Polars
+              DataFrame — no pandas round-trip, already validated.
+            - ``pl.DataFrame``: used as-is (index columns must be regular
+              columns, not hidden in a MultiIndex).
+            - ``pd.DataFrame``: Multi-Index is flattened into columns;
+              wrapped in a dataset class for validation.
+            - ``str`` / ``Path``: read as parquet/csv via dataset loader.
         """
 
-        # ---------- 1) Normalize to pandas.DataFrame ----------
+        # ---------- Fast path: SpatioTemporalDataset (pre-validated) ----------
+        if isinstance(data, SpatioTemporalDataset):
+            df = data.collect()
+            logger.info(
+                f"Loaded SpatioTemporalDataset directly as Polars DataFrame: "
+                f"{df.columns}"
+            )
+            # Schema validation
+            missing_index = [c for c in self.index_cols if c not in df.columns]
+            if missing_index:
+                raise ValueError(f"Missing required index columns: {missing_index}")
+            if self.target_cols:
+                missing_targets = [c for c in self.target_cols if c not in df.columns]
+                if missing_targets:
+                    raise ValueError(f"Missing target columns: {missing_targets}")
+            return df
+
+        # ---------- Polars DataFrame: already has flat columns ----------
         if isinstance(data, pl.DataFrame):
-            # Polars -> pandas
-            pdf = data.to_pandas()
-        elif isinstance(data, (pd.DataFrame, str, Path)):
+            df = data
+            logger.info(f"Using Polars DataFrame directly: {df.columns}")
+            missing_index = [c for c in self.index_cols if c not in df.columns]
+            if missing_index:
+                raise ValueError(f"Missing required index columns: {missing_index}")
+            if self.target_cols:
+                missing_targets = [c for c in self.target_cols if c not in df.columns]
+                if missing_targets:
+                    raise ValueError(f"Missing target columns: {missing_targets}")
+            return df
+
+        # ---------- Pandas / path: detect index, validate via dataset ----------
+        if isinstance(data, (pd.DataFrame, str, Path)):
             pdf = data
         else:
             raise TypeError(
                 f"Unsupported data type: {type(data)}. "
-                "Type must be either Polars DataFrame, Pandas DataFrame or path to a file."
+                "Expected SpatioTemporalDataset, pl.DataFrame, pd.DataFrame, str, or Path."
             )
 
-        # ---------- 2) Detect index columns ----------
+        # Detect index columns
         if isinstance(pdf, pd.DataFrame) and isinstance(pdf.index, pd.MultiIndex):
             time_name, entity_name = pdf.index.names
         elif isinstance(pdf, pd.DataFrame):
-            # Flat columns - infer from known column names
             _KNOWN_TIME = {"month_id", "year_id"}
             _KNOWN_ENTITY = {"country_id", "priogrid_id", "priogrid_gid", "pg_id"}
             time_candidates = [c for c in pdf.columns if c in _KNOWN_TIME]
@@ -790,10 +827,12 @@ class AggregationModule:
                 )
             time_name, entity_name = time_candidates[0], entity_candidates[0]
         else:
-            raise TypeError(f"Unexpected data type after normalization: {type(pdf)}")
+            # str/Path — will be handled by dataset constructor
+            time_name = self.index_cols[0] if self.index_cols else "month_id"
+            entity_name = self.index_cols[1] if len(self.index_cols) > 1 else "country_id"
 
-        # Handle priogrid_gid -> priogrid_gid (new API uses priogrid_gid by default)
-        if entity_name == "priogrid_id":
+        # Handle priogrid_id -> priogrid_gid rename
+        if isinstance(pdf, pd.DataFrame) and entity_name == "priogrid_id":
             logger.warning("Renaming 'priogrid_id' to 'priogrid_gid' to match new dataset API")
             if isinstance(pdf.index, pd.MultiIndex):
                 pdf.index = pdf.index.rename([time_name, "priogrid_gid"])
@@ -801,7 +840,7 @@ class AggregationModule:
                 pdf = pdf.rename(columns={"priogrid_id": "priogrid_gid"})
             entity_name = "priogrid_gid"
 
-        # ---------- 3) Wrap in CountryMonthDataset or PriogridMonthDataset ----------
+        # Wrap in dataset class for validation
         if entity_name == "country_id":
             ds = CountryMonthDataset(data=pdf, time_col=time_name, entity_col=entity_name)
         elif entity_name in ("priogrid_gid", "pg_id"):
@@ -813,9 +852,8 @@ class AggregationModule:
                 "['priogrid_id', 'priogrid_gid', 'pg_id'] for PriogridMonthDataset."
             )
 
-        # ---------- 4) Convert to Polars and keep index as columns ----------
-        pdf_processed = ds.get_subset_dataframe(return_pandas=True).reset_index()
-        df = pl.from_pandas(pdf_processed)
+        # Extract Polars DataFrame directly (skip pandas round-trip)
+        df = ds.collect()
         logger.info(f"Data frame has the following columns: {df.columns}")
 
         # ---------- 4) Schema validation on Polars dataframe ----------

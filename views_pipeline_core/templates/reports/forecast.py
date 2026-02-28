@@ -1,12 +1,14 @@
-from typing import Dict
+from typing import Dict, Union
 from pathlib import Path
 import tqdm
 import pandas as pd
+import polars as pl
 from views_pipeline_core.managers.model import ModelPathManager
 from views_pipeline_core.modules.dataset.core import (
     CountryDataset,
     CountryMonthDataset,
     PriogridMonthDataset,
+    SpatioTemporalDataset,
 )
 from views_pipeline_core.modules.reports import ReportModule
 from views_pipeline_core.modules.mapping import MappingModule
@@ -25,10 +27,19 @@ class ForecastReportTemplate:
 
     def generate(
         self,
-        forecast_dataframe: pd.DataFrame,
-        historical_dataframe: pd.DataFrame = None,
+        forecast_dataframe: Union[
+            pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path, SpatioTemporalDataset
+        ],
+        historical_dataframe: Union[
+            pd.DataFrame, pl.DataFrame, pl.LazyFrame, str, Path, SpatioTemporalDataset, None
+        ] = None,
     ) -> Path:
-        """Generate a forecast report based on the prediction DataFrame."""
+        """Generate a forecast report based on the prediction data.
+
+        Accepts any data type supported by the dataset constructors:
+        DataFrames (pandas or Polars), LazyFrames, file paths, or
+        pre-constructed dataset objects.
+        """
         dataset_classes = {"cm": CountryMonthDataset, "pgm": PriogridMonthDataset}
 
         def _create_report() -> Path:

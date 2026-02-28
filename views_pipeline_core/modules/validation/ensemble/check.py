@@ -6,6 +6,44 @@ from views_pipeline_core.files.utils import read_log_file
 logger = logging.getLogger(__name__)
 
 
+def _get_model_timestamps_from_registry(model_dir, run_type):
+    """
+    Attempt to read model/data timestamps from the artifact registry.
+
+    Returns a dict with keys matching the log-file convention, or None
+    if the registry is not available or empty.
+    """
+    try:
+        from views_pipeline_core.modules.artifacts import ArtifactRegistry
+        registry = ArtifactRegistry(model_dir)
+        if registry.count == 0:
+            return None
+
+        result = {}
+
+        # Latest train entry → model timestamp
+        train_entry = registry.get_latest(run_type, "train")
+        if train_entry:
+            result["Single Model Timestamp"] = train_entry.created_at[:15].replace("-", "").replace("T", "_").replace(":", "")
+            result["Single Model Name"] = model_dir.name
+
+        # Latest evaluate/forecast entry → data generation timestamp
+        for stage in ("evaluate", "forecast"):
+            entry = registry.get_latest(run_type, stage)
+            if entry:
+                result["Data Generation Timestamp"] = entry.created_at[:15].replace("-", "").replace("T", "_").replace(":", "")
+                break
+
+        # Latest data_fetch entry → data fetch timestamp
+        fetch_entry = registry.get_latest(run_type, "data_fetch")
+        if fetch_entry:
+            result["Data Fetch Timestamp"] = fetch_entry.created_at[:15].replace("-", "").replace("T", "_").replace(":", "")
+
+        return result if "Single Model Timestamp" in result else None
+    except Exception:
+        return None
+
+
 def validate_model_conditions(path_generated, run_type):
     """
     Validate temporal requirements for model training and data freshness.
@@ -38,11 +76,16 @@ def validate_model_conditions(path_generated, run_type):
     """
     
     log_file_path = Path(path_generated) / f"{run_type}_log.txt"
-    try:
-        log_data = read_log_file(log_file_path)
-    except Exception as e:
-        logger.error(f"Error reading log file: {e}")
-        return False
+
+    # Try artifact registry first, fall back to log file
+    model_dir = Path(path_generated).parent.parent  # data/generated → model_dir
+    log_data = _get_model_timestamps_from_registry(model_dir, run_type)
+    if log_data is None:
+        try:
+            log_data = read_log_file(log_file_path)
+        except Exception as e:
+            logger.error(f"Error reading log file: {e}")
+            return False
 
     current_time = datetime.now()
     current_year = current_time.year
@@ -164,30 +207,18 @@ def validate_ensemble_model(config):
     Validate data partition compatibility between ensemble and constituent model.
 
     Ensures that train/test splits match between the ensemble and individual
-    models to maintain evaluation integrity.
+    models to maintain evaluation integrity.  Also verifies via the artifact
+    registry that each constituent model's data and trained artifact are
+    consistent (i.e. the model was trained on the data that was fetched).
 
     Args:
-        ensemble_manager: EnsembleManager instance containing partition configuration
-        model_manager: ModelManager instance containing partition configuration
-        run_type: Type of run to validate partition for:
-            'calibration' | 'forecasting' | 'validation'
-
-    Returns:
-        True if partition configurations match, False otherwise
-
-    Example:
-        >>> from views_pipeline_core.managers.ensemble import EnsembleManager
-        >>> from views_pipeline_core.managers.model import ModelManager
-        >>> ensemble = EnsembleManager(ensemble_path)
-        >>> model = ModelManager(model_path)
-        >>> is_valid = validate_partition_config(ensemble, model, 'calibration')
-        >>> if not is_valid:
-        ...     print("Partition mismatch detected")
+        config: Ensemble configuration dict containing 'name', 'models',
+            'run_type', and 'deployment_status'.
 
     Note:
         - Critical for fair ensemble evaluation
         - Prevents data leakage between train/test sets
-        - Logs error with both partition configs on mismatch
+        - Exits the process if any constituent model fails validation
     """
     from views_pipeline_core.managers.model import ModelManager, ModelPathManager
     from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
@@ -197,6 +228,28 @@ def validate_ensemble_model(config):
         model_path_manager = ModelPathManager(model_name)
         model_manager = ModelManager(model_path_manager)
         path_generated = model_path_manager.data_generated
+
+        # Registry-based data/model match check for each constituent model
+        from views_pipeline_core.modules.artifacts import ArtifactRegistry
+        model_registry = ArtifactRegistry(model_path_manager.model_dir)
+        if model_registry.count == 0:
+            raise RuntimeError(
+                f"Artifact registry for constituent model {model_name!r} "
+                f"is empty — cannot verify data/model consistency"
+            )
+        if not model_registry.validate_data_model_match(
+            run_type=config["run_type"]
+        ):
+            raise RuntimeError(
+                f"Constituent model {model_name!r}: data and model "
+                f"artifacts do not match for run_type={config['run_type']!r}. "
+                f"The model was not trained on the current data."
+            )
+        logger.info(
+            f"Constituent model {model_name!r}: data/model match verified "
+            f"(run_type={config['run_type']!r}, "
+            f"registry entries={model_registry.count})"
+        )
 
         if (
                 (not validate_model_conditions(path_generated, config["run_type"])) or

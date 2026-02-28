@@ -296,24 +296,29 @@ class SpatioTemporalDataset:
     # ------------------------------------------------------------------
 
     def _cache_index_metadata(self) -> None:
-        """Cache lightweight index metadata from the LazyFrame."""
-        index_cols = [self._index.time_col, self._index.entity_col]
-        if self._index.sample_col:
-            index_cols.append(self._index.sample_col)
-        meta = self._lf.select(index_cols).unique().collect()
+        """Cache lightweight index metadata from the LazyFrame.
 
-        self._unique_times: List[int] = (
-            meta[self._index.time_col].unique().sort().to_list()
-        )
-        self._unique_entities: List[int] = (
-            meta[self._index.entity_col].unique().sort().to_list()
-        )
-        self._unique_samples: Optional[List[int]] = None
-        if self._index.sample_col and self._index.sample_col in meta.columns:
-            self._unique_samples = (
-                meta[self._index.sample_col].unique().sort().to_list()
+        Performs a single collect that fetches the distinct values per
+        index column and the row count together.
+        """
+        agg_exprs = [
+            pl.col(self._index.time_col).unique().sort().alias("_times"),
+            pl.col(self._index.entity_col).unique().sort().alias("_entities"),
+            pl.len().alias("_n_rows"),
+        ]
+        if self._index.sample_col:
+            agg_exprs.append(
+                pl.col(self._index.sample_col).unique().sort().alias("_samples")
             )
-        self._n_rows: int = self._lf.select(pl.len()).collect().item()
+
+        meta = self._lf.select(agg_exprs).collect()
+
+        self._unique_times: List[int] = meta["_times"].explode().to_list()
+        self._unique_entities: List[int] = meta["_entities"].explode().to_list()
+        self._unique_samples: Optional[List[int]] = None
+        if self._index.sample_col:
+            self._unique_samples = meta["_samples"].explode().to_list()
+        self._n_rows: int = meta["_n_rows"].item()
 
     def _ensure_grid_complete(
         self,
@@ -323,16 +328,18 @@ class SpatioTemporalDataset:
         sample_idx: Optional[Union[int, List[int]]],
     ) -> pl.LazyFrame:
         """Auto-complete grid for a subset query."""
-        t = list(time_ids) if time_ids is not None else self._unique_times
-        if isinstance(t, int):
-            t = [t]
-        e = list(entity_ids) if entity_ids is not None else self._unique_entities
-        if isinstance(e, int):
-            e = [e]
-        s = (list(sample_idx) if sample_idx is not None
-             else self._unique_samples)
-        if isinstance(s, int):
-            s = [s]
+        if time_ids is not None:
+            t = [time_ids] if isinstance(time_ids, int) else list(time_ids)
+        else:
+            t = self._unique_times
+        if entity_ids is not None:
+            e = [entity_ids] if isinstance(entity_ids, int) else list(entity_ids)
+        else:
+            e = self._unique_entities
+        if sample_idx is not None:
+            s = [sample_idx] if isinstance(sample_idx, int) else list(sample_idx)
+        else:
+            s = self._unique_samples
 
         skeleton_rows = len(t) * len(e) * (len(s) if s else 1)
         if skeleton_rows > 500_000_000:
@@ -351,13 +358,17 @@ class SpatioTemporalDataset:
             )
 
         result = grid.lazy().join(lf, on=self._index.index_cols, how="left")
-        data_cols = [
-            c for c in lf.collect_schema().names() if c not in self._index.index_cols_set
+        # Only fill nulls for numeric columns — leave arrays, strings,
+        # and other types untouched to avoid data corruption.
+        schema = lf.collect_schema()
+        numeric_fill = [
+            pl.col(c).fill_null(0.0)
+            for c in schema.names()
+            if c not in self._index.index_cols_set
+            and schema[c].is_numeric()
         ]
-        if data_cols:
-            result = result.with_columns(
-                [pl.col(c).fill_null(0.0) for c in data_cols]
-            )
+        if numeric_fill:
+            result = result.with_columns(numeric_fill)
         return result
 
     def _entity_lookup_df(self) -> pl.DataFrame:
@@ -618,7 +629,77 @@ class SpatioTemporalDataset:
     # -------------------------------------------------------------------------
     # Statistics
     # -------------------------------------------------------------------------
-    
+
+    def _stats_precompute(
+        self,
+        features: Optional[Union[str, List[str]]],
+        time_ids: Optional[Union[int, List[int]]],
+        entity_ids: Optional[Union[int, List[int]]],
+        default_features_fn: str = "get_all_data_cols",
+    ) -> Tuple[pl.DataFrame, List[str], pl.DataFrame]:
+        """Shared pre-computation for all statistics methods.
+
+        Performs a **single** collect with all requested features and
+        extracts the index DataFrame and resolved feature list.
+
+        Args:
+            features: Caller-supplied features (or None).
+            time_ids: Caller-supplied time filter.
+            entity_ids: Caller-supplied entity filter.
+            default_features_fn: Method name to call for default features
+                (``"get_pred_vars"`` falls back to ``"get_all_data_cols"``).
+
+        Returns:
+            Tuple of (sub_df, feature_list, index_df) where *sub_df* is
+            a materialised ``pl.DataFrame``, *feature_list* is the
+            resolved feature names, and *index_df* has only the index
+            columns.
+        """
+        if features is None:
+            if default_features_fn == "get_pred_vars":
+                features = self.get_pred_vars() or self.get_all_data_cols()
+            else:
+                features = self.get_all_data_cols()
+        if isinstance(features, str):
+            features = [features]
+
+        # Single collect with all features
+        sub_df = self.get_subset_dataframe(
+            time_ids=time_ids, entity_ids=entity_ids, features=features,
+        )
+
+        times, entities, _ = self._index.get_unique_values(sub_df)
+
+        index_df = pl.DataFrame({
+            self.time_col: [t for t in times for _ in entities],
+            self.entity_col: [e for _ in times for e in entities],
+        })
+
+        return sub_df, features, index_df
+
+    def _feature_to_tensor(
+        self,
+        sub_df: pl.DataFrame,
+        feature: str,
+    ) -> Optional[np.ndarray]:
+        """Convert a single feature from an already-collected DataFrame
+        to a 3D tensor (Time, Entity, Sample).
+
+        Returns ``None`` if the tensor is empty.
+        """
+        # Select only the index columns + this feature to avoid
+        # passing unnecessary columns to the tensor converter.
+        keep = list(self._index.index_cols) + [feature]
+        feat_df = sub_df.select([c for c in keep if c in sub_df.columns])
+
+        tensor = self._tensor_mod.convert(
+            feat_df, [feature], self._index, self._dist_layout,
+        )
+        if tensor.size == 0:
+            return None
+        # (T, E, S, 1) -> (T, E, S)
+        return tensor.squeeze(axis=-1)
+
     def calculate_hdi(
         self,
         alpha: float = 0.9,
@@ -643,30 +724,16 @@ class SpatioTemporalDataset:
             DataFrame with HDI bounds. Columns are {feature}_hdi_lower and
             {feature}_hdi_upper for each feature.
         """
-        features = features or self.get_pred_vars() or self.get_all_data_cols()
-        if isinstance(features, str):
-            features = [features]
-        
-        times, entities, _ = self._index.get_unique_values(
-            self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
+        sub_df, features, index_df = self._stats_precompute(
+            features, time_ids, entity_ids, default_features_fn="get_pred_vars",
         )
-        
-        # Build base index DataFrame
-        index_df = pl.DataFrame({
-            self.time_col: [t for t in times for _ in entities],
-            self.entity_col: [e for _ in times for e in entities],
-        })
         
         hdi_columns = {}
         for feature in features:
-            tensor = self.get_subset_tensor(time_ids, entity_ids, features=[feature])
-            if tensor.size == 0:
+            data = self._feature_to_tensor(sub_df, feature)
+            if data is None:
                 continue
-            
-            data = tensor.squeeze(axis=-1)
             lower, upper = self._stats.calculate_hdi(data, alpha)
-            
-            # Flatten in row-major order (time, entity)
             hdi_columns[f"{feature}_hdi_lower"] = lower.flatten()
             hdi_columns[f"{feature}_hdi_upper"] = upper.flatten()
         
@@ -704,27 +771,15 @@ class SpatioTemporalDataset:
         Returns:
             DataFrame with MAP values. Columns are {feature}_map for each feature.
         """
-        features = features or self.get_pred_vars() or self.get_all_data_cols()
-        if isinstance(features, str):
-            features = [features]
-        
-        times, entities, _ = self._index.get_unique_values(
-            self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
+        sub_df, features, index_df = self._stats_precompute(
+            features, time_ids, entity_ids, default_features_fn="get_pred_vars",
         )
-        
-        # Build base index DataFrame
-        index_df = pl.DataFrame({
-            self.time_col: [t for t in times for _ in entities],
-            self.entity_col: [e for _ in times for e in entities],
-        })
         
         map_columns = {}
         for feature in features:
-            tensor = self.get_subset_tensor(time_ids, entity_ids, features=[feature])
-            if tensor.size == 0:
+            data = self._feature_to_tensor(sub_df, feature)
+            if data is None:
                 continue
-            
-            data = tensor.squeeze(axis=-1)
             map_vals = self._stats.calculate_map(data, enforce_non_negative)
             
             # Flatten in row-major order (time, entity)
@@ -770,27 +825,15 @@ class SpatioTemporalDataset:
         Returns:
             DataFrame with HDI bounds and MAP values.
         """
-        features = features or self.get_pred_vars() or self.get_all_data_cols()
-        if isinstance(features, str):
-            features = [features]
-        
-        times, entities, _ = self._index.get_unique_values(
-            self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
+        sub_df, features, index_df = self._stats_precompute(
+            features, time_ids, entity_ids, default_features_fn="get_pred_vars",
         )
-        
-        # Build base index DataFrame
-        index_df = pl.DataFrame({
-            self.time_col: [t for t in times for _ in entities],
-            self.entity_col: [e for _ in times for e in entities],
-        })
         
         all_columns = {}
         for feature in features:
-            tensor = self.get_subset_tensor(time_ids, entity_ids, features=[feature])
-            if tensor.size == 0:
+            data = self._feature_to_tensor(sub_df, feature)
+            if data is None:
                 continue
-            
-            data = tensor.squeeze(axis=-1)
             lower, upper, map_vals = self._stats.calculate_hdi_map(
                 data, alpha, enforce_non_negative
             )
@@ -833,27 +876,15 @@ class SpatioTemporalDataset:
             DataFrame with summary statistics. Columns are named {feature}_{metric}
             where metric is one of: mean, std, q05, q25, q50, q75, q95, q98, q100.
         """
-        features = features or self.get_all_data_cols()
-        if isinstance(features, str):
-            features = [features]
-        
-        times, entities, _ = self._index.get_unique_values(
-            self.get_subset_dataframe(time_ids=time_ids, entity_ids=entity_ids)
+        sub_df, features, index_df = self._stats_precompute(
+            features, time_ids, entity_ids,
         )
-        
-        # Build base index DataFrame
-        index_df = pl.DataFrame({
-            self.time_col: [t for t in times for _ in entities],
-            self.entity_col: [e for _ in times for e in entities],
-        })
         
         stat_columns = {}
         for feature in features:
-            tensor = self.get_subset_tensor(time_ids, entity_ids, features=[feature])
-            if tensor.size == 0:
+            data = self._feature_to_tensor(sub_df, feature)
+            if data is None:
                 continue
-            
-            data = tensor.squeeze(axis=-1)
             stats = self._stats.compute_summary_statistics(data)
             
             # Flatten each metric in row-major order (time, entity)
@@ -955,14 +986,13 @@ class SpatioTemporalDataset:
         Returns:
             TensorBundle with properly shaped tensors.
         """
-        if time_ids is not None or entity_ids is not None:
-            df = self.get_subset_dataframe(
-                time_ids=time_ids,
-                entity_ids=entity_ids,
-                features=columns,
-            )
-        else:
-            df = self._lf.collect()
+        # Always use get_subset_dataframe so we only collect the
+        # requested columns instead of the entire dataset.
+        df = self.get_subset_dataframe(
+            time_ids=time_ids,
+            entity_ids=entity_ids,
+            features=columns,
+        )
         
         converter = TensorConverter(
             time_col=self.time_col,
@@ -1549,23 +1579,32 @@ class PriogridDataset(SpatioTemporalDataset):
             reconciled_values, feature
         )
         
-        # Update each grid cell in the reconciled dataframe
-        for idx, entity_id in enumerate(entity_ids):
-            new_samples = reconciled_values[:, idx].tolist()
-            
-            # Find the row to update
-            mask = (
-                (pl.col(self.time_col) == time_id) & 
-                (pl.col(self.entity_col) == entity_id)
-            )
-            
-            # Update the feature column with new samples
-            self.reconciled_dataframe = self.reconciled_dataframe.with_columns(
-                pl.when(mask)
-                .then(pl.lit(new_samples))
-                .otherwise(pl.col(feature))
-                .alias(feature)
-            )
+        # Build a single update DataFrame for all grid cells at once
+        # instead of rewriting the full DataFrame per cell.
+        update_records = {
+            self.time_col: [time_id] * len(entity_ids),
+            self.entity_col: list(entity_ids),
+            feature: [
+                reconciled_values[:, idx].tolist()
+                for idx in range(len(entity_ids))
+            ],
+        }
+        update_df = pl.DataFrame(update_records)
+
+        # Use anti-join + concat to update only the affected rows
+        join_cols = [self.time_col, self.entity_col]
+        unchanged = self.reconciled_dataframe.join(
+            update_df.select(join_cols), on=join_cols, how="anti"
+        )
+        changed = self.reconciled_dataframe.join(
+            update_df, on=join_cols, how="inner", suffix="_new"
+        ).with_columns(
+            pl.col(f"{feature}_new").alias(feature)
+        ).drop(f"{feature}_new")
+
+        self.reconciled_dataframe = pl.concat(
+            [unchanged, changed], how="diagonal_relaxed"
+        ).sort(join_cols)
         
         self._logger.info(
             f"Reconciled {feature} for country {country_id} at time {time_id}"

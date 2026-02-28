@@ -1,11 +1,16 @@
 import logging
-import pandas as pd
 from pathlib import Path
 from typing import Union
 from datetime import datetime
 
+import pandas as pd
+
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# Log File Utilities
+# =============================================================================
 
 def read_log_file(log_file_path):
     """
@@ -276,6 +281,8 @@ def generate_model_file_name(run_type: str, file_extension: str) -> str:
     """
     Generates a model file name based on the run type, and timestamp.
 
+    Delegates to ``ArtifactNaming.model_artifact`` for consistent naming.
+
     Args:
         run_type (str): The type of run (e.g., calibration, validation).
         file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pt, .pkl, .h5
@@ -283,8 +290,8 @@ def generate_model_file_name(run_type: str, file_extension: str) -> str:
     Returns:
         str: The generated model file name.
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{run_type}_model_{timestamp}{file_extension}"
+    from views_pipeline_core.modules.artifacts.naming import ArtifactNaming
+    return ArtifactNaming.model_artifact(run_type, file_extension)
 
 
 def generate_output_file_name(
@@ -297,6 +304,8 @@ def generate_output_file_name(
     """
     Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
 
+    Delegates to ``ArtifactNaming.prediction`` for consistent naming.
+
     Args:
         generated_file_type (str): The type of generated file (e.g., predictions, output).
         sequence_number (int): The sequence number.
@@ -307,11 +316,8 @@ def generate_output_file_name(
     Returns:
         str: The generated prediction file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
-    if sequence_number is not None:
-        return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}{file_extension}"
-    else:
-        return f"{generated_file_type}_{run_type}_{timestamp}{file_extension}"
+    from views_pipeline_core.modules.artifacts.naming import ArtifactNaming
+    return ArtifactNaming.prediction(run_type, timestamp, sequence_number, file_extension)
     
 
 def generate_evaluation_file_name(
@@ -324,6 +330,8 @@ def generate_evaluation_file_name(
     """
     Generates an evaluation file name based on the run type, evaluation type, and timestamp.
 
+    Delegates to ``ArtifactNaming.evaluation`` for consistent naming.
+
     Args:
         evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
         target_identifier (str): The target identifier (e.g., target name 'ged_sb_best').
@@ -334,28 +342,29 @@ def generate_evaluation_file_name(
     Returns:
         str: The generated prediction file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
-    return f"eval_{run_type}_{target_identifier}_{evaluation_type}_{timestamp}{file_extension}"
+    from views_pipeline_core.modules.artifacts.naming import ArtifactNaming
+    return ArtifactNaming.evaluation(evaluation_type, target_identifier, run_type, timestamp, file_extension)
 
 
 def generate_evaluation_report_name(
     run_type: str,
-    conflict_type: str,
+    target_identifier: str,
     timestamp: str,
     file_extension: str,
 ) -> str:
     """
-    Generates an evaluation file name based on the run type, evaluation type, and timestamp.
+    Generates an evaluation report file name based on the run type, target, and timestamp.
+
+    Delegates to ``ArtifactNaming.evaluation_report`` for consistent naming.
 
     Args:
-        evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
-        conflict_type (str): The type of conflict (e.g., sb, os, ns).
         run_type (str): The type of run (e.g., calibration, validation).
+        target_identifier (str): The target identifier (e.g., target name 'ged_sb').
         timestamp (str): The timestamp of the generated file.
         file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
 
     Returns:
-        str: The generated prediction file name.
+        str: The generated evaluation report file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
-    return f"eval_{run_type}_{conflict_type}_{timestamp}{file_extension}"
+    from views_pipeline_core.modules.artifacts.naming import ArtifactNaming
+    return ArtifactNaming.evaluation_report(run_type, target_identifier, timestamp, file_extension)

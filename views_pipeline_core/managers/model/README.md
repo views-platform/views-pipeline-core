@@ -47,7 +47,7 @@ Model name must match: `^[a-z]+_[a-z]+$` (two lowercase tokens separated by unde
 | `get_queryset()` | Dynamically imports and executes queryset config if present. |
 | `_get_raw_data_file_paths(run_type)` | Returns list of raw dataset parquet files. |
 | `_get_generated_predictions_data_file_paths(run_type)` | Returns generated prediction file paths. |
-| `_get_eval_file_paths(run_type, conflict_type)` | Returns evaluation metric files. |
+| `_get_eval_file_paths(run_type, target_identifier)` | Returns evaluation metric files. |
 | `view_directories()` / `view_scripts()` | Human-readable console views. |
 | `get_directories()` / `get_scripts()` | Structured dict export (for JSON/logging). |
 
@@ -188,7 +188,7 @@ Specialized subclass configuring the full forecasting lifecycle: data ingestion,
 ### Added Functionality
 | Method | Purpose |
 |--------|---------|
-| `_get_conflict_type(target)` | Extracts conflict class token from target names (`sb`, `os`, `ns`). |
+| ~~`_get_conflict_type(target)`~~ | **Removed.** Target identifier is used directly instead. |
 | `_resolve_evaluation_sequence_number(eval_type)` | Determines number of evaluation sequences (e.g. `standard` → 12). |
 | `dataset_class(loa)` | Returns dataset constructor (`CMDataset` or `PGMDataset`) via partial. |
 
