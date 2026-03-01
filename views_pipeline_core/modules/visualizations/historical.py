@@ -117,7 +117,7 @@ class HistoricalLineGraph:
         return "\n".join(html_parts) if as_html else None
 
     # ==================================================================
-    # Batch data fetching  (Polars-native, no pandas)
+    # Batch data fetching
     # ==================================================================
 
     def _batch_fetch_historical(
@@ -209,11 +209,22 @@ class HistoricalLineGraph:
                 entity_ids = [entity_ids]
             return self._validate_entity_ids(entity_ids)
 
-        ids: set = set()
-        if self.historical_dataset:
-            ids.update(self.historical_dataset._unique_entities)
-        if self.forecast_dataset:
-            ids.update(self.forecast_dataset._unique_entities)
+        hist_ids = set(self.historical_dataset._unique_entities) if self.historical_dataset else set()
+        fc_ids = set(self.forecast_dataset._unique_entities) if self.forecast_dataset else set()
+
+        if hist_ids and fc_ids:
+            # Intersection: only entities present in both datasets so we
+            # never plot defunct entities (e.g. USSR) that only appear in
+            # the historical data but have no forecast. This is only a viewser concern.
+            ids = hist_ids & fc_ids
+            dropped = (hist_ids | fc_ids) - ids
+            if dropped:
+                logger.info(
+                    f"Excluded {len(dropped)} entities present in only one "
+                    f"dataset (e.g. historical-only defunct states)."
+                )
+        else:
+            ids = hist_ids | fc_ids
 
         all_ids = sorted(ids)
         if len(all_ids) > max_entities:
@@ -248,16 +259,27 @@ class HistoricalLineGraph:
         return valid
 
     # ==================================================================
-    # Entity name maps  (Polars-native)
+    # Entity name maps
     # ==================================================================
 
     def _get_entity_name_map(self) -> Optional[Dict[int, str]]:
         try:
-            ds = self.forecast_dataset or self.historical_dataset
-            if isinstance(ds, CountryDataset):
-                return self._country_name_map(ds)
-            if isinstance(ds, PriogridDataset):
-                return self._priogrid_name_map(ds)
+            # Build name map from BOTH datasets so every plotted entity gets a
+            # label.  Forecast names take precedence (more recent metadata).
+            name_map: Dict[int, str] = {}
+
+            for ds in (self.historical_dataset, self.forecast_dataset):
+                if ds is None:
+                    continue
+                if isinstance(ds, CountryDataset):
+                    partial = self._country_name_map(ds)
+                elif isinstance(ds, PriogridDataset):
+                    partial = self._priogrid_name_map(ds)
+                else:
+                    continue
+                name_map.update(partial)
+
+            return name_map if name_map else None
         except Exception as e:
             logger.warning(f"Could not retrieve entity names: {e}")
         return None
