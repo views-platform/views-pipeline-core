@@ -273,6 +273,15 @@ class PriogridMetadata:
             join_cols = [self.entity_col]
             meta_subset = meta_subset.unique(subset=[self.entity_col])
         
+        # Also filter join_cols to what data_df actually has
+        join_cols = [c for c in join_cols if c in data_df.columns]
+        if not join_cols:
+            raise ValueError("No common join columns between data and metadata")
+        
+        # If data_df lacks time_col, deduplicate metadata to one row per entity
+        if self.time_col not in join_cols and self.time_col in meta_subset.columns:
+            meta_subset = meta_subset.drop(self.time_col).unique(subset=[self.entity_col])
+        
         result = data_df.select(join_cols).unique().join(
             meta_subset,
             on=join_cols,
@@ -385,7 +394,10 @@ class PriogridMetadata:
         if with_id:
             result = self._join_with_data(data_df, ["country_id", "name"])
             result = result.with_columns(
-                (pl.col("country_id").cast(pl.Utf8) + " - " + pl.col("name")).alias("name")
+                pl.when(pl.col("name").is_not_null())
+                .then(pl.col("country_id").cast(pl.Utf8) + " - " + pl.col("name"))
+                .otherwise(pl.col(self.entity_col).cast(pl.Utf8))
+                .alias("name")
             ).drop("country_id")
         else:
             result = self._join_with_data(data_df, ["name"])
