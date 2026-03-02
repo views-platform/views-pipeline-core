@@ -57,14 +57,15 @@ class TestMultiIndexStructure:
         df = _cm_df(121, 444)
         CoreDataSniffer(calibration_partition, "calibration", level="cm").sniff_loaded_data(df)
 
-    def test_pgm_multiindex_permissive_passes(self, calibration_partition):
-        """Permissive mode (no level) accepts any recognized layout."""
+    def test_pgm_multiindex_explicit_level_passes(self, calibration_partition):
+        """Explicit level is always required; pgm level accepts pgm index."""
         df = _pgm_df(121, 444)
-        CoreDataSniffer(calibration_partition, "calibration").sniff_loaded_data(df)
+        CoreDataSniffer(calibration_partition, "calibration", level="pgm").sniff_loaded_data(df)
 
-    def test_cm_multiindex_permissive_passes(self, calibration_partition):
+    def test_cm_multiindex_explicit_level_passes(self, calibration_partition):
+        """Explicit level is always required; cm level accepts cm index."""
         df = _cm_df(121, 444)
-        CoreDataSniffer(calibration_partition, "calibration").sniff_loaded_data(df)
+        CoreDataSniffer(calibration_partition, "calibration", level="cm").sniff_loaded_data(df)
 
     def test_flat_index_raises(self, calibration_partition):
         df = pd.DataFrame(
@@ -84,21 +85,33 @@ class TestMultiIndexStructure:
         with pytest.raises(ValueError, match="do not match"):
             CoreDataSniffer(calibration_partition, "calibration", level="pgm").sniff_loaded_data(df)
 
-    def test_unrecognized_layout_permissive_raises(self, calibration_partition):
-        """Permissive mode still rejects completely unknown index layouts."""
+    def test_unrecognized_layout_raises(self, calibration_partition):
+        """Unknown index layouts are rejected regardless of the declared level."""
         months = [121, 122]
         idx = pd.MultiIndex.from_arrays(
             [[100, 100], months],
             names=["unknown_id", "month_id"],
         )
         df = pd.DataFrame({"value": [0.0, 0.0]}, index=idx)
-        with pytest.raises(ValueError, match="supported layout"):
-            CoreDataSniffer(calibration_partition, "calibration").sniff_loaded_data(df)
+        with pytest.raises(ValueError, match="do not match"):
+            CoreDataSniffer(calibration_partition, "calibration", level="pgm").sniff_loaded_data(df)
 
     def test_unsupported_level_raises(self, calibration_partition):
         df = _pgm_df(121, 444)
         with pytest.raises(NotImplementedError, match="not supported"):
             CoreDataSniffer(calibration_partition, "calibration", level="xyz").sniff_loaded_data(df)
+
+    def test_pgm_level_rejects_cm_index(self, calibration_partition):
+        """pgm level must reject a cm-format DataFrame (country_id/month_id)."""
+        df = _cm_df(121, 444)
+        with pytest.raises(ValueError, match="do not match"):
+            CoreDataSniffer(calibration_partition, "calibration", level="pgm").sniff_loaded_data(df)
+
+    def test_cm_level_rejects_pgm_index(self, calibration_partition):
+        """cm level must reject a pgm-format DataFrame (priogrid_gid/month_id)."""
+        df = _pgm_df(121, 444)
+        with pytest.raises(ValueError, match="do not match"):
+            CoreDataSniffer(calibration_partition, "calibration", level="cm").sniff_loaded_data(df)
 
 
 # ---------------------------------------------------------------------------

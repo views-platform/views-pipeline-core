@@ -66,6 +66,16 @@ class TestCoreConfigSniffer:
         with pytest.raises(KeyError, match="rolling_origin_stride"):
             CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
 
+    @pytest.mark.parametrize("key", [
+        "algorithm", "level", "steps", "time_steps",
+        "regression_targets", "classification_targets",
+    ])
+    def test_missing_mandatory_key_variants_raise_keyerror(self, key):
+        configs = _valid_configs()
+        del configs[key]
+        with pytest.raises(KeyError, match=key):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
     # ── Targets / metrics coupling ────────────────────────────────────────
 
     def test_no_targets_at_all_raises(self):
@@ -111,6 +121,13 @@ class TestCoreConfigSniffer:
         configs["regression_sample_metrics"] = ["CRPS"]
         CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
 
+    def test_classification_only_config_passes(self):
+        """Classification-only model: no regression targets, no regression metrics."""
+        configs = _valid_configs()
+        configs["regression_targets"] = []
+        configs.pop("regression_point_metrics")
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
     # ── Currently supported values ────────────────────────────────────────
 
     def test_time_steps_mismatch_raises(self):
@@ -138,6 +155,13 @@ class TestCoreConfigSniffer:
         configs = _valid_configs()
         configs["level"] = "subnational"
         with pytest.raises(NotImplementedError, match="level='subnational'"):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_level_none_in_config_raises_not_implemented(self):
+        """level key present but explicitly None — not missing, but unsupported."""
+        configs = _valid_configs()
+        configs["level"] = None
+        with pytest.raises(NotImplementedError, match="level"):
             CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
 
     def test_cm_level_passes(self):
@@ -172,6 +196,15 @@ class TestCoreConfigSniffer:
         CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
 
     # ── Evaluation contract ───────────────────────────────────────────────
+
+    def test_validation_run_type_passes(self):
+        partition = {
+            "validation": {
+                "train": (121, 444),
+                "test": (445, 492),
+            }
+        }
+        CoreConfigSniffer(_valid_configs(), partition).sniff_all("validation")
 
     def test_missing_partition_for_run_type_raises(self):
         with pytest.raises(KeyError, match="No partition for run_type='validation'"):

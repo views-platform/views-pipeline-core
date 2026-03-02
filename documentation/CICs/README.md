@@ -50,8 +50,11 @@ Contracts must be clear enough that:
 
 ## Active Contracts
 
-- ...
-- (Add entries as they are created)
+- `EvaluationAdapter.md` — bridges Pandas DataFrames to the Pure Math Engine
+- `PredictionFrame.md` — canonical transport object for model inference output
+- `CoreConfigSniffer.md` — validates model config before inference
+- `CoreDataSniffer.md` — audits loaded VIEWSER DataFrames against partition contract
+- `CorePredictionSniffer.md` — audits prediction DataFrames before evaluation/storage
 
 ---
 

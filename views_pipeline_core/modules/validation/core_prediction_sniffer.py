@@ -5,7 +5,7 @@ Fail Loud and Proud. Follows the hydranet DataSniffer pattern.
 """
 from __future__ import annotations
 import logging
-from typing import Optional, Union
+from typing import Union
 
 import pandas as pd
 
@@ -22,8 +22,8 @@ class CorePredictionSniffer:
     PredictionFrame is self-validating at construction and requires no external sniffer.
     """
 
-    def __init__(self, level: Optional[str] = None) -> None:
-        self._level = level  # kept only for optional strict index check
+    def __init__(self, level: str) -> None:
+        self._level = level
 
     def sniff_predictions(
         self,

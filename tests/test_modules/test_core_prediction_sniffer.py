@@ -37,18 +37,18 @@ def cm_multiindex_df():
 
 class TestSniffPredictionsPass:
     def test_pgm_multiindex_single_target(self, pgm_multiindex_df):
-        CorePredictionSniffer().sniff_predictions(pgm_multiindex_df, "ged_sb")
-
-    def test_pgm_multiindex_multiple_targets(self, pgm_multiindex_df):
-        CorePredictionSniffer().sniff_predictions(pgm_multiindex_df, ["ged_sb", "ged_ns"])
-
-    def test_cm_multiindex_single_target(self, cm_multiindex_df):
-        CorePredictionSniffer().sniff_predictions(cm_multiindex_df, "ged_sb")
-
-    def test_strict_pgm_level(self, pgm_multiindex_df):
         CorePredictionSniffer(level="pgm").sniff_predictions(pgm_multiindex_df, "ged_sb")
 
-    def test_strict_cm_level(self, cm_multiindex_df):
+    def test_pgm_multiindex_multiple_targets(self, pgm_multiindex_df):
+        CorePredictionSniffer(level="pgm").sniff_predictions(pgm_multiindex_df, ["ged_sb", "ged_ns"])
+
+    def test_cm_multiindex_single_target(self, cm_multiindex_df):
+        CorePredictionSniffer(level="cm").sniff_predictions(cm_multiindex_df, "ged_sb")
+
+    def test_pgm_level_accepts_pgm_index(self, pgm_multiindex_df):
+        CorePredictionSniffer(level="pgm").sniff_predictions(pgm_multiindex_df, "ged_sb")
+
+    def test_cm_level_accepts_cm_index(self, cm_multiindex_df):
         CorePredictionSniffer(level="cm").sniff_predictions(cm_multiindex_df, "ged_sb")
 
 
@@ -68,7 +68,7 @@ class TestBehaviorChanges:
             ),
         )
         with pytest.raises(ValueError):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
 
     def test_cm_flat_index_single_target_raises(self):
         """Flat-indexed CM DataFrames are not accepted — MultiIndex required."""
@@ -81,7 +81,7 @@ class TestBehaviorChanges:
             }
         )
         with pytest.raises(ValueError):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="cm").sniff_predictions(df, "ged_sb")
 
     def test_cm_flat_index_multiple_targets_raises(self):
         """Flat-indexed CM DataFrames are not accepted — MultiIndex required."""
@@ -94,7 +94,7 @@ class TestBehaviorChanges:
             }
         )
         with pytest.raises(ValueError):
-            CorePredictionSniffer().sniff_predictions(df, ["ged_sb", "ged_ns"])
+            CorePredictionSniffer(level="cm").sniff_predictions(df, ["ged_sb", "ged_ns"])
 
     def test_unknown_id_flat_index_raises(self):
         """month_id alone in columns no longer passes — MultiIndex required."""
@@ -106,7 +106,7 @@ class TestBehaviorChanges:
             }
         )
         with pytest.raises(ValueError):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ class TestBehaviorChanges:
 class TestEmptyDataFrame:
     def test_empty_dataframe_raises(self):
         with pytest.raises(ValueError, match="Prediction DataFrame is empty"):
-            CorePredictionSniffer().sniff_predictions(pd.DataFrame(), "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(pd.DataFrame(), "ged_sb")
 
 
 # ---------------------------------------------------------------------------
@@ -126,15 +126,15 @@ class TestEmptyDataFrame:
 class TestInvalidTargetType:
     def test_int_target_raises(self, pgm_multiindex_df):
         with pytest.raises(ValueError, match="Invalid targets type"):
-            CorePredictionSniffer().sniff_predictions(pgm_multiindex_df, 123)
+            CorePredictionSniffer(level="pgm").sniff_predictions(pgm_multiindex_df, 123)
 
     def test_dict_target_raises(self, pgm_multiindex_df):
         with pytest.raises(ValueError, match="Invalid targets type"):
-            CorePredictionSniffer().sniff_predictions(pgm_multiindex_df, {"target": "ged_sb"})
+            CorePredictionSniffer(level="pgm").sniff_predictions(pgm_multiindex_df, {"target": "ged_sb"})
 
     def test_none_target_raises(self, pgm_multiindex_df):
         with pytest.raises(ValueError, match="Invalid targets type"):
-            CorePredictionSniffer().sniff_predictions(pgm_multiindex_df, None)
+            CorePredictionSniffer(level="pgm").sniff_predictions(pgm_multiindex_df, None)
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ class TestMissingPredictionColumns:
             ),
         )
         with pytest.raises(ValueError, match="Missing prediction columns"):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
 
     def test_missing_one_of_multiple_pred_columns_raises(self):
         df = pd.DataFrame(
@@ -162,7 +162,7 @@ class TestMissingPredictionColumns:
             ),
         )
         with pytest.raises(ValueError, match="Missing prediction columns"):
-            CorePredictionSniffer().sniff_predictions(df, ["ged_sb", "ged_ns"])
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, ["ged_sb", "ged_ns"])
 
     def test_column_without_pred_prefix_raises(self):
         df = pd.DataFrame(
@@ -173,7 +173,7 @@ class TestMissingPredictionColumns:
             ),
         )
         with pytest.raises(ValueError, match="Missing prediction columns"):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ class TestMultiIndexStructure:
             ),
         )
         with pytest.raises(ValueError):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
 
     def test_multiindex_without_month_id_raises(self):
         df = pd.DataFrame(
@@ -201,14 +201,14 @@ class TestMultiIndexStructure:
             ),
         )
         with pytest.raises(ValueError):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
 
     def test_flat_index_single_col_raises(self):
         df = pd.DataFrame(
             {"priogrid_gid": [100, 101, 102], "pred_ged_sb": [0.1, 0.2, 0.3]}
         )
         with pytest.raises(ValueError):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
 
     def test_fully_unrecognized_multiindex_raises(self):
         df = pd.DataFrame(
@@ -219,7 +219,7 @@ class TestMultiIndexStructure:
             ),
         )
         with pytest.raises(ValueError):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
 
     def test_flat_index_with_unrecognized_cols_raises(self):
         df = pd.DataFrame(
@@ -230,7 +230,7 @@ class TestMultiIndexStructure:
             }
         )
         with pytest.raises(ValueError):
-            CorePredictionSniffer().sniff_predictions(df, "ged_sb")
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
 
 
 # ---------------------------------------------------------------------------

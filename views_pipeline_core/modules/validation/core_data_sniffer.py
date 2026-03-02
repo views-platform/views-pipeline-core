@@ -20,15 +20,21 @@ EXPECTED_INDEX_NAMES: Dict[str, tuple] = {
     "cm":  ("country_id",   "month_id"),
 }
 
+# Partition dict structural keys — internal; not part of the public API.
+_PARTITION_TRAIN = "train"
+_PARTITION_TEST  = "test"
 
-def _check_multiindex(df: pd.DataFrame, level: Optional[str], source: str) -> None:
+# Run types that use train+test bounds (as opposed to forecasting, which is train-only).
+_TRAINING_RUN_TYPES = frozenset({"calibration", "validation"})
+
+
+def _check_multiindex(df: pd.DataFrame, level: str, source: str) -> None:
     """
     Shared MultiIndex structure check used by CoreDataSniffer and
     CorePredictionSniffer. `source` is the calling class name, used only
     in error messages so they remain self-identifying.
 
-    Strict mode (level is not None): index must match the exact layout for
-    that level. Permissive mode (level is None): any recognized layout accepted.
+    `level` is required; callers always pass an explicit 'pgm' or 'cm' string.
     """
     if not isinstance(df.index, pd.MultiIndex):
         raise ValueError(
@@ -38,26 +44,18 @@ def _check_multiindex(df: pd.DataFrame, level: Optional[str], source: str) -> No
 
     actual = set(df.index.names)
 
-    if level is not None:
-        if level not in EXPECTED_INDEX_NAMES:
-            raise NotImplementedError(
-                f"{source}: level='{level}' is not supported. "
-                f"Supported: {list(EXPECTED_INDEX_NAMES)}. "
-                f"Update EXPECTED_INDEX_NAMES in core_data_sniffer.py when ready."
-            )
-        expected = set(EXPECTED_INDEX_NAMES[level])
-        if actual != expected:
-            raise ValueError(
-                f"{source}: MultiIndex names {tuple(df.index.names)} do not match "
-                f"expected layout for level='{level}': {EXPECTED_INDEX_NAMES[level]}."
-            )
-    else:
-        recognized = [set(v) for v in EXPECTED_INDEX_NAMES.values()]
-        if actual not in recognized:
-            raise ValueError(
-                f"{source}: MultiIndex names {tuple(df.index.names)} do not match "
-                f"any supported layout: {list(EXPECTED_INDEX_NAMES.values())}."
-            )
+    if level not in EXPECTED_INDEX_NAMES:
+        raise NotImplementedError(
+            f"{source}: level='{level}' is not supported. "
+            f"Supported: {list(EXPECTED_INDEX_NAMES)}. "
+            f"Update EXPECTED_INDEX_NAMES in core_data_sniffer.py when ready."
+        )
+    expected = set(EXPECTED_INDEX_NAMES[level])
+    if actual != expected:
+        raise ValueError(
+            f"{source}: MultiIndex names {tuple(df.index.names)} do not match "
+            f"expected layout for level='{level}': {EXPECTED_INDEX_NAMES[level]}."
+        )
 
 
 class CoreDataSniffer:
@@ -71,9 +69,9 @@ class CoreDataSniffer:
     Args:
         partition_dict: Partition dict containing 'train' and 'test' tuples.
         partition: Run type string — 'calibration', 'validation', or 'forecasting'.
-        level: Optional model level — 'pgm' or 'cm'. When provided, the MultiIndex
-            structure is validated against the exact expected layout for that level.
-            When None, any recognized layout is accepted (backward-compatible mode).
+        level: Model level — 'pgm' or 'cm'. Required; no permissive mode.
+            The MultiIndex structure is validated against the exact expected layout
+            for this level.
         override_month: Optional month override for forecasting partitions.
     """
 
@@ -81,23 +79,23 @@ class CoreDataSniffer:
         self,
         partition_dict: Dict,
         partition: str,
-        level: Optional[str] = None,
+        level: str,
         override_month: Optional[int] = None,
     ) -> None:
         # Pre-compute the expected bounds from the partition context.
         # Nothing is modified — these are read-only expected values.
-        if partition in ("calibration", "validation"):
-            self._first_expected: int = partition_dict["train"][0]
-            self._last_expected:  int = partition_dict["test"][1]
+        if partition in _TRAINING_RUN_TYPES:
+            self._first_expected: int = partition_dict[_PARTITION_TRAIN][0]
+            self._last_expected:  int = partition_dict[_PARTITION_TEST][1]
         else:  # forecasting
-            self._first_expected = partition_dict["train"][0]
+            self._first_expected = partition_dict[_PARTITION_TRAIN][0]
             self._last_expected  = (
                 override_month
                 if override_month is not None
-                else partition_dict["train"][1]
+                else partition_dict[_PARTITION_TRAIN][1]
             )
         self._partition = partition  # kept only for error messages
-        self._level     = level      # kept only for optional strict index check
+        self._level     = level      # kept only for error messages / logging
 
     def sniff_loaded_data(self, df: pd.DataFrame) -> None:
         """
@@ -114,7 +112,7 @@ class CoreDataSniffer:
             "CoreDataSniffer: Loaded data audited "
             "(partition='%s', level='%s').",
             self._partition,
-            self._level or "any",
+            self._level,
         )
 
     # ── Private checks ────────────────────────────────────────────────────────

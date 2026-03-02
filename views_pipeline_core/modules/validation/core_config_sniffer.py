@@ -9,14 +9,22 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
+from views_pipeline_core.modules.validation.core_data_sniffer import (
+    _PARTITION_TRAIN,
+    _PARTITION_TEST,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── Currently supported values ─────────────────────────────────────────────────
 # Extend these constants (not inline checks) when new values are supported.
-SUPPORTED_TIME_STEPS          = {36}
-SUPPORTED_STRIDES             = {1}
-SUPPORTED_LEVELS              = {"cm", "pgm"}
-SUPPORTED_DEPLOYMENT_STATUSES = {"shadow", "deployed", "baseline", "deprecated"}
+SUPPORTED_TIME_STEPS = {36}
+SUPPORTED_STRIDES    = {1}
+SUPPORTED_LEVELS     = {"cm", "pgm"}
+
+DEPRECATED_STATUS             = "deprecated"    # must be defined before SUPPORTED_DEPLOYMENT_STATUSES
+SUPPORTED_DEPLOYMENT_STATUSES = {"shadow", "deployed", "baseline", DEPRECATED_STATUS}
+
 # MAX_SHIFT_COUNT is the number of times the rolling origin is shifted forward by
 # rolling_origin_stride. The total number of evaluation sequences equals
 # MAX_SHIFT_COUNT + 1 (e.g. 12 shifts → 13 sequences). This is because Sequence 0
@@ -25,6 +33,19 @@ SUPPORTED_DEPLOYMENT_STATUSES = {"shadow", "deployed", "baseline", "deprecated"}
 # you need N shifts and N+1 sequences.
 # With time_steps=36: expected test_len = 36 + 12 = 48 months (4 years).
 MAX_SHIFT_COUNT      = 12
+
+# Run-type identifiers
+FORECASTING_RUN_TYPE = "forecasting"   # used in sniff_all() guard
+
+# Metric key names expected in configs
+REGRESSION_METRIC_KEYS     = frozenset({
+    "regression_point_metrics",
+    "regression_sample_metrics",
+})
+CLASSIFICATION_METRIC_KEYS = frozenset({
+    "classification_point_metrics",
+    "classification_sample_metrics",
+})
 
 
 class CoreConfigSniffer:
@@ -52,7 +73,7 @@ class CoreConfigSniffer:
         self._check_targets_and_metrics()
         self._check_currently_supported_values()
         self._check_level()
-        if run_type != "forecasting":
+        if run_type != FORECASTING_RUN_TYPE:
             self._check_evaluation_contract(run_type)
         logger.info("CoreConfigSniffer: Config audited (run_type='%s').", run_type)
 
@@ -76,25 +97,22 @@ class CoreConfigSniffer:
                 "classification_targets must be non-empty."
             )
 
-        reg_metric_keys = {"regression_point_metrics", "regression_sample_metrics"}
-        cls_metric_keys = {"classification_point_metrics", "classification_sample_metrics"}
-
-        if reg_targets and not any(self._c.get(k) for k in reg_metric_keys):
+        if reg_targets and not any(self._c.get(k) for k in REGRESSION_METRIC_KEYS):
             raise ValueError(
                 f"CoreConfigSniffer: regression_targets is non-empty but none of "
-                f"{reg_metric_keys} are present. Add at least one regression metric key."
+                f"{REGRESSION_METRIC_KEYS} are present. Add at least one regression metric key."
             )
-        if not reg_targets and any(self._c.get(k) for k in reg_metric_keys):
+        if not reg_targets and any(self._c.get(k) for k in REGRESSION_METRIC_KEYS):
             raise ValueError(
                 "CoreConfigSniffer: Regression metric key(s) declared but "
                 "regression_targets is empty. Add targets or remove the metric keys."
             )
-        if cls_targets and not any(self._c.get(k) for k in cls_metric_keys):
+        if cls_targets and not any(self._c.get(k) for k in CLASSIFICATION_METRIC_KEYS):
             raise ValueError(
                 f"CoreConfigSniffer: classification_targets is non-empty but none of "
-                f"{cls_metric_keys} are present. Add at least one classification metric key."
+                f"{CLASSIFICATION_METRIC_KEYS} are present. Add at least one classification metric key."
             )
-        if not cls_targets and any(self._c.get(k) for k in cls_metric_keys):
+        if not cls_targets and any(self._c.get(k) for k in CLASSIFICATION_METRIC_KEYS):
             raise ValueError(
                 "CoreConfigSniffer: Classification metric key(s) declared but "
                 "classification_targets is empty. Add targets or remove the metric keys."
@@ -140,7 +158,7 @@ class CoreConfigSniffer:
                 f"Supported: {SUPPORTED_DEPLOYMENT_STATUSES}. "
                 f"Fix in config_meta.py."
             )
-        if status == "deprecated":
+        if status == DEPRECATED_STATUS:
             raise ValueError(
                 f"CoreConfigSniffer: Model '{self._c.get('name')}' has "
                 f"deployment_status='deprecated' and cannot be run. "
@@ -154,9 +172,9 @@ class CoreConfigSniffer:
                 f"Available: {list(self._partition_dict.keys())}."
             )
         partition   = self._partition_dict[run_type]
-        train_end   = partition["train"][1]
-        test_start  = partition["test"][0]
-        test_end    = partition["test"][1]
+        train_end   = partition[_PARTITION_TRAIN][1]
+        test_start  = partition[_PARTITION_TEST][0]
+        test_end    = partition[_PARTITION_TEST][1]
         time_steps  = self._c["time_steps"]
         stride      = self._c["rolling_origin_stride"]
         base_origin = test_start - 1
