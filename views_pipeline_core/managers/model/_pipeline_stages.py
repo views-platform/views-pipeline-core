@@ -837,14 +837,16 @@ class PipelineStagesMixin:
 
                     # Wrap the merged LazyFrame in the appropriate dataset class
                     historical_data = self._coerce_to_dataset(
-                        historical_lf.collect()
+                        historical_lf.collect(),
+                        target_cols=self.configs.get("targets"),
                     )
 
                 elif self._model_path._target == "model":
                     historical_data = self._coerce_to_dataset(
                         self._model_path._get_raw_data_file_paths(
                             run_type=self.args.run_type
-                        )[0]
+                        )[0],
+                        target_cols=self.configs.get("targets"),
                     )
 
                 else:

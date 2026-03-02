@@ -263,6 +263,26 @@ class ArtifactRegistry:
         if not filepath.exists():
             raise FileNotFoundError(f"Cannot register non-existent file: {filepath}")
 
+        sha = compute_file_sha256(filepath)
+
+        # Content-addressable dedup: if an entry with the same hash,
+        # run_type, and stage already exists, return it instead of
+        # creating a duplicate with a newer timestamp.  This prevents
+        # ``--saved`` re-reads from bumping the registration time and
+        # breaking ``validate_data_model_match``.
+        for existing in reversed(self._entries):
+            if (
+                existing.sha256 == sha
+                and existing.run_type == run_type
+                and existing.stage == stage
+            ):
+                logger.info(
+                    f"Artifact already registered (content unchanged): "
+                    f"{existing.filename} [{existing.stage}/{existing.run_type}] "
+                    f"id={existing.id}"
+                )
+                return existing
+
         # Store directory relative to model root for portability
         try:
             rel_dir = str(filepath.parent.relative_to(self._model_dir))
@@ -274,7 +294,7 @@ class ArtifactRegistry:
             stage=stage,
             filename=filepath.name,
             directory=rel_dir,
-            sha256=compute_file_sha256(filepath),
+            sha256=sha,
             size_bytes=filepath.stat().st_size,
             created_at=datetime.now(timezone.utc).isoformat(),
             parent_id=parent_id,
@@ -496,14 +516,38 @@ class ArtifactRegistry:
             )
 
         # The data must have been fetched (registered) before the model
-        # was trained.
+        # was trained.  However, when `--saved` is used, the same
+        # unchanged data file may be re-registered *after* the model was
+        # trained, giving it a newer timestamp.  In that case we fall
+        # back to a content check: if an older data_fetch entry with the
+        # same SHA-256 exists that pre-dates the model, the data is
+        # unchanged and the match is valid.
         if data_entry.created_at > model_entry.created_at:
-            raise RuntimeError(
-                f"Data artifact {data_entry.filename} (registered "
-                f"{data_entry.created_at}) is *newer* than model artifact "
-                f"{model_entry.filename} (registered {model_entry.created_at}). "
-                f"The model was not trained on this data."
-            )
+            older_match = None
+            for e in self._entries:
+                if (
+                    e.run_type == run_type
+                    and e.stage == "data_fetch"
+                    and e.sha256 == data_entry.sha256
+                    and e.created_at <= model_entry.created_at
+                ):
+                    older_match = e
+
+            if older_match is None:
+                raise RuntimeError(
+                    f"Data artifact {data_entry.filename} (registered "
+                    f"{data_entry.created_at}) is *newer* than model artifact "
+                    f"{model_entry.filename} (registered {model_entry.created_at}). "
+                    f"The model was not trained on this data."
+                )
+            else:
+                logger.info(
+                    f"Latest data_fetch entry is newer than model, but "
+                    f"content matches older entry {older_match.id} "
+                    f"(registered {older_match.created_at}). "
+                    f"Accepting as valid (--saved re-registration)."
+                )
+                data_entry = older_match
 
         # Verify both files still exist and are intact
         self.verify(data_entry.id)

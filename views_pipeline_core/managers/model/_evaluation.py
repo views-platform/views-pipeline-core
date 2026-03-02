@@ -107,7 +107,15 @@ class EvaluationMixin:
             "classification": self.configs.get("classification_targets", []),
         }
 
-        evaluation_manager = EvaluationManager()
+        # Build the flat metrics list expected by EvaluationManager
+        metrics_list = (
+            self.configs.get("regression_point_metrics", [])
+            + self.configs.get("regression_sample_metrics", [])
+            + self.configs.get("classification_point_metrics", [])
+            + self.configs.get("classification_sample_metrics", [])
+        )
+
+        evaluation_manager = EvaluationManager(metrics_list=metrics_list)
 
         for task_type, targets in tasks.items():
             if not targets:

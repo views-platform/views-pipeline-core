@@ -91,7 +91,10 @@ class LoaderModule:
 
             self._logger.info(f"Scanning file: {path}")
             if path.suffix == ".parquet":
-                return pl.scan_parquet(path)
+                # Eager read to avoid pyo3 panics (EINVAL / os error 22)
+                # that occur with scan_parquet on certain Polars versions
+                # during multi-threaded collect on macOS.
+                return pl.read_parquet(path).lazy()
             if path.suffix == ".csv":
                 return pl.scan_csv(path)
 

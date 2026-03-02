@@ -299,16 +299,19 @@ class SpatioTemporalDataset:
         """Cache lightweight index metadata from the LazyFrame.
 
         Performs a single collect that fetches the distinct values per
-        index column and the row count together.
+        index column and the row count together.  Each ``.unique()``
+        result is wrapped in ``.implode()`` so that all columns are
+        length-1 lists and Polars can assemble them into a single-row
+        DataFrame regardless of how many unique values each column has.
         """
         agg_exprs = [
-            pl.col(self._index.time_col).unique().sort().alias("_times"),
-            pl.col(self._index.entity_col).unique().sort().alias("_entities"),
+            pl.col(self._index.time_col).unique().sort().implode().alias("_times"),
+            pl.col(self._index.entity_col).unique().sort().implode().alias("_entities"),
             pl.len().alias("_n_rows"),
         ]
         if self._index.sample_col:
             agg_exprs.append(
-                pl.col(self._index.sample_col).unique().sort().alias("_samples")
+                pl.col(self._index.sample_col).unique().sort().implode().alias("_samples")
             )
 
         meta = self._lf.select(agg_exprs).collect()

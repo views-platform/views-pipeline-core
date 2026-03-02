@@ -83,6 +83,7 @@ class PredictionIOMixin:
             Path,
             SpatioTemporalDataset,
         ],
+        target_cols: Optional[List[str]] = None,
     ) -> SpatioTemporalDataset:
         """Convert a prediction payload to the appropriate dataset object.
 
@@ -96,6 +97,12 @@ class PredictionIOMixin:
         ``Path`` objects only.  Raw ``pd.DataFrame`` / ``pl.LazyFrame``
         are **not** accepted — the dataset class constructor handles the
         actual loading and provides schema verification.
+
+        Args:
+            data: The raw data source to wrap.
+            target_cols: Target column names, required when loading
+                historical data (no ``pred_`` columns) so the dataset
+                constructor can distinguish historical from forecast mode.
 
         Returns:
             A ``CountryMonthDataset`` or ``PriogridMonthDataset`` wrapping *data*.
@@ -115,13 +122,25 @@ class PredictionIOMixin:
                 "Expected 'cm' or 'pgm'."
             )
 
-        if not isinstance(data, (pl.DataFrame, str, Path)):
+        if not isinstance(data, (pl.DataFrame, pd.DataFrame, str, Path)):
             raise TypeError(
                 f"Cannot coerce predictions: unsupported type {type(data).__name__}. "
-                "Expected Path, str, pl.DataFrame, or SpatioTemporalDataset."
+                "Expected Path, str, pd.DataFrame, pl.DataFrame, or SpatioTemporalDataset."
             )
 
-        return dataset_cls_partial(data=data)
+        # Convert pandas to Polars so the dataset constructor receives a
+        # uniform type.  Pandas DataFrames with a MultiIndex are reset so
+        # the index columns become regular columns.
+        if isinstance(data, pd.DataFrame):
+            if isinstance(data.index, pd.MultiIndex):
+                data = pl.from_pandas(data.reset_index())
+            else:
+                data = pl.from_pandas(data)
+
+        kwargs = {"data": data}
+        if target_cols is not None:
+            kwargs["target_cols"] = target_cols
+        return dataset_cls_partial(**kwargs)
 
     def _coerce_predictions_to_datasets(
         self,

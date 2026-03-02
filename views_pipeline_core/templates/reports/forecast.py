@@ -44,7 +44,10 @@ class ForecastReportTemplate:
 
         def _create_report() -> Path:
             """Helper function to create and export report."""
-            forecast_dataset = dataset_cls(data=forecast_dataframe, fetch_metadata=True)
+            if isinstance(forecast_dataframe, SpatioTemporalDataset):
+                forecast_dataset = forecast_dataframe
+            else:
+                forecast_dataset = dataset_cls(data=forecast_dataframe, fetch_metadata=True)
 
             report_manager = ReportModule()
             # Build report content
@@ -98,10 +101,13 @@ class ForecastReportTemplate:
                     "Generating historical vs forecast graphs for CM dataset"
                 )
                 report_manager.add_heading("Historical vs Forecasted", level=2)
-                historical_dataset = dataset_cls(
-                    data=historical_dataframe, target_cols=self.config["targets"],
-                    fetch_metadata=True,
-                )
+                if isinstance(historical_dataframe, SpatioTemporalDataset):
+                    historical_dataset = historical_dataframe
+                else:
+                    historical_dataset = dataset_cls(
+                        data=historical_dataframe, target_cols=self.config["targets"],
+                        fetch_metadata=True,
+                    )
                 historical_line_graph = HistoricalLineGraph(
                     historical_dataset=historical_dataset,
                     forecast_dataset=forecast_dataset,
