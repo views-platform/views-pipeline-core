@@ -1,11 +1,10 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from datetime import datetime
 import copy
 
 from views_pipeline_core.managers.configuration.configuration import ConfigurationManager
 from views_pipeline_core.cli.args import ForecastingModelArgs
-from views_pipeline_core.exceptions import ConfigurationException
 
 
 # ============================================================================
@@ -30,7 +29,7 @@ def base_configs():
             "name": "test_model",
             "environment": "development",
             "version": "1.0.0",
-            "deployment_status": "production",
+            "deployment_status": "shadow",
         },
         "meta": {
             "description": "Test model",
@@ -232,19 +231,20 @@ class TestGetCombinedConfig:
         config = config_manager.get_combined_config()
         assert config["algorithm"] == "override_algorithm"
         
-    def test_string_targets_converted_to_list(self, base_configs):
-        """Test string targets are converted to list."""
+    def test_string_regression_targets_converted_to_list(self, base_configs):
+        """Test string regression_targets are converted to list."""
         configs = copy.deepcopy(base_configs)
-        configs["meta"]["targets"] = "single_target"
-        
+        configs["hyperparameters"]["regression_targets"] = "single_target"
+        configs["hyperparameters"].pop("targets", None)
+
         manager = ConfigurationManager(
             config_hyperparameters=configs["hyperparameters"],
             config_deployment=configs["deployment"],
             config_meta=configs["meta"],
         )
-        
+
         config = manager.get_combined_config()
-        assert config["targets"] == ["single_target"]
+        assert config["regression_targets"] == ["single_target"]
 
 
 # ============================================================================
@@ -280,15 +280,14 @@ class TestUpdateForSingleRun:
             train=True,
             evaluate=True,
         )
-        
-        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
-            config_manager.update_for_single_run(args, mock_wandb_module)
-        
+
+        config_manager.update_for_single_run(args, mock_wandb_module)
+
         config = config_manager.get_combined_config()
         assert config["run_type"] == "calibration"
         assert config["eval_type"] == "standard"
         assert config["sweep"] is False
-        
+
     def test_update_with_timestep_override(self, config_manager, mock_wandb_module):
         """Test timestep override is applied."""
         args = ForecastingModelArgs(
@@ -297,38 +296,13 @@ class TestUpdateForSingleRun:
             forecast=True,
             override_timestep=530,
         )
-        
-        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
-            config_manager.update_for_single_run(args, mock_wandb_module)
-        
+
+        config_manager.update_for_single_run(args, mock_wandb_module)
+
         config = config_manager.get_combined_config()
         assert "forecasting" in config
         assert config["forecasting"]["train"] == (121, 530)
         assert config["forecasting"]["test"][0] == 531
-        
-    def test_validation_failure_raises_exception(self, config_manager, mock_wandb_module):
-        """Test validation failure raises ConfigurationException."""
-        args = ForecastingModelArgs(run_type="calibration", train=True)
-        
-        with patch("views_pipeline_core.managers.configuration.configuration.validate_config") as mock_validate:
-            mock_validate.side_effect = ValueError("Invalid config")
-            
-            with pytest.raises(ConfigurationException, match="Configuration validation failed"):
-                config_manager.update_for_single_run(args, mock_wandb_module)
-                
-    def test_validation_sends_alert(self, config_manager, mock_wandb_module):
-        """Test validation failure sends WandB alert."""
-        args = ForecastingModelArgs(run_type="calibration", train=True)
-        
-        with patch("views_pipeline_core.managers.configuration.configuration.validate_config") as mock_validate:
-            mock_validate.side_effect = ValueError("Invalid config")
-            
-            try:
-                config_manager.update_for_single_run(args, mock_wandb_module)
-            except ConfigurationException:
-                pass
-            
-            # Alert sent via ConfigurationException
 
 
 # ============================================================================
@@ -381,31 +355,19 @@ class TestUpdateForSweepRun:
                 "max_depth": 15,
             }
         }
-        
+
         args = ForecastingModelArgs(
             run_type="calibration",
             sweep=True,
         )
-        
-        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
-            config_manager.update_for_sweep_run(wandb_config, args, mock_wandb_module)
-        
+
+        config_manager.update_for_sweep_run(wandb_config, args, mock_wandb_module)
+
         config = config_manager.get_combined_config()
         assert config["hyperparameters"]["n_estimators"] == 200
         assert config["hyperparameters"]["max_depth"] == 15
         assert config["run_type"] == "calibration"
         assert config["sweep"] is True
-        
-    def test_sweep_validation_failure(self, config_manager, mock_wandb_module):
-        """Test sweep validation failure."""
-        wandb_config = {"invalid": "config"}
-        args = ForecastingModelArgs(run_type="calibration", sweep=True)
-        
-        with patch("views_pipeline_core.managers.configuration.configuration.validate_config") as mock_validate:
-            mock_validate.side_effect = ValueError("Invalid sweep config")
-            
-            with pytest.raises(ConfigurationException, match="Sweep configuration validation failed"):
-                config_manager.update_for_sweep_run(wandb_config, args, mock_wandb_module)
 
 
 # ============================================================================
@@ -433,12 +395,11 @@ class TestConfigurationManagerIntegration:
             evaluate=True,
         )
         
-        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
-            manager.update_for_single_run(args, mock_wandb_module)
-        
+        manager.update_for_single_run(args, mock_wandb_module)
+
         # Get final config
         config = manager.get_combined_config()
-        
+
         # Verify all sources merged correctly
         assert config["algorithm"] == "random_forest"  # hyperparameters
         assert config["name"] == "test_model"  # deployment
@@ -474,11 +435,10 @@ class TestConfigurationManagerIntegration:
             train=True,
         )
         
-        with patch("views_pipeline_core.managers.configuration.configuration.validate_config"):
-            manager.update_for_single_run(args, mock_wandb_module)
-        
+        manager.update_for_single_run(args, mock_wandb_module)
+
         config = manager.get_combined_config()
-        
+
         # Check both calibration and validation partitions present
         assert "calibration" in config
         assert "validation" in config

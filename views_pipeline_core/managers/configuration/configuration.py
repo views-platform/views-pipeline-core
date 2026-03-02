@@ -1,8 +1,6 @@
 from typing import Dict, Optional, List, Any
 import logging
 from datetime import datetime
-from views_pipeline_core.modules.validation.model import validate_config
-from views_pipeline_core.exceptions import ConfigurationException
 from views_pipeline_core.cli.args import ForecastingModelArgs
 
 logger = logging.getLogger(__name__)
@@ -504,28 +502,9 @@ class ConfigurationManager:
         """
         config = self._get_raw_combined_config()
 
-        # 1. Map legacy keys (Tier 1) → legacy keys (Tier 2), only if Tier 2/3 absent
-        if "targets" in config and "regression_targets" not in config and "classification_targets" not in config:
-            config["regression_targets"] = config["targets"]
-        if "metrics" in config and "regression_metrics" not in config and "classification_metrics" not in config:
-            config["regression_metrics"] = config["metrics"]
-
-        # 1b. Map legacy metric keys (Tier 2) → explicit metric keys (Tier 3),
-        #     only if Tier 3 metric keys are absent.
-        _explicit_metric_keys = {
-            "regression_point_metrics", "regression_sample_metrics",
-            "classification_point_metrics", "classification_sample_metrics",
-        }
-        if not (config.keys() & _explicit_metric_keys):
-            if "regression_metrics" in config:
-                config["regression_point_metrics"] = config["regression_metrics"]
-            if "classification_metrics" in config:
-                config["classification_point_metrics"] = config["classification_metrics"]
-
-        # 2. Force all task keys to be lists (normalization)
+        # Force all task keys to be lists (normalization)
         task_keys = [
             "regression_targets", "classification_targets",
-            "regression_metrics", "classification_metrics",
             "regression_point_metrics", "regression_sample_metrics",
             "classification_point_metrics", "classification_sample_metrics",
         ]
@@ -537,28 +516,6 @@ class ConfigurationManager:
                 config[key] = []
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
-
-        # 3. Sync back to unified 'targets' and 'metrics' for backward compatibility
-        all_targets = []
-        for t in config.get("regression_targets", []) + config.get("classification_targets", []):
-            if t not in all_targets:
-                all_targets.append(t)
-
-        if all_targets:
-            config["targets"] = all_targets
-
-        all_metrics = []
-        for m in (
-            config.get("regression_point_metrics", []) +
-            config.get("regression_sample_metrics", []) +
-            config.get("classification_point_metrics", []) +
-            config.get("classification_sample_metrics", [])
-        ):
-            if m not in all_metrics:
-                all_metrics.append(m)
-
-        if all_metrics:
-            config["metrics"] = all_metrics
 
         return config
     
@@ -568,25 +525,9 @@ class ConfigurationManager:
         """
         config = self._get_raw_combined_config()
 
-        # Mirroring normalization from get_combined_config (identical logic)
-        if "targets" in config and "regression_targets" not in config and "classification_targets" not in config:
-            config["regression_targets"] = config["targets"]
-        if "metrics" in config and "regression_metrics" not in config and "classification_metrics" not in config:
-            config["regression_metrics"] = config["metrics"]
-
-        _explicit_metric_keys = {
-            "regression_point_metrics", "regression_sample_metrics",
-            "classification_point_metrics", "classification_sample_metrics",
-        }
-        if not (config.keys() & _explicit_metric_keys):
-            if "regression_metrics" in config:
-                config["regression_point_metrics"] = config["regression_metrics"]
-            if "classification_metrics" in config:
-                config["classification_point_metrics"] = config["classification_metrics"]
-
+        # Force all task keys to be lists (normalization)
         task_keys = [
             "regression_targets", "classification_targets",
-            "regression_metrics", "classification_metrics",
             "regression_point_metrics", "regression_sample_metrics",
             "classification_point_metrics", "classification_sample_metrics",
         ]
@@ -598,27 +539,6 @@ class ConfigurationManager:
                 config[key] = []
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
-
-        all_targets = []
-        for t in config.get("regression_targets", []) + config.get("classification_targets", []):
-            if t not in all_targets:
-                all_targets.append(t)
-
-        if all_targets:
-            config["targets"] = all_targets
-
-        all_metrics = []
-        for m in (
-            config.get("regression_point_metrics", []) +
-            config.get("regression_sample_metrics", []) +
-            config.get("classification_point_metrics", []) +
-            config.get("classification_sample_metrics", [])
-        ):
-            if m not in all_metrics:
-                all_metrics.append(m)
-
-        if all_metrics:
-            config["metrics"] = all_metrics
 
         return config
         
@@ -757,17 +677,6 @@ class ConfigurationManager:
         # Handle override timestep
         if args.override_timestep is not None:
             self._apply_timestep_override(args)
-
-        # Validate configuration
-        try:
-            # Use raw merge for validation to check exactly what the user provided
-            # and avoid "self-fulfilling" conflict errors from normalization.
-            validate_config(self._get_raw_combined_config())
-        except Exception as e:
-            raise ConfigurationException(
-                f"Configuration validation failed: {e}",
-                wandb_module=wandb_module,
-            )
 
     def _apply_timestep_override(self, args: ForecastingModelArgs) -> None:
         """
@@ -930,12 +839,3 @@ class ConfigurationManager:
         self._runtime_config["eval_type"] = args.eval_type
         self._runtime_config["sweep"] = args.sweep
 
-        # Validate configuration
-        try:
-            # Use raw merge for validation to check exactly what the user provided
-            validate_config(self._get_raw_combined_config())
-        except Exception as e:
-            raise ConfigurationException(
-                f"Sweep configuration validation failed: {e}",
-                wandb_module=wandb_module,
-            )

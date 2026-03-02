@@ -21,8 +21,8 @@ sys.modules['views_evaluation.evaluation'] = mock_eval.evaluation
 sys.modules['views_evaluation.evaluation.evaluation_frame'] = mock_eval.evaluation.evaluation_frame
 
 # 3. Now import PandasAdapter (it will pick up DummyEvaluationFrame)
-from views_pipeline_core.modules.validation.adapter import PandasAdapter
-from views_pipeline_core.data.prediction_frame import PredictionFrame
+from views_pipeline_core.modules.validation.adapter import PandasAdapter  # noqa: E402
+from views_pipeline_core.data.prediction_frame import PredictionFrame  # noqa: E402
 
 class TestPandasAdapter:
     

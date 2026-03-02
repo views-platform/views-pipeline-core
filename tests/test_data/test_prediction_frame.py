@@ -52,6 +52,20 @@ class TestPredictionFrame:
             'time': np.array([100, np.nan]),
             'unit': np.array([1, 2])
         }
-        
+
         with pytest.raises(ValueError, match="NaN detected in identifier"):
+            PredictionFrame(y_pred=y_pred, identifiers=identifiers)
+
+    def test_zero_rows_raises(self):
+        """A frame with shape (0, S) is not a valid prediction."""
+        y_pred = np.empty((0, 1))
+        identifiers = {'time': np.array([]), 'unit': np.array([])}
+        with pytest.raises(ValueError, match="at least one row"):
+            PredictionFrame(y_pred=y_pred, identifiers=identifiers)
+
+    def test_zero_samples_raises(self):
+        """A frame with shape (N, 0) is not a valid prediction."""
+        y_pred = np.empty((3, 0))
+        identifiers = {'time': np.arange(3), 'unit': np.arange(3)}
+        with pytest.raises(ValueError, match="at least one sample column"):
             PredictionFrame(y_pred=y_pred, identifiers=identifiers)

@@ -48,10 +48,7 @@ from views_pipeline_core.modules.wandb import get_latest_run
 # )
 
 from views_pipeline_core.configs import PipelineConfig
-# from views_pipeline_core.modules.validation.model import (
-#     validate_prediction_dataframe,
-#     validate_config,
-# )
+from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 
 import dotenv
 
@@ -1700,6 +1697,11 @@ class ForecastingModelManager(ModelManager):
         # Store args FIRST before using them
         self._args = args
 
+        # Layer 1: structural pre-condition — fail immediately if partition config
+        # is inaccessible, before any side effects (WandB login, data fetching, etc.)
+        self._assert_partition_config_accessible(args.run_type)
+        CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
+
         self._wandb_module.login()
 
         # Now we can use self.args in config_manager
@@ -1756,6 +1758,8 @@ class ForecastingModelManager(ModelManager):
 
         # Store args FIRST before using them
         self._args = args
+
+        CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
 
         self._wandb_module.login()
 
@@ -1870,6 +1874,7 @@ class ForecastingModelManager(ModelManager):
                     self_test=self.args.drift_self_test,
                     partition=self.args.run_type,
                     override_month=self.args.override_timestep,
+                    level=self.configs.get("level"),
                 )
 
                 self._wandb_module.send_alert(
@@ -1989,7 +1994,7 @@ class ForecastingModelManager(ModelManager):
             - Metrics calculated only if specified in config
         """
         import traceback
-        from views_pipeline_core.modules.validation.model import validate_prediction_dataframe
+        from views_pipeline_core.modules.validation.core_prediction_sniffer import CorePredictionSniffer
         from views_pipeline_core.files.utils import handle_single_log_creation
 
         with self._wandb_module.initialize_run(
@@ -2001,9 +2006,24 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Evaluating {self._model_path.target} {self.configs['name']}..."
                 )
+
+                # Layer 2: log declared temporal window before expensive inference.
+                # This makes the expected outcome visible in the run log so any
+                # mismatch with actual model output can be diagnosed from logs alone.
+                if self.args.run_type != "forecasting":
+                    _steps = self.configs.get("steps", list(range(1, 37)))
+                    _base_origin = self._partition_dict[self.args.run_type]['test'][0] - 1
+                    logger.info(
+                        f"Declared temporal window: base_origin={_base_origin}, "
+                        f"step 1 → month {_base_origin + 1}, "
+                        f"step {max(_steps)} → month {_base_origin + max(_steps)} "
+                        f"({len(_steps)} steps total). Model inference starting."
+                    )
+
                 list_df_predictions = self._evaluate_model_artifact(
                     self._eval_type, self.args.artifact_name
                 )
+                self._assert_predictions_in_step_window(list_df_predictions)
 
                 import concurrent.futures
 
@@ -2013,8 +2033,8 @@ class ForecastingModelManager(ModelManager):
                     print(
                         f"\nValidating evaluation dataframe of sequence {idx+1}/{len(list_df_predictions)}"
                     )
-                    validate_prediction_dataframe(
-                        dataframe=df, target=configs["targets"]
+                    CorePredictionSniffer(level=configs.get("level")).sniff_predictions(
+                        df, targets=configs["targets"]
                     )
                     save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
 
@@ -2110,7 +2130,7 @@ class ForecastingModelManager(ModelManager):
             - Prediction store requires use_prediction_store=True
         """
         import traceback
-        from views_pipeline_core.modules.validation.model import validate_prediction_dataframe
+        from views_pipeline_core.modules.validation.core_prediction_sniffer import CorePredictionSniffer
         from views_pipeline_core.files.utils import handle_single_log_creation
 
         with self._wandb_module.initialize_run(
@@ -2124,8 +2144,8 @@ class ForecastingModelManager(ModelManager):
                 )
                 df_predictions = self._forecast_model_artifact(self.args.artifact_name)
                 
-                validate_prediction_dataframe(
-                    dataframe=df_predictions, target=self.configs["targets"]
+                CorePredictionSniffer(level=self.configs.get("level")).sniff_predictions(
+                    df_predictions, targets=self.configs["targets"]
                 )
 
                 handle_single_log_creation(
@@ -2222,12 +2242,12 @@ class ForecastingModelManager(ModelManager):
                     print(
                         f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
                     )
-                    from views_pipeline_core.modules.validation.model import (
-                        validate_prediction_dataframe,
+                    from views_pipeline_core.modules.validation.core_prediction_sniffer import (
+                        CorePredictionSniffer,
                     )
 
-                    validate_prediction_dataframe(
-                        dataframe=df, target=self.configs["targets"]
+                    CorePredictionSniffer(level=self.configs.get("level")).sniff_predictions(
+                        df, targets=self.configs["targets"]
                     )
 
                 if self.configs.get("metrics"):
@@ -2859,7 +2879,15 @@ class ForecastingModelManager(ModelManager):
                     f"Partition configuration for run_type '{run_type}' not found. "
                     f"Available keys: {list(self._partition_dict.keys())}"
                 )
-            base_origin = self._partition_dict[run_type]['train'][1]
+            # base_origin = test[0] - 1 is definitionally correct.
+            # The forecast origin is "the last month of observed data before the
+            # evaluation period begins", which is test[0] - 1 by definition.
+            # Using train[1] was an implicit assumption that the partition is
+            # gap-free (train[1] + 1 == test[0]). If any gap exists between
+            # train end and test start, train[1] != test[0] - 1 and the old
+            # formula would produce a shifted window that excludes the model's
+            # last prediction month. test[0] - 1 is correct in all cases.
+            base_origin = self._partition_dict[run_type]['test'][0] - 1
 
         steps = self.configs.get("steps", [*range(1, 36 + 1, 1)])
 
@@ -2874,6 +2902,129 @@ class ForecastingModelManager(ModelManager):
             f"seq[0]={mappings[0] if mappings else {}}"
         )
         return mappings
+
+    def _assert_partition_config_accessible(self, run_type: str) -> None:
+        """
+        Layer 1 structural assertion: verify the partition config is accessible
+        for the declared run_type before any computation begins.
+
+        This is a PRE-CONDITION check, not a behavioral check. It asserts that
+        the configuration is structurally valid — keys exist, test[0] is reachable.
+        It does NOT check numeric consistency (step window vs. test period length),
+        which would generate false positives for rolling-origin evaluation.
+
+        Called at the start of execute_single_run so configuration mistakes fail
+        immediately, before any side effects (WandB login, data fetching, inference).
+
+        Args:
+            run_type: The run type declared in args (e.g. 'calibration', 'forecasting').
+
+        Raises:
+            KeyError: if run_type is not in _partition_dict (non-forecasting runs).
+            KeyError: if 'test' key is missing from the run_type partition.
+            IndexError: if the 'test' value has no first element (empty sequence).
+        """
+        if run_type == "forecasting":
+            # Forecasting uses _data_loader.month_last — no partition 'test' needed.
+            return
+        partition_dict = self._partition_dict or {}
+        if run_type not in partition_dict:
+            available = list(partition_dict.keys())
+            raise KeyError(
+                f"Partition config missing for run_type='{run_type}'. "
+                f"Available: {available}."
+            )
+        partition = partition_dict[run_type]
+        if 'test' not in partition:
+            raise KeyError(
+                f"Partition for run_type='{run_type}' has no 'test' key. "
+                f"Keys present: {list(partition.keys())}."
+            )
+        test_val = partition['test']
+        if not hasattr(test_val, '__getitem__') or len(test_val) < 1:
+            raise IndexError(
+                f"Partition['test'] for run_type='{run_type}' must have at least "
+                f"one element (test[0] is the test period start month). "
+                f"Got: {test_val!r}."
+            )
+
+    def _assert_predictions_in_step_window(self, predictions: List[pd.DataFrame]) -> None:
+        """
+        Pre-flight: validate temporal coverage of all prediction sequences against
+        the declared step_mapping window BEFORE the per-target evaluation loop.
+
+        Raises ValueError immediately if any sequence contains months outside the
+        declared window, surfacing the mismatch right after model inference rather
+        than midway through the per-target evaluation loop. This gives a clear,
+        early error instead of a cryptic failure deep in the adapter.
+
+        Args:
+            predictions: List of prediction DataFrames returned by _evaluate_model_artifact.
+        """
+        if not predictions:
+            return
+        step_mappings = self._get_evaluation_step_mappings(n_sequences=len(predictions))
+        for i, (df, mapping) in enumerate(zip(predictions, step_mappings)):
+            pred_months = set(df.index.get_level_values(0).unique())
+            pred_min = min(pred_months)
+            pred_max = max(pred_months)
+            pred_count = len(pred_months)
+            # Layer 3 diagnostic: always log ranges so the run log captures what the
+            # model produced even when the check passes (visible without re-running).
+            logger.debug(
+                f"Pre-flight Seq {i}: {pred_count} month(s) {pred_min}..{pred_max}"
+                f" | window {min(mapping)}..{max(mapping)}"
+            )
+            rogue = pred_months - set(mapping.keys())
+            if rogue:
+                base_origin = min(mapping) - 1
+                declared_steps = self.configs.get("steps", list(range(1, 37)))
+                declared_max_step = max(declared_steps)
+                rogue_steps = sorted(m - base_origin for m in rogue)
+                # Detect origin shift: if the first declared step month is absent from
+                # predictions, the model forecasted from a later origin than expected.
+                first_step_month = min(mapping)  # = base_origin + 1
+                origin_shifted = first_step_month not in pred_months
+                if origin_shifted:
+                    cause_hint = (
+                        f"Origin appears SHIFTED: month {first_step_month} (step 1) is "
+                        f"absent from predictions — model forecasted from origin "
+                        f"{pred_min - 1} instead of {base_origin}.\n"
+                        f"Root cause: data loaded beyond test[1] causes "
+                        f"get_rolling_origin_indices to place the last origin one month "
+                        f"too late. Fix: truncate data to test[1] before building "
+                        f"VolumeHandler, or pin the last origin via fixed_last_origin."
+                    )
+                else:
+                    cause_hint = (
+                        f"Origin is correct (month {first_step_month} present) but model "
+                        f"generated {pred_count} month(s) instead of "
+                        f"{len(declared_steps)}.\n"
+                        f"Root cause: ConfigInitializer or the prediction loop generates "
+                        f"an extra step. Check ConfigInitializer.get_config() for "
+                        f"inflation of 'time_steps'."
+                    )
+                raise ValueError(
+                    f"Pre-flight check failed — Sequence {i}: prediction has "
+                    f"{pred_count} month(s) covering {pred_min}..{pred_max}, with "
+                    f"{len(rogue)} rogue month(s) {sorted(rogue)} outside the declared "
+                    f"step_mapping window [{min(mapping)}-{max(mapping)}] "
+                    f"(base_origin={base_origin}, configs['steps'] declares "
+                    f"{len(declared_steps)} steps, max={declared_max_step}).\n"
+                    f"{cause_hint}\n"
+                    f"Rogue month(s) {sorted(rogue)} correspond to step(s) "
+                    f"{rogue_steps} relative to base_origin={base_origin}.\n"
+                    f"To fix, choose one of:\n"
+                    f"  (a) [Origin shifted] Pin the rolling origin or truncate data "
+                    f"to test[1] in _evaluate_model_artifact (views-models).\n"
+                    f"  (b) [Extra step] Fix ConfigInitializer not to inflate "
+                    f"'time_steps', or fix the prediction loop to stop at step "
+                    f"{declared_max_step} (month {base_origin + declared_max_step}).\n"
+                    f"Note: configs['steps'] is the sole source of truth in "
+                    f"views-pipeline-core. If it shows {len(declared_steps)} steps "
+                    f"and the model generates more, the bug is in "
+                    f"_evaluate_model_artifact (views-models)."
+                )
 
     def _audit_parity(self, legacy: Dict, shadow: Dict, target: str) -> None:
         """

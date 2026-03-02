@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import sys
 
-from views_pipeline_core.modules.validation.model.check import validate_config
 from views_pipeline_core.managers.model.model import ForecastingModelManager
 
 # Realistic return value for EvaluationManager.evaluate
@@ -62,24 +61,6 @@ def get_test_manager():
 # GREEN TEAM: Functionality Proof
 # ============================================================
 
-def test_G1_explicit_mapping_full():
-    """Verify standard explicit configuration works."""
-    config = {
-        "name": "green_alien", "deployment_status": "production",
-        "regression_targets": ["t1_sb"], "classification_targets": ["t2_os"],
-        "regression_metrics": ["mse"], "classification_metrics": ["auc"]
-    }
-    validate_config(config)
-    assert "t1_sb" in config["targets"]
-    assert "t2_os" in config["targets"]
-
-def test_G2_legacy_mapping_regression():
-    """Verify legacy keys map to regression by default."""
-    config = {"name": "old_alien", "deployment_status": "production", "targets": ["t1_sb"], "metrics": ["mse"]}
-    validate_config(config)
-    assert config["regression_targets"] == ["t1_sb"]
-    assert config["regression_metrics"] == ["mse"]
-
 def test_G3_scalar_gate_allows_scalars(mock_deps):
     """Verify scalar predictions pass the gate."""
     mock_eval_mgr_cls, mock_wandb = mock_deps
@@ -118,12 +99,6 @@ def test_G4_multi_task_loop_separation(mock_deps):
         # Should be called 4 times (2 targets * 2 calls per target: Legacy + Shadow)
         assert mock_eval_inst.evaluate.call_count == 4
 
-def test_G5_normalization_handles_strings():
-    """Verify string-to-list normalization."""
-    config = {"name": "str_alien", "deployment_status": "production", "regression_targets": "t1_sb"}
-    validate_config(config)
-    assert isinstance(config["regression_targets"], list)
-
 # ============================================================
 # BEIGE TEAM: Robustness & Boundary
 # ============================================================
@@ -141,15 +116,6 @@ def test_B2_numpy_string_types():
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": [np.str_("mse")], "targets": ["t1_sb"], "sweep": False}
     # Normalized during validate_config or get_combined_config
     assert True
-
-def test_B3_priority_mixed_keys():
-    """Verify that mixing explicit and legacy keys is forbidden."""
-    config = {
-        "name": "mixed", "deployment_status": "production",
-        "targets": ["legacy"], "regression_targets": ["explicit"]
-    }
-    with pytest.raises(ValueError, match="Configuration Conflict"):
-        validate_config(config)
 
 def test_B4_scalar_gate_with_nans(mock_deps):
     """Verify scalar gate handles NaN predictions without crashing."""
@@ -282,32 +248,6 @@ def test_GI_2_no_name_inference_proof(mock_deps):
         mock_eval_mgr_cls.assert_called_once_with()
         assert mock_eval_inst.evaluate.call_args.args[2] == "this_is_a_regression_name"
 
-def test_GI_3_legacy_fallback_integrity(mock_deps):
-    """PROVE that legacy 'targets' key behaves strictly as regression by genome-mapping."""
-    mock_eval_mgr_cls, _ = mock_deps
-    mgr = get_test_manager()
-    
-    # Raw config from user using legacy keys
-    raw_config = {
-        "name": "legacy_alien", "deployment_status": "production",
-        "targets": ["legacy_t"], "metrics": ["mse"], "sweep": False
-    }
-    validate_config(raw_config) # This does the genome mapping
-    
-    mgr.configs = raw_config
-    df_pred = pd.DataFrame({"pred_legacy_t": [0.5]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
-
-    with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"legacy_t":[0]}, index=df_pred.index)):
-        mock_eval_inst = mock_eval_mgr_cls.return_value
-        mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
-        
-        mgr._evaluate_prediction_dataframe(df_pred, "standard")
-        
-        # Verify it went through the regression loop.
-        # EvaluationManager takes no constructor args; metrics are read from config.
-        mock_eval_mgr_cls.assert_called_once_with()
-        assert mock_eval_inst.evaluate.call_args.args[2] == "legacy_t"
-
 def test_GI_4_explicit_step_mapping_authority(mock_deps):
     """PROVE that lead-times are derived from explicit mapping, fulfilling ADR-012."""
     mock_eval_mgr_cls, _ = mock_deps
@@ -326,7 +266,7 @@ def test_GI_4_explicit_step_mapping_authority(mock_deps):
     mappings = mgr._get_evaluation_step_mappings(n_sequences=1)
 
     # For a single-sequence run, the first (and only) mapping covers base_origin+s → s.
-    # base_origin = partition_dict['train'][1] = 100, steps = [1, 3]
+    # base_origin = partition_dict['test'][0] - 1 = 101 - 1 = 100, steps = [1, 3]
     # Expected: [{101: 1, 103: 3}]
     assert mappings[0] == {101: 1, 103: 3}
 
@@ -336,16 +276,6 @@ def test_R3_garbage_metric_strings():
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["; drop table users;"], "targets": ["t1_sb"], "sweep": False}
     # Should not trigger gate as it's not in point_metrics set
     assert True
-
-def test_R4_classification_via_legacy_bypass():
-    """Prove that classification CANNOT be done via legacy 'metrics' key anymore."""
-    config = {
-        "name": "bypass", "deployment_status": "production",
-        "targets": ["t1_sb"], "metrics": ["auc"] # Classification metric in legacy key
-    }
-    validate_config(config)
-    # implementation maps it to regression_metrics
-    assert "auc" in config["regression_metrics"]
 
 def test_R5_mismatched_target_column_names(mock_deps):
     """Verify robustness against 'pred_' prefix mismatch."""

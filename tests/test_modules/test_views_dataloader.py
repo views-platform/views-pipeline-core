@@ -51,7 +51,7 @@ def sample_dataframe():
     
     index = pd.MultiIndex.from_product(
         [month_ids, pg_ids],
-        names=["month_id", "priogrid_id"]
+        names=["month_id", "priogrid_gid"]
     )
     
     data = {
@@ -249,55 +249,6 @@ class TestGetMonthRange:
         assert first == 121
         assert last == 520
 
-
-# ============================================================================
-# Test _validate_df_partition
-# ============================================================================
-
-class TestValidateDfPartition:
-    def test_valid_calibration_df(self, data_loader, sample_dataframe):
-        """Test validation of valid calibration DataFrame"""
-        data_loader.partition = "calibration"
-        data_loader.partition_dict = {
-            "train": (121, 396),
-            "test": (397, 444)
-        }
-        
-        # Create df with correct range
-        df = sample_dataframe.copy()
-        
-        is_valid = data_loader._validate_df_partition(df)
-        assert is_valid
-        
-    def test_invalid_month_range(self, data_loader):
-        """Test validation fails with wrong month range"""
-        data_loader.partition = "calibration"
-        data_loader.partition_dict = {
-            "train": (121, 396),
-            "test": (397, 444)
-        }
-        
-        # Create df with wrong range
-        index = pd.MultiIndex.from_product(
-            [range(100, 200), [1000, 1001]],
-            names=["month_id", "priogrid_id"]
-        )
-        df = pd.DataFrame({"feature": np.random.randn(200)}, index=index)
-        
-        is_valid = data_loader._validate_df_partition(df)
-        assert not is_valid
-        
-    def test_validation_with_override(self, data_loader, sample_dataframe):
-        """Test validation with override month"""
-        data_loader.partition = "forecasting"
-        data_loader.partition_dict = {
-            "train": (121, 529),
-            "test": (530, 565)
-        }
-        data_loader.override_month = 444  # Match sample df
-        
-        is_valid = data_loader._validate_df_partition(sample_dataframe)
-        assert is_valid
 
 
 # ============================================================================

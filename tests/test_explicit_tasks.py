@@ -1,4 +1,3 @@
-import pytest
 import pandas as pd
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -23,52 +22,7 @@ sys.modules['views_evaluation.evaluation.evaluation_frame'] = MagicMock()
 sys.modules['wandb'] = mock_wandb
 sys.modules['art'] = MagicMock()
 
-from views_pipeline_core.modules.validation.model.check import validate_config  # noqa: E402
 from views_pipeline_core.managers.model.model import ForecastingModelManager  # noqa: E402
-
-# ============================================================
-# CONFIGURATION VALIDATION TESTS
-# ============================================================
-
-def test_validate_config_explicit_keys():
-    """Verify that explicit task keys are correctly normalized."""
-    config = {
-        "name": "test_model",
-        "deployment_status": "production",
-        "regression_targets": "target_reg",
-        "classification_targets": ["target_class"],
-        "regression_metrics": ["mse"],
-        "classification_metrics": ["auc"]
-    }
-    validate_config(config)
-    
-    assert config["regression_targets"] == ["target_reg"]
-    assert config["classification_targets"] == ["target_class"]
-    assert "target_reg" in config["targets"]
-    assert "target_class" in config["targets"]
-
-def test_validate_config_strict_exclusivity():
-    """Verify that mixing legacy and explicit keys raises an error."""
-    config = {
-        "name": "conflict_model",
-        "deployment_status": "production",
-        "targets": ["t1"],
-        "classification_targets": ["t2"]
-    }
-    with pytest.raises(ValueError, match="Configuration Conflict"):
-        validate_config(config)
-
-def test_validate_config_legacy_mapping():
-    """Verify that legacy keys are mapped to regression by default."""
-    config = {
-        "name": "legacy_model",
-        "deployment_status": "production",
-        "targets": ["t1"],
-        "metrics": ["mse"]
-    }
-    validate_config(config)
-    assert config["regression_targets"] == ["t1"]
-    assert config["regression_metrics"] == ["mse"]
 
 # ============================================================
 # EVALUATION LOOP & SCALAR GATE TESTS

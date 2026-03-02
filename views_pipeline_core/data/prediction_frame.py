@@ -36,8 +36,13 @@ class PredictionFrame:
         # 1. Check Dimensions
         if y_pred.ndim != 2:
             raise ValueError(f"y_pred must be a 2D array of shape (N, S). Got ndim={y_pred.ndim}")
-        
+
         n_rows = y_pred.shape[0]
+        n_samples = y_pred.shape[1]
+        if n_rows == 0:
+            raise ValueError("y_pred must have at least one row. Got shape (0, ...).")
+        if n_samples == 0:
+            raise ValueError("y_pred must have at least one sample column. Got shape (..., 0).")
 
         # 2. Check Required Keys
         for req in self.REQUIRED_IDENTIFIERS:
