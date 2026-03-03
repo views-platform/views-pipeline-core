@@ -40,7 +40,7 @@ class _ForecastStub(ForecastingModelManager):
         pass
 
     def _evaluate_model_artifact(self, *a, **kw):
-        pass
+        return getattr(self, "_test_eval_return", None)
 
     def _evaluate_sweep(self, *a, **kw):
         pass
@@ -253,3 +253,206 @@ class TestAuditParityEf:
         )
         with pytest.raises(ValueError, match="[Pp]arity"):
             self._bare_manager()._audit_parity_ef(ef1, ef2, "lr_sb")
+
+
+# ── Phase 4b: Evaluation path dispatch ───────────────────────────────────────
+
+def _make_eval_stub(prediction_format: str) -> _ForecastStub:
+    """
+    Factory for evaluation-path tests.
+
+    Extends _make_stub with the additional attributes that
+    _execute_model_evaluation() and _evaluate_prediction_dataframe() read:
+    _partition_dict, _eval_type, regression_targets, classification_targets,
+    steps, and save/eval mocks.
+    """
+    merged = {
+        "name": "stub_model",
+        "level": "pgm",
+        "targets": ["lr_sb"],
+        "regression_targets": ["lr_sb"],
+        "classification_targets": [],
+        "regression_point_metrics": ["MSE"],
+        "prediction_format": prediction_format,
+        "sweep": False,
+        "steps": list(range(1, 37)),
+    }
+    m = object.__new__(_ForecastStub)
+    m._sweep = False
+    m._config_manager = MagicMock()
+    m._config_manager.get_combined_config.return_value = merged
+
+    wm = MagicMock()
+    wm.initialize_run.return_value.__enter__ = Mock(return_value=None)
+    wm.initialize_run.return_value.__exit__ = Mock(return_value=False)
+    m._wandb_module = wm
+    m._wandb_notifications = False
+    m._project = "stub_project"
+
+    mp = MagicMock()
+    mp.target = "model"
+    mp._target = "model"
+    mp.root = Path("/fake")
+    mp.data_generated = Path("/fake/generated")
+    m._model_path = mp
+
+    mock_args = MagicMock()
+    mock_args.artifact_name = "stub.pt"
+    mock_args.run_type = "calibration"
+    m._args = mock_args
+
+    m._save_predictions = Mock()
+    m._save_evaluations = Mock()
+    m._partition_dict = {"calibration": {"train": (121, 444), "test": (445, 492)}}
+    m._eval_type = "calibration"
+
+    return m
+
+
+def _run_execute_eval(manager: _ForecastStub, list_predictions: list) -> Mock:
+    """
+    Run manager._execute_model_evaluation() with infrastructure mocked out.
+
+    Patches the step-window check and metric evaluation so only the
+    validate-and-save loop dispatch is exercised.  Returns the
+    CorePredictionSniffer mock so callers can assert on it.
+    """
+    manager._test_eval_return = list_predictions
+
+    with patch(
+        "views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer"
+    ) as MockSniffer:
+        with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
+            with patch.object(
+                ForecastingModelManager, "_assert_predictions_in_step_window"
+            ):
+                with patch.object(
+                    ForecastingModelManager, "_evaluate_prediction_dataframe"
+                ):
+                    manager._execute_model_evaluation()
+                    return MockSniffer
+
+
+def _run_evaluate_prediction_df(
+    manager: _ForecastStub, list_predictions: list
+) -> tuple:
+    """
+    Run manager._evaluate_prediction_dataframe() with mocked dependencies.
+
+    Returns (mock_from_prediction_frames, mock_from_dataframes) so callers
+    can assert on which adapter path was taken.
+    """
+    from views_pipeline_core.modules.validation.adapter import PandasAdapter
+
+    actuals_df = pd.DataFrame(
+        {"lr_sb": [1.0, 2.0]},
+        index=pd.MultiIndex.from_tuples(
+            [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
+        ),
+    )
+    eval_result = {
+        "step":        ({}, pd.DataFrame()),
+        "time_series": ({}, pd.DataFrame()),
+        "month":       ({}, pd.DataFrame()),
+    }
+
+    with patch("views_pipeline_core.files.utils.read_dataframe", return_value=actuals_df):
+        with patch.object(
+            ForecastingModelManager, "prepare_actuals_df", return_value=actuals_df
+        ):
+            with patch(
+                "views_evaluation.evaluation.evaluation_manager.EvaluationManager"
+            ) as MockEM:
+                MockEM.return_value.evaluate.return_value = eval_result
+                with patch.object(PandasAdapter, "from_prediction_frames") as mock_fpf:
+                    mock_fpf.return_value = MagicMock()
+                    with patch.object(PandasAdapter, "from_dataframes") as mock_fd:
+                        mock_fd.return_value = MagicMock()
+                        with patch.object(
+                            ForecastingModelManager, "_get_evaluation_step_mappings"
+                        ) as mock_sm:
+                            mock_sm.return_value = [
+                                {445 + s: s for s in range(1, 37)}
+                            ]
+                            with patch.object(
+                                ForecastingModelManager, "_audit_parity"
+                            ):
+                                with patch.object(
+                                    ForecastingModelManager, "_audit_parity_ef"
+                                ):
+                                    with patch.object(
+                                        ForecastingModelManager,
+                                        "_generate_evaluation_table",
+                                        return_value="",
+                                    ):
+                                        with patch("wandb.summary"):
+                                            manager._evaluate_prediction_dataframe(
+                                                list_predictions, "calibration"
+                                            )
+                                            return mock_fpf, mock_fd
+
+
+class TestEvalDispatch:
+    """Verify that _execute_model_evaluation() routes by prediction_format."""
+
+    def test_eval_df_path_calls_sniffer(self):
+        """
+        DF path: CorePredictionSniffer.sniff_predictions must be called for
+        each prediction sequence (regression — existing behaviour).
+        """
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0], [3.0, 4.0]]},
+            index=pd.MultiIndex.from_tuples(
+                [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        manager = _make_eval_stub("dataframe")
+        MockSniffer = _run_execute_eval(manager, [df])
+        MockSniffer.return_value.sniff_predictions.assert_called()
+
+    def test_eval_pf_path_skips_sniffer(self):
+        """
+        PF path: CorePredictionSniffer.sniff_predictions must NOT be called.
+        PredictionFrame is self-validating at construction; the DF-centric
+        sniffer is inapplicable and skipped.
+        """
+        pf = PredictionFrame(
+            y_pred=np.ones((2, 2)),
+            identifiers={"time": np.array([445, 445]), "unit": np.array([1, 2])},
+        )
+        manager = _make_eval_stub("prediction_frame")
+        MockSniffer = _run_execute_eval(manager, [pf])
+        MockSniffer.return_value.sniff_predictions.assert_not_called()
+
+
+class TestEvalMetricsDispatch:
+    """Verify that _evaluate_prediction_dataframe() routes by prediction_format."""
+
+    def test_eval_pf_path_calls_from_prediction_frames(self):
+        """
+        PF path: PandasAdapter.from_prediction_frames must be called to build
+        the EvaluationFrame from the PredictionFrame list.
+        """
+        pf = PredictionFrame(
+            y_pred=np.ones((2, 2)),
+            identifiers={"time": np.array([445, 445]), "unit": np.array([1, 2])},
+        )
+        manager = _make_eval_stub("prediction_frame")
+        mock_fpf, _ = _run_evaluate_prediction_df(manager, [pf])
+        mock_fpf.assert_called()
+
+    def test_eval_df_path_calls_from_dataframes(self):
+        """
+        DF path (regression): PandasAdapter.from_dataframes must be called and
+        from_prediction_frames must NOT be called.
+        """
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0], [3.0, 4.0]]},
+            index=pd.MultiIndex.from_tuples(
+                [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        manager = _make_eval_stub("dataframe")
+        mock_fpf, mock_fd = _run_evaluate_prediction_df(manager, [df])
+        mock_fd.assert_called()
+        mock_fpf.assert_not_called()

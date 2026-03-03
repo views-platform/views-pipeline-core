@@ -25,6 +25,7 @@ from views_pipeline_core.exceptions import (
 )
 from views_pipeline_core.modules.transformations import DatasetTransformationModule
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+from views_pipeline_core.data.prediction_frame import PredictionFrame
 import os
 
 # from views_pipeline_core.modules.wandb import (
@@ -1493,10 +1494,20 @@ class ForecastingModelManager(ModelManager):
     @abstractmethod
     def _evaluate_model_artifact(
         self, eval_type: str, artifact_name: str
-    ) -> Union[Dict, pd.DataFrame]:
+    ) -> Union[List[pd.DataFrame], List[PredictionFrame]]:
         """
         Evaluate model artifact. Must be implemented by subclasses.
-        
+
+        Return type contract (ADR-033):
+            - ``"dataframe"`` path: return ``List[pd.DataFrame]``, one per evaluation
+              sequence.  Each DataFrame must have a MultiIndex ``[time, unit]`` and a
+              column ``pred_{target}`` whose cells are lists of sample floats.
+            - ``"prediction_frame"`` path: return ``List[PredictionFrame]``, one per
+              evaluation sequence.  ``identifiers["time"]`` must contain ``month_id``
+              values taken from ``X.index`` level 0; ``identifiers["unit"]`` must
+              contain ``priogrid_gid`` / ``country_id`` values from level 1.  The
+              model author is responsible for populating identifiers correctly.
+
         Contract:
             Must:
             - Load model from artifacts directory
@@ -1533,15 +1544,24 @@ class ForecastingModelManager(ModelManager):
         )
 
     @abstractmethod
-    def _forecast_model_artifact(self, artifact_name: str) -> pd.DataFrame:
+    def _forecast_model_artifact(self, artifact_name: str) -> Union[pd.DataFrame, PredictionFrame]:
         """
         Generate future forecasts. Must be implemented by subclasses.
-        
+
+        Return type contract (ADR-033):
+            - ``"dataframe"`` path: return a ``pd.DataFrame`` with a MultiIndex
+              ``[time, unit]`` and a column ``pred_{target}`` per target.
+            - ``"prediction_frame"`` path: return a ``PredictionFrame``.
+              ``identifiers["time"]`` must contain ``month_id`` values from ``X.index``
+              level 0; ``identifiers["unit"]`` must contain ``priogrid_gid`` /
+              ``country_id`` values from level 1.  The model author is responsible for
+              populating identifiers correctly.
+
         Contract:
             Must:
             - Load model from artifacts
             - Generate predictions for future period
-            - Return DataFrame with forecasts
+            - Return prediction in the format declared by ``prediction_format`` config
             
             Must not:
             - Use future ground truth data
@@ -1551,11 +1571,12 @@ class ForecastingModelManager(ModelManager):
             artifact_name: Name of model file for forecasting
         
         Returns:
-            DataFrame with future predictions and metadata
-        
+            ``pd.DataFrame`` or ``PredictionFrame`` depending on the declared
+            ``prediction_format`` config key.
+
         Raises:
             ModelForecastingException: If forecasting fails
-        
+
         Example Implementation:
             >>> def _forecast_model_artifact(self, artifact_name):
             ...     model = load_model(artifact_name)
@@ -1568,27 +1589,38 @@ class ForecastingModelManager(ModelManager):
         )
 
     @abstractmethod
-    def _evaluate_sweep(self, eval_type: str, model: any) -> None:
+    def _evaluate_sweep(
+        self, eval_type: str, model: any
+    ) -> Union[List[pd.DataFrame], List[PredictionFrame]]:
         """
         Evaluate model during sweep. Must be implemented by subclasses.
-        
+
+        Return type contract (ADR-033):
+            Same as ``_evaluate_model_artifact``: return ``List[pd.DataFrame]`` for
+            the ``"dataframe"`` path or ``List[PredictionFrame]`` for the
+            ``"prediction_frame"`` path.  When returning ``PredictionFrame`` objects,
+            ``identifiers["time"]`` must contain ``month_id`` values and
+            ``identifiers["unit"]`` must contain ``priogrid_gid`` / ``country_id``
+            values taken from ``X.index``.  The model author is responsible.
+
         Contract:
             Must:
             - Use provided model object (not load from disk)
             - Generate predictions for evaluation
-            - Return list of prediction DataFrames
-            
+            - Return list of predictions in the format declared by ``prediction_format``
+
             Must not:
             - Save model artifacts (handled by sweep)
             - Modify hyperparameters
-        
+
         Args:
             model: Trained model object from current sweep iteration
             eval_type: Evaluation type
-        
+
         Returns:
-            List of prediction DataFrames for metrics calculation
-        
+            List of ``pd.DataFrame`` or ``PredictionFrame`` objects, one per
+            evaluation sequence, depending on ``prediction_format`` config.
+
         Example Implementation:
             >>> def _evaluate_sweep(self, eval_type, model):
             ...     predictions = []
@@ -2027,30 +2059,52 @@ class ForecastingModelManager(ModelManager):
 
                 import concurrent.futures
 
-                def validate_and_save(
-                    df, idx, configs, model_path, save_predictions_func
-                ):
-                    print(
-                        f"\nValidating evaluation dataframe of sequence {idx+1}/{len(list_df_predictions)}"
-                    )
-                    CorePredictionSniffer(level=configs["level"]).sniff_predictions(
-                        df, targets=configs["targets"]
-                    )
-                    save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
+                # Legacy fallback: "dataframe" preserves existing behaviour for
+                # models that pre-date the mandatory prediction_format key.
+                # CoreConfigSniffer enforces the key is present at run time.
+                prediction_format = self.configs.get("prediction_format", "dataframe")
 
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    futures = [
-                        executor.submit(
-                            validate_and_save,
-                            df,
-                            i,
-                            self.configs,
-                            self._model_path,
-                            self._save_predictions,
+                if prediction_format == "prediction_frame":
+                    # PF path: PredictionFrame is self-validating at construction.
+                    # Skip the DF-centric CorePredictionSniffer.
+                    # Convert each PF to a legacy DF for storage compatibility (ADR-033 bridge).
+                    from views_pipeline_core.modules.validation.adapter import _pf_to_legacy_dfs
+                    _all_targets = (
+                        self.configs.get("regression_targets", []) +
+                        self.configs.get("classification_targets", [])
+                    ) or self.configs.get("targets", ["unknown"])
+                    _primary_target = _all_targets[0]
+                    for i, pf in enumerate(list_df_predictions):
+                        df_for_save = _pf_to_legacy_dfs([pf], _primary_target)[0]
+                        self._save_predictions(
+                            df_for_save, self._model_path.data_generated, i, send_alert=False
                         )
-                        for i, df in enumerate(list_df_predictions)
-                    ]
-                    concurrent.futures.wait(futures)
+                else:
+                    # DF path: validate (sniff) and save each prediction DataFrame.
+                    def validate_and_save(
+                        df, idx, configs, model_path, save_predictions_func
+                    ):
+                        print(
+                            f"\nValidating evaluation dataframe of sequence {idx+1}/{len(list_df_predictions)}"
+                        )
+                        CorePredictionSniffer(level=configs["level"]).sniff_predictions(
+                            df, targets=configs["targets"]
+                        )
+                        save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
+
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        futures = [
+                            executor.submit(
+                                validate_and_save,
+                                df,
+                                i,
+                                self.configs,
+                                self._model_path,
+                                self._save_predictions,
+                            )
+                            for i, df in enumerate(list_df_predictions)
+                        ]
+                        concurrent.futures.wait(futures)
 
                 self._wandb_module.send_alert(
                     title="Evaluation Predictions Saved",
@@ -2765,33 +2819,57 @@ class ForecastingModelManager(ModelManager):
             for target in targets:
                 logger.info(f"Calculating {task_type} evaluation metrics for {target}")
 
-                # Check that the canonical prediction column exists before evaluating
-                first_df = df_predictions[0] if isinstance(df_predictions, list) else df_predictions
-                if f"pred_{target}" not in first_df.columns:
-                    logger.warning(f"Column pred_{target} not found in prediction columns. Skipping.")
-                    continue
-
                 target_identifier = target
 
                 # EvaluationManager.evaluate() operates on one target at a time and
                 # requires exactly one column named pred_{target} per prediction DataFrame.
-                from views_pipeline_core.modules.validation.adapter import PandasAdapter
+                from views_pipeline_core.modules.validation.adapter import (
+                    PandasAdapter,
+                    _pf_to_legacy_dfs,
+                )
 
                 actual_slice = df_actual[[target]]
                 raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
-                pred_slices = [df[[f"pred_{target}"]] for df in raw_preds]
-                
-                # Fulfill ADR-031: Explicit per-sequence step mappings for rolling-origin evaluation.
-                # Each sequence i is anchored at base_origin + i, so its mapping shifts accordingly.
-                step_mappings = self._get_evaluation_step_mappings(n_sequences=len(pred_slices))
 
-                # Local Adaptation
-                ef = PandasAdapter.from_dataframes(
-                    actual=actual_slice,
-                    predictions=pred_slices,
-                    target=target,
-                    step_mapping=step_mappings
-                )
+                prediction_format = self.configs.get("prediction_format", "dataframe")
+
+                if prediction_format == "prediction_frame":
+                    # PF path: raw_preds is List[PredictionFrame]. Column check is
+                    # inapplicable (PF carries arrays, not named columns).
+                    # Build EF directly from PFs; also build parity-bridge EF from
+                    # converted legacy DFs and compare (ADR-033 bridge).
+                    step_mappings = self._get_evaluation_step_mappings(n_sequences=len(raw_preds))
+                    ef = PandasAdapter.from_prediction_frames(
+                        actual=actual_slice,
+                        predictions=raw_preds,
+                        target=target,
+                        step_mapping=step_mappings,
+                    )
+                    pred_slices = _pf_to_legacy_dfs(raw_preds, target)
+                    ef_leg = PandasAdapter.from_dataframes(
+                        actual=actual_slice,
+                        predictions=pred_slices,
+                        target=target,
+                        step_mapping=step_mappings,
+                    )
+                    self._audit_parity_ef(ef, ef_leg, target)
+                else:
+                    # DF path: check canonical column exists, then build EF.
+                    first_df = raw_preds[0]
+                    if f"pred_{target}" not in first_df.columns:
+                        logger.warning(
+                            f"Column pred_{target} not found in prediction columns. Skipping."
+                        )
+                        continue
+                    pred_slices = [df[[f"pred_{target}"]] for df in raw_preds]
+                    # Fulfill ADR-031: Explicit per-sequence step mappings.
+                    step_mappings = self._get_evaluation_step_mappings(n_sequences=len(pred_slices))
+                    ef = PandasAdapter.from_dataframes(
+                        actual=actual_slice,
+                        predictions=pred_slices,
+                        target=target,
+                        step_mapping=step_mappings,
+                    )
 
                 # --- EXPLICIT PARITY PROVING MODE ---
                 # 1. Run Legacy (DataFrame-based)
