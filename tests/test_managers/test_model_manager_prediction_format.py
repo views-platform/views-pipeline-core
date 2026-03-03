@@ -264,6 +264,78 @@ class TestForecastDispatchFallback:
         MockSniffer.return_value.sniff_predictions.assert_called()
 
 
+
+# ── Issue 1: _assert_predictions_in_step_window() PF-awareness ────────────────
+
+class TestAssertPredictionsInStepWindow:
+    """
+    Verify _assert_predictions_in_step_window() handles both pd.DataFrame and
+    PredictionFrame inputs.
+
+    GREEN→GREEN guards (existing DF behaviour must be unchanged):
+        test_df_within_window_passes
+        test_df_rogue_month_still_raises
+
+    RED→GREEN fixes (currently crash with AttributeError on pf.index):
+        test_pf_within_window_passes
+        test_pf_rogue_month_raises_value_error
+
+    Stub uses _make_eval_stub("dataframe"):
+        - run_type = "calibration"
+        - base_origin = 445 - 1 = 444
+        - valid window: months 445..480 (steps 1..36)
+        - month 999 is rogue in all tests that use it
+    """
+
+    def _stub(self):
+        return _make_eval_stub("dataframe")  # prediction_format irrelevant here
+
+    def test_df_within_window_passes(self):
+        """GREEN→GREEN: DF with months 445,446 (inside window 445-480) must not raise."""
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0], [2.0]]},
+            index=pd.MultiIndex.from_tuples(
+                [(445, 1), (446, 1)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        self._stub()._assert_predictions_in_step_window([df])
+
+    def test_df_rogue_month_still_raises(self):
+        """GREEN→GREEN: DF with month 999 (outside window) must still raise ValueError."""
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0], [2.0]]},
+            index=pd.MultiIndex.from_tuples(
+                [(445, 1), (999, 1)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        with pytest.raises(ValueError, match="Pre-flight"):
+            self._stub()._assert_predictions_in_step_window([df])
+
+    def test_pf_within_window_passes(self):
+        """
+        RED→GREEN: PF with months 445,446 (inside window) must not raise.
+        Before fix: AttributeError — PredictionFrame has no .index attribute.
+        """
+        pf = PredictionFrame(
+            y_pred=np.ones((2, 2)),
+            identifiers={"time": np.array([445, 446]), "unit": np.array([1, 2])},
+        )
+        self._stub()._assert_predictions_in_step_window([pf])
+
+    def test_pf_rogue_month_raises_value_error(self):
+        """
+        RED→GREEN: PF with month 999 (outside window) must raise ValueError,
+        not AttributeError.
+        Before fix: AttributeError is raised before the rogue check is reached.
+        """
+        pf = PredictionFrame(
+            y_pred=np.ones((2, 2)),
+            identifiers={"time": np.array([445, 999]), "unit": np.array([1, 2])},
+        )
+        with pytest.raises(ValueError, match="Pre-flight"):
+            self._stub()._assert_predictions_in_step_window([pf])
+
+
 # ── Phase 4B: _audit_parity_ef() unit tests ──────────────────────────────────
 
 class TestAuditParityEf:

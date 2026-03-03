@@ -3044,7 +3044,9 @@ class ForecastingModelManager(ModelManager):
                 f"Got: {test_val!r}."
             )
 
-    def _assert_predictions_in_step_window(self, predictions: List[pd.DataFrame]) -> None:
+    def _assert_predictions_in_step_window(
+        self, predictions: Union[List[pd.DataFrame], List[PredictionFrame]]
+    ) -> None:
         """
         Pre-flight: validate temporal coverage of all prediction sequences against
         the declared step_mapping window BEFORE the per-target evaluation loop.
@@ -3055,13 +3057,17 @@ class ForecastingModelManager(ModelManager):
         early error instead of a cryptic failure deep in the adapter.
 
         Args:
-            predictions: List of prediction DataFrames returned by _evaluate_model_artifact.
+            predictions: List of prediction DataFrames or PredictionFrames returned
+                by _evaluate_model_artifact.
         """
         if not predictions:
             return
         step_mappings = self._get_evaluation_step_mappings(n_sequences=len(predictions))
         for i, (df, mapping) in enumerate(zip(predictions, step_mappings)):
-            pred_months = set(df.index.get_level_values(0).unique())
+            if isinstance(df, PredictionFrame):
+                pred_months = set(df.identifiers["time"].tolist())
+            else:
+                pred_months = set(df.index.get_level_values(0).unique())
             pred_min = min(pred_months)
             pred_max = max(pred_months)
             pred_count = len(pred_months)
