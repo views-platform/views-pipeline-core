@@ -265,6 +265,47 @@ class TestForecastDispatchFallback:
 
 
 
+# ── Issue 1 + Sequence-count enforcement — helpers ───────────────────────────
+# Calibration stub (base_origin=444, test=(445,492), steps 1..36):
+#   Sequence i window: months 445+i .. 480+i
+#   MAX_SHIFT_COUNT = 12 → required sequences = 13
+
+def _valid_df_seq(i: int) -> pd.DataFrame:
+    """Minimal single-row DF whose only month sits in sequence i's window."""
+    month = 445 + i
+    return pd.DataFrame(
+        {"pred_lr_sb": [1.0]},
+        index=pd.MultiIndex.from_tuples([(month, 1)], names=["month_id", "priogrid_gid"]),
+    )
+
+
+def _valid_pf_seq(i: int) -> PredictionFrame:
+    """Minimal single-sample PF whose time value sits in sequence i's window."""
+    month = 445 + i
+    return PredictionFrame(
+        y_pred=np.ones((1, 1)),
+        identifiers={"time": np.array([month]), "unit": np.array([1])},
+    )
+
+
+def _rogue_df_seq0() -> pd.DataFrame:
+    """DF for sequence 0 containing month 999 (rogue — outside window 445-480)."""
+    return pd.DataFrame(
+        {"pred_lr_sb": [1.0, 1.0]},
+        index=pd.MultiIndex.from_tuples(
+            [(445, 1), (999, 1)], names=["month_id", "priogrid_gid"]
+        ),
+    )
+
+
+def _rogue_pf_seq0() -> PredictionFrame:
+    """PF for sequence 0 with time 999 (rogue — outside window 445-480)."""
+    return PredictionFrame(
+        y_pred=np.ones((2, 1)),
+        identifiers={"time": np.array([445, 999]), "unit": np.array([1, 2])},
+    )
+
+
 # ── Issue 1: _assert_predictions_in_step_window() PF-awareness ────────────────
 
 class TestAssertPredictionsInStepWindow:
@@ -272,18 +313,13 @@ class TestAssertPredictionsInStepWindow:
     Verify _assert_predictions_in_step_window() handles both pd.DataFrame and
     PredictionFrame inputs.
 
-    GREEN→GREEN guards (existing DF behaviour must be unchanged):
-        test_df_within_window_passes
-        test_df_rogue_month_still_raises
-
-    RED→GREEN fixes (currently crash with AttributeError on pf.index):
-        test_pf_within_window_passes
-        test_pf_rogue_month_raises_value_error
+    Tests use 13 sequences (MAX_SHIFT_COUNT + 1) — the correct contract count
+    for a calibration run with test_len=48 and time_steps=36.
 
     Stub uses _make_eval_stub("dataframe"):
         - run_type = "calibration"
         - base_origin = 445 - 1 = 444
-        - valid window: months 445..480 (steps 1..36)
+        - sequence i window: months 445+i .. 480+i
         - month 999 is rogue in all tests that use it
     """
 
@@ -291,49 +327,66 @@ class TestAssertPredictionsInStepWindow:
         return _make_eval_stub("dataframe")  # prediction_format irrelevant here
 
     def test_df_within_window_passes(self):
-        """GREEN→GREEN: DF with months 445,446 (inside window 445-480) must not raise."""
-        df = pd.DataFrame(
-            {"pred_lr_sb": [[1.0], [2.0]]},
-            index=pd.MultiIndex.from_tuples(
-                [(445, 1), (446, 1)], names=["month_id", "priogrid_gid"]
-            ),
-        )
-        self._stub()._assert_predictions_in_step_window([df])
+        """GREEN→GREEN: 13 DFs with months in their respective windows must not raise."""
+        preds = [_valid_df_seq(i) for i in range(13)]
+        self._stub()._assert_predictions_in_step_window(preds)
 
     def test_df_rogue_month_still_raises(self):
-        """GREEN→GREEN: DF with month 999 (outside window) must still raise ValueError."""
-        df = pd.DataFrame(
-            {"pred_lr_sb": [[1.0], [2.0]]},
-            index=pd.MultiIndex.from_tuples(
-                [(445, 1), (999, 1)], names=["month_id", "priogrid_gid"]
-            ),
-        )
+        """GREEN→GREEN: seq-0 DF with month 999 (outside window) must raise ValueError."""
+        preds = [_rogue_df_seq0(), *[_valid_df_seq(i) for i in range(1, 13)]]
         with pytest.raises(ValueError, match="Pre-flight"):
-            self._stub()._assert_predictions_in_step_window([df])
+            self._stub()._assert_predictions_in_step_window(preds)
 
     def test_pf_within_window_passes(self):
-        """
-        RED→GREEN: PF with months 445,446 (inside window) must not raise.
-        Before fix: AttributeError — PredictionFrame has no .index attribute.
-        """
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 2)),
-            identifiers={"time": np.array([445, 446]), "unit": np.array([1, 2])},
-        )
-        self._stub()._assert_predictions_in_step_window([pf])
+        """GREEN→GREEN: 13 PFs with months in their respective windows must not raise."""
+        preds = [_valid_pf_seq(i) for i in range(13)]
+        self._stub()._assert_predictions_in_step_window(preds)
 
     def test_pf_rogue_month_raises_value_error(self):
-        """
-        RED→GREEN: PF with month 999 (outside window) must raise ValueError,
-        not AttributeError.
-        Before fix: AttributeError is raised before the rogue check is reached.
-        """
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 2)),
-            identifiers={"time": np.array([445, 999]), "unit": np.array([1, 2])},
-        )
+        """GREEN→GREEN: seq-0 PF with month 999 (outside window) must raise ValueError."""
+        preds = [_rogue_pf_seq0(), *[_valid_pf_seq(i) for i in range(1, 13)]]
         with pytest.raises(ValueError, match="Pre-flight"):
-            self._stub()._assert_predictions_in_step_window([pf])
+            self._stub()._assert_predictions_in_step_window(preds)
+
+
+# ── Sequence-count contract enforcement ───────────────────────────────────────
+
+class TestSequenceCountEnforcement:
+    """
+    _assert_predictions_in_step_window() must enforce the rolling-origin
+    sequence count contract: exactly MAX_SHIFT_COUNT + 1 = 13 sequences.
+
+    Wrong counts (too many OR too few) indicate a fundamental engine
+    misconfiguration and must be caught immediately — no silent tolerance.
+
+    RED→GREEN (count check does not exist before this commit):
+        test_too_many_sequences_raises   — 14 sequences
+        test_too_few_sequences_raises    — 12 sequences (the darts bug)
+
+    GREEN→GREEN (correct count must pass the count check):
+        test_correct_count_passes_count_check — 13 sequences
+    """
+
+    def _stub(self):
+        return _make_eval_stub("dataframe")
+
+    def test_too_many_sequences_raises(self):
+        """RED→GREEN: 14 sequences violates MAX_SHIFT_COUNT + 1 = 13 contract."""
+        preds = [_valid_df_seq(i) for i in range(14)]
+        with pytest.raises(ValueError, match="sequence count check FAILED"):
+            self._stub()._assert_predictions_in_step_window(preds)
+
+    def test_too_few_sequences_raises(self):
+        """RED→GREEN: 12 sequences (old darts bug) violates MAX_SHIFT_COUNT + 1 = 13."""
+        preds = [_valid_df_seq(i) for i in range(12)]
+        with pytest.raises(ValueError, match="sequence count check FAILED"):
+            self._stub()._assert_predictions_in_step_window(preds)
+
+    def test_correct_count_passes_count_check(self):
+        """GREEN→GREEN: exactly 13 sequences passes the count check."""
+        preds = [_valid_df_seq(i) for i in range(13)]
+        # Must not raise from the count check; window check runs normally
+        self._stub()._assert_predictions_in_step_window(preds)
 
 
 # ── Phase 4B: _audit_parity_ef() unit tests ──────────────────────────────────

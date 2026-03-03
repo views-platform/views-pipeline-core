@@ -49,7 +49,7 @@ from views_pipeline_core.modules.wandb import get_latest_run
 # )
 
 from views_pipeline_core.configs import PipelineConfig
-from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
+from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
 
 import dotenv
 
@@ -3062,6 +3062,21 @@ class ForecastingModelManager(ModelManager):
         """
         if not predictions:
             return
+        # Contract enforcement: evaluation must return exactly MAX_SHIFT_COUNT + 1
+        # sequences. More or fewer means the engine is misconfigured at a fundamental
+        # level. This method is only called from _execute_model_evaluation (never the
+        # forecasting path), so no run_type guard is required.
+        _expected = MAX_SHIFT_COUNT + 1
+        _actual = len(predictions)
+        if _actual != _expected:
+            raise ValueError(
+                f"Pre-flight sequence count check FAILED: expected {_expected} "
+                f"prediction sequences (MAX_SHIFT_COUNT={MAX_SHIFT_COUNT} + 1) "
+                f"but got {_actual}. "
+                f"The model engine violated the rolling-origin evaluation contract. "
+                f"Root cause is in _evaluate_model_artifact (the engine), not "
+                f"views-pipeline-core."
+            )
         step_mappings = self._get_evaluation_step_mappings(n_sequences=len(predictions))
         for i, (df, mapping) in enumerate(zip(predictions, step_mappings)):
             if isinstance(df, PredictionFrame):
