@@ -2,6 +2,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 from views_pipeline_core.files.utils import read_log_file
+from views_pipeline_core.modules.validation.core_config_sniffer import DEPRECATED_STATUS
 
 logger = logging.getLogger(__name__)
 
@@ -132,11 +133,11 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     single_model_dp_status = log_data["Deployment Status"]
 
     # More check conditions can be added here
-    if ensemble_deployment_status == 'Deprecated':
+    if ensemble_deployment_status == DEPRECATED_STATUS:
         logger.error("Deployment status is deprecated. Exiting.")
         return False
-    
-    if single_model_dp_status == 'Deprecated':
+
+    if single_model_dp_status == DEPRECATED_STATUS:
         logger.error(f"Model {model_name} deployment status is deprecated. Exiting.")
         return False
 

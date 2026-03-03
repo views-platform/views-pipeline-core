@@ -252,7 +252,7 @@ class TestValidateEnsembleModelDeploymentStatus:
         result = validate_ensemble_model_deployment_status(
             Path("/test/path/generated"),
             "forecasting",
-            "Deprecated"
+            "deprecated"
         )
 
         assert result is False
@@ -262,7 +262,7 @@ class TestValidateEnsembleModelDeploymentStatus:
         """Test failure when constituent model is deprecated."""
         log_data = {
             "Single Model Name": "deprecated_model",
-            "Deployment Status": "Deprecated"
+            "Deployment Status": "deprecated"
         }
         mock_read_log.return_value = log_data
 

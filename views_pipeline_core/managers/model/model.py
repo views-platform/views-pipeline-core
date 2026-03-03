@@ -1874,7 +1874,7 @@ class ForecastingModelManager(ModelManager):
                     self_test=self.args.drift_self_test,
                     partition=self.args.run_type,
                     override_month=self.args.override_timestep,
-                    level=self.configs.get("level"),
+                    level=self.configs["level"],
                 )
 
                 self._wandb_module.send_alert(
@@ -2033,7 +2033,7 @@ class ForecastingModelManager(ModelManager):
                     print(
                         f"\nValidating evaluation dataframe of sequence {idx+1}/{len(list_df_predictions)}"
                     )
-                    CorePredictionSniffer(level=configs.get("level")).sniff_predictions(
+                    CorePredictionSniffer(level=configs["level"]).sniff_predictions(
                         df, targets=configs["targets"]
                     )
                     save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
@@ -2144,7 +2144,7 @@ class ForecastingModelManager(ModelManager):
                 )
                 df_predictions = self._forecast_model_artifact(self.args.artifact_name)
                 
-                CorePredictionSniffer(level=self.configs.get("level")).sniff_predictions(
+                CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
                     df_predictions, targets=self.configs["targets"]
                 )
 
@@ -2246,7 +2246,7 @@ class ForecastingModelManager(ModelManager):
                         CorePredictionSniffer,
                     )
 
-                    CorePredictionSniffer(level=self.configs.get("level")).sniff_predictions(
+                    CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
                         df, targets=self.configs["targets"]
                     )
 

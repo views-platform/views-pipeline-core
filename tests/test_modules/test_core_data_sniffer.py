@@ -57,16 +57,6 @@ class TestMultiIndexStructure:
         df = _cm_df(121, 444)
         CoreDataSniffer(calibration_partition, "calibration", level="cm").sniff_loaded_data(df)
 
-    def test_pgm_multiindex_explicit_level_passes(self, calibration_partition):
-        """Explicit level is always required; pgm level accepts pgm index."""
-        df = _pgm_df(121, 444)
-        CoreDataSniffer(calibration_partition, "calibration", level="pgm").sniff_loaded_data(df)
-
-    def test_cm_multiindex_explicit_level_passes(self, calibration_partition):
-        """Explicit level is always required; cm level accepts cm index."""
-        df = _cm_df(121, 444)
-        CoreDataSniffer(calibration_partition, "calibration", level="cm").sniff_loaded_data(df)
-
     def test_flat_index_raises(self, calibration_partition):
         df = pd.DataFrame(
             {"priogrid_gid": [100], "month_id": [121], "value": [0.0]}

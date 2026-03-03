@@ -10,7 +10,7 @@ from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.managers.model import ModelPathManager
-from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
+from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer, _PARTITION_TRAIN, _PARTITION_TEST
 from ingester3.ViewsMonth import ViewsMonth
 
 # import views_transformation_library as vtl
@@ -1115,12 +1115,12 @@ class ViewsDataLoader:
             - Override only applies to forecasting partition
             - Logs warning when override is used
         """
-        month_first = self.partition_dict["train"][0]
+        month_first = self.partition_dict[_PARTITION_TRAIN][0]
 
         if self.partition == "forecasting":
-            month_last = self.partition_dict["train"][1]
+            month_last = self.partition_dict[_PARTITION_TRAIN][1]
         elif self.partition in ["calibration", "validation"]:
-            month_last = self.partition_dict["test"][1]
+            month_last = self.partition_dict[_PARTITION_TEST][1]
         else:
             raise ValueError(
                 'partition should be either "calibration", "validation" or "forecasting"'
