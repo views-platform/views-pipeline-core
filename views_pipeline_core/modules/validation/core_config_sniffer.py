@@ -34,6 +34,9 @@ SUPPORTED_DEPLOYMENT_STATUSES = {"shadow", "deployed", "baseline", DEPRECATED_ST
 # With time_steps=36: expected test_len = 36 + 12 = 48 months (4 years).
 MAX_SHIFT_COUNT      = 12
 
+# Supported prediction output formats — extend here when new formats are supported
+SUPPORTED_PREDICTION_FORMATS = frozenset({"dataframe", "prediction_frame"})
+
 # Run-type identifiers
 FORECASTING_RUN_TYPE = "forecasting"   # used in sniff_all() guard
 
@@ -60,6 +63,7 @@ class CoreConfigSniffer:
         "regression_targets", "classification_targets",
         "steps", "time_steps", "rolling_origin_stride",
         "deployment_status",
+        "prediction_format",
     ]
 
     def __init__(self, configs: Dict[str, Any], partition_dict: Dict | None = None) -> None:
@@ -73,6 +77,7 @@ class CoreConfigSniffer:
         self._check_targets_and_metrics()
         self._check_currently_supported_values()
         self._check_level()
+        self._check_prediction_format()
         if run_type != FORECASTING_RUN_TYPE:
             self._check_evaluation_contract(run_type)
         logger.info("CoreConfigSniffer: Config audited (run_type='%s').", run_type)
@@ -163,6 +168,16 @@ class CoreConfigSniffer:
                 f"CoreConfigSniffer: Model '{self._c.get('name')}' has "
                 f"deployment_status='deprecated' and cannot be run. "
                 f"Update deployment_status in config_meta.py to proceed."
+            )
+
+    def _check_prediction_format(self) -> None:
+        fmt = self._c["prediction_format"]   # KeyError already raised by _check_mandatory_keys
+        if fmt not in SUPPORTED_PREDICTION_FORMATS:
+            raise ValueError(
+                f"CoreConfigSniffer: prediction_format='{fmt}' is not supported. "
+                f"Supported: {SUPPORTED_PREDICTION_FORMATS}. "
+                f"Update SUPPORTED_PREDICTION_FORMATS in core_config_sniffer.py "
+                f"when a new format is ready."
             )
 
     def _check_evaluation_contract(self, run_type: str) -> None:

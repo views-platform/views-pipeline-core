@@ -2,8 +2,8 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-03-02
-**Related ADRs:** ADR-032 (Sniffer Pattern)
+**Last reviewed:** 2026-03-03
+**Related ADRs:** ADR-032 (Sniffer Pattern), ADR-033 (PredictionFrame Adoption)
 
 ---
 
@@ -45,6 +45,9 @@ gatekeeper between a model's declared intentions and the execution engine.
 - Guarantees that for non-forecasting runs the partition exists, contains no train/test
   overlap, and that `test_len` equals the expected value
   (`time_steps + MAX_SHIFT_COUNT`).
+- Guarantees that `prediction_format` is present and is a supported value
+  (`"dataframe"` or `"prediction_frame"`). Raises `ValueError` if the value is
+  unrecognised.
 
 ---
 
@@ -61,6 +64,9 @@ gatekeeper between a model's declared intentions and the execution engine.
 - `run_type: str` — passed to `sniff_all()` at call time. This is a **runtime
   parameter** (from CLI args), not a model config property; a model does not declare
   which run types it participates in.
+- `prediction_format: str` (mandatory config key) — declares the format of the model's
+  inference output. Must be `"dataframe"` or `"prediction_frame"`. All model configs
+  must include this key; the sniffer raises `KeyError` if it is absent.
 
 ---
 
@@ -79,7 +85,7 @@ gatekeeper between a model's declared intentions and the execution engine.
 
 - `KeyError` — a mandatory config key is absent.
 - `ValueError` — invalid or deprecated `deployment_status`; target / metric
-  mismatch; partition overlap.
+  mismatch; partition overlap; unrecognised `prediction_format` value.
 - `NotImplementedError` — `time_steps`, `rolling_origin_stride`, `level`
   (unsupported), or `test_len` (unsupported partition size) has a valid type but
   is not yet supported by the pipeline.
@@ -144,6 +150,8 @@ if result:   # sniff_all returns None; absence of exception is the success signa
   values are supported.
 - Adding a new mandatory key requires adding it to `MANDATORY_KEYS` and updating this
   contract.
+- `SUPPORTED_PREDICTION_FORMATS` is added alongside existing `SUPPORTED_*` constants.
+  Extend it there — not via inline checks — when new formats are supported.
 
 ---
 

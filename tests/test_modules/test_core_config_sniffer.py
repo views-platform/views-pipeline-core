@@ -23,6 +23,7 @@ def _valid_configs():
         "rolling_origin_stride": 1,
         "regression_point_metrics": ["MSE"],
         "classification_point_metrics": ["AP"],
+        "prediction_format": "dataframe",
     }
 
 
@@ -239,3 +240,31 @@ class TestCoreConfigSniffer:
         }
         with pytest.raises(NotImplementedError, match="test_len=49"):
             CoreConfigSniffer(_valid_configs(), partition).sniff_all("calibration")
+
+    # ── prediction_format ─────────────────────────────────────────────────
+
+    def test_prediction_format_missing_raises_key_error(self):
+        """prediction_format is a mandatory key — its absence must raise KeyError."""
+        configs = _valid_configs()
+        configs.pop("prediction_format", None)   # ensure absent even if already there
+        with pytest.raises(KeyError, match="prediction_format"):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_prediction_format_unknown_value_raises_value_error(self):
+        """Unsupported prediction_format value must raise ValueError."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "tensor"
+        with pytest.raises(ValueError, match="prediction_format"):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_prediction_format_dataframe_passes(self):
+        """'dataframe' is a supported prediction_format value."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "dataframe"
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_prediction_format_prediction_frame_passes(self):
+        """'prediction_frame' is a supported prediction_format value."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")

@@ -78,6 +78,7 @@ def mock_configs():
             "description": "Test model",
             "level": "pgm",
             "creator": "test",
+            "prediction_format": "dataframe",
         },
         "partition": {
             "calibration": {
