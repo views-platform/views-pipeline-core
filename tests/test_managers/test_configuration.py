@@ -246,6 +246,63 @@ class TestGetCombinedConfig:
         config = manager.get_combined_config()
         assert config["regression_targets"] == ["single_target"]
 
+    def test_synthesises_targets_from_regression_targets(self, base_configs):
+        """targets is synthesised when only regression_targets is present."""
+        configs = copy.deepcopy(base_configs)
+        configs["hyperparameters"].pop("targets", None)
+        configs["hyperparameters"]["regression_targets"] = ["lr_ged_sb"]
+
+        manager = ConfigurationManager(
+            config_hyperparameters=configs["hyperparameters"],
+            config_deployment=configs["deployment"],
+            config_meta=configs["meta"],
+        )
+        config = manager.get_combined_config()
+        assert config["targets"] == ["lr_ged_sb"]
+
+    def test_synthesises_targets_from_classification_targets(self, base_configs):
+        """targets is synthesised when only classification_targets is present."""
+        configs = copy.deepcopy(base_configs)
+        configs["hyperparameters"].pop("targets", None)
+        configs["hyperparameters"]["classification_targets"] = ["binary_conflict"]
+
+        manager = ConfigurationManager(
+            config_hyperparameters=configs["hyperparameters"],
+            config_deployment=configs["deployment"],
+            config_meta=configs["meta"],
+        )
+        config = manager.get_combined_config()
+        assert config["targets"] == ["binary_conflict"]
+
+    def test_synthesises_targets_combines_both_task_types(self, base_configs):
+        """targets combines regression and classification when both are present."""
+        configs = copy.deepcopy(base_configs)
+        configs["hyperparameters"].pop("targets", None)
+        configs["hyperparameters"]["regression_targets"] = ["lr_ged_sb"]
+        configs["hyperparameters"]["classification_targets"] = ["binary_conflict"]
+
+        manager = ConfigurationManager(
+            config_hyperparameters=configs["hyperparameters"],
+            config_deployment=configs["deployment"],
+            config_meta=configs["meta"],
+        )
+        config = manager.get_combined_config()
+        assert config["targets"] == ["lr_ged_sb", "binary_conflict"]
+
+    def test_legacy_targets_key_takes_precedence_over_synthesis(self, base_configs):
+        """Explicit 'targets' key is not overwritten by synthesis."""
+        configs = copy.deepcopy(base_configs)
+        configs["hyperparameters"]["targets"] = ["legacy_target"]
+        configs["hyperparameters"]["regression_targets"] = ["lr_ged_sb"]
+
+        manager = ConfigurationManager(
+            config_hyperparameters=configs["hyperparameters"],
+            config_deployment=configs["deployment"],
+            config_meta=configs["meta"],
+        )
+        config = manager.get_combined_config()
+        assert config["targets"] == ["legacy_target"]
+
 
 # ============================================================================
 # Test add_config

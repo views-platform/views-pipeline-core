@@ -667,18 +667,9 @@ class ConfigurationManager:
             >>> config_mgr.update_for_single_run(args)
             INFO: Applied timestep override: train=(121, 530), test=(531, 567)
 
-        Validation Checks:
-            - Required keys present
-            - Correct types for all values
-            - Valid value ranges
-            - Consistent partition definitions
-            - Algorithm-specific requirements
-
         Notes:
             - Must be called before pipeline execution
-            - Validation happens after all updates applied
             - Override only applies to forecasting run type
-            - Configuration becomes read-only after validation
 
         See Also:
             - :class:`ForecastingModelArgs`: Arguments structure
@@ -826,17 +817,9 @@ class ConfigurationManager:
             >>> print(config['hyperparameters']['n_estimators'])
             200  # Sweep value takes priority
 
-        Validation Checks:
-            - All checks from validate_config()
-            - Sweep-specific parameter ranges
-            - Compatibility of hyperparameter combinations
-            - Resource constraints for sweep iterations
-
         Notes:
             - wandb_config has highest priority (overrides all sources)
             - Must be called within WandB sweep agent context
-            - Validation ensures sweep iteration is valid
-            - Configuration validated before sweep iteration starts
 
         Thread Safety:
             Not thread-safe (modifies instance state)
