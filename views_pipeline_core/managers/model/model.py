@@ -2142,11 +2142,25 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Forecasting {self._model_path.target} {self.configs['name']}..."
                 )
-                df_predictions = self._forecast_model_artifact(self.args.artifact_name)
-                
-                CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
-                    df_predictions, targets=self.configs["targets"]
-                )
+                prediction_format = self.configs["prediction_format"]
+
+                if prediction_format == "prediction_frame":
+                    # PF path: PredictionFrame is self-validating at construction;
+                    # the DF-specific CorePredictionSniffer is not applicable here.
+                    # Convert to list-in-cell DataFrame for the downstream
+                    # transformation hack and storage compatibility (ADR-033 bridge).
+                    from views_pipeline_core.modules.validation.adapter import _pf_to_legacy_dfs
+                    _pf = self._forecast_model_artifact(self.args.artifact_name)
+                    _target = (self.configs["targets"][0]
+                               if isinstance(self.configs["targets"], list)
+                               else self.configs["targets"])
+                    df_predictions = _pf_to_legacy_dfs([_pf], _target)[0]
+                else:
+                    # DF path: existing validation (unchanged).
+                    df_predictions = self._forecast_model_artifact(self.args.artifact_name)
+                    CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
+                        df_predictions, targets=self.configs["targets"]
+                    )
 
                 handle_single_log_creation(
                     model_path=self._model_path,
@@ -3070,6 +3084,49 @@ class ForecastingModelManager(ModelManager):
                     f"# PARITY CONFIRMED for {target.upper()}\n"
                     "# Local Orchestrator alignment matches Library-internal alignment exactly.\n"
                     "#" * 80 + "\033[0m")
+
+    def _audit_parity_ef(self, ef_pf, ef_df, target: str) -> None:
+        """
+        Compare two EvaluationFrame objects for bit-wise parity.
+
+        Used during the ADR-033 Strangler Fig transition to verify that the
+        PredictionFrame adapter path produces numerically identical output to
+        the legacy DataFrame adapter path for the same underlying predictions.
+
+        Args:
+            ef_pf:   EvaluationFrame built from the PredictionFrame path.
+            ef_df:   EvaluationFrame built from the legacy DataFrame path.
+            target:  Target column name (for logging only).
+
+        Raises:
+            ValueError: If any array comparison fails — message begins with
+                        "Parity Failure".
+        """
+        import numpy as np
+
+        logger.info(f"AUDITING EF PARITY for target: {target}")
+
+        try:
+            np.testing.assert_allclose(ef_pf.y_pred, ef_df.y_pred, rtol=1e-5, atol=1e-8)
+        except AssertionError as e:
+            raise ValueError(f"Parity Failure (y_pred): {e}")
+
+        try:
+            np.testing.assert_allclose(ef_pf.y_true, ef_df.y_true, rtol=1e-5, atol=1e-8)
+        except AssertionError as e:
+            raise ValueError(f"Parity Failure (y_true): {e}")
+
+        for key in ("time", "unit", "origin", "step"):
+            try:
+                np.testing.assert_array_equal(
+                    ef_pf.identifiers[key], ef_df.identifiers[key]
+                )
+            except AssertionError as e:
+                raise ValueError(f"Parity Failure (identifiers['{key}']): {e}")
+
+        logger.info(
+            "\033[92m" + f"EF PARITY CONFIRMED for {target.upper()}" + "\033[0m"
+        )
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
         """
