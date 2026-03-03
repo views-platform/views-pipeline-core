@@ -293,3 +293,179 @@ class TestPandasAdapter:
         # Steps must follow each sequence's own origin, not a global mapping
         np.testing.assert_array_equal(ef.identifiers['step'],   np.array([1, 2, 3, 1, 2, 3]))
         np.testing.assert_array_equal(ef.identifiers['origin'], np.array([0, 0, 0, 1, 1, 1]))
+
+
+# ---------------------------------------------------------------------------
+# Tests for PandasAdapter.from_prediction_frames() — rolling-origin PF path
+# ---------------------------------------------------------------------------
+
+# Helper fixtures shared by the PF tests
+def _pf_actual():
+    """Actuals covering months 100-103, unit 1."""
+    idx = pd.MultiIndex.from_tuples(
+        [(100, 1), (101, 1), (102, 1), (103, 1)],
+        names=['month_id', 'country_id'],
+    )
+    return pd.DataFrame({'target': [1.0, 2.0, 3.0, 4.0]}, index=idx)
+
+
+def _pf_seq(months, values, n_samples=2):
+    """Build a minimal PredictionFrame for one sequence."""
+    y_pred = np.array([[v + 0.1 * s for s in range(n_samples)] for v in values])
+    return PredictionFrame(
+        y_pred=y_pred,
+        identifiers={
+            'time': np.array(months),
+            'unit': np.ones(len(months), dtype=int),
+        }
+    )
+
+
+class TestFromPredictionFrames:
+    """Tests for PandasAdapter.from_prediction_frames() — new rolling-origin PF path."""
+
+    def test_single_pf_produces_correct_shape(self):
+        """Single PF, 3 rows, 2 samples → EF with 3 rows, 2-sample y_pred."""
+        actual = _pf_actual()
+        pf = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
+        mapping = [{100: 1, 101: 2, 102: 3}]
+        ef = PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
+        assert len(ef.y_true) == 3
+        assert ef.y_pred.shape == (3, 2)
+
+    def test_single_pf_identifiers(self):
+        """Identifiers extracted from PF match expected time and unit values."""
+        actual = _pf_actual()
+        pf = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
+        mapping = [{100: 1, 101: 2, 102: 3}]
+        ef = PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
+        np.testing.assert_array_equal(ef.identifiers['time'], np.array([100, 101, 102]))
+        np.testing.assert_array_equal(ef.identifiers['unit'], np.array([1, 1, 1]))
+        np.testing.assert_array_equal(ef.identifiers['origin'], np.array([0, 0, 0]))
+        np.testing.assert_array_equal(ef.identifiers['step'], np.array([1, 2, 3]))
+
+    def test_rolling_origin_two_sequences(self):
+        """Two sequences → 6 rows total; correct origins and steps."""
+        actual = _pf_actual()
+        pf0 = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
+        pf1 = _pf_seq([101, 102, 103], [2.1, 3.1, 4.1])
+        mappings = [{100: 1, 101: 2, 102: 3}, {101: 1, 102: 2, 103: 3}]
+        ef = PandasAdapter.from_prediction_frames(actual, [pf0, pf1], 'target', step_mapping=mappings)
+        assert len(ef.y_true) == 6
+        np.testing.assert_array_equal(ef.identifiers['origin'], np.array([0, 0, 0, 1, 1, 1]))
+        np.testing.assert_array_equal(ef.identifiers['step'],   np.array([1, 2, 3, 1, 2, 3]))
+
+    def test_index_intersection_drops_missing_rows(self):
+        """Rows in PF that have no matching actual are silently dropped."""
+        actual = _pf_actual()  # months 100-103
+        pf = _pf_seq([100, 101, 999], [1.1, 2.1, 0.0])  # month 999 absent from actuals
+        mapping = [{100: 1, 101: 2, 999: 3}]
+        ef = PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
+        assert len(ef.y_true) == 2  # only 100 and 101 survive intersection
+
+    def test_window_integrity_rogue_month_raises(self):
+        """Month in PF but not in step_mapping raises before intersection (Invariant I3)."""
+        actual = _pf_actual()
+        pf = _pf_seq([100, 101, 104], [1.1, 2.1, 9.9])  # month 104 outside mapping
+        mapping = [{100: 1, 101: 2, 102: 3}]  # month 104 not declared
+        with pytest.raises(ValueError, match="declared base_origin does not match"):
+            PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
+
+    def test_mapping_count_mismatch_raises(self):
+        """Number of mappings must equal number of PFs (Invariant I2)."""
+        actual = _pf_actual()
+        pf0 = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
+        pf1 = _pf_seq([101, 102, 103], [2.1, 3.1, 4.1])
+        one_mapping = [{100: 1, 101: 2, 102: 3}]  # length 1, but 2 sequences
+        with pytest.raises(ValueError, match="step_mapping list length"):
+            PandasAdapter.from_prediction_frames(actual, [pf0, pf1], 'target', step_mapping=one_mapping)
+
+    def test_parity_with_from_prediction_frame_singular(self):
+        """from_prediction_frames([pf]) must equal from_prediction_frame(pf)."""
+        actual = _pf_actual()
+        pf = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
+        mapping = {100: 1, 101: 2, 102: 3}
+        ef_singular = PandasAdapter.from_prediction_frame(actual, pf, 'target', step_mapping=mapping)
+        ef_plural   = PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=[mapping])
+        np.testing.assert_allclose(ef_plural.y_pred,              ef_singular.y_pred)
+        np.testing.assert_allclose(ef_plural.y_true,              ef_singular.y_true)
+        np.testing.assert_array_equal(ef_plural.identifiers['time'],   ef_singular.identifiers['time'])
+        np.testing.assert_array_equal(ef_plural.identifiers['unit'],   ef_singular.identifiers['unit'])
+        np.testing.assert_array_equal(ef_plural.identifiers['step'],   ef_singular.identifiers['step'])
+        np.testing.assert_array_equal(ef_plural.identifiers['origin'], ef_singular.identifiers['origin'])
+
+
+# ---------------------------------------------------------------------------
+# Tests for _pf_to_legacy_dfs() parity-bridge utility
+# ---------------------------------------------------------------------------
+
+# Import the private parity-bridge function for direct testing
+from views_pipeline_core.modules.validation.adapter import _pf_to_legacy_dfs  # noqa: E402
+
+
+class TestPfToLegacyDfs:
+    """Tests for _pf_to_legacy_dfs() — parity-bridge only."""
+
+    def test_single_pf_produces_single_df(self):
+        """One PF in → one DataFrame out."""
+        pf = _pf_seq([100, 101], [1.0, 2.0])
+        dfs = _pf_to_legacy_dfs([pf], 'target')
+        assert len(dfs) == 1
+
+    def test_multi_pf_produces_multi_df(self):
+        """Two PFs in → two DataFrames out (one per sequence)."""
+        pf0 = _pf_seq([100, 101, 102], [1.0, 2.0, 3.0])
+        pf1 = _pf_seq([101, 102, 103], [2.0, 3.0, 4.0])
+        dfs = _pf_to_legacy_dfs([pf0, pf1], 'target')
+        assert len(dfs) == 2
+
+    def test_list_in_cell_format(self):
+        """Each cell of pred_target must be a list of floats (list-in-cell format)."""
+        pf = _pf_seq([100, 101], [1.0, 2.0], n_samples=3)
+        dfs = _pf_to_legacy_dfs([pf], 'target')
+        df = dfs[0]
+        assert 'pred_target' in df.columns
+        cell = df['pred_target'].iloc[0]
+        assert isinstance(cell, list)
+        assert len(cell) == 3
+
+    def test_multiindex_level_0_is_time(self):
+        """Level 0 of the resulting DataFrame's index must be the time (month_id) values."""
+        pf = _pf_seq([100, 101, 102], [1.0, 2.0, 3.0])
+        dfs = _pf_to_legacy_dfs([pf], 'target')
+        times = dfs[0].index.get_level_values(0).tolist()
+        assert times == [100, 101, 102]
+
+    def test_parity_closure(self):
+        """
+        Full parity closure:
+        PF → from_prediction_frames == PF → _pf_to_legacy_dfs → from_dataframes.
+
+        This is the primary correctness anchor: if this passes, both adapter paths
+        produce numerically identical EvaluationFrames for the same data.
+        """
+        actual = _pf_actual()
+        pf0 = _pf_seq([100, 101, 102], [1.0, 2.0, 3.0])
+        pf1 = _pf_seq([101, 102, 103], [2.0, 3.0, 4.0])
+        step_mappings = [
+            {100: 1, 101: 2, 102: 3},
+            {101: 1, 102: 2, 103: 3},
+        ]
+
+        # PF path
+        ef_pf = PandasAdapter.from_prediction_frames(
+            actual, [pf0, pf1], 'target', step_mapping=step_mappings
+        )
+
+        # DF path (via parity bridge)
+        df_list = _pf_to_legacy_dfs([pf0, pf1], 'target')
+        ef_df = PandasAdapter.from_dataframes(
+            actual, df_list, 'target', step_mapping=step_mappings
+        )
+
+        np.testing.assert_allclose(ef_pf.y_pred, ef_df.y_pred)
+        np.testing.assert_allclose(ef_pf.y_true, ef_df.y_true)
+        np.testing.assert_array_equal(ef_pf.identifiers['time'],   ef_df.identifiers['time'])
+        np.testing.assert_array_equal(ef_pf.identifiers['unit'],   ef_df.identifiers['unit'])
+        np.testing.assert_array_equal(ef_pf.identifiers['step'],   ef_df.identifiers['step'])
+        np.testing.assert_array_equal(ef_pf.identifiers['origin'], ef_df.identifiers['origin'])

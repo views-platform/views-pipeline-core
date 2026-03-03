@@ -271,3 +271,158 @@ class PandasAdapter:
             },
             metadata={'target': target}
         )
+
+    @staticmethod
+    def from_prediction_frames(
+        actual: pd.DataFrame,
+        predictions: List[Any],  # List[PredictionFrame]
+        target: str,
+        step_mapping: Optional[List[Dict[int, int]]] = None,
+    ) -> EvaluationFrame:
+        """
+        Convert a List[PredictionFrame] (one per evaluation sequence) into a single
+        EvaluationFrame. Mirrors from_dataframes() exactly but uses the dense
+        PredictionFrame arrays directly, bypassing list-in-cell explosion.
+
+        Args:
+            actual: DataFrame with MultiIndex [time, unit]
+            predictions: List of PredictionFrames, one per rolling-origin sequence.
+                Each PredictionFrame must have identifiers["time"] and identifiers["unit"].
+            target: The name of the target column in actuals.
+            step_mapping: List of dicts, one per sequence (len must match predictions).
+                Each dict maps month_id → step. Required for rolling-origin evaluation;
+                None falls back to positional inference (legacy).
+        """
+        if target not in actual.columns:
+            raise KeyError(f"Target column '{target}' not found in actuals.")
+
+        if not predictions:
+            raise ValueError("No objects to concatenate")
+
+        # INVARIANT I2 — mapping list must be sized to match sequences.
+        if isinstance(step_mapping, list) and len(step_mapping) != len(predictions):
+            raise ValueError(
+                f"step_mapping list length ({len(step_mapping)}) must equal the number "
+                f"of prediction sequences ({len(predictions)}). Each sequence requires "
+                f"its own explicit origin-anchored mapping."
+            )
+
+        all_y_true   = []
+        all_y_pred   = []
+        all_times    = []
+        all_units    = []
+        all_origins  = []
+        all_steps    = []
+
+        for i, pf in enumerate(predictions):
+            seq_mapping = step_mapping[i] if isinstance(step_mapping, list) else step_mapping
+
+            # INVARIANT I3 — Window integrity (pre-intersection blindspot).
+            if seq_mapping is not None:
+                pred_months = set(pf.identifiers['time'].tolist())
+                rogue_months = pred_months - set(seq_mapping.keys())
+                if rogue_months:
+                    raise ValueError(
+                        f"Sequence {i}: prediction contains month(s) {sorted(rogue_months)} "
+                        f"that are not in the declared step_mapping window "
+                        f"(expected months: {sorted(seq_mapping.keys())[:5]}"
+                        f"{'...' if len(seq_mapping) > 5 else ''}). "
+                        f"This indicates that the declared base_origin does not match the "
+                        f"model's actual forecast origin for this sequence."
+                    )
+
+            # Build a temporary MultiIndex from PF identifiers for alignment.
+            pf_index = pd.MultiIndex.from_arrays(
+                [pf.identifiers['time'], pf.identifiers['unit']],
+                names=actual.index.names,
+            )
+
+            common_idx = actual.index.intersection(pf_index)
+            if common_idx.empty:
+                logger.warning(
+                    f"Sequence {i}: no overlap between prediction index and actuals index. "
+                    f"This sequence contributes zero rows to the EvaluationFrame."
+                )
+                continue
+
+            pf_locs = pf_index.get_indexer(common_idx)
+
+            y_pred_seq = pf.y_pred[pf_locs]
+            y_true_seq = actual.loc[common_idx, target].values
+
+            if y_true_seq.dtype == object:
+                y_true_seq = np.array([
+                    x[0] if isinstance(x, (list, np.ndarray)) and len(x) > 0 else x
+                    for x in y_true_seq
+                ])
+
+            times = pf.identifiers['time'][pf_locs]
+            units = pf.identifiers['unit'][pf_locs]
+
+            if np.any(pd.isna(times)):
+                raise ValueError(f"NaN detected in 'time' identifiers of sequence {i}.")
+            if np.any(pd.isna(units)):
+                raise ValueError(f"NaN detected in 'unit' identifiers of sequence {i}.")
+
+            all_y_true.append(y_true_seq)
+            all_y_pred.append(y_pred_seq)
+            all_times.append(times)
+            all_units.append(units)
+            all_origins.append(np.full(len(y_true_seq), i))
+
+            if seq_mapping is not None:
+                steps = np.array([seq_mapping[t] for t in times])
+            else:
+                unique_times = pd.Series(times).unique()
+                time_to_step = {t: idx + 1 for idx, t in enumerate(unique_times)}
+                steps = np.array([time_to_step[t] for t in times])
+            all_steps.append(steps)
+
+        if not all_y_true:
+            raise ValueError("need at least one array to concatenate")
+
+        sample_counts = [y.shape[1] for y in all_y_pred]
+        if len(set(sample_counts)) > 1:
+            raise ValueError(
+                "Inconsistent sample counts across PredictionFrame sequences: "
+                f"{set(sample_counts)}."
+            )
+
+        return EvaluationFrame(
+            y_true=np.concatenate(all_y_true),
+            y_pred=np.concatenate(all_y_pred),
+            identifiers={
+                'time':   np.concatenate(all_times),
+                'unit':   np.concatenate(all_units),
+                'origin': np.concatenate(all_origins),
+                'step':   np.concatenate(all_steps),
+            },
+            metadata={'target': target}
+        )
+
+
+def _pf_to_legacy_dfs(
+    prediction_frames: List[Any],  # List[PredictionFrame]
+    target: str,
+) -> List[pd.DataFrame]:
+    """
+    Convert a List[PredictionFrame] to the list-in-cell DataFrame format that
+    PandasAdapter.from_dataframes() expects.
+
+    Each output DataFrame has:
+    - MultiIndex with level 0 = time (month_id), level 1 = unit values.
+    - A single column 'pred_{target}' where each cell is a list of sample floats.
+
+    PARITY-BRIDGE ONLY — remove this function when the DataFrame path is retired
+    and from_dataframes() / from_prediction_frames() are no longer compared.
+    """
+    result = []
+    pred_col = f"pred_{target}"
+    for pf in prediction_frames:
+        idx = pd.MultiIndex.from_arrays([pf.identifiers['time'], pf.identifiers['unit']])
+        df = pd.DataFrame(
+            {pred_col: [list(row) for row in pf.y_pred]},
+            index=idx,
+        )
+        result.append(df)
+    return result
