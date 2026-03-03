@@ -12,6 +12,11 @@ Phase 4B — _audit_parity_ef() unit tests (RED → GREEN after implementing the
     test_audit_parity_ef_matching_frames_passes
     test_audit_parity_ef_mismatched_y_pred_raises
     test_audit_parity_ef_mismatched_identifier_raises
+
+Issue 7 — Bridge-period fallback contract (RED → GREEN after .get() harmonisation
+              in _execute_model_forecasting()):
+    TestForecastDispatchFallback.test_absent_prediction_format_falls_back_to_df_path
+    TestForecastDispatchFallback.test_eval_also_falls_back_to_df_when_key_absent
 """
 
 import numpy as np
@@ -190,6 +195,73 @@ class TestForecastDispatch:
         ) as mock_convert:
             _run_execute_forecast(manager, mock_df_result=converted_df)
             mock_convert.assert_called_once()
+
+
+# ── Issue 7: Bridge-period fallback contract ──────────────────────────────────
+
+class TestForecastDispatchFallback:
+    """
+    Verify the bridge-period fallback contract: all three dispatch sites must use
+    .get("prediction_format", "dataframe") so that pre-Phase-1 configs (which do
+    not carry the key) route silently to the DF path rather than crashing.
+
+    GREEN guards (already covered by TestForecastDispatch, confirmed unchanged):
+        TestForecastDispatch.test_df_path_calls_sniffer
+        TestForecastDispatch.test_pf_path_skips_sniffer
+
+    RED → GREEN (canonical bug-detection test for Issue 7):
+        test_absent_prediction_format_falls_back_to_df_path
+
+    BEIGE (symmetric-contract guard — GREEN before and after fix):
+        test_eval_also_falls_back_to_df_when_key_absent
+    """
+
+    def test_absent_prediction_format_falls_back_to_df_path(self):
+        """
+        _execute_model_forecasting() with no 'prediction_format' key in config
+        must NOT raise — it must fall back to the DF path (sniffer called).
+
+        RED before fix: self.configs["prediction_format"] raises KeyError, which
+        is caught and re-raised as ModelForecastingException.
+        GREEN after fix: .get("prediction_format", "dataframe") returns "dataframe",
+        DF path is taken, sniffer is called.
+        """
+        mock_df = pd.DataFrame(
+            {"pred_lr_sb": [1.0, 2.0]},
+            index=pd.MultiIndex.from_tuples(
+                [(100, 1), (100, 2)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        manager = _make_stub("dataframe")
+        manager._test_return = mock_df
+        # Simulate a pre-Phase-1 model config: delete prediction_format entirely.
+        cfg = manager._config_manager.get_combined_config.return_value
+        del cfg["prediction_format"]
+
+        MockSniffer = _run_execute_forecast(manager, mock_df_result=mock_df)
+        MockSniffer.return_value.sniff_predictions.assert_called_once()
+
+    def test_eval_also_falls_back_to_df_when_key_absent(self):
+        """
+        BEIGE: _execute_model_evaluation() with no 'prediction_format' key must
+        also route to the DF path (sniffer called). Documents the symmetric
+        bridge-period contract across both execution sites.
+
+        This is GREEN before and after the Issue 7 fix — it guards against the
+        eval sites being accidentally changed to direct key access in the future.
+        """
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0], [3.0, 4.0]]},
+            index=pd.MultiIndex.from_tuples(
+                [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        manager = _make_eval_stub("dataframe")
+        cfg = manager._config_manager.get_combined_config.return_value
+        del cfg["prediction_format"]
+
+        MockSniffer = _run_execute_eval(manager, [df])
+        MockSniffer.return_value.sniff_predictions.assert_called()
 
 
 # ── Phase 4B: _audit_parity_ef() unit tests ──────────────────────────────────

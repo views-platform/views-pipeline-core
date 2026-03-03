@@ -2196,7 +2196,11 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Forecasting {self._model_path.target} {self.configs['name']}..."
                 )
-                prediction_format = self.configs["prediction_format"]
+                # Legacy fallback: "dataframe" preserves existing behaviour for
+                # models that pre-date the mandatory prediction_format key.
+                # CoreConfigSniffer enforces the key is present at run time.
+                # All dispatch sites must be consistent (ADR-033, Issue 7).
+                prediction_format = self.configs.get("prediction_format", "dataframe")
 
                 if prediction_format == "prediction_frame":
                     # PF path: PredictionFrame is self-validating at construction;
