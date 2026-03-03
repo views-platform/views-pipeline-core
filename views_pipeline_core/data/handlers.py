@@ -125,15 +125,16 @@ class _ViewsDataset:
             self.sample_size = self._validate_prediction_structure()
         else:
             self.targets = targets
-            self.features = self.get_features()
-            if self.targets is not None:
-                missing_vars = set(self.targets) - set(self.dataframe.columns)
-                if missing_vars:
-                    raise ValueError(f"Missing targets: {missing_vars}")
-            else:
+            if self.targets is None:
                 raise ValueError(
                     "Targets must be specified for non-prediction dataframes. Example usage: ViewsDataset(dataframe, targets=['ln_sb_best'])"
                 )
+            
+            self.features = self.get_features()
+            
+            missing_vars = set(self.targets) - set(self.dataframe.columns)
+            if missing_vars:
+                raise ValueError(f"Missing targets: {missing_vars}")
 
             if self.broadcast_features:
                 self._validate_feature_samples()

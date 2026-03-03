@@ -517,8 +517,18 @@ class ConfigurationManager:
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
 
+        # Synthesise "targets" from the task-split keys so all downstream code
+        # that reads config.get("targets") works regardless of whether the model
+        # uses the legacy "targets" key or the newer split convention.
+        # Existing "targets" key (legacy models) takes precedence.
+        if not config.get("targets"):
+            config["targets"] = (
+                config.get("regression_targets", []) +
+                config.get("classification_targets", [])
+            )
+
         return config
-    
+
     def get_combined_sweep_config(self) -> Dict:
         """
         Get merged configuration from all sources for sweep run.
@@ -540,9 +550,16 @@ class ConfigurationManager:
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
 
+        # Synthesise "targets" from the task-split keys (mirrors get_combined_config).
+        if not config.get("targets"):
+            config["targets"] = (
+                config.get("regression_targets", []) +
+                config.get("classification_targets", [])
+            )
+
         return config
-        
-    
+
+
     def add_config(self, config: Dict) -> None:
         """
         Add runtime configuration values.

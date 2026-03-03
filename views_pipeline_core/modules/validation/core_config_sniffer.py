@@ -60,7 +60,6 @@ class CoreConfigSniffer:
 
     MANDATORY_KEYS = [
         "name", "algorithm", "level", "creator",
-        "regression_targets", "classification_targets",
         "steps", "time_steps", "rolling_origin_stride",
         "deployment_status",
         "prediction_format",
@@ -73,8 +72,8 @@ class CoreConfigSniffer:
     def sniff_all(self, run_type: str) -> None:
         """Run all checks for this run_type. Raises on first violation."""
         self._check_mandatory_keys()
-        self._check_deployment_status()
         self._check_targets_and_metrics()
+        self._check_deployment_status()
         self._check_currently_supported_values()
         self._check_level()
         self._check_prediction_format()
@@ -93,8 +92,18 @@ class CoreConfigSniffer:
             )
 
     def _check_targets_and_metrics(self) -> None:
-        reg_targets = self._c.get("regression_targets", [])
-        cls_targets = self._c.get("classification_targets", [])
+        reg_targets = self._c.get("regression_targets")
+        cls_targets = self._c.get("classification_targets")
+
+        if reg_targets is None and cls_targets is None:
+            raise KeyError(
+                "CoreConfigSniffer: Both 'regression_targets' and 'classification_targets' "
+                "are missing from config. At least one target type must be declared."
+            )
+
+        # Coerce to empty list for uniform checking if they exist but are empty
+        reg_targets = reg_targets or []
+        cls_targets = cls_targets or []
 
         if not reg_targets and not cls_targets:
             raise ValueError(

@@ -64,6 +64,14 @@ class Test_ViewsDatasetInitialization:
             _ViewsDataset(sample_features_df, targets=['missing'])
         assert "Missing targets" in str(excinfo.value)
 
+    def test_init_with_none_targets_raises_value_error(self, sample_features_df):
+        """
+        Regression test: initializing with targets=None (and is_prediction=False) 
+        should raise ValueError, not TypeError.
+        """
+        with pytest.raises(ValueError, match="Targets must be specified"):
+            _ViewsDataset(sample_features_df, targets=None)
+
 class TestTensorConversion:
     """Tests for tensor conversion functionality"""
     

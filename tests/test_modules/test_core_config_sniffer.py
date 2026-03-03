@@ -69,7 +69,6 @@ class TestCoreConfigSniffer:
 
     @pytest.mark.parametrize("key", [
         "algorithm", "level", "steps", "time_steps",
-        "regression_targets", "classification_targets",
     ])
     def test_missing_mandatory_key_variants_raise_keyerror(self, key):
         configs = _valid_configs()
