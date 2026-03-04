@@ -161,6 +161,13 @@ class WandBModule:
             target_identifier,
         )
 
+
+    def log_yearly_evaluation(self, evaluation_dict: dict, target: str):
+        for metric, value in evaluation_dict["year"].__dict__.items():
+            if value is not None:
+                wandb.summary[f"{target}_yearly_{metric}"] = value
+
+
     @staticmethod
     def send_alert(
         title: str,

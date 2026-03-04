@@ -2686,7 +2686,7 @@ class ForecastingModelManager(ModelManager):
             - Enforces scalar predictions for point metrics
         """
         import pandas as pd
-        from views_evaluation.evaluation.evaluation_manager import EvaluationManager
+        from views_evaluation.manager.base import EvaluationManager
         from views_pipeline_core.files.utils import read_dataframe
 
         if not ensemble:
