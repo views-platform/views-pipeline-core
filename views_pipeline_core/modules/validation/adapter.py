@@ -414,29 +414,3 @@ class PandasAdapter:
             metadata={'target': target}
         )
 
-
-def _pf_to_legacy_dfs(
-    prediction_frames: List[Any],  # List[PredictionFrame]
-    target: str,
-) -> List[pd.DataFrame]:
-    """
-    Convert a List[PredictionFrame] to the list-in-cell DataFrame format that
-    PandasAdapter.from_dataframes() expects.
-
-    Each output DataFrame has:
-    - MultiIndex with level 0 = time (month_id), level 1 = unit values.
-    - A single column 'pred_{target}' where each cell is a list of sample floats.
-
-    PARITY-BRIDGE ONLY — remove this function when the DataFrame path is retired
-    and from_dataframes() / from_prediction_frames() are no longer compared.
-    """
-    result = []
-    pred_col = f"pred_{target}"
-    for pf in prediction_frames:
-        idx = pd.MultiIndex.from_arrays([pf.identifiers['time'], pf.identifiers['unit']])
-        df = pd.DataFrame(
-            {pred_col: [list(row) for row in pf.y_pred]},
-            index=idx,
-        )
-        result.append(df)
-    return result

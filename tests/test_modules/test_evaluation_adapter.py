@@ -436,54 +436,26 @@ class TestFromPredictionFrameSingular:
 
 
 # ---------------------------------------------------------------------------
-# Tests for _pf_to_legacy_dfs() parity-bridge utility
+# Parity closure: from_prediction_frames ≡ to_legacy_dfs → from_dataframes
 # ---------------------------------------------------------------------------
 
-# Import the private parity-bridge function for direct testing
-from views_pipeline_core.modules.validation.adapter import _pf_to_legacy_dfs  # noqa: E402
+class TestParityClosure:
+    """
+    Verifies that PandasAdapter.from_prediction_frames() and the
+    PredictionFrameDispatcher.to_legacy_dfs() → from_dataframes() path
+    produce bit-wise identical EvaluationFrames for the same input data.
 
+    This is the primary correctness anchor for the ADR-033 parity bridge:
+    both adapter paths must agree before the legacy DF path can be retired.
+    """
 
-class TestPfToLegacyDfs:
-    """Tests for _pf_to_legacy_dfs() — parity-bridge only."""
-
-    def test_single_pf_produces_single_df(self):
-        """One PF in → one DataFrame out."""
-        pf = _pf_seq([100, 101], [1.0, 2.0])
-        dfs = _pf_to_legacy_dfs([pf], 'target')
-        assert len(dfs) == 1
-
-    def test_multi_pf_produces_multi_df(self):
-        """Two PFs in → two DataFrames out (one per sequence)."""
-        pf0 = _pf_seq([100, 101, 102], [1.0, 2.0, 3.0])
-        pf1 = _pf_seq([101, 102, 103], [2.0, 3.0, 4.0])
-        dfs = _pf_to_legacy_dfs([pf0, pf1], 'target')
-        assert len(dfs) == 2
-
-    def test_list_in_cell_format(self):
-        """Each cell of pred_target must be a list of floats (list-in-cell format)."""
-        pf = _pf_seq([100, 101], [1.0, 2.0], n_samples=3)
-        dfs = _pf_to_legacy_dfs([pf], 'target')
-        df = dfs[0]
-        assert 'pred_target' in df.columns
-        cell = df['pred_target'].iloc[0]
-        assert isinstance(cell, list)
-        assert len(cell) == 3
-
-    def test_multiindex_level_0_is_time(self):
-        """Level 0 of the resulting DataFrame's index must be the time (month_id) values."""
-        pf = _pf_seq([100, 101, 102], [1.0, 2.0, 3.0])
-        dfs = _pf_to_legacy_dfs([pf], 'target')
-        times = dfs[0].index.get_level_values(0).tolist()
-        assert times == [100, 101, 102]
-
-    def test_parity_closure(self):
+    def test_pf_and_legacy_df_paths_produce_identical_ef(self):
         """
-        Full parity closure:
-        PF → from_prediction_frames == PF → _pf_to_legacy_dfs → from_dataframes.
-
-        This is the primary correctness anchor: if this passes, both adapter paths
-        produce numerically identical EvaluationFrames for the same data.
+        PF → from_prediction_frames == dispatcher.to_legacy_dfs → from_dataframes.
         """
+        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+            PredictionFrameDispatcher,
+        )
         actual = _pf_actual()
         pf0 = _pf_seq([100, 101, 102], [1.0, 2.0, 3.0])
         pf1 = _pf_seq([101, 102, 103], [2.0, 3.0, 4.0])
@@ -492,13 +464,11 @@ class TestPfToLegacyDfs:
             {101: 1, 102: 2, 103: 3},
         ]
 
-        # PF path
         ef_pf = PandasAdapter.from_prediction_frames(
             actual, [pf0, pf1], 'target', step_mapping=step_mappings
         )
 
-        # DF path (via parity bridge)
-        df_list = _pf_to_legacy_dfs([pf0, pf1], 'target')
+        df_list = PredictionFrameDispatcher().to_legacy_dfs([pf0, pf1], 'target')
         ef_df = PandasAdapter.from_dataframes(
             actual, df_list, 'target', step_mapping=step_mappings
         )
