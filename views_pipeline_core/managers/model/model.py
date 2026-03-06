@@ -1491,10 +1491,20 @@ class ForecastingModelManager(ModelManager):
             "_train_model_artifact method must be implemented by subclasses."
         )
 
+    @property
+    def _prediction_format(self) -> str:
+        """
+        Return the declared prediction format from config (Step A — DRY, ADR-033).
+
+        Defaults to ``"dataframe"`` so pre-ADR-033 models (which lack the key)
+        continue to route to the existing DF path without any config change.
+        """
+        return self.configs.get("prediction_format", "dataframe")
+
     @abstractmethod
     def _evaluate_model_artifact(
         self, eval_type: str, artifact_name: str
-    ) -> Union[List[pd.DataFrame], List[PredictionFrame]]:
+    ) -> Union[List[pd.DataFrame], Dict[str, List[PredictionFrame]]]:
         """
         Evaluate model artifact. Must be implemented by subclasses.
 
@@ -1502,11 +1512,14 @@ class ForecastingModelManager(ModelManager):
             - ``"dataframe"`` path: return ``List[pd.DataFrame]``, one per evaluation
               sequence.  Each DataFrame must have a MultiIndex ``[time, unit]`` and a
               column ``pred_{target}`` whose cells are lists of sample floats.
-            - ``"prediction_frame"`` path: return ``List[PredictionFrame]``, one per
-              evaluation sequence.  ``identifiers["time"]`` must contain ``month_id``
-              values taken from ``X.index`` level 0; ``identifiers["unit"]`` must
-              contain ``priogrid_gid`` / ``country_id`` values from level 1.  The
-              model author is responsible for populating identifiers correctly.
+            - ``"prediction_frame"`` path: return
+              ``Dict[str, List[PredictionFrame]]`` — one key per target name, each
+              value a list of ``PredictionFrame`` objects (one per rolling-origin
+              sequence).  ``identifiers["time"]`` must contain ``month_id`` values
+              taken from ``X.index`` level 0; ``identifiers["unit"]`` must contain
+              ``priogrid_gid`` / ``country_id`` values from level 1.  The model
+              author is responsible for populating identifiers and the dict keys
+              correctly (ADR-033).
 
         Contract:
             Must:
@@ -1544,18 +1557,21 @@ class ForecastingModelManager(ModelManager):
         )
 
     @abstractmethod
-    def _forecast_model_artifact(self, artifact_name: str) -> Union[pd.DataFrame, PredictionFrame]:
+    def _forecast_model_artifact(self, artifact_name: str) -> Union[pd.DataFrame, Dict[str, PredictionFrame]]:
         """
         Generate future forecasts. Must be implemented by subclasses.
 
         Return type contract (ADR-033):
             - ``"dataframe"`` path: return a ``pd.DataFrame`` with a MultiIndex
               ``[time, unit]`` and a column ``pred_{target}`` per target.
-            - ``"prediction_frame"`` path: return a ``PredictionFrame``.
-              ``identifiers["time"]`` must contain ``month_id`` values from ``X.index``
-              level 0; ``identifiers["unit"]`` must contain ``priogrid_gid`` /
-              ``country_id`` values from level 1.  The model author is responsible for
-              populating identifiers correctly.
+            - ``"prediction_frame"`` path: return
+              ``Dict[str, PredictionFrame]`` — one key per target name, each value
+              a single ``PredictionFrame`` for the forecast horizon.
+              ``identifiers["time"]`` must contain ``month_id`` values from
+              ``X.index`` level 0; ``identifiers["unit"]`` must contain
+              ``priogrid_gid`` / ``country_id`` values from level 1.  The model
+              author is responsible for populating identifiers and the dict keys
+              correctly (ADR-033).
 
         Contract:
             Must:
@@ -1591,17 +1607,14 @@ class ForecastingModelManager(ModelManager):
     @abstractmethod
     def _evaluate_sweep(
         self, eval_type: str, model: any
-    ) -> Union[List[pd.DataFrame], List[PredictionFrame]]:
+    ) -> Union[List[pd.DataFrame], Dict[str, List[PredictionFrame]]]:
         """
         Evaluate model during sweep. Must be implemented by subclasses.
 
         Return type contract (ADR-033):
             Same as ``_evaluate_model_artifact``: return ``List[pd.DataFrame]`` for
-            the ``"dataframe"`` path or ``List[PredictionFrame]`` for the
-            ``"prediction_frame"`` path.  When returning ``PredictionFrame`` objects,
-            ``identifiers["time"]`` must contain ``month_id`` values and
-            ``identifiers["unit"]`` must contain ``priogrid_gid`` / ``country_id``
-            values taken from ``X.index``.  The model author is responsible.
+            the ``"dataframe"`` path or ``Dict[str, List[PredictionFrame]]`` for the
+            ``"prediction_frame"`` path (one key per target, one PF per sequence).
 
         Contract:
             Must:
@@ -2052,46 +2065,62 @@ class ForecastingModelManager(ModelManager):
                         f"({len(_steps)} steps total). Model inference starting."
                     )
 
-                list_df_predictions = self._evaluate_model_artifact(
+                raw_preds = self._evaluate_model_artifact(
                     self._eval_type, self.args.artifact_name
                 )
-                self._assert_predictions_in_step_window(list_df_predictions)
+
+                # Step C — Type enforcement guard (ADR-033, fail-loud).
+                if self._prediction_format == "prediction_frame":
+                    if not isinstance(raw_preds, dict):
+                        raise ValueError(
+                            f"prediction_format='prediction_frame' declared but "
+                            f"_evaluate_model_artifact() returned "
+                            f"{type(raw_preds).__name__}, expected "
+                            f"Dict[str, List[PredictionFrame]]. Model contract violation."
+                        )
+                else:
+                    if isinstance(raw_preds, dict):
+                        raise ValueError(
+                            f"prediction_format='dataframe' declared but "
+                            f"_evaluate_model_artifact() returned a dict, expected "
+                            f"List[pd.DataFrame]. Model contract violation."
+                        )
+
+                # Step window check: for PF path use first target's sequences
+                # (all targets share the same temporal structure).
+                if self._prediction_format == "prediction_frame":
+                    self._assert_predictions_in_step_window(next(iter(raw_preds.values())))
+                else:
+                    self._assert_predictions_in_step_window(raw_preds)
 
                 import concurrent.futures
 
-                # Legacy fallback: "dataframe" preserves existing behaviour for
-                # models that pre-date the mandatory prediction_format key.
-                # CoreConfigSniffer enforces the key is present at run time.
-                prediction_format = self.configs.get("prediction_format", "dataframe")
-
-                if prediction_format == "prediction_frame":
+                if self._prediction_format == "prediction_frame":
                     # PF path: PredictionFrame is self-validating at construction.
                     # Skip the DF-centric CorePredictionSniffer.
-                    # Convert each PF to a legacy DF for storage compatibility (ADR-033 bridge).
+                    # Step D — iterate all targets from the dict (multi-target support).
                     from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
                         PredictionFrameDispatcher,
                     )
-                    _primary_target, _all_targets = self._get_primary_target()
-                    if len(_all_targets) > 1:
-                        logger.warning(
-                            f"PF path: only '{_primary_target}' will be saved. "
-                            f"Multi-target PF output is not yet supported. "
-                            f"Targets {_all_targets[1:]} are dropped. See ADR-033 Issue 3."
-                        )
                     _dispatcher = PredictionFrameDispatcher()
-                    for i, df_for_save in enumerate(
-                        _dispatcher.to_legacy_dfs(list_df_predictions, _primary_target)
-                    ):
-                        self._save_predictions(
-                            df_for_save, self._model_path.data_generated, i, send_alert=False
-                        )
+                    n_sequences = 0
+                    for target, pf_sequence_list in raw_preds.items():
+                        n_sequences = len(pf_sequence_list)
+                        for i, df_for_save in enumerate(
+                            _dispatcher.to_legacy_dfs(pf_sequence_list, target)
+                        ):
+                            self._save_predictions(
+                                df_for_save, self._model_path.data_generated, i, send_alert=False
+                            )
                 else:
                     # DF path: validate (sniff) and save each prediction DataFrame.
+                    n_sequences = len(raw_preds)
+
                     def validate_and_save(
                         df, idx, configs, model_path, save_predictions_func
                     ):
                         print(
-                            f"\nValidating evaluation dataframe of sequence {idx+1}/{len(list_df_predictions)}"
+                            f"\nValidating evaluation dataframe of sequence {idx+1}/{n_sequences}"
                         )
                         CorePredictionSniffer(level=configs["level"]).sniff_predictions(
                             df, targets=configs["targets"]
@@ -2108,13 +2137,13 @@ class ForecastingModelManager(ModelManager):
                                 self._model_path,
                                 self._save_predictions,
                             )
-                            for i, df in enumerate(list_df_predictions)
+                            for i, df in enumerate(raw_preds)
                         ]
                         concurrent.futures.wait(futures)
 
                 self._wandb_module.send_alert(
                     title="Evaluation Predictions Saved",
-                    text=f"Validated and saved {len(list_df_predictions)} prediction sequences at {self._model_path.data_generated.relative_to(self._model_path.root)}.",
+                    text=f"Validated and saved {n_sequences} prediction sequences at {self._model_path.data_generated.relative_to(self._model_path.root)}.",
                     notifications_enabled=self._wandb_notifications,
                 )
 
@@ -2136,7 +2165,7 @@ class ForecastingModelManager(ModelManager):
 
                 if has_metrics:
                     self._evaluate_prediction_dataframe(
-                        list_df_predictions, self._eval_type
+                        raw_preds, self._eval_type
                     )
                 else:
                     logger.warning("No metrics specified in config")
@@ -2202,60 +2231,71 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Forecasting {self._model_path.target} {self.configs['name']}..."
                 )
-                # Legacy fallback: "dataframe" preserves existing behaviour for
-                # models that pre-date the mandatory prediction_format key.
-                # CoreConfigSniffer enforces the key is present at run time.
-                # All dispatch sites must be consistent (ADR-033, Issue 7).
-                prediction_format = self.configs.get("prediction_format", "dataframe")
 
-                if prediction_format == "prediction_frame":
+                if self._prediction_format == "prediction_frame":
                     # PF path: PredictionFrame is self-validating at construction;
                     # the DF-specific CorePredictionSniffer is not applicable here.
-                    # Convert to list-in-cell DataFrame for the downstream
-                    # transformation hack and storage compatibility (ADR-033 bridge).
                     from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
                         PredictionFrameDispatcher,
                     )
-                    _pf = self._forecast_model_artifact(self.args.artifact_name)
-                    _primary_target, _all_targets = self._get_primary_target()
-                    if len(_all_targets) > 1:
-                        logger.warning(
-                            f"PF path: only '{_primary_target}' will be saved. "
-                            f"Multi-target PF output is not yet supported. "
-                            f"Targets {_all_targets[1:]} are dropped. See ADR-033 Issue 3."
+                    pf_dict = self._forecast_model_artifact(self.args.artifact_name)
+
+                    # Step C — Type enforcement guard (ADR-033, fail-loud).
+                    if not isinstance(pf_dict, dict):
+                        raise ValueError(
+                            f"prediction_format='prediction_frame' declared but "
+                            f"_forecast_model_artifact() returned "
+                            f"{type(pf_dict).__name__}, expected "
+                            f"Dict[str, PredictionFrame]. Model contract violation."
                         )
+
+                    # Step D — iterate all targets from the dict (multi-target support).
                     _dispatcher_fc = PredictionFrameDispatcher()
-                    df_predictions = _dispatcher_fc.to_legacy_dfs([_pf], _primary_target)[0]
-                    _dispatcher_fc.audit_prediction_structure(_pf, df_predictions, _primary_target)
+                    for target, _pf in pf_dict.items():
+                        df_target = _dispatcher_fc.to_legacy_dfs([_pf], target)[0]
+                        _dispatcher_fc.audit_prediction_structure(_pf, df_target, target)
+
+                        # TEMPORARY: Undo transformations before saving per target.
+                        forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=df_target)
+                        forecast_transformation_module = DatasetTransformationModule(
+                            dataset=forecast_dataset
+                        )
+                        forecast_transformation_module.undo_all_transformations()
+                        df_target = forecast_transformation_module.get_dataframe()
+                        self._save_predictions(df_target, self._model_path.data_generated)
                 else:
                     # DF path: existing validation (unchanged).
                     df_predictions = self._forecast_model_artifact(self.args.artifact_name)
+
+                    # Step C — Type enforcement guard (ADR-033, fail-loud).
+                    if isinstance(df_predictions, dict):
+                        raise ValueError(
+                            f"prediction_format='dataframe' declared but "
+                            f"_forecast_model_artifact() returned a dict, expected "
+                            f"pd.DataFrame. Model contract violation."
+                        )
+
                     CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
                         df_predictions, targets=self.configs["targets"]
                     )
+
+                    # ------------------------------------
+                    # TEMPORARY: Undo transformations before saving.
+                    forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=df_predictions)
+                    forecast_transformation_module = DatasetTransformationModule(
+                        dataset=forecast_dataset
+                    )
+                    forecast_transformation_module.undo_all_transformations()
+                    df_predictions = forecast_transformation_module.get_dataframe()
+                    # ------------------------------------
+
+                    self._save_predictions(df_predictions, self._model_path.data_generated)
 
                 handle_single_log_creation(
                     model_path=self._model_path,
                     config=self.configs,
                     train=False,
                 )
-
-                # ------------------------------------
-                # TEMPORARY: Undo transformations before saving. Ensure predictions are in original space. This is a very painful hack but will be gone when a new
-                # ADR is written and enforced.
-                forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=df_predictions)
-                forecast_transformation_module = DatasetTransformationModule(
-                    dataset=forecast_dataset
-                )
-                forecast_transformation_module.undo_all_transformations()
-                df_predictions = forecast_transformation_module.get_dataframe()
-                # updated_targets = []
-                # for target in self.configs["targets"]:
-                #     updated_targets.append(forecast_transformation_module.get_current_column_name(original_name=f"pred_{target}").removeprefix("pred_"))
-                # self._config_manager.add_config({"targets": updated_targets})
-                # ------------------------------------
-
-                self._save_predictions(df_predictions, self._model_path.data_generated)
 
                 self._wandb_module.send_alert(
                     title=f"Forecasting for {self._model_path.target} {self.configs['name']} completed successfully.",
@@ -2322,15 +2362,30 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Evaluating {self._model_path.target} {self.configs['name']}..."
                 )
-                df_predictions = self._evaluate_sweep(self._eval_type, model)
+                raw_preds_sweep = self._evaluate_sweep(self._eval_type, model)
+
+                # Step C — Type enforcement guard (ADR-033, fail-loud).
+                if self._prediction_format == "prediction_frame":
+                    if not isinstance(raw_preds_sweep, dict):
+                        raise ValueError(
+                            f"prediction_format='prediction_frame' declared but "
+                            f"_evaluate_sweep() returned {type(raw_preds_sweep).__name__}, "
+                            f"expected Dict[str, List[PredictionFrame]]. Model contract violation."
+                        )
+                else:
+                    if isinstance(raw_preds_sweep, dict):
+                        raise ValueError(
+                            f"prediction_format='dataframe' declared but "
+                            f"_evaluate_sweep() returned a dict, expected "
+                            f"List[pd.DataFrame]. Model contract violation."
+                        )
 
                 # ADR-033: PF path skips CorePredictionSniffer (PF is self-validating
                 # at construction). The DF path validates each sequence as before.
-                prediction_format = self.configs.get("prediction_format", "dataframe")
-                if prediction_format != "prediction_frame":
-                    for i, df in enumerate(df_predictions):
+                if self._prediction_format != "prediction_frame":
+                    for i, df in enumerate(raw_preds_sweep):
                         print(
-                            f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
+                            f"\nValidating evaluation dataframe of sequence {i+1}/{len(raw_preds_sweep)}"
                         )
                         from views_pipeline_core.modules.validation.core_prediction_sniffer import (
                             CorePredictionSniffer,
@@ -2341,7 +2396,7 @@ class ForecastingModelManager(ModelManager):
                         )
 
                 if self.configs.get("metrics"):
-                    self._evaluate_prediction_dataframe(df_predictions, self._eval_type)
+                    self._evaluate_prediction_dataframe(raw_preds_sweep, self._eval_type)
                 else:
                     raise PipelineException("No evaluation metrics specified in config_meta.py")
             finally:
@@ -2848,30 +2903,35 @@ class ForecastingModelManager(ModelManager):
                 from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
 
                 actual_slice = df_actual[[target]]
-                raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
 
-                prediction_format = self.configs.get("prediction_format", "dataframe")
-
-                if prediction_format == "prediction_frame":
-                    # PF path: raw_preds is List[PredictionFrame]. Column check is
-                    # inapplicable (PF carries arrays, not named columns).
+                if self._prediction_format == "prediction_frame":
+                    # PF path: df_predictions is Dict[str, List[PredictionFrame]].
+                    # Look up the sequence list for this target by name (ADR-033, DoD #1).
+                    # Column check is inapplicable (PF carries arrays, not named columns).
                     # Build EF directly from PFs; also build parity-bridge EF from
                     # converted legacy DFs and compare (ADR-033 bridge).
                     from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
                         PredictionFrameDispatcher,
                     )
+                    raw_preds = df_predictions.get(target)
+                    if raw_preds is None:
+                        logger.warning(
+                            f"PF path: target '{target}' not found in predictions dict "
+                            f"(keys: {list(df_predictions.keys())}). Skipping."
+                        )
+                        continue
                     _disp = PredictionFrameDispatcher()
                     step_mappings = self._get_evaluation_step_mappings(n_sequences=len(raw_preds))
                     logger.debug(
-                        f"PF path: assuming raw_preds[i].y_pred corresponds to target '{target}'. "
-                        f"Target-to-PF alignment is the model author's responsibility (ADR-033)."
+                        f"PF path: using predictions['{target}'] for target '{target}' (ADR-033)."
                     )
                     ef = _disp.build_evaluation_frame(
                         actual_slice, raw_preds, target, step_mappings
                     )
                     pred_slices = _disp.to_legacy_dfs(raw_preds, target)
                 else:
-                    # DF path: check canonical column exists, then build EF.
+                    # DF path: df_predictions is List[pd.DataFrame].
+                    raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
                     first_df = raw_preds[0]
                     if f"pred_{target}" not in first_df.columns:
                         logger.warning(
@@ -2954,23 +3014,6 @@ class ForecastingModelManager(ModelManager):
             text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
             notifications_enabled=self._wandb_notifications,
         )
-
-    def _get_primary_target(self) -> tuple:
-        """
-        Return (primary_target, all_targets) for PF dispatch sites.
-
-        Prefers the explicit regression_targets + classification_targets lists
-        from the config; falls back to the legacy 'targets' alias for models
-        that pre-date the multi-target config schema.
-
-        Returns:
-            (primary_target: str, all_targets: List[str])
-        """
-        _all = (
-            self.configs.get("regression_targets", []) +
-            self.configs.get("classification_targets", [])
-        ) or self.configs.get("targets", ["unknown"])
-        return _all[0], _all
 
     def _get_evaluation_step_mappings(self, n_sequences: int) -> List[Dict[int, int]]:
         """

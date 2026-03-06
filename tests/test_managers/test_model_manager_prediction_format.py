@@ -17,6 +17,10 @@ Issue 7 — Bridge-period fallback contract (RED → GREEN after .get() harmonis
               in _execute_model_forecasting()):
     TestForecastDispatchFallback.test_absent_prediction_format_falls_back_to_df_path
     TestForecastDispatchFallback.test_eval_also_falls_back_to_df_when_key_absent
+
+DoD #1 dict interface — multi-target PF support (RED → GREEN after Steps A-E):
+    TestPFDictDispatch — dict eval/forecast dispatch for single and multi-target
+    TestTypeEnforcementGuards — fail-loud type guards at abstract call sites
 """
 
 import numpy as np
@@ -162,7 +166,7 @@ class TestForecastDispatch:
             identifiers={"time": np.array([100, 100]), "unit": np.array([1, 2])},
         )
         manager = _make_stub("prediction_frame")
-        manager._test_return = pf
+        manager._test_return = {"lr_sb": pf}  # dict interface (DoD #1)
 
         MockSniffer = _run_execute_forecast(manager)
         MockSniffer.return_value.sniff_predictions.assert_not_called()
@@ -182,7 +186,7 @@ class TestForecastDispatch:
             identifiers={"time": np.array([100, 100]), "unit": np.array([1, 2])},
         )
         manager = _make_stub("prediction_frame")
-        manager._test_return = pf
+        manager._test_return = {"lr_sb": pf}  # dict interface (DoD #1)
 
         converted_df = pd.DataFrame(
             {"pred_lr_sb": [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]},
@@ -558,7 +562,7 @@ class TestEvalDispatch:
             identifiers={"time": np.array([445, 445]), "unit": np.array([1, 2])},
         )
         manager = _make_eval_stub("prediction_frame")
-        MockSniffer = _run_execute_eval(manager, [pf])
+        MockSniffer = _run_execute_eval(manager, {"lr_sb": [pf]})  # dict interface (DoD #1)
         MockSniffer.return_value.sniff_predictions.assert_not_called()
 
 
@@ -575,7 +579,7 @@ class TestEvalMetricsDispatch:
             identifiers={"time": np.array([445, 445]), "unit": np.array([1, 2])},
         )
         manager = _make_eval_stub("prediction_frame")
-        mock_fpf, _ = _run_evaluate_prediction_df(manager, [pf])
+        mock_fpf, _ = _run_evaluate_prediction_df(manager, {"lr_sb": [pf]})  # dict interface (DoD #1)
         mock_fpf.assert_called()
 
     def test_eval_df_path_calls_from_dataframes(self):
@@ -683,7 +687,7 @@ class TestSweepDispatch:
             identifiers={"time": np.array([445, 446]), "unit": np.array([1, 2])},
         )
         manager = _make_sweep_stub("prediction_frame")
-        MockSniffer = _run_execute_sweep(manager, [pf])
+        MockSniffer = _run_execute_sweep(manager, {"lr_sb": [pf]})  # dict interface (DoD #1)
         MockSniffer.return_value.sniff_predictions.assert_not_called()
 
     def test_sweep_df_path_calls_sniffer(self):
@@ -700,3 +704,165 @@ class TestSweepDispatch:
         manager = _make_sweep_stub("dataframe")
         MockSniffer = _run_execute_sweep(manager, [df])
         MockSniffer.return_value.sniff_predictions.assert_called_once()
+
+
+# ── DoD #1: Dict interface for PF path ───────────────────────────────────────
+
+def _make_dummy_df(target: str = "lr_sb") -> pd.DataFrame:
+    """Minimal list-in-cell DataFrame as produced by to_legacy_dfs()."""
+    return pd.DataFrame(
+        {f"pred_{target}": [[1.0, 1.0], [1.0, 1.0]]},
+        index=pd.MultiIndex.from_tuples(
+            [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
+        ),
+    )
+
+
+def _make_simple_pf() -> PredictionFrame:
+    """Minimal two-row PredictionFrame for dispatch tests."""
+    return PredictionFrame(
+        y_pred=np.ones((2, 2)),
+        identifiers={"time": np.array([445, 445]), "unit": np.array([1, 2])},
+    )
+
+
+class TestPFDictDispatch:
+    """
+    PF path must accept Dict[str, List[PF]] for eval and Dict[str, PF] for forecast.
+
+    RED before Step D implementation: manager reads list_df_predictions directly
+    (treats return value as a list or bare PF, not a dict).
+    GREEN after Steps A-E: manager iterates dict.items() for all targets.
+    """
+
+    def test_pf_eval_single_target_dict_calls_to_legacy_dfs(self):
+        """Single-target dict eval: to_legacy_dfs called exactly once with correct target."""
+        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+            PredictionFrameDispatcher,
+        )
+
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        manager._test_eval_return = {"lr_sb": [pf]}
+
+        with patch.object(
+            PredictionFrameDispatcher, "to_legacy_dfs", return_value=[_make_dummy_df()]
+        ) as mock_tld:
+            with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
+                with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
+                    with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
+                        manager._execute_model_evaluation()
+
+        mock_tld.assert_called_once()
+        # Positional args: (pf_sequence_list, target)
+        _seq, _target = mock_tld.call_args[0]
+        assert _target == "lr_sb"
+        # Must pass the extracted List[PF], not the raw dict
+        assert isinstance(_seq, list), f"Expected List[PF], got {type(_seq).__name__}"
+        assert len(_seq) == 1
+
+    def test_pf_eval_multi_target_dict_calls_to_legacy_dfs_per_target(self):
+        """Two-target dict eval: to_legacy_dfs called once per target, both targets used."""
+        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+            PredictionFrameDispatcher,
+        )
+
+        pf1, pf2 = _make_simple_pf(), _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        manager._test_eval_return = {"lr_sb": [pf1], "ged_ns": [pf2]}
+
+        with patch.object(
+            PredictionFrameDispatcher, "to_legacy_dfs", return_value=[_make_dummy_df()]
+        ) as mock_tld:
+            with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
+                with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
+                    with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
+                        manager._execute_model_evaluation()
+
+        assert mock_tld.call_count == 2
+        targets_called = {call[0][1] for call in mock_tld.call_args_list}
+        assert targets_called == {"lr_sb", "ged_ns"}
+
+    def test_pf_forecast_single_target_dict_calls_to_legacy_dfs(self):
+        """Single-target dict forecast: to_legacy_dfs called exactly once."""
+        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+            PredictionFrameDispatcher,
+        )
+
+        pf = _make_simple_pf()
+        manager = _make_stub("prediction_frame")
+        manager._test_return = {"lr_sb": pf}
+        dummy_df = _make_dummy_df()
+
+        with patch.object(
+            PredictionFrameDispatcher, "to_legacy_dfs", return_value=[dummy_df]
+        ) as mock_tld:
+            _run_execute_forecast(manager, mock_df_result=dummy_df)
+
+        mock_tld.assert_called_once()
+
+    def test_pf_forecast_multi_target_dict_saves_each_target(self):
+        """Two-target dict forecast: _save_predictions called once per target."""
+        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+            PredictionFrameDispatcher,
+        )
+
+        pf1, pf2 = _make_simple_pf(), _make_simple_pf()
+        manager = _make_stub("prediction_frame")
+        manager._test_return = {"lr_sb": pf1, "ged_ns": pf2}
+        dummy_df = _make_dummy_df()
+
+        with patch.object(PredictionFrameDispatcher, "to_legacy_dfs", return_value=[dummy_df]):
+            with patch.object(PredictionFrameDispatcher, "audit_prediction_structure"):
+                _run_execute_forecast(manager, mock_df_result=dummy_df)
+
+        assert manager._save_predictions.call_count == 2
+
+
+class TestTypeEnforcementGuards:
+    """
+    Type guards at abstract method call sites must raise immediately on contract violation.
+
+    RED before Step C: no guards exist; wrong return type causes a cryptic downstream error.
+    GREEN after Step C: explicit isinstance check raises descriptive exception immediately.
+    """
+
+    def test_eval_pf_declared_list_returned_raises(self):
+        """prediction_format='prediction_frame' but _evaluate_model_artifact returns
+        List[PF] (not Dict) → ModelEvaluationException raised."""
+        from views_pipeline_core.exceptions import ModelEvaluationException
+
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        manager._test_eval_return = [pf]  # wrong: List, not Dict
+
+        with pytest.raises(ModelEvaluationException, match="(?i)prediction_frame|dict"):
+            with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
+                with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
+                    manager._execute_model_evaluation()
+
+    def test_eval_df_declared_dict_returned_raises(self):
+        """prediction_format='dataframe' but _evaluate_model_artifact returns
+        Dict (not List[DataFrame]) → ModelEvaluationException raised."""
+        from views_pipeline_core.exceptions import ModelEvaluationException
+
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("dataframe")
+        manager._test_eval_return = {"lr_sb": [pf]}  # wrong: Dict, not List
+
+        with pytest.raises(ModelEvaluationException, match="(?i)dataframe|dict"):
+            with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
+                with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
+                    manager._execute_model_evaluation()
+
+    def test_forecast_pf_declared_bare_pf_returned_raises(self):
+        """prediction_format='prediction_frame' but _forecast_model_artifact returns
+        bare PredictionFrame (not Dict) → ModelForecastingException raised."""
+        from views_pipeline_core.exceptions import ModelForecastingException
+
+        pf = _make_simple_pf()
+        manager = _make_stub("prediction_frame")
+        manager._test_return = pf  # wrong: bare PF, not Dict
+
+        with pytest.raises(ModelForecastingException, match="(?i)prediction_frame|dict"):
+            _run_execute_forecast(manager)
