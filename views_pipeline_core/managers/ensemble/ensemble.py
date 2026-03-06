@@ -588,6 +588,21 @@ class EnsembleManager(ForecastingModelManager):
         model_args = self._create_model_args(evaluate=evaluate, forecast=forecast)
         self._execute_shell_script(model_path, model_name, model_args)
 
+        # After generation, load the expected file_path (NOT the latest file)
+        if not file_path.exists():
+            # Helpful debug: show what was actually generated
+            prediction_files = model_path._get_generated_predictions_data_file_paths(
+                run_type
+            )
+            raise PipelineException(
+                f"Model ran but expected prediction file was not created.\n"
+                f"Expected: {file_path}\n"
+                f"Found: {[p.name for p in prediction_files[:10]]}",
+                wandb_module=self._wandb_module,
+            )
+
+        logger.info(f"Loading newly generated prediction from {file_path}")
+
         # Load the newly generated prediction
         if self._use_prediction_store:
             return pd.DataFrame.forecasts.read_store(
@@ -595,14 +610,18 @@ class EnsembleManager(ForecastingModelManager):
             )
         else:
             # Get the latest prediction file (shell script generates with new timestamp)
-            prediction_files = model_path._get_generated_predictions_data_file_paths(run_type)
+            prediction_files = model_path._get_generated_predictions_data_file_paths(
+                run_type
+            )
             if not prediction_files:
                 raise PipelineException(
                     f"No prediction files found for {model_name} after generation",
-                    wandb_module=self._wandb_module
+                    wandb_module=self._wandb_module,
                 )
             latest_prediction_file = prediction_files[0]
-            logger.info(f"Loading newly generated prediction from {latest_prediction_file}")
+            logger.info(
+                f"Loading newly generated prediction from {latest_prediction_file}"
+            )
             return read_dataframe(latest_prediction_file)
 
     def _apply_reconciliation(self, df_prediction: pd.DataFrame) -> pd.DataFrame:
@@ -827,6 +846,11 @@ class EnsembleManager(ForecastingModelManager):
 
         first_df = next(iter(df_to_aggregate.values()))
         index_cols = list(first_df.index.names)
+        second = index_cols[1]
+        if second in ("priogrid_gid", "priogrid_id", "pg_id"):
+            second = "priogrid_id"
+        index_cols = ["month_id", second]
+        logger.info(f"Identified index columns: {index_cols}")
         # target_cols = [c for c in first_df.columns if c not in index_cols] ### This is not right, but how to chose target cols?
         target_cols = ["pred_" + col for col in self.configs.get("targets")]
 

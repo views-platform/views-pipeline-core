@@ -2,7 +2,7 @@ import polars as pl
 import pandas as pd
 import numpy as np
 from functools import reduce
-from typing import List, Union, Optional, Dict
+from typing import List, Union, Optional, Dict, Tuple
 from pathlib import Path
 import logging
 from dataclasses import dataclass
@@ -43,6 +43,10 @@ class AggregationManager:
     ):
         self.models: List[_ModelSpec] = []
         self.index_cols = index_cols
+        self.index_cols = [
+            "priogrid_id" if c in ("priogrid_gid") else c for c in self.index_cols
+        ]
+        logger.info(f"Initialized AggregationManager with index_cols={self.index_cols}")
         self.target_cols = target_cols
         self.aggregated_df = None
         self.prediction_type: Optional[str] = None  # "point" or "distribution"
@@ -340,94 +344,182 @@ class AggregationManager:
     def _concatenate_aggregation(
         self, df: pl.DataFrame, weights: Optional[List[float]] = None
     ) -> pl.DataFrame:
-        """
-        Perform linear pooling with resampling to combine distributions
-
-        Parameters:
-            df: Polars DataFrame with target columns containing distribution samples
-            weights: list of floats (default: equal weights)
-
-        Returns:
-            Polars DataFrame with pooled distributions
-        """
-
-        # set weights to equal if not specified
         if weights is None:
             weights = [1.0 / self.n_models] * self.n_models
 
-        # infer sample size from manager state
+        logger.info(f"Performing CONCATENATION aggregation with weights={weights}")
+
         if self.sample_size is None:
             raise ValueError(
                 "self.sample_size is not set. Make sure you added at least one "
                 "distribution model and detected its sample size."
             )
-        n_samples = self.sample_size
 
-        pooled_cols = []
+        n_samples = self.sample_size
         rng = np.random.default_rng(42)
 
-        for target_column in self.target_cols:
+        targets = list(self.target_cols)
+        n_rows = df.height
 
-            # find target columns
-            model_cols = [c for c in df.columns if c.startswith(target_column)]
+        # --- Align model columns per target (target_modelname)
+        model_cols_per_target, model_names = self.align_model_cols_by_target_prefix(
+            df, targets
+        )
+        n_models = len(model_names)
 
-            #    def pool_row(row, *, rng=rng):
+        if any(len(cols) != n_models for cols in model_cols_per_target):
+            raise ValueError(
+                "Targets have different numbers of model columns. "
+                "Joint pooling requires the same set of models for every target."
+            )
 
-            #        samples_list = [np.array(val) for val in row]
+        weights = np.asarray(weights, dtype=float)
+        if weights.shape[0] != n_models:
+            raise ValueError(
+                f"weights has length {weights.shape[0]} but expected {n_models}"
+            )
+        weights = weights / weights.sum()
 
-            #        # decide how many samples to draw from each model
-            #        sample_counts = rng.multinomial(n_samples, weights)
+        # --- Determine "series block" columns (block-wise unit)
+        # if "priogrid_id" in self.index_cols:
+        #     block_cols = ["priogrid_id"]
+        if any(c in self.index_cols for c in ["priogrid_id", "priogrid_gid"]):
+            block_cols = ["priogrid_id"]
+        elif "country_id" in self.index_cols:
+            block_cols = ["country_id"]
+        else:
+            raise ValueError(
+                "Cannot determine series block column. "
+                "Expected one of {'priogrid_id', 'country_id'} in index_cols."
+            )
 
-            #        pool = []
-            #        for s, count in zip(samples_list, sample_counts):
-            #                pool.extend(rng.choice(s, size=count, replace=True))
-            #        return (pool,)
+        # Build block_id per row
+        # Use numpy unique on the block key matrix (fast and deterministic)
+        key_mat = df.select(block_cols).to_numpy()
+        _, block_id = np.unique(key_mat, axis=0, return_inverse=True)
+        n_blocks = int(block_id.max()) + 1
 
-            #    pools = df.select(model_cols).map_rows(pool_row)
-            #    pooled_cols.append(pools.to_series().alias(target_column))
-            model_arrays = []
-            for col in model_cols:
-                # df[col].to_list() -> List[List[...]] with length n_rows
+        logger.info(
+            f"Block-wise sampling using block_cols={block_cols} with n_blocks={n_blocks}"
+        )
+
+        # --- Build joint tensor: (n_models, n_rows, n_targets, n_samples)
+        n_targets = len(targets)
+        model_tensor = np.empty((n_models, n_rows, n_targets, n_samples), dtype=float)
+
+        for ti, cols in enumerate(model_cols_per_target):
+            for mi, col in enumerate(cols):
                 arr = np.asarray(df[col].to_list())
-                # Basic sanity check
                 if arr.ndim != 2 or arr.shape[1] != n_samples:
                     raise ValueError(
                         f"Column {col} does not have shape (n_rows, {n_samples}). "
                         f"Got shape {arr.shape}."
                     )
-                model_arrays.append(arr)
+                model_tensor[mi, :, ti, :] = arr
 
-            # Stack into (n_models, n_rows, n_samples)
-            model_stack = np.stack(model_arrays, axis=0)
-            # Reorder to (n_rows, n_models, n_samples)
-            model_stack = np.moveaxis(model_stack, 0, 1)
+        # --- BLOCK-WISE choices (per series-block, per draw), shared across all targets
+        # chosen_models/chosen_samples: (n_blocks, n_samples)
+        chosen_models = rng.choice(n_models, size=(n_blocks, n_samples), p=weights)
+        chosen_samples = rng.integers(n_samples, size=(n_blocks, n_samples))
 
-            n_rows, n_models, n_samples_check = model_stack.shape
-            assert n_samples_check == n_samples
+        # Lift block-wise indices to row-wise indices
+        model_idx = chosen_models[block_id, :]  # (n_rows, n_samples)
+        sample_idx = chosen_samples[block_id, :]  # (n_rows, n_samples)
+        row_idx = np.arange(n_rows)[:, None]  # (n_rows, 1)
 
-            # Draw model indices and sample indices for ALL rows at once
-            # model_idx: (n_rows, n_samples) with values in [0, n_models)
-            model_idx = rng.choice(n_models, size=(n_rows, n_samples), p=weights)
-            # sample_idx: (n_rows, n_samples) with values in [0, n_samples)
-            sample_idx = rng.integers(n_samples, size=(n_rows, n_samples))
+        # Gather -> (n_rows, n_samples, n_targets)
+        pooled_r_s_t = model_tensor[model_idx, row_idx, :, sample_idx]
+        # Reorder -> (n_rows, n_targets, n_samples)
+        pooled_r_t_s = np.swapaxes(pooled_r_s_t, 1, 2)
 
-            # row indices broadcasted to (n_rows, n_samples)
-            row_idx = np.arange(n_rows)[:, None]
-
-            # Advanced indexing: result shape (n_rows, n_samples)
-            pooled_array = model_stack[row_idx, model_idx, sample_idx]
-
-            # Convert each row to a list
-            pooled_lists = pooled_array.tolist()
-
-            # Build a Polars Series of list type
-            pooled_series = pl.Series(name=target_column, values=pooled_lists)
-            pooled_cols.append(pooled_series)
-
-        # combine back into polar dataframe with index columns
+        # --- Write output
         pooled = df.select(self.index_cols)
-        for col in pooled_cols:
-            pooled = pooled.with_columns(col)
+        for ti, t in enumerate(targets):
+            pooled = pooled.with_columns(
+                pl.Series(name=t, values=pooled_r_t_s[:, ti, :].tolist())
+            )
+
+        return pooled
+
+    def _concatenate_aggregation_old(
+        self, df: pl.DataFrame, weights: Optional[List[float]] = None
+    ) -> pl.DataFrame:
+        if weights is None:
+            weights = [1.0 / self.n_models] * self.n_models
+
+        logger.info(f"Performing CONCATENATION aggregation with weights={weights} ")
+        if self.sample_size is None:
+            raise ValueError(
+                "self.sample_size is not set. Make sure you added at least one "
+                "distribution model and detected its sample size."
+            )
+
+        n_samples = self.sample_size
+        rng = np.random.default_rng(42)
+
+        targets = list(self.target_cols)
+        n_targets = len(targets)
+        n_rows = df.height
+
+        # --- Build a joint tensor of shape (n_models, n_rows, n_targets, n_samples)
+        # We assume: for each target, df columns that startwith(target) are ordered consistently by model.
+        model_cols_per_target, model_names = self.align_model_cols_by_target_prefix(
+            df, targets
+        )
+        logger.info(f"Aligned model columns per target: {model_cols_per_target}")
+        logger.info(f"Canonical model order: {model_names}")
+        n_models = len(model_names)
+        if any(len(cols) != n_models for cols in model_cols_per_target):
+            raise ValueError(
+                "Targets have different numbers of model columns. "
+                "Joint pooling requires the same set of models for every target."
+            )
+
+        # tensor_t_m_r_s: (n_targets, n_models, n_rows, n_samples)
+        tensor_t_m_r_s = []
+        for cols in model_cols_per_target:
+            model_arrays = []
+            for col in cols:
+                arr = np.asarray(df[col].to_list())
+                if arr.ndim != 2 or arr.shape[1] != n_samples:
+                    raise ValueError(
+                        f"Column {col} does not have shape (n_rows, {n_samples}). "
+                        f"Got shape {arr.shape}."
+                    )
+                model_arrays.append(arr)  # (n_rows, n_samples)
+            tensor_t_m_r_s.append(
+                np.stack(model_arrays, axis=0)
+            )  # (n_models, n_rows, n_samples)
+
+        tensor_t_m_r_s = np.stack(
+            tensor_t_m_r_s, axis=0
+        )  # (n_targets, n_models, n_rows, n_samples)
+        model_tensor = np.moveaxis(
+            tensor_t_m_r_s, 0, 2
+        )  # (n_models, n_rows, n_targets, n_samples)
+
+        # --- JOINT pooling indices (shared across all targets)
+        # model_idx/sample_idx are per-row and per-draw
+        model_idx = rng.choice(
+            n_models, size=(n_rows, n_samples), p=weights
+        )  # (n_rows, n_samples)
+        sample_idx = rng.integers(
+            n_samples, size=(n_rows, n_samples)
+        )  # (n_rows, n_samples)
+        row_idx = np.arange(n_rows)[:, None]  # (n_rows, 1)
+
+        # Gather -> (n_rows, n_samples, n_targets)
+        pooled_r_s_t = model_tensor[model_idx, row_idx, :, sample_idx]
+
+        # Reorder -> (n_rows, n_targets, n_samples)
+        pooled_r_t_s = np.swapaxes(pooled_r_s_t, 1, 2)
+
+        # --- Write output columns (list per row per target)
+        pooled = df.select(self.index_cols)
+        for ti, t in enumerate(targets):
+            pooled = pooled.with_columns(
+                pl.Series(name=t, values=pooled_r_t_s[:, ti, :].tolist())
+            )
 
         return pooled
 
@@ -655,6 +747,64 @@ class AggregationManager:
 
     #### ----- Utility Functions for Aggregation ----- ####
 
+    def align_model_cols_by_target_prefix(
+        self,
+        df: pl.DataFrame,
+        target_cols: List[str],
+    ) -> Tuple[List[List[str]], List[str]]:
+        """
+        Align per-target model columns when columns are named: '{target}_{modelname}'.
+
+        Returns
+        -------
+        model_cols_per_target : List[List[str]]
+            For each target in target_cols (same order), a list of column names aligned
+            by the same model order.
+        model_names : List[str]
+            Canonical model order used for alignment.
+        """
+        per_target_maps = []
+        for t in target_cols:
+            prefix = f"{t}_"
+            cols = [c for c in df.columns if c.startswith(prefix)]
+            if not cols:
+                raise ValueError(
+                    f"No columns found for target {t!r} with prefix {prefix!r}"
+                )
+
+            m = {}
+            for c in cols:
+                modelname = c[len(prefix) :]
+                if not modelname:
+                    raise ValueError(f"Column {c!r} has empty modelname suffix.")
+                if modelname in m:
+                    raise ValueError(
+                        f"Duplicate modelname {modelname!r} for target {t!r}"
+                    )
+                m[modelname] = c
+            per_target_maps.append(m)
+
+        # Ensure identical model sets across targets
+        ref = set(per_target_maps[0].keys())
+        for t, m in zip(target_cols[1:], per_target_maps[1:]):
+            keys = set(m.keys())
+            if keys != ref:
+                missing = sorted(ref - keys)
+                extra = sorted(keys - ref)
+                raise ValueError(
+                    f"Model sets differ across targets.\n"
+                    f"Expected (from {target_cols[0]!r}): {sorted(ref)}\n"
+                    f"For {t!r}: {sorted(keys)}\n"
+                    f"Missing in {t!r}: {missing}\n"
+                    f"Extra in {t!r}: {extra}"
+                )
+
+        model_names = sorted(ref)  # canonical stable order
+        model_cols_per_target = [
+            [m[name] for name in model_names] for m in per_target_maps
+        ]
+        return model_cols_per_target, model_names
+
     def prepare_point_cols(
         self, joined: pl.DataFrame
     ) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -742,6 +892,7 @@ class AggregationManager:
         pdf_processed = ds.dataframe.reset_index()
         df = pl.from_pandas(pdf_processed)
         logger.info(f"Data frame has the following columns: {df.columns}")
+        logger.info(f"Data frame has index columns: {self.index_cols}")
 
         # ---------- 4) Schema validation on Polars dataframe ----------
         # Validate that index columns are in dataframe
