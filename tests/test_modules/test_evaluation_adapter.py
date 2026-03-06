@@ -396,6 +396,46 @@ class TestFromPredictionFrames:
 
 
 # ---------------------------------------------------------------------------
+# Tests for from_prediction_frame() (singular) — I3 window integrity
+# ---------------------------------------------------------------------------
+
+class TestFromPredictionFrameSingular:
+    """I3 window integrity for from_prediction_frame() (singular path)."""
+
+    def test_singular_window_integrity_rogue_month_raises(self):
+        """I3: month in PF but outside step_mapping raises (pre-intersection blindspot)."""
+        actual = pd.DataFrame(
+            {"lr_sb": [1.0, 2.0]},
+            index=pd.MultiIndex.from_tuples(
+                [(100, 1), (999, 2)], names=["month_id", "pgm_id"]
+            ),
+        )
+        pf = PredictionFrame(
+            y_pred=np.ones((2, 2)),
+            identifiers={"time": np.array([100, 999]), "unit": np.array([1, 2])},
+        )
+        mapping = {100: 1, 101: 2}  # month 999 not in mapping
+        with pytest.raises(ValueError, match="declared base_origin does not match"):
+            PandasAdapter.from_prediction_frame(actual, pf, "lr_sb", mapping)
+
+    def test_singular_window_integrity_no_step_mapping_skips_check(self):
+        """I3 is only enforced when step_mapping is provided (guard condition)."""
+        actual = pd.DataFrame(
+            {"lr_sb": [1.0, 2.0]},
+            index=pd.MultiIndex.from_tuples(
+                [(100, 1), (999, 2)], names=["month_id", "pgm_id"]
+            ),
+        )
+        pf = PredictionFrame(
+            y_pred=np.ones((2, 2)),
+            identifiers={"time": np.array([100, 999]), "unit": np.array([1, 2])},
+        )
+        # No mapping supplied → I3 not triggered, positional inference used
+        ef = PandasAdapter.from_prediction_frame(actual, pf, "lr_sb", step_mapping=None)
+        assert len(ef.y_true) == 2
+
+
+# ---------------------------------------------------------------------------
 # Tests for _pf_to_legacy_dfs() parity-bridge utility
 # ---------------------------------------------------------------------------
 

@@ -215,6 +215,20 @@ class PandasAdapter:
         if target not in actual.columns:
             raise KeyError(f"Target column '{target}' not found in actuals.")
 
+        # INVARIANT I3 — Window integrity (pre-intersection blindspot).
+        if step_mapping is not None:
+            pred_months = set(prediction_frame.identifiers['time'].tolist())
+            rogue_months = pred_months - set(step_mapping.keys())
+            if rogue_months:
+                raise ValueError(
+                    f"Prediction contains month(s) {sorted(rogue_months)} that are not "
+                    f"in the declared step_mapping window "
+                    f"(expected months: {sorted(step_mapping.keys())[:5]}"
+                    f"{'...' if len(step_mapping) > 5 else ''}). "
+                    f"This indicates that the declared base_origin does not match the "
+                    f"model's actual forecast origin."
+                )
+
         # 1. Alignment (Intersection)
         # We must align the prediction_frame arrays with the actuals index.
         # Since PredictionFrame has flat arrays, we'll use pandas to perform 
