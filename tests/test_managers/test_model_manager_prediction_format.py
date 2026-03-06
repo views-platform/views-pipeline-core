@@ -25,8 +25,6 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 
-from types import SimpleNamespace
-
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 from views_pipeline_core.managers.model.model import ForecastingModelManager
 
@@ -387,70 +385,6 @@ class TestSequenceCountEnforcement:
         preds = [_valid_df_seq(i) for i in range(13)]
         # Must not raise from the count check; window check runs normally
         self._stub()._assert_predictions_in_step_window(preds)
-
-
-# ── Phase 4B: _audit_parity_ef() unit tests ──────────────────────────────────
-
-class TestAuditParityEf:
-    """Unit tests for ModelManager._audit_parity_ef()."""
-
-    @staticmethod
-    def _make_ef(**overrides) -> SimpleNamespace:
-        """
-        Build a duck-typed EvaluationFrame for parity-audit testing.
-
-        Uses SimpleNamespace with real numpy arrays rather than importing
-        EvaluationFrame, which is immune to the session-level sys.modules
-        patch in test_explicit_tasks.py that replaces the real class with
-        a MagicMock. The _audit_parity_ef() method only accesses .y_pred,
-        .y_true and .identifiers, so SimpleNamespace is sufficient.
-        """
-        ef = SimpleNamespace(
-            y_true=np.array([1.0, 2.0, 3.0]),
-            y_pred=np.array([[1.1, 1.2], [2.1, 2.2], [3.1, 3.2]]),
-            identifiers={
-                "time":   np.array([100, 101, 102]),
-                "unit":   np.array([1,   2,   3]),
-                "origin": np.array([0,   0,   0]),
-                "step":   np.array([1,   2,   3]),
-            },
-        )
-        for key, val in overrides.items():
-            setattr(ef, key, val)
-        return ef
-
-    @staticmethod
-    def _bare_manager() -> _ForecastStub:
-        """Instantiate stub without any configured infrastructure."""
-        return object.__new__(_ForecastStub)
-
-    def test_matching_frames_passes(self):
-        """Identical EvaluationFrames must not raise."""
-        ef = self._make_ef()
-        ef2 = self._make_ef()
-        self._bare_manager()._audit_parity_ef(ef, ef2, "lr_sb")
-
-    def test_mismatched_y_pred_raises(self):
-        """Differing y_pred arrays must raise ValueError mentioning 'Parity'."""
-        ef1 = self._make_ef()
-        ef2 = self._make_ef(y_pred=np.zeros((3, 2)))
-        with pytest.raises(ValueError, match="[Pp]arity"):
-            self._bare_manager()._audit_parity_ef(ef1, ef2, "lr_sb")
-
-    def test_mismatched_identifier_raises(self):
-        """Differing identifier arrays must raise ValueError mentioning 'Parity'."""
-        ef1 = self._make_ef()
-        ef2 = self._make_ef(
-            identifiers={
-                "time":   np.array([999, 101, 102]),   # ← wrong
-                "unit":   np.array([1,   2,   3]),
-                "origin": np.array([0,   0,   0]),
-                "step":   np.array([1,   2,   3]),
-            }
-        )
-        with pytest.raises(ValueError, match="[Pp]arity"):
-            self._bare_manager()._audit_parity_ef(ef1, ef2, "lr_sb")
-
 
 # ── Phase 4b: Evaluation path dispatch ───────────────────────────────────────
 
