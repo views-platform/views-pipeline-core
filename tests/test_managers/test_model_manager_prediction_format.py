@@ -48,7 +48,7 @@ class _ForecastStub(ForecastingModelManager):
         return getattr(self, "_test_eval_return", None)
 
     def _evaluate_sweep(self, *a, **kw):
-        pass
+        return getattr(self, "_test_sweep_return", [])
 
     def _forecast_model_artifact(self, artifact_name: str):
         return self._test_return
@@ -653,3 +653,110 @@ class TestEvalMetricsDispatch:
         mock_fpf, mock_fd = _run_evaluate_prediction_df(manager, [df])
         mock_fd.assert_called()
         mock_fpf.assert_not_called()
+
+
+# ── Issue 2: Sweep path PF dispatch ──────────────────────────────────────────
+
+def _make_sweep_stub(prediction_format: str) -> _ForecastStub:
+    """
+    Factory for sweep-path tests.
+
+    Mirrors _make_eval_stub but adds "metrics" key required by the
+    `if self.configs.get("metrics"):` guard in _execute_model_sweeping().
+    """
+    merged = {
+        "name": "stub_model",
+        "level": "pgm",
+        "targets": ["lr_sb"],
+        "regression_targets": ["lr_sb"],
+        "classification_targets": [],
+        "regression_point_metrics": ["MSE"],
+        "metrics": ["MSE"],
+        "prediction_format": prediction_format,
+        "sweep": True,
+        "steps": list(range(1, 37)),
+    }
+    m = object.__new__(_ForecastStub)
+    m._sweep = True
+    m._config_manager = MagicMock()
+    m._config_manager.get_combined_config.return_value = merged
+    m._config_manager.get_combined_sweep_config.return_value = merged
+
+    wm = MagicMock()
+    wm.initialize_run.return_value.__enter__ = Mock(return_value=None)
+    wm.initialize_run.return_value.__exit__ = Mock(return_value=False)
+    m._wandb_module = wm
+    m._wandb_notifications = False
+    m._project = "stub_project"
+
+    mp = MagicMock()
+    mp.target = "model"
+    mp._target = "model"
+    mp.root = Path("/fake")
+    mp.data_generated = Path("/fake/generated")
+    m._model_path = mp
+
+    mock_args = MagicMock()
+    mock_args.artifact_name = "stub.pt"
+    mock_args.run_type = "calibration"
+    m._args = mock_args
+
+    m._save_predictions = Mock()
+    m._save_evaluations = Mock()
+    m._partition_dict = {"calibration": {"train": (121, 444), "test": (445, 492)}}
+    m._eval_type = "calibration"
+    return m
+
+
+def _run_execute_sweep(manager: _ForecastStub, list_predictions: list) -> Mock:
+    """
+    Run manager._execute_model_sweeping() with infrastructure mocked out.
+
+    Sets _test_sweep_return so _ForecastStub._evaluate_sweep() returns
+    list_predictions.  Patches wandb.config, train, and
+    evaluate_prediction_dataframe so only the sniffer-loop dispatch is
+    exercised.  Returns the CorePredictionSniffer mock.
+    """
+    manager._test_sweep_return = list_predictions
+    with patch("wandb.config", MagicMock()):
+        with patch(
+            "views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer"
+        ) as MockSniffer:
+            with patch.object(ForecastingModelManager, "_train_model_artifact"):
+                with patch.object(
+                    ForecastingModelManager, "_evaluate_prediction_dataframe"
+                ):
+                    manager._execute_model_sweeping()
+                    return MockSniffer
+
+
+class TestSweepDispatch:
+    """Verify that _execute_model_sweeping() routes by prediction_format."""
+
+    def test_sweep_pf_path_skips_sniffer(self):
+        """
+        PF path: CorePredictionSniffer.sniff_predictions must NOT be called.
+        PredictionFrame is self-validating at construction; sniffer is DF-only.
+        """
+        pf = PredictionFrame(
+            y_pred=np.ones((2, 3)),
+            identifiers={"time": np.array([445, 446]), "unit": np.array([1, 2])},
+        )
+        manager = _make_sweep_stub("prediction_frame")
+        MockSniffer = _run_execute_sweep(manager, [pf])
+        MockSniffer.return_value.sniff_predictions.assert_not_called()
+
+    def test_sweep_df_path_calls_sniffer(self):
+        """
+        DF path: CorePredictionSniffer.sniff_predictions must be called once
+        per sequence (existing behaviour preserved).
+        """
+        df = pd.DataFrame(
+            {"pred_lr_sb": [1.0, 2.0]},
+            index=pd.MultiIndex.from_tuples(
+                [(445, 1), (446, 1)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        manager = _make_sweep_stub("dataframe")
+        MockSniffer = _run_execute_sweep(manager, [df])
+        MockSniffer.return_value.sniff_predictions.assert_called_once()

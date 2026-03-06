@@ -2310,17 +2310,21 @@ class ForecastingModelManager(ModelManager):
                 )
                 df_predictions = self._evaluate_sweep(self._eval_type, model)
 
-                for i, df in enumerate(df_predictions):
-                    print(
-                        f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
-                    )
-                    from views_pipeline_core.modules.validation.core_prediction_sniffer import (
-                        CorePredictionSniffer,
-                    )
+                # ADR-033: PF path skips CorePredictionSniffer (PF is self-validating
+                # at construction). The DF path validates each sequence as before.
+                prediction_format = self.configs.get("prediction_format", "dataframe")
+                if prediction_format != "prediction_frame":
+                    for i, df in enumerate(df_predictions):
+                        print(
+                            f"\nValidating evaluation dataframe of sequence {i+1}/{len(df_predictions)}"
+                        )
+                        from views_pipeline_core.modules.validation.core_prediction_sniffer import (
+                            CorePredictionSniffer,
+                        )
 
-                    CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
-                        df, targets=self.configs["targets"]
-                    )
+                        CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
+                            df, targets=self.configs["targets"]
+                        )
 
                 if self.configs.get("metrics"):
                     self._evaluate_prediction_dataframe(df_predictions, self._eval_type)
