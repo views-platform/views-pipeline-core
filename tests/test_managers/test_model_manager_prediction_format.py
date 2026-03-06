@@ -167,12 +167,16 @@ class TestForecastDispatch:
         MockSniffer = _run_execute_forecast(manager)
         MockSniffer.return_value.sniff_predictions.assert_not_called()
 
-    def test_pf_path_converts_via_pf_to_legacy_dfs(self):
+    def test_pf_path_converts_via_to_legacy_dfs(self):
         """
-        PF path: _pf_to_legacy_dfs must be called to convert the PredictionFrame
-        into a list-in-cell DataFrame before passing it downstream (storage +
-        transformation hack).
+        PF path: PredictionFrameDispatcher.to_legacy_dfs must be called to
+        convert the PredictionFrame into a list-in-cell DataFrame before passing
+        it downstream (storage + transformation hack).
         """
+        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+            PredictionFrameDispatcher,
+        )
+
         pf = PredictionFrame(
             y_pred=np.ones((2, 3)),
             identifiers={"time": np.array([100, 100]), "unit": np.array([1, 2])},
@@ -187,9 +191,8 @@ class TestForecastDispatch:
             ),
         )
 
-        with patch(
-            "views_pipeline_core.modules.validation.adapter._pf_to_legacy_dfs",
-            return_value=[converted_df],
+        with patch.object(
+            PredictionFrameDispatcher, "to_legacy_dfs", return_value=[converted_df]
         ) as mock_convert:
             _run_execute_forecast(manager, mock_df_result=converted_df)
             mock_convert.assert_called_once()
@@ -474,6 +477,9 @@ def _run_evaluate_prediction_df(
     can assert on which adapter path was taken.
     """
     from views_pipeline_core.modules.validation.adapter import PandasAdapter
+    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+        PredictionFrameDispatcher,
+    )
 
     actuals_df = pd.DataFrame(
         {"lr_sb": [1.0, 2.0]},
@@ -509,7 +515,7 @@ def _run_evaluate_prediction_df(
                                 ForecastingModelManager, "_audit_parity"
                             ):
                                 with patch.object(
-                                    ForecastingModelManager, "_audit_parity_ef"
+                                    PredictionFrameDispatcher, "audit_parity_ef"
                                 ):
                                     with patch.object(
                                         ForecastingModelManager,

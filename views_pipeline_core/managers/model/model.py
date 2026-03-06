@@ -2068,14 +2068,18 @@ class ForecastingModelManager(ModelManager):
                     # PF path: PredictionFrame is self-validating at construction.
                     # Skip the DF-centric CorePredictionSniffer.
                     # Convert each PF to a legacy DF for storage compatibility (ADR-033 bridge).
-                    from views_pipeline_core.modules.validation.adapter import _pf_to_legacy_dfs
+                    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+                        PredictionFrameDispatcher,
+                    )
                     _all_targets = (
                         self.configs.get("regression_targets", []) +
                         self.configs.get("classification_targets", [])
                     ) or self.configs.get("targets", ["unknown"])
                     _primary_target = _all_targets[0]
-                    for i, pf in enumerate(list_df_predictions):
-                        df_for_save = _pf_to_legacy_dfs([pf], _primary_target)[0]
+                    _dispatcher = PredictionFrameDispatcher()
+                    for i, df_for_save in enumerate(
+                        _dispatcher.to_legacy_dfs(list_df_predictions, _primary_target)
+                    ):
                         self._save_predictions(
                             df_for_save, self._model_path.data_generated, i, send_alert=False
                         )
@@ -2207,12 +2211,16 @@ class ForecastingModelManager(ModelManager):
                     # the DF-specific CorePredictionSniffer is not applicable here.
                     # Convert to list-in-cell DataFrame for the downstream
                     # transformation hack and storage compatibility (ADR-033 bridge).
-                    from views_pipeline_core.modules.validation.adapter import _pf_to_legacy_dfs
+                    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+                        PredictionFrameDispatcher,
+                    )
                     _pf = self._forecast_model_artifact(self.args.artifact_name)
-                    _target = (self.configs["targets"][0]
-                               if isinstance(self.configs["targets"], list)
-                               else self.configs["targets"])
-                    df_predictions = _pf_to_legacy_dfs([_pf], _target)[0]
+                    _all_targets = (
+                        self.configs.get("regression_targets", []) +
+                        self.configs.get("classification_targets", [])
+                    ) or self.configs.get("targets", ["unknown"])
+                    _primary_target = _all_targets[0]
+                    df_predictions = PredictionFrameDispatcher().to_legacy_dfs([_pf], _primary_target)[0]
                 else:
                     # DF path: existing validation (unchanged).
                     df_predictions = self._forecast_model_artifact(self.args.artifact_name)
@@ -2831,10 +2839,7 @@ class ForecastingModelManager(ModelManager):
 
                 # EvaluationManager.evaluate() operates on one target at a time and
                 # requires exactly one column named pred_{target} per prediction DataFrame.
-                from views_pipeline_core.modules.validation.adapter import (
-                    PandasAdapter,
-                    _pf_to_legacy_dfs,
-                )
+                from views_pipeline_core.modules.validation.adapter import PandasAdapter
 
                 actual_slice = df_actual[[target]]
                 raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
@@ -2846,21 +2851,15 @@ class ForecastingModelManager(ModelManager):
                     # inapplicable (PF carries arrays, not named columns).
                     # Build EF directly from PFs; also build parity-bridge EF from
                     # converted legacy DFs and compare (ADR-033 bridge).
+                    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+                        PredictionFrameDispatcher,
+                    )
+                    _disp = PredictionFrameDispatcher()
                     step_mappings = self._get_evaluation_step_mappings(n_sequences=len(raw_preds))
-                    ef = PandasAdapter.from_prediction_frames(
-                        actual=actual_slice,
-                        predictions=raw_preds,
-                        target=target,
-                        step_mapping=step_mappings,
+                    ef = _disp.build_evaluation_frame(
+                        actual_slice, raw_preds, target, step_mappings
                     )
-                    pred_slices = _pf_to_legacy_dfs(raw_preds, target)
-                    ef_leg = PandasAdapter.from_dataframes(
-                        actual=actual_slice,
-                        predictions=pred_slices,
-                        target=target,
-                        step_mapping=step_mappings,
-                    )
-                    self._audit_parity_ef(ef, ef_leg, target)
+                    pred_slices = _disp.to_legacy_dfs(raw_preds, target)
                 else:
                     # DF path: check canonical column exists, then build EF.
                     first_df = raw_preds[0]
@@ -3191,49 +3190,6 @@ class ForecastingModelManager(ModelManager):
                     f"# PARITY CONFIRMED for {target.upper()}\n"
                     "# Local Orchestrator alignment matches Library-internal alignment exactly.\n"
                     "#" * 80 + "\033[0m")
-
-    def _audit_parity_ef(self, ef_pf, ef_df, target: str) -> None:
-        """
-        Compare two EvaluationFrame objects for bit-wise parity.
-
-        Used during the ADR-033 Strangler Fig transition to verify that the
-        PredictionFrame adapter path produces numerically identical output to
-        the legacy DataFrame adapter path for the same underlying predictions.
-
-        Args:
-            ef_pf:   EvaluationFrame built from the PredictionFrame path.
-            ef_df:   EvaluationFrame built from the legacy DataFrame path.
-            target:  Target column name (for logging only).
-
-        Raises:
-            ValueError: If any array comparison fails — message begins with
-                        "Parity Failure".
-        """
-        import numpy as np
-
-        logger.info(f"AUDITING EF PARITY for target: {target}")
-
-        try:
-            np.testing.assert_allclose(ef_pf.y_pred, ef_df.y_pred, rtol=1e-5, atol=1e-8)
-        except AssertionError as e:
-            raise ValueError(f"Parity Failure (y_pred): {e}")
-
-        try:
-            np.testing.assert_allclose(ef_pf.y_true, ef_df.y_true, rtol=1e-5, atol=1e-8)
-        except AssertionError as e:
-            raise ValueError(f"Parity Failure (y_true): {e}")
-
-        for key in ("time", "unit", "origin", "step"):
-            try:
-                np.testing.assert_array_equal(
-                    ef_pf.identifiers[key], ef_df.identifiers[key]
-                )
-            except AssertionError as e:
-                raise ValueError(f"Parity Failure (identifiers['{key}']): {e}")
-
-        logger.info(
-            "\033[92m" + f"EF PARITY CONFIRMED for {target.upper()}" + "\033[0m"
-        )
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
         """
