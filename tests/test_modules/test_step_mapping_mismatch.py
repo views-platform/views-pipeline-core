@@ -11,7 +11,7 @@ between train end and test start these differ, producing a shifted window that
 excludes the model's last prediction month.
 
 Test structure:
-  Test A (baseline)  — adapter rejects a trivially rogue month (INVARIANT I3 works)
+  Test A (baseline)  — adapter rejects a trivially rogue month (window-integrity guard works)
   Test B (H2)        — off-by-one in base_origin produces the exact rogue month 481
   Test C (H1)        — model generating 37 steps instead of 36 also produces it
   Test D (green)     — correct formula test[0]-1 passes with no rogue months
@@ -19,7 +19,6 @@ Test structure:
 """
 import pytest
 import pandas as pd
-import numpy as np
 from unittest.mock import MagicMock
 import sys
 
@@ -54,11 +53,11 @@ def _make_df(months, units, col, value=1.0):
 
 
 # ---------------------------------------------------------------------------
-# Test A — Baseline: INVARIANT I3 already works (must PASS before any fix)
+# Test A — Baseline: window-integrity guard already works (must PASS before any fix)
 # ---------------------------------------------------------------------------
 
 def test_adapter_rejects_rogue_month():
-    """INVARIANT I3: a month outside the declared window raises ValueError immediately."""
+    """GUARD window-integrity: a month outside the declared window raises ValueError immediately."""
     actual = _make_df([445, 446], [1], 'target')
     pred = _make_df([481], [1], 'pred_target', value=0.5)
 

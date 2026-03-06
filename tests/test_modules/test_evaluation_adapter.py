@@ -174,7 +174,7 @@ class TestPandasAdapter:
 
     def test_mapping_count_mismatch_raises(self):
         """
-        Hole C — Invariant I2:
+        Guard: mapping-count —
         len(step_mapping) must equal len(predictions).
         An IndexError on step_mapping[i] would be cryptic; we fail loud with a
         descriptive ValueError before the loop even begins.
@@ -364,7 +364,7 @@ class TestFromPredictionFrames:
         assert len(ef.y_true) == 2  # only 100 and 101 survive intersection
 
     def test_window_integrity_rogue_month_raises(self):
-        """Month in PF but not in step_mapping raises before intersection (Invariant I3)."""
+        """Month in PF but not in step_mapping raises before intersection (window-integrity guard)."""
         actual = _pf_actual()
         pf = _pf_seq([100, 101, 104], [1.1, 2.1, 9.9])  # month 104 outside mapping
         mapping = [{100: 1, 101: 2, 102: 3}]  # month 104 not declared
@@ -372,7 +372,7 @@ class TestFromPredictionFrames:
             PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
 
     def test_mapping_count_mismatch_raises(self):
-        """Number of mappings must equal number of PFs (Invariant I2)."""
+        """Number of mappings must equal number of PFs (mapping-count guard)."""
         actual = _pf_actual()
         pf0 = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
         pf1 = _pf_seq([101, 102, 103], [2.1, 3.1, 4.1])
@@ -396,14 +396,14 @@ class TestFromPredictionFrames:
 
 
 # ---------------------------------------------------------------------------
-# Tests for from_prediction_frame() (singular) — I3 window integrity
+# Tests for from_prediction_frame() (singular) — window-integrity guard
 # ---------------------------------------------------------------------------
 
 class TestFromPredictionFrameSingular:
-    """I3 window integrity for from_prediction_frame() (singular path)."""
+    """Window-integrity guard for from_prediction_frame() (singular path)."""
 
     def test_singular_window_integrity_rogue_month_raises(self):
-        """I3: month in PF but outside step_mapping raises (pre-intersection blindspot)."""
+        """GUARD window-integrity: month outside step_mapping raises before intersection."""
         actual = pd.DataFrame(
             {"lr_sb": [1.0, 2.0]},
             index=pd.MultiIndex.from_tuples(
@@ -419,7 +419,7 @@ class TestFromPredictionFrameSingular:
             PandasAdapter.from_prediction_frame(actual, pf, "lr_sb", mapping)
 
     def test_singular_window_integrity_no_step_mapping_skips_check(self):
-        """I3 is only enforced when step_mapping is provided (guard condition)."""
+        """Window-integrity guard fires only when step_mapping is provided."""
         actual = pd.DataFrame(
             {"lr_sb": [1.0, 2.0]},
             index=pd.MultiIndex.from_tuples(
@@ -430,7 +430,7 @@ class TestFromPredictionFrameSingular:
             y_pred=np.ones((2, 2)),
             identifiers={"time": np.array([100, 999]), "unit": np.array([1, 2])},
         )
-        # No mapping supplied → I3 not triggered, positional inference used
+        # No mapping supplied → window-integrity guard skipped, positional inference used
         ef = PandasAdapter.from_prediction_frame(actual, pf, "lr_sb", step_mapping=None)
         assert len(ef.y_true) == 2
 

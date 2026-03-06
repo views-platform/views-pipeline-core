@@ -51,7 +51,7 @@ class PandasAdapter:
             # Align with legacy expected error message
             raise ValueError("No objects to concatenate")
 
-        # INVARIANT I2 — Hole C: mapping list must be sized to match sequences.
+        # GUARD: mapping-count — step_mapping list must have one entry per prediction sequence.
         # An IndexError on step_mapping[i] would be cryptic; make it explicit here.
         if isinstance(step_mapping, list) and len(step_mapping) != len(predictions):
             raise ValueError(
@@ -68,7 +68,7 @@ class PandasAdapter:
             else:
                 seq_mapping = step_mapping      # single dict or None: backward-compatible
 
-            # INVARIANT I3 — Window integrity (Hole A + Hole B).
+            # GUARD: window-integrity — every prediction month must fall within the declared step_mapping.
             # Prove that EVERY month the model produced is inside the declared step window,
             # regardless of whether that month appears in the actuals.
             # This closes the pre-intersection blindspot: months dropped by the actuals
@@ -215,7 +215,7 @@ class PandasAdapter:
         if target not in actual.columns:
             raise KeyError(f"Target column '{target}' not found in actuals.")
 
-        # INVARIANT I3 — Window integrity (pre-intersection blindspot).
+        # GUARD: window-integrity — every prediction month must fall within the declared step_mapping.
         if step_mapping is not None:
             pred_months = set(prediction_frame.identifiers['time'].tolist())
             rogue_months = pred_months - set(step_mapping.keys())
@@ -313,7 +313,7 @@ class PandasAdapter:
         if not predictions:
             raise ValueError("No objects to concatenate")
 
-        # INVARIANT I2 — mapping list must be sized to match sequences.
+        # GUARD: mapping-count — step_mapping list must have one entry per prediction sequence.
         if isinstance(step_mapping, list) and len(step_mapping) != len(predictions):
             raise ValueError(
                 f"step_mapping list length ({len(step_mapping)}) must equal the number "
@@ -331,7 +331,7 @@ class PandasAdapter:
         for i, pf in enumerate(predictions):
             seq_mapping = step_mapping[i] if isinstance(step_mapping, list) else step_mapping
 
-            # INVARIANT I3 — Window integrity (pre-intersection blindspot).
+            # GUARD: window-integrity — every prediction month must fall within the declared step_mapping.
             if seq_mapping is not None:
                 pred_months = set(pf.identifiers['time'].tolist())
                 rogue_months = pred_months - set(seq_mapping.keys())
