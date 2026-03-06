@@ -149,7 +149,7 @@ class TestBuildEvaluationFrame:
         If the PF-native EF and the legacy-DF bridge EF disagree on y_pred,
         build_evaluation_frame() must raise ValueError mentioning 'Parity'.
 
-        Achieved by patching PandasAdapter.from_dataframes to return an EF
+        Achieved by patching EvaluationAdapter.from_dataframes to return an EF
         with zeroed y_pred while the PF-native EF has non-zero values.
         """
         from unittest.mock import patch
@@ -178,7 +178,7 @@ class TestBuildEvaluationFrame:
         )
 
         with patch(
-            "views_pipeline_core.modules.validation.adapter.PandasAdapter.from_dataframes",
+            "views_pipeline_core.modules.validation.adapter.EvaluationAdapter.from_dataframes",
             return_value=bad_ef,
         ):
             with pytest.raises(ValueError, match="[Pp]arity"):
@@ -220,3 +220,50 @@ class TestAuditParityEf:
         )
         with pytest.raises(ValueError, match="[Pp]arity"):
             PredictionFrameDispatcher().audit_parity_ef(ef1, ef2, "lr_sb")
+
+
+# ---------------------------------------------------------------------------
+# TestAuditPredictionStructure
+# ---------------------------------------------------------------------------
+
+class TestAuditPredictionStructure:
+    """
+    Unit tests for PredictionFrameDispatcher.audit_prediction_structure().
+
+    Verifies structural integrity after PF→DF conversion (row count + column name).
+    Note: method name uses 'prediction' not 'forecast' — this audits the
+    PredictionFrame conversion, not the forecasting data partition.
+    """
+
+    @staticmethod
+    def _make_df(months: List[int], units: List[int], target: str, n_samples: int = 2):
+        """Build a list-in-cell DF matching what to_legacy_dfs() produces."""
+        import itertools
+        times = list(itertools.chain.from_iterable([m] * len(units) for m in months))
+        unit_ids = units * len(months)
+        idx = pd.MultiIndex.from_arrays([times, unit_ids])
+        return pd.DataFrame(
+            {f"pred_{target}": [[float(i)] * n_samples for i in range(len(times))]},
+            index=idx,
+        )
+
+    def test_passes_for_consistent_pf_and_df(self):
+        """Consistent PF and converted DF must not raise."""
+        pf = _make_pf([445, 446], [1, 2])
+        df = self._make_df([445, 446], [1, 2], target="lr_sb")
+        PredictionFrameDispatcher().audit_prediction_structure(pf, df, "lr_sb")
+
+    def test_raises_on_row_mismatch(self):
+        """If PF has more rows than the converted DF, raise ValueError."""
+        pf = _make_pf([445, 446, 447], [1])   # 3 rows
+        df = self._make_df([445, 446], [1], target="lr_sb")  # 2 rows
+        with pytest.raises(ValueError, match="[Pp][Ff]|row|conversion"):
+            PredictionFrameDispatcher().audit_prediction_structure(pf, df, "lr_sb")
+
+    def test_raises_on_missing_column(self):
+        """If the DF lacks the pred_{target} column, raise ValueError."""
+        pf = _make_pf([445, 446], [1, 2])
+        df = self._make_df([445, 446], [1, 2], target="wrong_target")
+        # df has column 'pred_wrong_target', not 'pred_lr_sb'
+        with pytest.raises(ValueError, match="pred_lr_sb|column|conversion"):
+            PredictionFrameDispatcher().audit_prediction_structure(pf, df, "lr_sb")

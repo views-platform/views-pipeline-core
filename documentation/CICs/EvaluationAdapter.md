@@ -16,11 +16,7 @@ The definitive bridge between high-level data objects (`pd.DataFrame` and
 lead-time assignment so that the evaluation engine receives a clean, dense
 `EvaluationFrame` with no ambiguity.
 
-**Implementation note:** The role described in this CIC is implemented by the class
-`PandasAdapter` in `views_pipeline_core/modules/validation/adapter.py`. The name
-"EvaluationAdapter" is used throughout CICs and ADRs as the role name; `PandasAdapter`
-reflects the current implementation detail that one input path requires Pandas. When
-the DataFrame path is retired, the class may be renamed.
+**Implementation:** `views_pipeline_core/modules/validation/adapter.py` → `class EvaluationAdapter`.
 
 ---
 
@@ -114,7 +110,7 @@ the DataFrame path is retired, the class may be renamed.
 
 ```python
 # DataFrame path (legacy)
-ef = PandasAdapter.from_dataframes(
+ef = EvaluationAdapter.from_dataframes(
     actual=df_truth,
     predictions=[df_pred_seq0, df_pred_seq1],
     target="ged_sb",
@@ -122,7 +118,7 @@ ef = PandasAdapter.from_dataframes(
 )
 
 # PredictionFrame path (new)
-ef = PandasAdapter.from_prediction_frames(
+ef = EvaluationAdapter.from_prediction_frames(
     actual=df_truth,
     predictions=[pf_seq0, pf_seq1],
     target="ged_sb",
@@ -136,11 +132,11 @@ ef = PandasAdapter.from_prediction_frames(
 
 ```python
 # WRONG: calling from_prediction_frames with a single PredictionFrame (not a list)
-ef = PandasAdapter.from_prediction_frames(actual, pf, "ged_sb", step_mapping)
+ef = EvaluationAdapter.from_prediction_frames(actual, pf, "ged_sb", step_mapping)
 # predictions must be List[PredictionFrame]; pass [pf] for a single sequence
 
 # WRONG: omitting step_mapping for rolling-origin evaluation
-ef = PandasAdapter.from_prediction_frames(actual, pf_list, "ged_sb")
+ef = EvaluationAdapter.from_prediction_frames(actual, pf_list, "ged_sb")
 # step_mapping is required; positional inference is not available on the PF path
 ```
 
@@ -167,15 +163,15 @@ ef = PandasAdapter.from_prediction_frames(actual, pf_list, "ged_sb")
 - **`from_dataframes()` deprecation.** When all models have migrated to the PF
   path and downstream consumers (`views_evaluation`, `views_hydranet`) no longer
   require DataFrames, `from_dataframes()` and `_pf_to_legacy_dfs()` are removed.
-  The class may then be renamed from `PandasAdapter` to reflect its framework-
-  agnostic nature.
+- **Class renamed** from `PandasAdapter` to `EvaluationAdapter` (2026-03-06) once
+  `from_prediction_frames()` made the pandas-specific name misleading — the PF methods
+  operate on pure numpy arrays and have no pandas dependency.
 
 ---
 
 ## End of Contract
 
-This document defines the **intended meaning** of `EvaluationAdapter`
-(implemented as `PandasAdapter`).
+This document defines the **intended meaning** of `EvaluationAdapter`.
 
 Changes to behaviour that violate this intent are bugs.
 Changes to intent must update this contract.

@@ -12,7 +12,7 @@ class DummyEvaluationFrame:
         self.identifiers = identifiers
         self.metadata = metadata
 
-# 2. Setup mocking BEFORE importing PandasAdapter
+# 2. Setup mocking BEFORE importing EvaluationAdapter
 # Ensure views_evaluation structure is present so adapter can import from it
 mock_eval = MagicMock()
 mock_eval.evaluation.evaluation_frame.EvaluationFrame = DummyEvaluationFrame
@@ -20,11 +20,11 @@ sys.modules['views_evaluation'] = mock_eval
 sys.modules['views_evaluation.evaluation'] = mock_eval.evaluation
 sys.modules['views_evaluation.evaluation.evaluation_frame'] = mock_eval.evaluation.evaluation_frame
 
-# 3. Now import PandasAdapter (it will pick up DummyEvaluationFrame)
-from views_pipeline_core.modules.validation.adapter import PandasAdapter  # noqa: E402
+# 3. Now import EvaluationAdapter (it will pick up DummyEvaluationFrame)
+from views_pipeline_core.modules.validation.adapter import EvaluationAdapter  # noqa: E402
 from views_pipeline_core.data.prediction_frame import PredictionFrame  # noqa: E402
 
-class TestPandasAdapter:
+class TestEvaluationAdapter:
     
     @pytest.fixture
     def sample_data(self):
@@ -55,7 +55,7 @@ class TestPandasAdapter:
             }
         )
         
-        ef = PandasAdapter.from_prediction_frame(df_actual, pf, 'target')
+        ef = EvaluationAdapter.from_prediction_frame(df_actual, pf, 'target')
         
         assert len(ef.y_true) == 3
         assert len(ef.y_pred) == 3
@@ -66,7 +66,7 @@ class TestPandasAdapter:
         """Verify that adapter intersects actuals and predictions."""
         df_actual, df_pred = sample_data
         
-        ef = PandasAdapter.from_dataframes(df_actual, [df_pred], 'target')
+        ef = EvaluationAdapter.from_dataframes(df_actual, [df_pred], 'target')
         
         # Should be an instance of our dummy class
         assert isinstance(ef, DummyEvaluationFrame)
@@ -92,7 +92,7 @@ class TestPandasAdapter:
         samples = [np.random.rand(10).tolist()]
         df_pred = pd.DataFrame({'pred_target': samples}, index=idx)
         
-        ef = PandasAdapter.from_dataframes(df_actual, [df_pred], 'target')
+        ef = EvaluationAdapter.from_dataframes(df_actual, [df_pred], 'target')
         
         assert ef.y_pred.shape == (1, 10)
         assert ef.y_true.shape == (1,)
@@ -102,7 +102,7 @@ class TestPandasAdapter:
         df_actual, df_pred = sample_data
         
         # Two identical sequences
-        ef = PandasAdapter.from_dataframes(df_actual, [df_pred, df_pred], 'target')
+        ef = EvaluationAdapter.from_dataframes(df_actual, [df_pred, df_pred], 'target')
         
         # 3 rows * 2 sequences = 6 total rows
         assert len(ef.y_true) == 6
@@ -120,7 +120,7 @@ class TestPandasAdapter:
         df_actual = pd.DataFrame({'target': [1.0, 2.0]}, index=idx)
         df_pred = pd.DataFrame({'pred_target': [1.1, 2.1]}, index=idx)
         
-        ef = PandasAdapter.from_dataframes(df_actual, [df_pred], 'target')
+        ef = EvaluationAdapter.from_dataframes(df_actual, [df_pred], 'target')
         
         # Steps should be 1, 2 (based on unique times 100->1, 102->2)
         expected_steps = np.array([1, 2])
@@ -135,7 +135,7 @@ class TestPandasAdapter:
         # Define explicit mapping where month 100 is step 12 and month 102 is step 13
         step_mapping = {100: 12, 102: 13}
         
-        ef = PandasAdapter.from_dataframes(df_actual, [df_pred], 'target', step_mapping=step_mapping)
+        ef = EvaluationAdapter.from_dataframes(df_actual, [df_pred], 'target', step_mapping=step_mapping)
         
         expected_steps = np.array([12, 13])
         np.testing.assert_array_equal(ef.identifiers['step'], expected_steps)
@@ -155,7 +155,7 @@ class TestPandasAdapter:
         step_mapping = {999: 1}  # month 100 is outside the declared window
 
         with pytest.raises(ValueError, match="declared base_origin does not match"):
-            PandasAdapter.from_dataframes(df_actual, [df_pred], 'target', step_mapping=step_mapping)
+            EvaluationAdapter.from_dataframes(df_actual, [df_pred], 'target', step_mapping=step_mapping)
 
     def test_no_overlap_raises(self, sample_data):
         """Verify fail-loud on zero overlap."""
@@ -166,7 +166,7 @@ class TestPandasAdapter:
         df_pred_bad = pd.DataFrame({'pred_target': [0.0]}, index=idx_no_overlap)
 
         with pytest.raises(ValueError, match="need at least one array to concatenate"):
-            PandasAdapter.from_dataframes(df_actual, [df_pred_bad], 'target')
+            EvaluationAdapter.from_dataframes(df_actual, [df_pred_bad], 'target')
 
     # -----------------------------------------------------------------------
     # Invariant proofs: window integrity (Holes A, B, C)
@@ -185,7 +185,7 @@ class TestPandasAdapter:
 
         # Two sequences but only one mapping
         with pytest.raises(ValueError, match="step_mapping list length"):
-            PandasAdapter.from_dataframes(
+            EvaluationAdapter.from_dataframes(
                 df_actual, [df_pred, df_pred], 'target',
                 step_mapping=[{1: 1}]  # length 1, sequences=2
             )
@@ -213,7 +213,7 @@ class TestPandasAdapter:
         mapping = {1: 1, 2: 2, 3: 3}  # covers months 1-3 only; month 4 is outside
 
         with pytest.raises(ValueError, match="declared base_origin does not match"):
-            PandasAdapter.from_dataframes(df_actual, [df_pred], 'target',
+            EvaluationAdapter.from_dataframes(df_actual, [df_pred], 'target',
                                           step_mapping=mapping)
 
     def test_window_integrity_wrong_origin_caught_even_when_partially_in_actuals(self):
@@ -237,7 +237,7 @@ class TestPandasAdapter:
 
         # Months 5 and 6 are in the prediction but outside the window → must be caught
         with pytest.raises(ValueError, match="declared base_origin does not match"):
-            PandasAdapter.from_dataframes(df_actual, [df_pred], 'target',
+            EvaluationAdapter.from_dataframes(df_actual, [df_pred], 'target',
                                           step_mapping=mapping)
 
     def test_static_mapping_fails_rolling_origin(self):
@@ -259,7 +259,7 @@ class TestPandasAdapter:
 
         # Window integrity check fires before post-intersection step-lookup.
         with pytest.raises(ValueError, match="declared base_origin does not match"):
-            PandasAdapter.from_dataframes(df_actual, [df_pred_0, df_pred_1],
+            EvaluationAdapter.from_dataframes(df_actual, [df_pred_0, df_pred_1],
                                           'target', step_mapping=static_mapping)
 
     def test_rolling_origin_per_sequence_mapping(self):
@@ -284,7 +284,7 @@ class TestPandasAdapter:
             {2: 1, 3: 2, 4: 3},  # sequence 1: origin 1
         ]
 
-        ef = PandasAdapter.from_dataframes(
+        ef = EvaluationAdapter.from_dataframes(
             df_actual, [df_pred_0, df_pred_1], 'target', step_mapping=step_mappings
         )
 
@@ -296,7 +296,7 @@ class TestPandasAdapter:
 
 
 # ---------------------------------------------------------------------------
-# Tests for PandasAdapter.from_prediction_frames() — rolling-origin PF path
+# Tests for EvaluationAdapter.from_prediction_frames() — rolling-origin PF path
 # ---------------------------------------------------------------------------
 
 # Helper fixtures shared by the PF tests
@@ -322,14 +322,14 @@ def _pf_seq(months, values, n_samples=2):
 
 
 class TestFromPredictionFrames:
-    """Tests for PandasAdapter.from_prediction_frames() — new rolling-origin PF path."""
+    """Tests for EvaluationAdapter.from_prediction_frames() — new rolling-origin PF path."""
 
     def test_single_pf_produces_correct_shape(self):
         """Single PF, 3 rows, 2 samples → EF with 3 rows, 2-sample y_pred."""
         actual = _pf_actual()
         pf = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
         mapping = [{100: 1, 101: 2, 102: 3}]
-        ef = PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
+        ef = EvaluationAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
         assert len(ef.y_true) == 3
         assert ef.y_pred.shape == (3, 2)
 
@@ -338,7 +338,7 @@ class TestFromPredictionFrames:
         actual = _pf_actual()
         pf = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
         mapping = [{100: 1, 101: 2, 102: 3}]
-        ef = PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
+        ef = EvaluationAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
         np.testing.assert_array_equal(ef.identifiers['time'], np.array([100, 101, 102]))
         np.testing.assert_array_equal(ef.identifiers['unit'], np.array([1, 1, 1]))
         np.testing.assert_array_equal(ef.identifiers['origin'], np.array([0, 0, 0]))
@@ -350,7 +350,7 @@ class TestFromPredictionFrames:
         pf0 = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
         pf1 = _pf_seq([101, 102, 103], [2.1, 3.1, 4.1])
         mappings = [{100: 1, 101: 2, 102: 3}, {101: 1, 102: 2, 103: 3}]
-        ef = PandasAdapter.from_prediction_frames(actual, [pf0, pf1], 'target', step_mapping=mappings)
+        ef = EvaluationAdapter.from_prediction_frames(actual, [pf0, pf1], 'target', step_mapping=mappings)
         assert len(ef.y_true) == 6
         np.testing.assert_array_equal(ef.identifiers['origin'], np.array([0, 0, 0, 1, 1, 1]))
         np.testing.assert_array_equal(ef.identifiers['step'],   np.array([1, 2, 3, 1, 2, 3]))
@@ -360,7 +360,7 @@ class TestFromPredictionFrames:
         actual = _pf_actual()  # months 100-103
         pf = _pf_seq([100, 101, 999], [1.1, 2.1, 0.0])  # month 999 absent from actuals
         mapping = [{100: 1, 101: 2, 999: 3}]
-        ef = PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
+        ef = EvaluationAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
         assert len(ef.y_true) == 2  # only 100 and 101 survive intersection
 
     def test_window_integrity_rogue_month_raises(self):
@@ -369,7 +369,7 @@ class TestFromPredictionFrames:
         pf = _pf_seq([100, 101, 104], [1.1, 2.1, 9.9])  # month 104 outside mapping
         mapping = [{100: 1, 101: 2, 102: 3}]  # month 104 not declared
         with pytest.raises(ValueError, match="declared base_origin does not match"):
-            PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
+            EvaluationAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=mapping)
 
     def test_mapping_count_mismatch_raises(self):
         """Number of mappings must equal number of PFs (mapping-count guard)."""
@@ -378,15 +378,15 @@ class TestFromPredictionFrames:
         pf1 = _pf_seq([101, 102, 103], [2.1, 3.1, 4.1])
         one_mapping = [{100: 1, 101: 2, 102: 3}]  # length 1, but 2 sequences
         with pytest.raises(ValueError, match="step_mapping list length"):
-            PandasAdapter.from_prediction_frames(actual, [pf0, pf1], 'target', step_mapping=one_mapping)
+            EvaluationAdapter.from_prediction_frames(actual, [pf0, pf1], 'target', step_mapping=one_mapping)
 
     def test_parity_with_from_prediction_frame_singular(self):
         """from_prediction_frames([pf]) must equal from_prediction_frame(pf)."""
         actual = _pf_actual()
         pf = _pf_seq([100, 101, 102], [1.1, 2.1, 3.1])
         mapping = {100: 1, 101: 2, 102: 3}
-        ef_singular = PandasAdapter.from_prediction_frame(actual, pf, 'target', step_mapping=mapping)
-        ef_plural   = PandasAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=[mapping])
+        ef_singular = EvaluationAdapter.from_prediction_frame(actual, pf, 'target', step_mapping=mapping)
+        ef_plural   = EvaluationAdapter.from_prediction_frames(actual, [pf], 'target', step_mapping=[mapping])
         np.testing.assert_allclose(ef_plural.y_pred,              ef_singular.y_pred)
         np.testing.assert_allclose(ef_plural.y_true,              ef_singular.y_true)
         np.testing.assert_array_equal(ef_plural.identifiers['time'],   ef_singular.identifiers['time'])
@@ -416,7 +416,7 @@ class TestFromPredictionFrameSingular:
         )
         mapping = {100: 1, 101: 2}  # month 999 not in mapping
         with pytest.raises(ValueError, match="declared base_origin does not match"):
-            PandasAdapter.from_prediction_frame(actual, pf, "lr_sb", mapping)
+            EvaluationAdapter.from_prediction_frame(actual, pf, "lr_sb", mapping)
 
     def test_singular_window_integrity_no_step_mapping_skips_check(self):
         """Window-integrity guard fires only when step_mapping is provided."""
@@ -431,7 +431,7 @@ class TestFromPredictionFrameSingular:
             identifiers={"time": np.array([100, 999]), "unit": np.array([1, 2])},
         )
         # No mapping supplied → window-integrity guard skipped, positional inference used
-        ef = PandasAdapter.from_prediction_frame(actual, pf, "lr_sb", step_mapping=None)
+        ef = EvaluationAdapter.from_prediction_frame(actual, pf, "lr_sb", step_mapping=None)
         assert len(ef.y_true) == 2
 
 
@@ -441,7 +441,7 @@ class TestFromPredictionFrameSingular:
 
 class TestParityClosure:
     """
-    Verifies that PandasAdapter.from_prediction_frames() and the
+    Verifies that EvaluationAdapter.from_prediction_frames() and the
     PredictionFrameDispatcher.to_legacy_dfs() → from_dataframes() path
     produce bit-wise identical EvaluationFrames for the same input data.
 
@@ -464,12 +464,12 @@ class TestParityClosure:
             {101: 1, 102: 2, 103: 3},
         ]
 
-        ef_pf = PandasAdapter.from_prediction_frames(
+        ef_pf = EvaluationAdapter.from_prediction_frames(
             actual, [pf0, pf1], 'target', step_mapping=step_mappings
         )
 
         df_list = PredictionFrameDispatcher().to_legacy_dfs([pf0, pf1], 'target')
-        ef_df = PandasAdapter.from_dataframes(
+        ef_df = EvaluationAdapter.from_dataframes(
             actual, df_list, 'target', step_mapping=step_mappings
         )
 

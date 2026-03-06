@@ -6,7 +6,7 @@ from views_evaluation.evaluation.evaluation_frame import EvaluationFrame
 
 logger = logging.getLogger(__name__)
 
-class PandasAdapter:
+class EvaluationAdapter:
     """
     Adapter to convert Pandas DataFrames into the native EvaluationFrame.
     

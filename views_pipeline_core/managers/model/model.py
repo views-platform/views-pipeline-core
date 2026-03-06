@@ -2072,6 +2072,12 @@ class ForecastingModelManager(ModelManager):
                         PredictionFrameDispatcher,
                     )
                     _primary_target, _all_targets = self._get_primary_target()
+                    if len(_all_targets) > 1:
+                        logger.warning(
+                            f"PF path: only '{_primary_target}' will be saved. "
+                            f"Multi-target PF output is not yet supported. "
+                            f"Targets {_all_targets[1:]} are dropped. See ADR-033 Issue 3."
+                        )
                     _dispatcher = PredictionFrameDispatcher()
                     for i, df_for_save in enumerate(
                         _dispatcher.to_legacy_dfs(list_df_predictions, _primary_target)
@@ -2212,7 +2218,15 @@ class ForecastingModelManager(ModelManager):
                     )
                     _pf = self._forecast_model_artifact(self.args.artifact_name)
                     _primary_target, _all_targets = self._get_primary_target()
-                    df_predictions = PredictionFrameDispatcher().to_legacy_dfs([_pf], _primary_target)[0]
+                    if len(_all_targets) > 1:
+                        logger.warning(
+                            f"PF path: only '{_primary_target}' will be saved. "
+                            f"Multi-target PF output is not yet supported. "
+                            f"Targets {_all_targets[1:]} are dropped. See ADR-033 Issue 3."
+                        )
+                    _dispatcher_fc = PredictionFrameDispatcher()
+                    df_predictions = _dispatcher_fc.to_legacy_dfs([_pf], _primary_target)[0]
+                    _dispatcher_fc.audit_prediction_structure(_pf, df_predictions, _primary_target)
                 else:
                     # DF path: existing validation (unchanged).
                     df_predictions = self._forecast_model_artifact(self.args.artifact_name)
@@ -2831,7 +2845,7 @@ class ForecastingModelManager(ModelManager):
 
                 # EvaluationManager.evaluate() operates on one target at a time and
                 # requires exactly one column named pred_{target} per prediction DataFrame.
-                from views_pipeline_core.modules.validation.adapter import PandasAdapter
+                from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
 
                 actual_slice = df_actual[[target]]
                 raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
@@ -2848,6 +2862,10 @@ class ForecastingModelManager(ModelManager):
                     )
                     _disp = PredictionFrameDispatcher()
                     step_mappings = self._get_evaluation_step_mappings(n_sequences=len(raw_preds))
+                    logger.debug(
+                        f"PF path: assuming raw_preds[i].y_pred corresponds to target '{target}'. "
+                        f"Target-to-PF alignment is the model author's responsibility (ADR-033)."
+                    )
                     ef = _disp.build_evaluation_frame(
                         actual_slice, raw_preds, target, step_mappings
                     )
@@ -2863,7 +2881,7 @@ class ForecastingModelManager(ModelManager):
                     pred_slices = [df[[f"pred_{target}"]] for df in raw_preds]
                     # Fulfill ADR-031: Explicit per-sequence step mappings.
                     step_mappings = self._get_evaluation_step_mappings(n_sequences=len(pred_slices))
-                    ef = PandasAdapter.from_dataframes(
+                    ef = EvaluationAdapter.from_dataframes(
                         actual=actual_slice,
                         predictions=pred_slices,
                         target=target,

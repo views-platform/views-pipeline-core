@@ -476,7 +476,7 @@ def _run_evaluate_prediction_df(
     Returns (mock_from_prediction_frames, mock_from_dataframes) so callers
     can assert on which adapter path was taken.
     """
-    from views_pipeline_core.modules.validation.adapter import PandasAdapter
+    from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
     from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
         PredictionFrameDispatcher,
     )
@@ -501,9 +501,9 @@ def _run_evaluate_prediction_df(
                 "views_evaluation.evaluation.evaluation_manager.EvaluationManager"
             ) as MockEM:
                 MockEM.return_value.evaluate.return_value = eval_result
-                with patch.object(PandasAdapter, "from_prediction_frames") as mock_fpf:
+                with patch.object(EvaluationAdapter, "from_prediction_frames") as mock_fpf:
                     mock_fpf.return_value = MagicMock()
-                    with patch.object(PandasAdapter, "from_dataframes") as mock_fd:
+                    with patch.object(EvaluationAdapter, "from_dataframes") as mock_fd:
                         mock_fd.return_value = MagicMock()
                         with patch.object(
                             ForecastingModelManager, "_get_evaluation_step_mappings"
@@ -567,7 +567,7 @@ class TestEvalMetricsDispatch:
 
     def test_eval_pf_path_calls_from_prediction_frames(self):
         """
-        PF path: PandasAdapter.from_prediction_frames must be called to build
+        PF path: EvaluationAdapter.from_prediction_frames must be called to build
         the EvaluationFrame from the PredictionFrame list.
         """
         pf = PredictionFrame(
@@ -580,7 +580,7 @@ class TestEvalMetricsDispatch:
 
     def test_eval_df_path_calls_from_dataframes(self):
         """
-        DF path (regression): PandasAdapter.from_dataframes must be called and
+        DF path (regression): EvaluationAdapter.from_dataframes must be called and
         from_prediction_frames must NOT be called.
         """
         df = pd.DataFrame(

@@ -22,7 +22,7 @@ import pandas as pd
 from unittest.mock import MagicMock
 import sys
 
-# Mock views_evaluation before importing PandasAdapter (same pattern as test_evaluation_adapter.py)
+# Mock views_evaluation before importing EvaluationAdapter (same pattern as test_evaluation_adapter.py)
 class _DummyEvaluationFrame:
     def __init__(self, y_true, y_pred, identifiers, metadata):
         self.y_true = y_true
@@ -39,7 +39,7 @@ sys.modules.setdefault(
     _mock_eval.evaluation.evaluation_frame,
 )
 
-from views_pipeline_core.modules.validation.adapter import PandasAdapter  # noqa: E402
+from views_pipeline_core.modules.validation.adapter import EvaluationAdapter  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ def test_adapter_rejects_rogue_month():
     mapping = [{444 + s: s for s in range(1, 37)}]
 
     with pytest.raises(ValueError, match="481"):
-        PandasAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping)
+        EvaluationAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping)
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ def test_origin_off_by_one_produces_rogue_month():
     pred = _make_df(months, [1], 'pred_target', value=0.5)
 
     with pytest.raises(ValueError, match="481"):
-        PandasAdapter.from_dataframes(actual, [pred], 'target', step_mapping=manager_mapping)
+        EvaluationAdapter.from_dataframes(actual, [pred], 'target', step_mapping=manager_mapping)
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ def test_extra_step_produces_rogue_month():
     pred = _make_df(months, [1], 'pred_target', value=0.5)
 
     with pytest.raises(ValueError, match="481"):
-        PandasAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping)
+        EvaluationAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping)
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ def test_correct_origin_no_rogue_month():
     actual = _make_df(months, [1], 'target', value=1.0)
     pred = _make_df(months, [1], 'pred_target', value=0.5)
 
-    ef = PandasAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping)
+    ef = EvaluationAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping)
     assert ef is not None
 
 
@@ -168,10 +168,10 @@ def test_base_origin_formula_robust_to_partition_gap():
 
     # Correct mapping: no rogue months
     mapping_correct = [{correct_origin + s: s for s in steps}]
-    ef = PandasAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping_correct)
+    ef = EvaluationAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping_correct)
     assert ef is not None
 
     # Wrong mapping (old formula): month 481 is rogue
     mapping_wrong = [{wrong_origin + s: s for s in steps}]  # months 445-480
     with pytest.raises(ValueError, match="481"):
-        PandasAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping_wrong)
+        EvaluationAdapter.from_dataframes(actual, [pred], 'target', step_mapping=mapping_wrong)

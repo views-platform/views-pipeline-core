@@ -38,7 +38,7 @@ class PredictionFrameDispatcher:
     ) -> List[pd.DataFrame]:
         """
         Convert List[PredictionFrame] to the list-in-cell DataFrame format
-        that PandasAdapter.from_dataframes() expects.
+        that EvaluationAdapter.from_dataframes() expects.
 
         Each output DataFrame has:
         - MultiIndex (time, unit) derived from PredictionFrame.identifiers.
@@ -91,9 +91,9 @@ class PredictionFrameDispatcher:
         Raises:
             ValueError: "Parity Failure ..." if PF and legacy-DF EFs disagree.
         """
-        from views_pipeline_core.modules.validation.adapter import PandasAdapter
+        from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
 
-        ef = PandasAdapter.from_prediction_frames(
+        ef = EvaluationAdapter.from_prediction_frames(
             actual=actual,
             predictions=predictions,
             target=target,
@@ -101,7 +101,7 @@ class PredictionFrameDispatcher:
         )
 
         pred_slices = self.to_legacy_dfs(predictions, target)
-        ef_leg = PandasAdapter.from_dataframes(
+        ef_leg = EvaluationAdapter.from_dataframes(
             actual=actual,
             predictions=pred_slices,
             target=target,
@@ -155,4 +155,44 @@ class PredictionFrameDispatcher:
 
         logger.info(
             "\033[92m" + f"EF PARITY CONFIRMED for {target.upper()}" + "\033[0m"
+        )
+
+    def audit_prediction_structure(
+        self,
+        pf: Any,           # PredictionFrame (duck-typed)
+        df: pd.DataFrame,
+        target: str,
+    ) -> None:
+        """
+        Structural audit after PF→DF conversion.
+
+        Verifies that the legacy list-in-cell DataFrame produced by
+        to_legacy_dfs() has the correct row count and column name relative
+        to the originating PredictionFrame.  Used in the forecasting-partition
+        path where no actuals are available for a full EF-level parity check.
+
+        Note: "prediction" in the method name refers to PredictionFrame, not
+        the forecasting data partition.
+
+        Args:
+            pf:     The source PredictionFrame.
+            df:     The converted DataFrame (output of to_legacy_dfs).
+            target: Target variable name (used to check column 'pred_{target}').
+
+        Raises:
+            ValueError: "PF→DF conversion ..." if row count or column name mismatch.
+        """
+        pf_rows = len(pf.identifiers["time"])
+        df_rows = len(df)
+        if pf_rows != df_rows:
+            raise ValueError(
+                f"PF→DF conversion: PF has {pf_rows} rows but converted DF has {df_rows} rows."
+            )
+        if f"pred_{target}" not in df.columns:
+            raise ValueError(
+                f"PF→DF conversion: expected column 'pred_{target}' "
+                f"not found in converted DF (columns: {list(df.columns)})."
+            )
+        logger.info(
+            "\033[92m" + f"PF STRUCTURAL PARITY OK for {target.upper()}" + "\033[0m"
         )
