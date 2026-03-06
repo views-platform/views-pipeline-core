@@ -2071,11 +2071,7 @@ class ForecastingModelManager(ModelManager):
                     from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
                         PredictionFrameDispatcher,
                     )
-                    _all_targets = (
-                        self.configs.get("regression_targets", []) +
-                        self.configs.get("classification_targets", [])
-                    ) or self.configs.get("targets", ["unknown"])
-                    _primary_target = _all_targets[0]
+                    _primary_target, _all_targets = self._get_primary_target()
                     _dispatcher = PredictionFrameDispatcher()
                     for i, df_for_save in enumerate(
                         _dispatcher.to_legacy_dfs(list_df_predictions, _primary_target)
@@ -2215,11 +2211,7 @@ class ForecastingModelManager(ModelManager):
                         PredictionFrameDispatcher,
                     )
                     _pf = self._forecast_model_artifact(self.args.artifact_name)
-                    _all_targets = (
-                        self.configs.get("regression_targets", []) +
-                        self.configs.get("classification_targets", [])
-                    ) or self.configs.get("targets", ["unknown"])
-                    _primary_target = _all_targets[0]
+                    _primary_target, _all_targets = self._get_primary_target()
                     df_predictions = PredictionFrameDispatcher().to_legacy_dfs([_pf], _primary_target)[0]
                 else:
                     # DF path: existing validation (unchanged).
@@ -2944,6 +2936,23 @@ class ForecastingModelManager(ModelManager):
             text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
             notifications_enabled=self._wandb_notifications,
         )
+
+    def _get_primary_target(self) -> tuple:
+        """
+        Return (primary_target, all_targets) for PF dispatch sites.
+
+        Prefers the explicit regression_targets + classification_targets lists
+        from the config; falls back to the legacy 'targets' alias for models
+        that pre-date the multi-target config schema.
+
+        Returns:
+            (primary_target: str, all_targets: List[str])
+        """
+        _all = (
+            self.configs.get("regression_targets", []) +
+            self.configs.get("classification_targets", [])
+        ) or self.configs.get("targets", ["unknown"])
+        return _all[0], _all
 
     def _get_evaluation_step_mappings(self, n_sequences: int) -> List[Dict[int, int]]:
         """
