@@ -173,7 +173,7 @@ class TestForecastDispatch:
 
     def test_pf_path_converts_via_to_legacy_dfs(self):
         """
-        PF path: PredictionFrameDispatcher.to_legacy_dfs must be called to
+        PF path: PredictionFrameDispatcher.to_legacy_df must be called to
         convert the PredictionFrame into a list-in-cell DataFrame before passing
         it downstream (storage + transformation hack).
         """
@@ -196,7 +196,7 @@ class TestForecastDispatch:
         )
 
         with patch.object(
-            PredictionFrameDispatcher, "to_legacy_dfs", return_value=[converted_df]
+            PredictionFrameDispatcher, "to_legacy_df", return_value=converted_df
         ) as mock_convert:
             _run_execute_forecast(manager, mock_df_result=converted_df)
             mock_convert.assert_called_once()
@@ -736,7 +736,7 @@ class TestPFDictDispatch:
     """
 
     def test_pf_eval_single_target_dict_calls_to_legacy_dfs(self):
-        """Single-target dict eval: to_legacy_dfs called exactly once with correct target."""
+        """Single-target dict eval: to_legacy_df called exactly once with correct target."""
         from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
             PredictionFrameDispatcher,
         )
@@ -746,7 +746,7 @@ class TestPFDictDispatch:
         manager._test_eval_return = {"lr_sb": [pf]}
 
         with patch.object(
-            PredictionFrameDispatcher, "to_legacy_dfs", return_value=[_make_dummy_df()]
+            PredictionFrameDispatcher, "to_legacy_df", return_value=_make_dummy_df()
         ) as mock_tld:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
@@ -754,15 +754,12 @@ class TestPFDictDispatch:
                         manager._execute_model_evaluation()
 
         mock_tld.assert_called_once()
-        # Positional args: (pf_sequence_list, target)
-        _seq, _target = mock_tld.call_args[0]
+        # Positional args: (pf, target)
+        _pf, _target = mock_tld.call_args[0]
         assert _target == "lr_sb"
-        # Must pass the extracted List[PF], not the raw dict
-        assert isinstance(_seq, list), f"Expected List[PF], got {type(_seq).__name__}"
-        assert len(_seq) == 1
 
     def test_pf_eval_multi_target_dict_calls_to_legacy_dfs_per_target(self):
-        """Two-target dict eval: to_legacy_dfs called once per target, both targets used."""
+        """Two-target dict eval: to_legacy_df called once per target, both targets used."""
         from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
             PredictionFrameDispatcher,
         )
@@ -772,7 +769,7 @@ class TestPFDictDispatch:
         manager._test_eval_return = {"lr_sb": [pf1], "ged_ns": [pf2]}
 
         with patch.object(
-            PredictionFrameDispatcher, "to_legacy_dfs", return_value=[_make_dummy_df()]
+            PredictionFrameDispatcher, "to_legacy_df", return_value=_make_dummy_df()
         ) as mock_tld:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
@@ -784,7 +781,7 @@ class TestPFDictDispatch:
         assert targets_called == {"lr_sb", "ged_ns"}
 
     def test_pf_forecast_single_target_dict_calls_to_legacy_dfs(self):
-        """Single-target dict forecast: to_legacy_dfs called exactly once."""
+        """Single-target dict forecast: to_legacy_df called exactly once."""
         from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
             PredictionFrameDispatcher,
         )
@@ -795,7 +792,7 @@ class TestPFDictDispatch:
         dummy_df = _make_dummy_df()
 
         with patch.object(
-            PredictionFrameDispatcher, "to_legacy_dfs", return_value=[dummy_df]
+            PredictionFrameDispatcher, "to_legacy_df", return_value=dummy_df
         ) as mock_tld:
             _run_execute_forecast(manager, mock_df_result=dummy_df)
 
@@ -866,3 +863,163 @@ class TestTypeEnforcementGuards:
 
         with pytest.raises(ModelForecastingException, match="(?i)prediction_frame|dict"):
             _run_execute_forecast(manager)
+
+
+# ── DoD #1.5: Clean PF evaluation path ───────────────────────────────────────
+
+def _run_pf_eval_clean_path(manager: _ForecastStub, list_predictions: dict) -> tuple:
+    """
+    Run manager._evaluate_prediction_dataframe() for the PF path with
+    fine-grained mocks.
+
+    Returns (mock_evaluate, mock_to_legacy_dfs, mock_audit_parity,
+             mock_from_pf, mock_from_df) so callers can assert on:
+    - evaluate() call count and kwargs
+    - _audit_parity() call count (level-2 metric parity, must be absent on PF path)
+    - to_legacy_dfs() call count (parity bridge — present but isolated)
+    - which EF object flows into evaluate()
+    """
+    from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
+    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
+        PredictionFrameDispatcher,
+    )
+
+    actuals_df = pd.DataFrame(
+        {"lr_sb": [1.0, 2.0]},
+        index=pd.MultiIndex.from_tuples(
+            [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
+        ),
+    )
+    eval_result = {
+        "step":        ({}, pd.DataFrame()),
+        "time_series": ({}, pd.DataFrame()),
+        "month":       ({}, pd.DataFrame()),
+    }
+
+    # Distinct sentinels so we can tell which EF object reached evaluate()
+    mock_ef_pf     = MagicMock(name="ef_from_prediction_frames")
+    mock_ef_legacy = MagicMock(name="ef_from_dataframes")
+
+    with patch("views_pipeline_core.files.utils.read_dataframe", return_value=actuals_df):
+        with patch.object(
+            ForecastingModelManager, "prepare_actuals_df", return_value=actuals_df
+        ):
+            with patch(
+                "views_evaluation.evaluation.evaluation_manager.EvaluationManager"
+            ) as MockEM:
+                MockEM.return_value.evaluate.return_value = eval_result
+                with patch.object(
+                    EvaluationAdapter, "from_prediction_frames", return_value=mock_ef_pf
+                ) as mock_fpf:
+                    with patch.object(
+                        EvaluationAdapter, "from_dataframes", return_value=mock_ef_legacy
+                    ) as mock_fd:
+                        with patch.object(
+                            ForecastingModelManager, "_get_evaluation_step_mappings"
+                        ) as mock_sm:
+                            mock_sm.return_value = [{445 + s: s for s in range(1, 37)}]
+                            with patch.object(
+                                PredictionFrameDispatcher, "to_legacy_dfs",
+                                return_value=[MagicMock()],
+                            ) as mock_tld:
+                                with patch.object(
+                                    PredictionFrameDispatcher, "audit_parity_ef"
+                                ):
+                                    with patch.object(
+                                        ForecastingModelManager, "_audit_parity"
+                                    ) as mock_ap:
+                                        with patch.object(
+                                            ForecastingModelManager,
+                                            "_generate_evaluation_table",
+                                            return_value="",
+                                        ):
+                                            with patch("wandb.summary"):
+                                                manager._evaluate_prediction_dataframe(
+                                                    list_predictions, "calibration"
+                                                )
+                                                return (
+                                                    MockEM.return_value.evaluate,
+                                                    mock_tld,
+                                                    mock_ap,
+                                                    mock_fpf,
+                                                    mock_fd,
+                                                )
+
+
+class TestPFEvalCleanPath:
+    """
+    Verify the clean PF evaluation path (DoD #1.5):
+
+    (a) evaluate() is called exactly once on the PF path — the legacy evaluate(ef=None)
+        call is removed.
+    (b) evaluate() is never called with ef=None — the legacy DataFrame path is bypassed.
+    (c) _audit_parity() (level-2 metric parity) is not called — it is redundant once
+        level-1 EF parity is confirmed.
+    (d) The EF object that reaches evaluate() comes from from_prediction_frames(), not
+        from to_legacy_dfs() / from_dataframes() (the parity bridge is isolated).
+
+    RED:  current code calls evaluate() twice and calls _audit_parity().
+    GREEN: single evaluate(ef=ef) call; _audit_parity() absent from PF path.
+    """
+
+    def test_pf_eval_calls_evaluate_exactly_once(self):
+        """PF path must call EvaluationManager.evaluate() exactly once."""
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        mock_evaluate, _, _, _, _ = _run_pf_eval_clean_path(
+            manager, {"lr_sb": [pf]}
+        )
+        assert mock_evaluate.call_count == 1, (
+            f"Expected evaluate() to be called exactly once on PF path, "
+            f"got {mock_evaluate.call_count} call(s). "
+            "Remove the legacy evaluate(ef=None) call from the PF path."
+        )
+
+    def test_pf_eval_does_not_call_evaluate_with_ef_none(self):
+        """PF path must never call evaluate(ef=None) — legacy path must be bypassed."""
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        mock_evaluate, _, _, _, _ = _run_pf_eval_clean_path(
+            manager, {"lr_sb": [pf]}
+        )
+        for call_args in mock_evaluate.call_args_list:
+            ef_val = call_args.kwargs.get("ef")
+            assert ef_val is not None, (
+                "evaluate() was called with ef=None on the PF path. "
+                "The legacy evaluate(ef=None) call must be removed."
+            )
+
+    def test_pf_eval_does_not_call_audit_parity(self):
+        """_audit_parity() (level-2 metric parity) must NOT be called on PF path.
+
+        Level-1 EF parity (array comparison via audit_parity_ef) is sufficient;
+        level-2 metric parity is redundant and doubles memory/compute.
+        """
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        _, _, mock_ap, _, _ = _run_pf_eval_clean_path(
+            manager, {"lr_sb": [pf]}
+        )
+        mock_ap.assert_not_called()
+
+    def test_pf_eval_evaluate_called_with_ef_from_prediction_frames(self):
+        """evaluate() must receive the EF built from PredictionFrames, not from DataFrames.
+
+        The parity bridge (to_legacy_dfs → from_dataframes → audit_parity_ef) is
+        isolated scaffolding. Its EF must not flow into evaluate().
+        """
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        mock_evaluate, _, _, mock_fpf, _ = _run_pf_eval_clean_path(
+            manager, {"lr_sb": [pf]}
+        )
+        # The EF returned by from_prediction_frames() is the sentinel mock_ef_pf.
+        # evaluate() must have been called with ef=mock_ef_pf (the PF-native EF).
+        assert mock_evaluate.call_count >= 1, "evaluate() was never called"
+        actual_ef = mock_evaluate.call_args_list[-1].kwargs.get("ef")
+        expected_ef = mock_fpf.return_value
+        assert actual_ef is expected_ef, (
+            f"evaluate() was called with ef={actual_ef!r} but expected the EF "
+            f"returned by from_prediction_frames() ({expected_ef!r}). "
+            "The parity bridge EF must not reach evaluate()."
+        )

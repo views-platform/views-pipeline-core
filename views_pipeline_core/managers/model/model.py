@@ -2106,12 +2106,12 @@ class ForecastingModelManager(ModelManager):
                     n_sequences = 0
                     for target, pf_sequence_list in raw_preds.items():
                         n_sequences = len(pf_sequence_list)
-                        for i, df_for_save in enumerate(
-                            _dispatcher.to_legacy_dfs(pf_sequence_list, target)
-                        ):
+                        for i, pf in enumerate(pf_sequence_list):
+                            df_for_save = _dispatcher.to_legacy_df(pf, target)
                             self._save_predictions(
                                 df_for_save, self._model_path.data_generated, i, send_alert=False
                             )
+                            del df_for_save
                 else:
                     # DF path: validate (sniff) and save each prediction DataFrame.
                     n_sequences = len(raw_preds)
@@ -2252,7 +2252,7 @@ class ForecastingModelManager(ModelManager):
                     # Step D — iterate all targets from the dict (multi-target support).
                     _dispatcher_fc = PredictionFrameDispatcher()
                     for target, _pf in pf_dict.items():
-                        df_target = _dispatcher_fc.to_legacy_dfs([_pf], target)[0]
+                        df_target = _dispatcher_fc.to_legacy_df(_pf, target)
                         _dispatcher_fc.audit_prediction_structure(_pf, df_target, target)
 
                         # TEMPORARY: Undo transformations before saving per target.
@@ -2906,29 +2906,33 @@ class ForecastingModelManager(ModelManager):
 
                 if self._prediction_format == "prediction_frame":
                     # PF path: df_predictions is Dict[str, List[PredictionFrame]].
-                    # Look up the sequence list for this target by name (ADR-033, DoD #1).
-                    # Column check is inapplicable (PF carries arrays, not named columns).
-                    # Build EF directly from PFs; also build parity-bridge EF from
-                    # converted legacy DFs and compare (ADR-033 bridge).
-                    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-                        PredictionFrameDispatcher,
-                    )
-                    raw_preds = df_predictions.get(target)
+                    # Pop frees memory for each target as we go (ADR-033 DoD #1.5).
+                    import gc
+                    raw_preds = df_predictions.pop(target, None)
                     if raw_preds is None:
                         logger.warning(
                             f"PF path: target '{target}' not found in predictions dict "
                             f"(keys: {list(df_predictions.keys())}). Skipping."
                         )
                         continue
-                    _disp = PredictionFrameDispatcher()
                     step_mappings = self._get_evaluation_step_mappings(n_sequences=len(raw_preds))
-                    logger.debug(
-                        f"PF path: using predictions['{target}'] for target '{target}' (ADR-033)."
+
+                    ef = EvaluationAdapter.from_prediction_frames(
+                        actual=actual_slice,
+                        predictions=raw_preds,
+                        target=target,
+                        step_mapping=step_mappings,
                     )
-                    ef = _disp.build_evaluation_frame(
-                        actual_slice, raw_preds, target, step_mappings
+
+                    del raw_preds
+                    gc.collect()
+
+                    eval_result_dict = evaluation_manager.evaluate(
+                        actual_slice, None, target, self.configs, ef=ef
                     )
-                    pred_slices = _disp.to_legacy_dfs(raw_preds, target)
+                    del ef
+                    gc.collect()
+
                 else:
                     # DF path: df_predictions is List[pd.DataFrame].
                     raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
@@ -2948,22 +2952,22 @@ class ForecastingModelManager(ModelManager):
                         step_mapping=step_mappings,
                     )
 
-                # --- EXPLICIT PARITY PROVING MODE ---
-                # 1. Run Legacy (DataFrame-based)
-                legacy_result = evaluation_manager.evaluate(
-                    actual_slice, pred_slices, target, self.configs, ef=None
-                )
-                
-                # 2. Run Shadow (EvaluationFrame-based)
-                shadow_result = evaluation_manager.evaluate(
-                    actual_slice, pred_slices, target, self.configs, ef=ef
-                )
-                
-                # 3. Explicit Comparison & Audit
-                self._audit_parity(legacy_result, shadow_result, target)
-                
-                # 4. Use Shadow Result
-                eval_result_dict = shadow_result
+                    # --- EXPLICIT PARITY PROVING MODE (DF path) ---
+                    # 1. Run Legacy (DataFrame-based)
+                    legacy_result = evaluation_manager.evaluate(
+                        actual_slice, pred_slices, target, self.configs, ef=None
+                    )
+
+                    # 2. Run Shadow (EvaluationFrame-based)
+                    shadow_result = evaluation_manager.evaluate(
+                        actual_slice, pred_slices, target, self.configs, ef=ef
+                    )
+
+                    # 3. Explicit Comparison & Audit
+                    self._audit_parity(legacy_result, shadow_result, target)
+
+                    # 4. Use Shadow Result
+                    eval_result_dict = shadow_result
 
                 # Initialize local variables to avoid UnboundLocalError
                 step_wise_evaluation, df_step_wise_evaluation = ({}, pd.DataFrame())

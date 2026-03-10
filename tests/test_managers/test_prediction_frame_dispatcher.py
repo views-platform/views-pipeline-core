@@ -112,6 +112,55 @@ class TestToLegacyDfs:
         result = dispatcher.to_legacy_dfs([pf], target="lr_sb")
         assert "pred_lr_sb" in result[0].columns
 
+    def test_delegates_to_to_legacy_df_per_item(self):
+        """to_legacy_dfs must call to_legacy_df once per PF — DRY rule."""
+        from unittest.mock import patch
+        sentinel = pd.DataFrame({"pred_sb": [[1.0]]})
+        pfs = [_make_pf([445 + i], [1]) for i in range(3)]
+        with patch.object(
+            PredictionFrameDispatcher, "to_legacy_df", return_value=sentinel
+        ) as mock_singular:
+            PredictionFrameDispatcher().to_legacy_dfs(pfs, target="sb")
+            assert mock_singular.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# TestToLegacyDfSingular
+# ---------------------------------------------------------------------------
+
+class TestToLegacyDfSingular:
+    """to_legacy_df() converts ONE PredictionFrame to ONE list-in-cell DataFrame.
+
+    Natural unit of work: 1 PF = 1 target = 1 DataFrame.
+    """
+
+    def test_returns_dataframe(self):
+        """to_legacy_df() returns a pd.DataFrame."""
+        pf = _make_pf([445, 446], [1, 2])
+        df = PredictionFrameDispatcher().to_legacy_df(pf, "sb")
+        assert isinstance(df, pd.DataFrame)
+
+    def test_output_has_pred_target_column(self):
+        """Output DataFrame has column 'pred_{target}'."""
+        pf = _make_pf([445], [1, 2])
+        df = PredictionFrameDispatcher().to_legacy_df(pf, "lr_sb")
+        assert "pred_lr_sb" in df.columns
+
+    def test_row_count_matches_pf(self):
+        """Row count equals the number of rows in the PredictionFrame."""
+        pf = _make_pf([445, 446], [1, 2])   # 4 rows (2 months × 2 units)
+        df = PredictionFrameDispatcher().to_legacy_df(pf, "sb")
+        assert len(df) == len(pf.identifiers["time"])
+
+    def test_cells_contain_sample_lists(self):
+        """Each cell in pred_{target} must be a list of S sample floats."""
+        pf = _make_pf([445], [1], n_samples=3, value=7.0)
+        df = PredictionFrameDispatcher().to_legacy_df(pf, "sb")
+        cell = df["pred_sb"].iloc[0]
+        assert isinstance(cell, list)
+        assert len(cell) == 3
+        assert all(v == pytest.approx(7.0) for v in cell)
+
 
 # ---------------------------------------------------------------------------
 # TestBuildEvaluationFrame
@@ -144,13 +193,14 @@ class TestBuildEvaluationFrame:
         ef = dispatcher.build_evaluation_frame(actual, [pf], target, step_mappings)
         assert ef is not None
 
-    def test_raises_parity_failure_on_y_pred_mismatch(self):
+    def test_build_ef_does_not_call_to_legacy_dfs_internally(self):
         """
-        If the PF-native EF and the legacy-DF bridge EF disagree on y_pred,
-        build_evaluation_frame() must raise ValueError mentioning 'Parity'.
+        build_evaluation_frame() must NOT call to_legacy_dfs() internally.
+        Parity is the caller's responsibility (model.py parity bridge).
 
-        Achieved by patching EvaluationAdapter.from_dataframes to return an EF
-        with zeroed y_pred while the PF-native EF has non-zero values.
+        RED: current build_evaluation_frame() calls to_legacy_dfs() for internal
+             level-1 EF parity — a second conversion on top of what model.py does.
+        GREEN: simplified build_evaluation_frame() does one thing — return the EF.
         """
         from unittest.mock import patch
 
@@ -160,31 +210,56 @@ class TestBuildEvaluationFrame:
         base_origin = 445
         steps = list(range(1, len(months) + 1))
         step_mappings = [{base_origin + s: s for s in steps}]
-
         pf = _make_pf(months, units, n_samples=2, value=1.0)
         actual = self._make_actual_df(months, units, target, value=1.0)
 
-        # Manufacture a mismatched "legacy" EF
-        n = len(months) * len(units)
-        bad_ef = SimpleNamespace(
-            y_true=np.ones(n),
-            y_pred=np.zeros((n, 2)),   # zeros ≠ 1.0
-            identifiers={
-                "time":   np.zeros(n, dtype=int),
-                "unit":   np.zeros(n, dtype=int),
-                "origin": np.zeros(n, dtype=int),
-                "step":   np.zeros(n, dtype=int),
-            },
-        )
+        with patch(
+            "views_pipeline_core.modules.validation.adapter.EvaluationAdapter.from_dataframes",
+            return_value=MagicMock(),
+        ):
+            with patch.object(PredictionFrameDispatcher, "audit_parity_ef"):
+                with patch.object(
+                    PredictionFrameDispatcher, "to_legacy_dfs", return_value=[MagicMock()]
+                ) as mock_tld:
+                    PredictionFrameDispatcher().build_evaluation_frame(
+                        actual, [pf], target, step_mappings
+                    )
+                    mock_tld.assert_not_called()
+
+    def test_build_ef_does_not_call_audit_parity_ef_internally(self):
+        """
+        build_evaluation_frame() must NOT call audit_parity_ef() internally.
+        Parity is the caller's responsibility (model.py parity bridge).
+
+        RED: current build_evaluation_frame() calls audit_parity_ef() for level-1
+             EF parity, duplicating work the caller should own.
+        GREEN: simplified build_evaluation_frame() delegates parity to caller.
+        """
+        from unittest.mock import patch
+
+        target = "lr_sb"
+        months = list(range(446, 449))
+        units = [1, 2]
+        base_origin = 445
+        steps = list(range(1, len(months) + 1))
+        step_mappings = [{base_origin + s: s for s in steps}]
+        pf = _make_pf(months, units, n_samples=2, value=1.0)
+        actual = self._make_actual_df(months, units, target, value=1.0)
 
         with patch(
             "views_pipeline_core.modules.validation.adapter.EvaluationAdapter.from_dataframes",
-            return_value=bad_ef,
+            return_value=MagicMock(),
         ):
-            with pytest.raises(ValueError, match="[Pp]arity"):
-                PredictionFrameDispatcher().build_evaluation_frame(
-                    actual, [pf], target, step_mappings
-                )
+            with patch.object(
+                PredictionFrameDispatcher, "to_legacy_dfs", return_value=[MagicMock()]
+            ):
+                with patch.object(
+                    PredictionFrameDispatcher, "audit_parity_ef"
+                ) as mock_ape:
+                    PredictionFrameDispatcher().build_evaluation_frame(
+                        actual, [pf], target, step_mappings
+                    )
+                    mock_ape.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

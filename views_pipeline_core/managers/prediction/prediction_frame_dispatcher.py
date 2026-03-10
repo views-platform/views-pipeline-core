@@ -31,6 +31,32 @@ class PredictionFrameDispatcher:
     # Public API
     # ------------------------------------------------------------------
 
+    def to_legacy_df(
+        self,
+        pf: Any,     # PredictionFrame (duck-typed)
+        target: str,
+    ) -> pd.DataFrame:
+        """
+        Convert a single PredictionFrame to the list-in-cell DataFrame format
+        that EvaluationAdapter.from_dataframes() expects.
+
+        The natural unit of work: 1 PF = 1 target = 1 DataFrame.
+
+        Args:
+            pf:     PredictionFrame to convert.
+            target: Target variable name (column becomes 'pred_{target}').
+
+        Returns:
+            DataFrame with MultiIndex (time, unit) and column 'pred_{target}'.
+        """
+        idx = pd.MultiIndex.from_arrays(
+            [pf.identifiers["time"], pf.identifiers["unit"]]
+        )
+        return pd.DataFrame(
+            {f"pred_{target}": [list(row) for row in pf.y_pred]},
+            index=idx,
+        )
+
     def to_legacy_dfs(
         self,
         predictions: List[Any],  # List[PredictionFrame]
@@ -54,18 +80,7 @@ class PredictionFrameDispatcher:
         Returns:
             List of DataFrames, one per input PredictionFrame.
         """
-        pred_col = f"pred_{target}"
-        result = []
-        for pf in predictions:
-            idx = pd.MultiIndex.from_arrays(
-                [pf.identifiers["time"], pf.identifiers["unit"]]
-            )
-            df = pd.DataFrame(
-                {pred_col: [list(row) for row in pf.y_pred]},
-                index=idx,
-            )
-            result.append(df)
-        return result
+        return [self.to_legacy_df(pf, target) for pf in predictions]
 
     def build_evaluation_frame(
         self,
@@ -75,9 +90,10 @@ class PredictionFrameDispatcher:
         step_mappings: List[Dict[int, int]],
     ) -> Any:  # EvaluationFrame
         """
-        Build a PF-native EvaluationFrame, construct a parity-bridge EF from
-        the corresponding legacy DataFrames, audit bit-wise parity, and return
-        the PF-native EF.
+        Build a PF-native EvaluationFrame and return it.
+
+        Parity auditing is the caller's responsibility (isolated parity bridge in
+        model.py — see ADR-033 DoD #1.5). This method does one thing only.
 
         Args:
             actual:        DataFrame of ground-truth values (MultiIndex [time, unit]).
@@ -87,29 +103,15 @@ class PredictionFrameDispatcher:
 
         Returns:
             EvaluationFrame built from the PF-native path.
-
-        Raises:
-            ValueError: "Parity Failure ..." if PF and legacy-DF EFs disagree.
         """
         from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
 
-        ef = EvaluationAdapter.from_prediction_frames(
+        return EvaluationAdapter.from_prediction_frames(
             actual=actual,
             predictions=predictions,
             target=target,
             step_mapping=step_mappings,
         )
-
-        pred_slices = self.to_legacy_dfs(predictions, target)
-        ef_leg = EvaluationAdapter.from_dataframes(
-            actual=actual,
-            predictions=pred_slices,
-            target=target,
-            step_mapping=step_mappings,
-        )
-
-        self.audit_parity_ef(ef, ef_leg, target)
-        return ef
 
     def audit_parity_ef(
         self,
