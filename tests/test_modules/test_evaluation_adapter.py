@@ -442,7 +442,7 @@ class TestFromPredictionFrameSingular:
 class TestParityClosure:
     """
     Verifies that EvaluationAdapter.from_prediction_frames() and the
-    PredictionFrameDispatcher.to_legacy_dfs() → from_dataframes() path
+    PredictionFrameConverter.to_legacy_dfs() → from_dataframes() path
     produce bit-wise identical EvaluationFrames for the same input data.
 
     This is the primary correctness anchor for the ADR-033 parity bridge:
@@ -453,8 +453,8 @@ class TestParityClosure:
         """
         PF → from_prediction_frames == dispatcher.to_legacy_dfs → from_dataframes.
         """
-        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-            PredictionFrameDispatcher,
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
         )
         actual = _pf_actual()
         pf0 = _pf_seq([100, 101, 102], [1.0, 2.0, 3.0])
@@ -468,7 +468,7 @@ class TestParityClosure:
             actual, [pf0, pf1], 'target', step_mapping=step_mappings
         )
 
-        df_list = PredictionFrameDispatcher().to_legacy_dfs([pf0, pf1], 'target')
+        df_list = PredictionFrameConverter().to_legacy_dfs([pf0, pf1], 'target')
         ef_df = EvaluationAdapter.from_dataframes(
             actual, df_list, 'target', step_mapping=step_mappings
         )

@@ -2099,15 +2099,15 @@ class ForecastingModelManager(ModelManager):
                     # PF path: PredictionFrame is self-validating at construction.
                     # Skip the DF-centric CorePredictionSniffer.
                     # Step D — iterate all targets from the dict (multi-target support).
-                    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-                        PredictionFrameDispatcher,
+                    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+                        PredictionFrameConverter,
                     )
-                    _dispatcher = PredictionFrameDispatcher()
+                    converter = PredictionFrameConverter()
                     n_sequences = 0
                     for target, pf_sequence_list in raw_preds.items():
                         n_sequences = len(pf_sequence_list)
                         for i, pf in enumerate(pf_sequence_list):
-                            df_for_save = _dispatcher.to_legacy_df(pf, target)
+                            df_for_save = converter.to_legacy_df(pf, target)
                             self._save_predictions(
                                 df_for_save, self._model_path.data_generated, i, send_alert=False
                             )
@@ -2235,8 +2235,8 @@ class ForecastingModelManager(ModelManager):
                 if self._prediction_format == "prediction_frame":
                     # PF path: PredictionFrame is self-validating at construction;
                     # the DF-specific CorePredictionSniffer is not applicable here.
-                    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-                        PredictionFrameDispatcher,
+                    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+                        PredictionFrameConverter,
                     )
                     pf_dict = self._forecast_model_artifact(self.args.artifact_name)
 
@@ -2250,10 +2250,10 @@ class ForecastingModelManager(ModelManager):
                         )
 
                     # Step D — iterate all targets from the dict (multi-target support).
-                    _dispatcher_fc = PredictionFrameDispatcher()
+                    converter = PredictionFrameConverter()
                     for target, _pf in pf_dict.items():
-                        df_target = _dispatcher_fc.to_legacy_df(_pf, target)
-                        _dispatcher_fc.audit_prediction_structure(_pf, df_target, target)
+                        df_target = converter.to_legacy_df(_pf, target)
+                        converter.audit_prediction_structure(_pf, df_target, target)
 
                         # TEMPORARY: Undo transformations before saving per target.
                         forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=df_target)

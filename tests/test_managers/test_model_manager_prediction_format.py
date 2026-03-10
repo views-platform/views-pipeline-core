@@ -173,12 +173,12 @@ class TestForecastDispatch:
 
     def test_pf_path_converts_via_to_legacy_dfs(self):
         """
-        PF path: PredictionFrameDispatcher.to_legacy_df must be called to
+        PF path: PredictionFrameConverter.to_legacy_df must be called to
         convert the PredictionFrame into a list-in-cell DataFrame before passing
         it downstream (storage + transformation hack).
         """
-        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-            PredictionFrameDispatcher,
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
         )
 
         pf = PredictionFrame(
@@ -196,7 +196,7 @@ class TestForecastDispatch:
         )
 
         with patch.object(
-            PredictionFrameDispatcher, "to_legacy_df", return_value=converted_df
+            PredictionFrameConverter, "to_legacy_df", return_value=converted_df
         ) as mock_convert:
             _run_execute_forecast(manager, mock_df_result=converted_df)
             mock_convert.assert_called_once()
@@ -481,8 +481,8 @@ def _run_evaluate_prediction_df(
     can assert on which adapter path was taken.
     """
     from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
-    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-        PredictionFrameDispatcher,
+    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        PredictionFrameConverter,
     )
 
     actuals_df = pd.DataFrame(
@@ -519,7 +519,7 @@ def _run_evaluate_prediction_df(
                                 ForecastingModelManager, "_audit_parity"
                             ):
                                 with patch.object(
-                                    PredictionFrameDispatcher, "audit_parity_ef"
+                                    PredictionFrameConverter, "audit_parity_ef"
                                 ):
                                     with patch.object(
                                         ForecastingModelManager,
@@ -737,8 +737,8 @@ class TestPFDictDispatch:
 
     def test_pf_eval_single_target_dict_calls_to_legacy_dfs(self):
         """Single-target dict eval: to_legacy_df called exactly once with correct target."""
-        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-            PredictionFrameDispatcher,
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
         )
 
         pf = _make_simple_pf()
@@ -746,7 +746,7 @@ class TestPFDictDispatch:
         manager._test_eval_return = {"lr_sb": [pf]}
 
         with patch.object(
-            PredictionFrameDispatcher, "to_legacy_df", return_value=_make_dummy_df()
+            PredictionFrameConverter, "to_legacy_df", return_value=_make_dummy_df()
         ) as mock_tld:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
@@ -760,8 +760,8 @@ class TestPFDictDispatch:
 
     def test_pf_eval_multi_target_dict_calls_to_legacy_dfs_per_target(self):
         """Two-target dict eval: to_legacy_df called once per target, both targets used."""
-        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-            PredictionFrameDispatcher,
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
         )
 
         pf1, pf2 = _make_simple_pf(), _make_simple_pf()
@@ -769,7 +769,7 @@ class TestPFDictDispatch:
         manager._test_eval_return = {"lr_sb": [pf1], "ged_ns": [pf2]}
 
         with patch.object(
-            PredictionFrameDispatcher, "to_legacy_df", return_value=_make_dummy_df()
+            PredictionFrameConverter, "to_legacy_df", return_value=_make_dummy_df()
         ) as mock_tld:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
@@ -782,8 +782,8 @@ class TestPFDictDispatch:
 
     def test_pf_forecast_single_target_dict_calls_to_legacy_dfs(self):
         """Single-target dict forecast: to_legacy_df called exactly once."""
-        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-            PredictionFrameDispatcher,
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
         )
 
         pf = _make_simple_pf()
@@ -792,7 +792,7 @@ class TestPFDictDispatch:
         dummy_df = _make_dummy_df()
 
         with patch.object(
-            PredictionFrameDispatcher, "to_legacy_df", return_value=dummy_df
+            PredictionFrameConverter, "to_legacy_df", return_value=dummy_df
         ) as mock_tld:
             _run_execute_forecast(manager, mock_df_result=dummy_df)
 
@@ -800,8 +800,8 @@ class TestPFDictDispatch:
 
     def test_pf_forecast_multi_target_dict_saves_each_target(self):
         """Two-target dict forecast: _save_predictions called once per target."""
-        from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-            PredictionFrameDispatcher,
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
         )
 
         pf1, pf2 = _make_simple_pf(), _make_simple_pf()
@@ -809,8 +809,8 @@ class TestPFDictDispatch:
         manager._test_return = {"lr_sb": pf1, "ged_ns": pf2}
         dummy_df = _make_dummy_df()
 
-        with patch.object(PredictionFrameDispatcher, "to_legacy_dfs", return_value=[dummy_df]):
-            with patch.object(PredictionFrameDispatcher, "audit_prediction_structure"):
+        with patch.object(PredictionFrameConverter, "to_legacy_dfs", return_value=[dummy_df]):
+            with patch.object(PredictionFrameConverter, "audit_prediction_structure"):
                 _run_execute_forecast(manager, mock_df_result=dummy_df)
 
         assert manager._save_predictions.call_count == 2
@@ -880,8 +880,8 @@ def _run_pf_eval_clean_path(manager: _ForecastStub, list_predictions: dict) -> t
     - which EF object flows into evaluate()
     """
     from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
-    from views_pipeline_core.managers.prediction.prediction_frame_dispatcher import (
-        PredictionFrameDispatcher,
+    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        PredictionFrameConverter,
     )
 
     actuals_df = pd.DataFrame(
@@ -919,11 +919,11 @@ def _run_pf_eval_clean_path(manager: _ForecastStub, list_predictions: dict) -> t
                         ) as mock_sm:
                             mock_sm.return_value = [{445 + s: s for s in range(1, 37)}]
                             with patch.object(
-                                PredictionFrameDispatcher, "to_legacy_dfs",
+                                PredictionFrameConverter, "to_legacy_dfs",
                                 return_value=[MagicMock()],
                             ) as mock_tld:
                                 with patch.object(
-                                    PredictionFrameDispatcher, "audit_parity_ef"
+                                    PredictionFrameConverter, "audit_parity_ef"
                                 ):
                                     with patch.object(
                                         ForecastingModelManager, "_audit_parity"

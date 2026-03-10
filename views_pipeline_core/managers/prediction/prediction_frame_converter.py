@@ -1,30 +1,30 @@
 """
-PredictionFrameDispatcher — orchestrates PF-to-legacy-DF conversion,
-EvaluationFrame construction, and parity auditing for the ADR-033 PF path.
+PredictionFrameConverter — PF-to-legacy-DF conversion and structural auditing
+for the ADR-033 PredictionFrame path.
 
-Extracts the three inline PF dispatch blocks from ForecastingModelManager so
-they can be independently tested and later extended for multi-target support
-(future: Dict[str, List[PredictionFrame]] return from _evaluate_model_artifact).
+Extracts the PF dispatch blocks from ForecastingModelManager so they can be
+independently tested and later extended for multi-target support.
 
 DF dispatch remains in model.py for now; this class is designed so a parallel
-DataFrameDispatcher would have the same shape.
+DataFrameConverter would have the same shape.
 """
 import logging
 import numpy as np
-from typing import Any, Dict, List
+from typing import Any, List
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
-class PredictionFrameDispatcher:
+class PredictionFrameConverter:
     """
-    Orchestrates PF-to-legacy-DF conversion, EvaluationFrame construction,
-    and parity auditing for the ADR-033 PF path.
+    Converts PredictionFrame objects to the legacy list-in-cell DataFrame format
+    required for disk persistence, and audits the structural integrity of those
+    conversions.
 
-    All three public methods are stateless; the class exists for cohesion and
-    to provide a clean extension point for multi-target dispatch.
+    All public methods are stateless; the class exists for cohesion and to
+    provide clean patch points in tests.
     """
 
     # ------------------------------------------------------------------
@@ -73,6 +73,8 @@ class PredictionFrameDispatcher:
         PARITY-BRIDGE ONLY — remove when the DataFrame path is retired and
         from_dataframes() / from_prediction_frames() are no longer compared.
 
+        # DoD #3 removal target: retire when from_dataframes() path is removed.
+
         Args:
             predictions: List of PredictionFrame objects.
             target:      Target variable name (used to construct the column name).
@@ -81,37 +83,6 @@ class PredictionFrameDispatcher:
             List of DataFrames, one per input PredictionFrame.
         """
         return [self.to_legacy_df(pf, target) for pf in predictions]
-
-    def build_evaluation_frame(
-        self,
-        actual: pd.DataFrame,
-        predictions: List[Any],  # List[PredictionFrame]
-        target: str,
-        step_mappings: List[Dict[int, int]],
-    ) -> Any:  # EvaluationFrame
-        """
-        Build a PF-native EvaluationFrame and return it.
-
-        Parity auditing is the caller's responsibility (isolated parity bridge in
-        model.py — see ADR-033 DoD #1.5). This method does one thing only.
-
-        Args:
-            actual:        DataFrame of ground-truth values (MultiIndex [time, unit]).
-            predictions:   List[PredictionFrame] — one per rolling-origin sequence.
-            target:        Target variable name.
-            step_mappings: List[Dict[month → step]], one dict per sequence.
-
-        Returns:
-            EvaluationFrame built from the PF-native path.
-        """
-        from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
-
-        return EvaluationAdapter.from_prediction_frames(
-            actual=actual,
-            predictions=predictions,
-            target=target,
-            step_mapping=step_mappings,
-        )
 
     def audit_parity_ef(
         self,
@@ -126,6 +97,8 @@ class PredictionFrameDispatcher:
         PredictionFrame adapter path produces numerically identical output to
         the legacy DataFrame adapter path for the same underlying predictions.
 
+        # DoD #3 removal target: retire when from_dataframes() path is removed.
+
         Args:
             ef_pf:   EvaluationFrame built from the PredictionFrame path.
             ef_leg:  EvaluationFrame built from the legacy DataFrame path.
@@ -135,7 +108,7 @@ class PredictionFrameDispatcher:
             ValueError: If any array comparison fails — message begins with
                         "Parity Failure".
         """
-        logger.info(f"AUDITING EF PARITY for target: {target}")
+        logger.info("AUDITING EF PARITY for target: %s", target)
 
         try:
             np.testing.assert_allclose(ef_pf.y_pred, ef_leg.y_pred, rtol=1e-5, atol=1e-8)
@@ -155,9 +128,7 @@ class PredictionFrameDispatcher:
             except AssertionError as e:
                 raise ValueError(f"Parity Failure (identifiers['{key}']): {e}")
 
-        logger.info(
-            "\033[92m" + f"EF PARITY CONFIRMED for {target.upper()}" + "\033[0m"
-        )
+        logger.info("EF PARITY CONFIRMED for %s", target.upper())
 
     def audit_prediction_structure(
         self,
@@ -195,6 +166,4 @@ class PredictionFrameDispatcher:
                 f"PF→DF conversion: expected column 'pred_{target}' "
                 f"not found in converted DF (columns: {list(df.columns)})."
             )
-        logger.info(
-            "\033[92m" + f"PF STRUCTURAL PARITY OK for {target.upper()}" + "\033[0m"
-        )
+        logger.info("PF STRUCTURAL INTEGRITY OK for %s", target.upper())
