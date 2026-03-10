@@ -4,7 +4,7 @@ Unit tests for PredictionFrameConverter.
 Tests are grouped into four classes matching the public methods:
 
   TestToLegacyDfs             — to_legacy_dfs()
-  TestToLegacyDfSingular      — to_legacy_df()
+  TestToPredictionDf      — to_prediction_df()
   TestAuditParityEf           — audit_parity_ef()
   TestAuditPredictionStructure — audit_prediction_structure()
 
@@ -113,50 +113,50 @@ class TestToLegacyDfs:
         result = converter.to_legacy_dfs([pf], target="lr_sb")
         assert "pred_lr_sb" in result[0].columns
 
-    def test_delegates_to_to_legacy_df_per_item(self):
-        """to_legacy_dfs must call to_legacy_df once per PF — DRY rule."""
+    def test_delegates_to_to_prediction_df_per_item(self):
+        """to_legacy_dfs must call to_prediction_df once per PF — DRY rule."""
         from unittest.mock import patch
         sentinel = pd.DataFrame({"pred_sb": [[1.0]]})
         pfs = [_make_pf([445 + i], [1]) for i in range(3)]
         with patch.object(
-            PredictionFrameConverter, "to_legacy_df", return_value=sentinel
+            PredictionFrameConverter, "to_prediction_df", return_value=sentinel
         ) as mock_singular:
             PredictionFrameConverter().to_legacy_dfs(pfs, target="sb")
             assert mock_singular.call_count == 3
 
 
 # ---------------------------------------------------------------------------
-# TestToLegacyDfSingular
+# TestToPredictionDf
 # ---------------------------------------------------------------------------
 
-class TestToLegacyDfSingular:
-    """to_legacy_df() converts ONE PredictionFrame to ONE list-in-cell DataFrame.
+class TestToPredictionDf:
+    """to_prediction_df() converts ONE PredictionFrame to ONE list-in-cell DataFrame.
 
     Natural unit of work: 1 PF = 1 target = 1 DataFrame.
     """
 
     def test_returns_dataframe(self):
-        """to_legacy_df() returns a pd.DataFrame."""
+        """to_prediction_df() returns a pd.DataFrame."""
         pf = _make_pf([445, 446], [1, 2])
-        df = PredictionFrameConverter().to_legacy_df(pf, "sb")
+        df = PredictionFrameConverter().to_prediction_df(pf, "sb")
         assert isinstance(df, pd.DataFrame)
 
     def test_output_has_pred_target_column(self):
         """Output DataFrame has column 'pred_{target}'."""
         pf = _make_pf([445], [1, 2])
-        df = PredictionFrameConverter().to_legacy_df(pf, "lr_sb")
+        df = PredictionFrameConverter().to_prediction_df(pf, "lr_sb")
         assert "pred_lr_sb" in df.columns
 
     def test_row_count_matches_pf(self):
         """Row count equals the number of rows in the PredictionFrame."""
         pf = _make_pf([445, 446], [1, 2])   # 4 rows (2 months × 2 units)
-        df = PredictionFrameConverter().to_legacy_df(pf, "sb")
+        df = PredictionFrameConverter().to_prediction_df(pf, "sb")
         assert len(df) == len(pf.identifiers["time"])
 
     def test_cells_contain_sample_lists(self):
         """Each cell in pred_{target} must be a list of S sample floats."""
         pf = _make_pf([445], [1], n_samples=3, value=7.0)
-        df = PredictionFrameConverter().to_legacy_df(pf, "sb")
+        df = PredictionFrameConverter().to_prediction_df(pf, "sb")
         cell = df["pred_sb"].iloc[0]
         assert isinstance(cell, list)
         assert len(cell) == 3

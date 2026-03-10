@@ -1,15 +1,17 @@
 """
-PredictionFrameConverter — PF-to-DataFrame I/O adapter and structural auditing
-for the ADR-033 PredictionFrame path.
+PredictionFrameConverter — orchestrates PF-to-legacy-DF conversion,
+EvaluationFrame construction, and parity auditing for the ADR-033 PF path.
 
-Converts PredictionFrame objects to the list-in-cell parquet format required for
-disk persistence and downstream consumption by the ensemble manager. This format
-is a permanent cross-repo contract: the ensemble reads pred_{target} columns with
-list-in-cell cells from every model's saved predictions.
+Extracts the three inline PF dispatch blocks from ForecastingModelManager so
+they can be independently tested and later extended for multi-target support
+(future: Dict[str, List[PredictionFrame]] return from _evaluate_model_artifact).
+
+DF dispatch remains in model.py for now; this class is designed so a parallel
+DataFrameDispatcher would have the same shape.
 """
 import logging
 import numpy as np
-from typing import Any, List
+from typing import Any, Dict, List
 
 import pandas as pd
 
@@ -18,52 +20,16 @@ logger = logging.getLogger(__name__)
 
 class PredictionFrameConverter:
     """
-    Converts PredictionFrame objects to the list-in-cell DataFrame format
-    required for disk persistence, and audits the structural integrity of those
-    conversions.
+    Orchestrates PF-to-legacy-DF conversion, EvaluationFrame construction,
+    and parity auditing for the ADR-033 PF path.
 
-    The disk format (pred_{target} columns, list-in-cell cells, MultiIndex time/unit)
-    is a permanent cross-repo contract consumed by the ensemble manager. This class
-    owns the PF→DataFrame I/O adapter layer.
-
-    All public methods are stateless; the class exists for cohesion and to
-    provide clean patch points in tests.
+    All three public methods are stateless; the class exists for cohesion and
+    to provide a clean extension point for multi-target dispatch.
     """
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-
-    def to_prediction_df(
-        self,
-        pf: Any,     # PredictionFrame (duck-typed)
-        target: str,
-    ) -> pd.DataFrame:
-        """
-        Convert a single PredictionFrame to the list-in-cell DataFrame format
-        required for disk persistence and ensemble consumption.
-
-        Produces the permanent I/O format: MultiIndex (time, unit) with one column
-        'pred_{target}' where each cell is a list of S sample floats. This format
-        is a cross-repo contract — the ensemble manager reads pred_{target} columns
-        from every model's saved parquet files.
-
-        The natural unit of work: 1 PF = 1 target = 1 DataFrame.
-
-        Args:
-            pf:     PredictionFrame to convert.
-            target: Target variable name (column becomes 'pred_{target}').
-
-        Returns:
-            DataFrame with MultiIndex (time, unit) and column 'pred_{target}'.
-        """
-        idx = pd.MultiIndex.from_arrays(
-            [pf.identifiers["time"], pf.identifiers["unit"]]
-        )
-        return pd.DataFrame(
-            {f"pred_{target}": [list(row) for row in pf.y_pred]},
-            index=idx,
-        )
 
     def to_legacy_dfs(
         self,
@@ -81,8 +47,6 @@ class PredictionFrameConverter:
         PARITY-BRIDGE ONLY — remove when the DataFrame path is retired and
         from_dataframes() / from_prediction_frames() are no longer compared.
 
-        # DoD #3 removal target: retire when from_dataframes() path is removed.
-
         Args:
             predictions: List of PredictionFrame objects.
             target:      Target variable name (used to construct the column name).
@@ -90,7 +54,62 @@ class PredictionFrameConverter:
         Returns:
             List of DataFrames, one per input PredictionFrame.
         """
-        return [self.to_prediction_df(pf, target) for pf in predictions]
+        pred_col = f"pred_{target}"
+        result = []
+        for pf in predictions:
+            idx = pd.MultiIndex.from_arrays(
+                [pf.identifiers["time"], pf.identifiers["unit"]]
+            )
+            df = pd.DataFrame(
+                {pred_col: [list(row) for row in pf.y_pred]},
+                index=idx,
+            )
+            result.append(df)
+        return result
+
+    def build_evaluation_frame(
+        self,
+        actual: pd.DataFrame,
+        predictions: List[Any],  # List[PredictionFrame]
+        target: str,
+        step_mappings: List[Dict[int, int]],
+    ) -> Any:  # EvaluationFrame
+        """
+        Build a PF-native EvaluationFrame, construct a parity-bridge EF from
+        the corresponding legacy DataFrames, audit bit-wise parity, and return
+        the PF-native EF.
+
+        Args:
+            actual:        DataFrame of ground-truth values (MultiIndex [time, unit]).
+            predictions:   List[PredictionFrame] — one per rolling-origin sequence.
+            target:        Target variable name.
+            step_mappings: List[Dict[month → step]], one dict per sequence.
+
+        Returns:
+            EvaluationFrame built from the PF-native path.
+
+        Raises:
+            ValueError: "Parity Failure ..." if PF and legacy-DF EFs disagree.
+        """
+        from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
+
+        ef = EvaluationAdapter.from_prediction_frames(
+            actual=actual,
+            predictions=predictions,
+            target=target,
+            step_mapping=step_mappings,
+        )
+
+        pred_slices = self.to_legacy_dfs(predictions, target)
+        ef_leg = EvaluationAdapter.from_dataframes(
+            actual=actual,
+            predictions=pred_slices,
+            target=target,
+            step_mapping=step_mappings,
+        )
+
+        self.audit_parity_ef(ef, ef_leg, target)
+        return ef
 
     def audit_parity_ef(
         self,
@@ -105,8 +124,6 @@ class PredictionFrameConverter:
         PredictionFrame adapter path produces numerically identical output to
         the legacy DataFrame adapter path for the same underlying predictions.
 
-        # DoD #3 removal target: retire when from_dataframes() path is removed.
-
         Args:
             ef_pf:   EvaluationFrame built from the PredictionFrame path.
             ef_leg:  EvaluationFrame built from the legacy DataFrame path.
@@ -116,7 +133,7 @@ class PredictionFrameConverter:
             ValueError: If any array comparison fails — message begins with
                         "Parity Failure".
         """
-        logger.info("AUDITING EF PARITY for target: %s", target)
+        logger.info(f"AUDITING EF PARITY for target: {target}")
 
         try:
             np.testing.assert_allclose(ef_pf.y_pred, ef_leg.y_pred, rtol=1e-5, atol=1e-8)
@@ -136,7 +153,9 @@ class PredictionFrameConverter:
             except AssertionError as e:
                 raise ValueError(f"Parity Failure (identifiers['{key}']): {e}")
 
-        logger.info("EF PARITY CONFIRMED for %s", target.upper())
+        logger.info(
+            "\033[92m" + f"EF PARITY CONFIRMED for {target.upper()}" + "\033[0m"
+        )
 
     def audit_prediction_structure(
         self,
@@ -174,4 +193,6 @@ class PredictionFrameConverter:
                 f"PF→DF conversion: expected column 'pred_{target}' "
                 f"not found in converted DF (columns: {list(df.columns)})."
             )
-        logger.info("PF STRUCTURAL INTEGRITY OK for %s", target.upper())
+        logger.info(
+            "\033[92m" + f"PF STRUCTURAL PARITY OK for {target.upper()}" + "\033[0m"
+        )

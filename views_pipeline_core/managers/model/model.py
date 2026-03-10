@@ -2107,7 +2107,7 @@ class ForecastingModelManager(ModelManager):
                     for target, pf_sequence_list in raw_preds.items():
                         n_sequences = len(pf_sequence_list)
                         for i, pf in enumerate(pf_sequence_list):
-                            df_for_save = converter.to_legacy_df(pf, target)
+                            df_for_save = converter.to_prediction_df(pf, target)
                             self._save_predictions(
                                 df_for_save, self._model_path.data_generated, i, send_alert=False
                             )
@@ -2252,7 +2252,7 @@ class ForecastingModelManager(ModelManager):
                     # Step D — iterate all targets from the dict (multi-target support).
                     converter = PredictionFrameConverter()
                     for target, _pf in pf_dict.items():
-                        df_target = converter.to_legacy_df(_pf, target)
+                        df_target = converter.to_prediction_df(_pf, target)
                         converter.audit_prediction_structure(_pf, df_target, target)
 
                         # TEMPORARY: Undo transformations before saving per target.

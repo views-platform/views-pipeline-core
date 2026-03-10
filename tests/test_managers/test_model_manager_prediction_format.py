@@ -173,7 +173,7 @@ class TestForecastDispatch:
 
     def test_pf_path_converts_via_to_legacy_dfs(self):
         """
-        PF path: PredictionFrameConverter.to_legacy_df must be called to
+        PF path: PredictionFrameConverter.to_prediction_df must be called to
         convert the PredictionFrame into a list-in-cell DataFrame before passing
         it downstream (storage + transformation hack).
         """
@@ -196,7 +196,7 @@ class TestForecastDispatch:
         )
 
         with patch.object(
-            PredictionFrameConverter, "to_legacy_df", return_value=converted_df
+            PredictionFrameConverter, "to_prediction_df", return_value=converted_df
         ) as mock_convert:
             _run_execute_forecast(manager, mock_df_result=converted_df)
             mock_convert.assert_called_once()
@@ -736,7 +736,7 @@ class TestPFDictDispatch:
     """
 
     def test_pf_eval_single_target_dict_calls_to_legacy_dfs(self):
-        """Single-target dict eval: to_legacy_df called exactly once with correct target."""
+        """Single-target dict eval: to_prediction_df called exactly once with correct target."""
         from views_pipeline_core.managers.prediction.prediction_frame_converter import (
             PredictionFrameConverter,
         )
@@ -746,7 +746,7 @@ class TestPFDictDispatch:
         manager._test_eval_return = {"lr_sb": [pf]}
 
         with patch.object(
-            PredictionFrameConverter, "to_legacy_df", return_value=_make_dummy_df()
+            PredictionFrameConverter, "to_prediction_df", return_value=_make_dummy_df()
         ) as mock_tld:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
@@ -759,7 +759,7 @@ class TestPFDictDispatch:
         assert _target == "lr_sb"
 
     def test_pf_eval_multi_target_dict_calls_to_legacy_dfs_per_target(self):
-        """Two-target dict eval: to_legacy_df called once per target, both targets used."""
+        """Two-target dict eval: to_prediction_df called once per target, both targets used."""
         from views_pipeline_core.managers.prediction.prediction_frame_converter import (
             PredictionFrameConverter,
         )
@@ -769,7 +769,7 @@ class TestPFDictDispatch:
         manager._test_eval_return = {"lr_sb": [pf1], "ged_ns": [pf2]}
 
         with patch.object(
-            PredictionFrameConverter, "to_legacy_df", return_value=_make_dummy_df()
+            PredictionFrameConverter, "to_prediction_df", return_value=_make_dummy_df()
         ) as mock_tld:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
@@ -781,7 +781,7 @@ class TestPFDictDispatch:
         assert targets_called == {"lr_sb", "ged_ns"}
 
     def test_pf_forecast_single_target_dict_calls_to_legacy_dfs(self):
-        """Single-target dict forecast: to_legacy_df called exactly once."""
+        """Single-target dict forecast: to_prediction_df called exactly once."""
         from views_pipeline_core.managers.prediction.prediction_frame_converter import (
             PredictionFrameConverter,
         )
@@ -792,7 +792,7 @@ class TestPFDictDispatch:
         dummy_df = _make_dummy_df()
 
         with patch.object(
-            PredictionFrameConverter, "to_legacy_df", return_value=dummy_df
+            PredictionFrameConverter, "to_prediction_df", return_value=dummy_df
         ) as mock_tld:
             _run_execute_forecast(manager, mock_df_result=dummy_df)
 
