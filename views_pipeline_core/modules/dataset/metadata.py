@@ -112,7 +112,7 @@ class PriogridMetadata:
         """
         self.time_col = time_col
         self.entity_col = entity_col
-        self._cache: Optional[pl.DataFrame] = None
+        self._cache: Optional[pl.LazyFrame] = None
         self._country_to_entities: Optional[Dict[int, List[int]]] = None
         self._logger = logging.getLogger(f"{__name__}.PriogridMetadata")
     
@@ -159,11 +159,11 @@ class PriogridMetadata:
             if "priogrid_gid" in pdf.columns and self.entity_col != "priogrid_gid":
                 pdf.rename(columns={"priogrid_gid": self.entity_col}, inplace=True)
             
-            # Convert to Polars
-            self._cache = pl.from_pandas(pdf)
+            # Convert to Polars LazyFrame
+            self._cache = pl.from_pandas(pdf).lazy()
             self._build_country_mappings()
             
-            self._logger.info(f"Metadata fetched: {len(self._cache)} records")
+            self._logger.info("Metadata fetched")
             
         except Exception as e:
             raise MetadataError(f"Failed to fetch metadata: {e}")
@@ -185,14 +185,15 @@ class PriogridMetadata:
         self._logger.info(f"Loading metadata from: {path}")
         
         if path.suffix == ".parquet":
-            self._cache = pl.read_parquet(path)
+            self._cache = pl.scan_parquet(path)
         elif path.suffix == ".csv":
-            self._cache = pl.read_csv(path)
+            self._cache = pl.scan_csv(path)
         else:
             raise ValidationError(f"Unsupported format: {path.suffix}")
         
         # Normalize column names
-        if "priogrid_gid" in self._cache.columns and self.entity_col != "priogrid_gid":
+        cache_cols = self._cache.collect_schema().names()
+        if "priogrid_gid" in cache_cols and self.entity_col != "priogrid_gid":
             self._cache = self._cache.rename({"priogrid_gid": self.entity_col})
         
         self._build_country_mappings()
@@ -204,26 +205,33 @@ class PriogridMetadata:
             df: Polars or pandas DataFrame with metadata.
         """
         if isinstance(df, pd.DataFrame):
-            self._cache = pl.from_pandas(df.reset_index())
+            self._cache = pl.from_pandas(df.reset_index()).lazy()
+        elif isinstance(df, pl.LazyFrame):
+            self._cache = df
         else:
-            self._cache = df.clone()
+            self._cache = df.clone().lazy()
         
         # Normalize column names
-        if "priogrid_gid" in self._cache.columns and self.entity_col != "priogrid_gid":
+        cache_cols = self._cache.collect_schema().names()
+        if "priogrid_gid" in cache_cols and self.entity_col != "priogrid_gid":
             self._cache = self._cache.rename({"priogrid_gid": self.entity_col})
         
         self._build_country_mappings()
     
     def _build_country_mappings(self) -> None:
         """Build country-to-entity mapping from cache."""
-        if self._cache is None or "country_id" not in self._cache.columns:
+        if self._cache is None:
+            return
+        cache_cols = self._cache.collect_schema().names()
+        if "country_id" not in cache_cols:
             return
         
-        # Get unique entity-country pairs (use first occurrence per entity)
+        # Targeted collect of only the two columns needed for the mapping
         mapping = (
             self._cache
             .select([self.entity_col, "country_id"])
             .unique(subset=[self.entity_col])
+            .collect(engine="streaming")
         )
         
         self._country_to_entities = {}
@@ -248,27 +256,31 @@ class PriogridMetadata:
         self,
         data_df: pl.DataFrame,
         columns: List[str],
-    ) -> pl.DataFrame:
+    ) -> pl.LazyFrame:
         """Join metadata columns with data DataFrame.
+        
+        Returns a **LazyFrame** — callers collect at the public boundary.
         
         Args:
             data_df: Data DataFrame with time and entity columns.
             columns: Metadata columns to join.
             
         Returns:
-            DataFrame with joined metadata.
+            LazyFrame with joined metadata.
         """
         self._ensure_loaded()
         
-        # Select needed columns from cache
+        # Select needed columns from cache (lazy)
         select_cols = [self.time_col, self.entity_col] + columns
-        available_cols = [c for c in select_cols if c in self._cache.columns]
+        cache_cols = self._cache.collect_schema().names()
+        available_cols = [c for c in select_cols if c in cache_cols]
         
         meta_subset = self._cache.select(available_cols).unique()
         
         # Join on time and entity
         join_cols = [self.time_col, self.entity_col]
-        if self.time_col not in meta_subset.columns:
+        meta_schema_names = meta_subset.collect_schema().names()
+        if self.time_col not in meta_schema_names:
             # Metadata may not have time column; join only on entity
             join_cols = [self.entity_col]
             meta_subset = meta_subset.unique(subset=[self.entity_col])
@@ -279,10 +291,10 @@ class PriogridMetadata:
             raise ValueError("No common join columns between data and metadata")
         
         # If data_df lacks time_col, deduplicate metadata to one row per entity
-        if self.time_col not in join_cols and self.time_col in meta_subset.columns:
+        if self.time_col not in join_cols and self.time_col in meta_schema_names:
             meta_subset = meta_subset.drop(self.time_col).unique(subset=[self.entity_col])
         
-        result = data_df.select(join_cols).unique().join(
+        result = data_df.lazy().select(join_cols).unique().join(
             meta_subset,
             on=join_cols,
             how="left",
@@ -309,7 +321,7 @@ class PriogridMetadata:
             DataFrame with lat/lon columns.
         """
         result = self._join_with_data(data_df, ["lat", "long"])
-        result = result.rename({"long": "lon"})
+        result = result.rename({"long": "lon"}).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -329,7 +341,7 @@ class PriogridMetadata:
         Returns:
             DataFrame with row/col columns.
         """
-        result = self._join_with_data(data_df, ["row", "col"])
+        result = self._join_with_data(data_df, ["row", "col"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -349,7 +361,7 @@ class PriogridMetadata:
         Returns:
             DataFrame with country_id column.
         """
-        result = self._join_with_data(data_df, ["country_id"])
+        result = self._join_with_data(data_df, ["country_id"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -369,7 +381,7 @@ class PriogridMetadata:
         Returns:
             DataFrame with isoab column.
         """
-        result = self._join_with_data(data_df, ["isoab"])
+        result = self._join_with_data(data_df, ["isoab"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -392,7 +404,7 @@ class PriogridMetadata:
             DataFrame with name column.
         """
         if with_id:
-            result = self._join_with_data(data_df, ["country_id", "name"])
+            result = self._join_with_data(data_df, ["country_id", "name"]).collect(engine="streaming")
             result = result.with_columns(
                 pl.when(pl.col("name").is_not_null())
                 .then(pl.col("country_id").cast(pl.Utf8) + " - " + pl.col("name"))
@@ -400,7 +412,7 @@ class PriogridMetadata:
                 .alias("name")
             ).drop("country_id")
         else:
-            result = self._join_with_data(data_df, ["name"])
+            result = self._join_with_data(data_df, ["name"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -420,7 +432,7 @@ class PriogridMetadata:
         Returns:
             DataFrame with gwcode column.
         """
-        result = self._join_with_data(data_df, ["gwcode"])
+        result = self._join_with_data(data_df, ["gwcode"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -443,7 +455,7 @@ class PriogridMetadata:
         result = self._join_with_data(data_df, ["gwcode"])
         result = result.with_columns(
             classify_region_from_gwcode(pl.col("gwcode")).alias("region")
-        ).drop("gwcode")
+        ).drop("gwcode").collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -499,9 +511,8 @@ class PriogridMetadata:
     def __repr__(self) -> str:
         if self._cache is None:
             return "PriogridMetadata(not loaded)"
-        n_records = len(self._cache)
         n_countries = len(self._country_to_entities) if self._country_to_entities else 0
-        return f"PriogridMetadata(records={n_records}, countries={n_countries})"
+        return f"PriogridMetadata(loaded, countries={n_countries})"
 
 
 # =============================================================================
@@ -533,7 +544,7 @@ class CountryMetadata:
         """
         self.time_col = time_col
         self.entity_col = entity_col
-        self._cache: Optional[pl.DataFrame] = None
+        self._cache: Optional[pl.LazyFrame] = None
         self._logger = logging.getLogger(f"{__name__}.CountryMetadata")
     
     @property
@@ -580,11 +591,9 @@ class CountryMetadata:
             # per entity, so we only need one row per country_id.
             full = pl.from_pandas(pdf)
             static_cols = [c for c in full.columns if c != self.time_col]
-            self._cache = full.select(static_cols).unique(subset=[self.entity_col])
+            self._cache = full.select(static_cols).unique(subset=[self.entity_col]).lazy()
             
-            self._logger.info(
-                f"Metadata fetched: {len(full)} raw records → {len(self._cache)} unique entities"
-            )
+            self._logger.info("Country metadata fetched")
             
         except Exception as e:
             raise MetadataError(f"Failed to fetch metadata: {e}")
@@ -602,18 +611,20 @@ class CountryMetadata:
         self._logger.info(f"Loading metadata from: {path}")
         
         if path.suffix == ".parquet":
-            self._cache = pl.read_parquet(path)
+            self._cache = pl.scan_parquet(path)
         elif path.suffix == ".csv":
-            self._cache = pl.read_csv(path)
+            self._cache = pl.scan_csv(path)
         else:
             raise ValidationError(f"Unsupported format: {path.suffix}")
     
     def load_from_dataframe(self, df: Union[pl.DataFrame, pd.DataFrame]) -> None:
         """Load metadata from DataFrame."""
         if isinstance(df, pd.DataFrame):
-            self._cache = pl.from_pandas(df.reset_index())
+            self._cache = pl.from_pandas(df.reset_index()).lazy()
+        elif isinstance(df, pl.LazyFrame):
+            self._cache = df
         else:
-            self._cache = df.clone()
+            self._cache = df.clone().lazy()
     
     def _ensure_loaded(self) -> None:
         """Ensure metadata is loaded, fetching if needed."""
@@ -624,17 +635,22 @@ class CountryMetadata:
         self,
         data_df: pl.DataFrame,
         columns: List[str],
-    ) -> pl.DataFrame:
-        """Join metadata columns with data DataFrame."""
+    ) -> pl.LazyFrame:
+        """Join metadata columns with data DataFrame.
+        
+        Returns a LazyFrame — callers collect at the public boundary.
+        """
         self._ensure_loaded()
         
         select_cols = [self.time_col, self.entity_col] + columns
-        available_cols = [c for c in select_cols if c in self._cache.columns]
+        cache_cols = self._cache.collect_schema().names()
+        available_cols = [c for c in select_cols if c in cache_cols]
         
         meta_subset = self._cache.select(available_cols).unique()
         
         join_cols = [self.time_col, self.entity_col]
-        if self.time_col not in meta_subset.columns:
+        meta_schema_names = meta_subset.collect_schema().names()
+        if self.time_col not in meta_schema_names:
             join_cols = [self.entity_col]
             meta_subset = meta_subset.unique(subset=[self.entity_col])
         
@@ -643,7 +659,7 @@ class CountryMetadata:
         if not join_cols:
             raise ValueError("No common join columns between data and metadata")
         
-        result = data_df.select(join_cols).unique().join(
+        result = data_df.lazy().select(join_cols).unique().join(
             meta_subset,
             on=join_cols,
             how="left",
@@ -661,7 +677,7 @@ class CountryMetadata:
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get ISO alpha-2 country code."""
-        result = self._join_with_data(data_df, ["isoab"])
+        result = self._join_with_data(data_df, ["isoab"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -675,7 +691,7 @@ class CountryMetadata:
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get country name."""
         if with_id:
-            result = self._join_with_data(data_df, ["name"])
+            result = self._join_with_data(data_df, ["name"]).collect(engine="streaming")
             result = result.with_columns(
                 pl.when(pl.col("name").is_not_null())
                 .then(pl.col(self.entity_col).cast(pl.Utf8) + " - " + pl.col("name"))
@@ -683,7 +699,7 @@ class CountryMetadata:
                 .alias("name")
             )
         else:
-            result = self._join_with_data(data_df, ["name"])
+            result = self._join_with_data(data_df, ["name"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -695,7 +711,7 @@ class CountryMetadata:
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get Gleditsch-Ward country code."""
-        result = self._join_with_data(data_df, ["gwcode"])
+        result = self._join_with_data(data_df, ["gwcode"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -707,7 +723,7 @@ class CountryMetadata:
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get ISO numeric country code."""
-        result = self._join_with_data(data_df, ["isonum"])
+        result = self._join_with_data(data_df, ["isonum"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -719,7 +735,7 @@ class CountryMetadata:
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get capital city name."""
-        result = self._join_with_data(data_df, ["capname"])
+        result = self._join_with_data(data_df, ["capname"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -732,7 +748,7 @@ class CountryMetadata:
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get capital city coordinates."""
         result = self._join_with_data(data_df, ["caplat", "caplong"])
-        result = result.rename({"caplat": "cap_lat", "caplong": "cap_lon"})
+        result = result.rename({"caplat": "cap_lat", "caplong": "cap_lon"}).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -744,7 +760,7 @@ class CountryMetadata:
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get region flags (in_africa, in_me)."""
-        result = self._join_with_data(data_df, ["in_africa", "in_me"])
+        result = self._join_with_data(data_df, ["in_africa", "in_me"]).collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -759,7 +775,7 @@ class CountryMetadata:
         result = self._join_with_data(data_df, ["gwcode"])
         result = result.with_columns(
             classify_region_from_gwcode(pl.col("gwcode")).alias("region")
-        ).drop("gwcode")
+        ).drop("gwcode").collect(engine="streaming")
         
         if return_pandas:
             return _to_pandas_multiindex(result, [self.time_col, self.entity_col])
@@ -768,7 +784,7 @@ class CountryMetadata:
     def __repr__(self) -> str:
         if self._cache is None:
             return "CountryMetadata(not loaded)"
-        return f"CountryMetadata(records={len(self._cache)})"
+        return "CountryMetadata(loaded)"
 
 
 # =============================================================================
@@ -785,7 +801,7 @@ class MetadataModule:
     
     def __init__(self, entity_col: str):
         self.entity_col = entity_col
-        self._cache: Optional[pl.DataFrame] = None
+        self._cache: Optional[pl.LazyFrame] = None
         self._country_to_entities: Optional[Dict[int, List[int]]] = None
         self._entity_to_country: Optional[Dict[int, int]] = None
         self._logger = logging.getLogger(f"{__name__}.MetadataModule")
@@ -800,17 +816,18 @@ class MetadataModule:
             raise FileNotFoundError(f"Metadata file not found: {path}")
         
         if path.suffix == ".parquet":
-            self._cache = pl.read_parquet(path)
+            self._cache = pl.scan_parquet(path)
         elif path.suffix == ".csv":
-            self._cache = pl.read_csv(path)
+            self._cache = pl.scan_csv(path)
         else:
             raise ValidationError(f"Unsupported format: {path.suffix}")
         
         entity_col = entity_col or self.entity_col
-        if entity_col not in self._cache.columns:
+        cache_cols = self._cache.collect_schema().names()
+        if entity_col not in cache_cols:
             raise ValidationError(f"Entity column '{entity_col}' not found")
         
-        if "country_id" in self._cache.columns:
+        if "country_id" in cache_cols:
             self._build_country_mappings()
     
     def load_from_dataframe(self, df: pl.DataFrame, entity_col: Optional[str] = None) -> None:
@@ -818,17 +835,21 @@ class MetadataModule:
         if entity_col not in df.columns:
             raise ValidationError(f"Entity column '{entity_col}' not found")
         
-        self._cache = df.clone()
-        if "country_id" in self._cache.columns:
+        self._cache = df.clone().lazy()
+        cache_cols = self._cache.collect_schema().names()
+        if "country_id" in cache_cols:
             self._build_country_mappings()
     
     def _build_country_mappings(self) -> None:
         if self._cache is None:
             return
         
+        # Targeted collect of only the two columns needed
+        mapping_df = self._cache.select([self.entity_col, "country_id"]).collect()
+        
         self._entity_to_country = dict(zip(
-            self._cache[self.entity_col].to_list(),
-            self._cache["country_id"].to_list()
+            mapping_df[self.entity_col].to_list(),
+            mapping_df["country_id"].to_list()
         ))
         
         self._country_to_entities = {}
@@ -859,7 +880,7 @@ class MetadataModule:
         result = self._cache.select([self.entity_col, lat_col, lon_col])
         if entity_ids is not None:
             result = result.filter(pl.col(self.entity_col).is_in(entity_ids))
-        return result
+        return result.collect()
     
     def get_region(
         self,
@@ -869,7 +890,8 @@ class MetadataModule:
         if self._cache is None:
             raise MetadataError("Metadata not loaded")
         
-        if gwcode_col not in self._cache.columns:
+        cache_cols = self._cache.collect_schema().names()
+        if gwcode_col not in cache_cols:
             raise MetadataError(f"GW code column '{gwcode_col}' not found")
         
         result = self._cache.with_columns(
@@ -878,7 +900,7 @@ class MetadataModule:
         
         if entity_ids is not None:
             result = result.filter(pl.col(self.entity_col).is_in(entity_ids))
-        return result
+        return result.collect()
     
     def get_all_countries(self) -> List[int]:
         if self._country_to_entities is None:
@@ -888,14 +910,13 @@ class MetadataModule:
     def get_all_entities(self) -> List[int]:
         if self._cache is None:
             return []
-        return self._cache[self.entity_col].unique().to_list()
+        return self._cache.select(pl.col(self.entity_col).unique()).collect()[self.entity_col].to_list()
     
     def __repr__(self) -> str:
         if self._cache is None:
             return "MetadataModule(not loaded)"
-        n_entities = len(self._cache)
         n_countries = len(self._country_to_entities) if self._country_to_entities else 0
-        return f"MetadataModule(entities={n_entities}, countries={n_countries})"
+        return f"MetadataModule(loaded, countries={n_countries})"
 
 
 __all__ = [

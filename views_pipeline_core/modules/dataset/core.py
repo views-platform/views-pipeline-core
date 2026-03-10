@@ -204,6 +204,8 @@ class SpatioTemporalDataset:
         fix_structure: bool = True,
         auto_broadcast: bool = True,
         cache_tensors: bool = True,
+        known_time_ids: Optional[List[int]] = None,
+        known_entity_ids: Optional[List[int]] = None,
     ):
         """Initialize SpatioTemporalDataset.
 
@@ -221,6 +223,12 @@ class SpatioTemporalDataset:
             fix_structure: If True, auto-completes grid at query time.
             auto_broadcast: If True, broadcasts scalars to match array dims.
             cache_tensors: If True, enables tensor caching.
+            known_time_ids: Pre-computed unique time IDs.  Pass this when
+                the underlying LazyFrame is expensive to evaluate (e.g. a
+                large cross-join from an extractor) to avoid materialising
+                the full plan at init time.
+            known_entity_ids: Pre-computed unique entity IDs.  Same
+                rationale as *known_time_ids*.
         """
         self._logger = logging.getLogger(self.__class__.__name__)
         self._logger.warning(
@@ -256,6 +264,15 @@ class SpatioTemporalDataset:
         )
         self._logger.info(f"Distribution layout: {self._dist_layout}")
 
+        # Cache heavy-column flag before any plan mutation.
+        self._has_heavy_cols: bool = SubsetModule.has_heavy_columns(self._lf)
+
+        # Preserve the unsorted scan plan for optimised subset reads.
+        # IndexModule.create() adds a deferred sort; _raw_lf keeps the
+        # original physical row order so filter_indexed() can use
+        # with_row_index / slice to skip irrelevant parquet row groups.
+        self._raw_lf: pl.LazyFrame = self._lf
+
         # Initialize indices (validates columns, adds sort to lazy plan)
         self._index, self._lf = IndexModule.create(
             self._lf, time_col, entity_col,
@@ -263,8 +280,14 @@ class SpatioTemporalDataset:
             dist_layout=self._dist_layout,
         )
 
-        # Cache lightweight index metadata (small targeted collect)
-        self._cache_index_metadata()
+        # Cache lightweight index metadata.
+        # When the caller already knows the unique IDs (e.g. an
+        # extractor that built a cross-join panel), accept them
+        # directly to avoid evaluating an expensive LazyFrame plan.
+        self._cache_index_metadata(
+            known_time_ids=known_time_ids,
+            known_entity_ids=known_entity_ids,
+        )
 
         # Detect mode
         has_predictions = any(c.startswith("pred_") for c in cols)
@@ -295,33 +318,79 @@ class SpatioTemporalDataset:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _cache_index_metadata(self) -> None:
-        """Cache lightweight index metadata from the LazyFrame.
+    def _cache_index_metadata(
+        self,
+        known_time_ids: Optional[List[int]] = None,
+        known_entity_ids: Optional[List[int]] = None,
+    ) -> None:
+        """Cache lightweight index metadata.
 
-        Performs a single collect that fetches the distinct values per
-        index column and the row count together.  Each ``.unique()``
-        result is wrapped in ``.implode()`` so that all columns are
-        length-1 lists and Polars can assemble them into a single-row
-        DataFrame regardless of how many unique values each column has.
+        When *known_time_ids* / *known_entity_ids* are supplied the
+        expensive collect is skipped entirely — the caller already
+        knows the panel dimensions (typical for extractor-produced
+        LazyFrames backed by a large cross-join).
+
+        Otherwise, per-column unique collects are performed on the
+        pre-sort LazyFrame (``_raw_lf``).  These are cheap for
+        Parquet-backed scans because Polars only reads the relevant
+        column.
+
+        ``_n_rows`` is always *derived* from the product of unique
+        counts rather than counting the full frame.  For a complete
+        panel this is exact; for sparse data it is a safe
+        overestimate (only used for the ``filter_indexed`` scatter
+        heuristic and a size warning).
         """
-        agg_exprs = [
-            pl.col(self._index.time_col).unique().sort().implode().alias("_times"),
-            pl.col(self._index.entity_col).unique().sort().implode().alias("_entities"),
-            pl.len().alias("_n_rows"),
-        ]
-        if self._index.sample_col:
-            agg_exprs.append(
-                pl.col(self._index.sample_col).unique().sort().implode().alias("_samples")
+        tc = self._index.time_col
+        ec = self._index.entity_col
+        sc = self._index.sample_col
+
+        # ── time IDs ────────────────────────────────────────────────
+        if known_time_ids is not None:
+            self._unique_times: List[int] = sorted(known_time_ids)
+        else:
+            self._unique_times = (
+                self._raw_lf
+                .select(pl.col(tc))
+                .unique()
+                .sort(tc)
+                .collect(engine="streaming")
+                .to_series()
+                .to_list()
             )
 
-        meta = self._lf.select(agg_exprs).collect()
+        # ── entity IDs ──────────────────────────────────────────────
+        if known_entity_ids is not None:
+            self._unique_entities: List[int] = sorted(known_entity_ids)
+        else:
+            self._unique_entities = (
+                self._raw_lf
+                .select(pl.col(ec))
+                .unique()
+                .sort(ec)
+                .collect(engine="streaming")
+                .to_series()
+                .to_list()
+            )
 
-        self._unique_times: List[int] = meta["_times"].explode().to_list()
-        self._unique_entities: List[int] = meta["_entities"].explode().to_list()
+        # ── sample IDs (always collected; tiny for row-based) ───────
         self._unique_samples: Optional[List[int]] = None
-        if self._index.sample_col:
-            self._unique_samples = meta["_samples"].explode().to_list()
-        self._n_rows: int = meta["_n_rows"].item()
+        if sc:
+            self._unique_samples = (
+                self._raw_lf
+                .select(pl.col(sc))
+                .unique()
+                .sort(sc)
+                .collect(engine="streaming")
+                .to_series()
+                .to_list()
+            )
+
+        # ── row count (derived) ─────────────────────────────────────
+        n_samples = len(self._unique_samples) if self._unique_samples else 1
+        self._n_rows: int = (
+            len(self._unique_times) * len(self._unique_entities) * n_samples
+        )
 
     def _ensure_grid_complete(
         self,
@@ -450,7 +519,7 @@ class SpatioTemporalDataset:
                 f"Collecting {self._n_rows:,} rows — consider using "
                 "get_subset_dataframe() for large datasets."
             )
-        return self._lf.collect()
+        return self._lf.collect(engine="streaming")
 
     # -------------------------------------------------------------------------
     # Column Accessors
@@ -471,7 +540,43 @@ class SpatioTemporalDataset:
     # -------------------------------------------------------------------------
     # Data Access
     # -------------------------------------------------------------------------
-    
+
+    def _get_subset_lazy(
+        self,
+        time_ids: Optional[Union[int, List[int]]] = None,
+        entity_ids: Optional[Union[int, List[int]]] = None,
+        sample_idx: Optional[Union[int, List[int]]] = None,
+        features: Optional[Union[str, List[str]]] = None,
+    ) -> pl.LazyFrame:
+        """Build a filtered subset as a LazyFrame (no materialisation).
+
+        All filtering and grid-fix logic is deferred in the lazy plan.
+        Call ``.collect(engine="streaming")`` on the result when materialisation is needed.
+        """
+        has_row_filter = time_ids is not None or entity_ids is not None
+
+        if has_row_filter and self._has_heavy_cols:
+            result = self._subset.filter_indexed(
+                self._lf, self._raw_lf, self._index, self._n_rows,
+                time_ids=time_ids, entity_ids=entity_ids,
+                sample_idx=sample_idx, features=features,
+            )
+        else:
+            result = self._subset.filter(
+                self._lf, self._index,
+                time_ids=time_ids, entity_ids=entity_ids,
+                sample_idx=sample_idx, features=features,
+            )
+
+        # Auto-fix grid for subset queries
+        is_subset = time_ids is not None or entity_ids is not None
+        if self._fix_structure and is_subset:
+            result = self._ensure_grid_complete(
+                result, time_ids, entity_ids, sample_idx,
+            )
+
+        return result.sort(self._index.index_cols)
+
     def get_subset_dataframe(
         self,
         time_ids: Optional[Union[int, List[int]]] = None,
@@ -481,31 +586,28 @@ class SpatioTemporalDataset:
         return_pandas: bool = False,
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get filtered subset as DataFrame.
-        
+
+        When the dataset contains heavy columns (``Array`` / ``List``)
+        and a row-level filter is requested, a two-phase strategy is
+        used: an index-only scan collects matching physical row
+        positions first (column-projection pushdown skips the heavy
+        data), then only the relevant row groups are read.  For
+        entity-sorted parquet files this is orders of magnitude faster.
+
         Args:
             time_ids: Time IDs to include (None = all).
             entity_ids: Entity IDs to include (None = all).
             sample_idx: Sample indices to include (None = all).
             features: Features to include (None = all).
             return_pandas: If True, return pandas DataFrame with MultiIndex.
-            
+
         Returns:
             Filtered DataFrame (Polars by default, or Pandas with MultiIndex).
         """
-        result = self._subset.filter(
-            self._lf, self._index,
+        result = self._get_subset_lazy(
             time_ids=time_ids, entity_ids=entity_ids,
             sample_idx=sample_idx, features=features,
-        )
-
-        # Auto-fix grid for subset queries
-        is_subset = time_ids is not None or entity_ids is not None
-        if self._fix_structure and is_subset:
-            result = self._ensure_grid_complete(
-                result, time_ids, entity_ids, sample_idx,
-            )
-
-        result = result.sort(self._index.index_cols).collect()
+        ).collect(engine="streaming")
 
         if return_pandas:
             index_cols = [self.time_col, self.entity_col]
@@ -536,10 +638,12 @@ class SpatioTemporalDataset:
         if not feat_list:
             return np.array([])
         
-        sub_df = self.get_subset_dataframe(
+        # Stay lazy until the numpy boundary
+        sub_lf = self._get_subset_lazy(
             time_ids=time_ids, entity_ids=entity_ids,
             sample_idx=sample_idx, features=feat_list,
         )
+        sub_df = sub_lf.collect(engine="streaming")
         
         return self._tensor_mod.convert(
             sub_df, feat_list, self._index, self._dist_layout
@@ -639,11 +743,12 @@ class SpatioTemporalDataset:
         time_ids: Optional[Union[int, List[int]]],
         entity_ids: Optional[Union[int, List[int]]],
         default_features_fn: str = "get_all_data_cols",
-    ) -> Tuple[pl.DataFrame, List[str], pl.DataFrame]:
+    ) -> Tuple[pl.LazyFrame, List[str], pl.DataFrame]:
         """Shared pre-computation for all statistics methods.
 
-        Performs a **single** collect with all requested features and
-        extracts the index DataFrame and resolved feature list.
+        Builds the filtered subset as a **LazyFrame** (no collect) and
+        derives the index grid from the filter parameters and cached
+        metadata.
 
         Args:
             features: Caller-supplied features (or None).
@@ -653,10 +758,9 @@ class SpatioTemporalDataset:
                 (``"get_pred_vars"`` falls back to ``"get_all_data_cols"``).
 
         Returns:
-            Tuple of (sub_df, feature_list, index_df) where *sub_df* is
-            a materialised ``pl.DataFrame``, *feature_list* is the
-            resolved feature names, and *index_df* has only the index
-            columns.
+            Tuple of (sub_lf, feature_list, index_df) where *sub_lf* is
+            a **LazyFrame**, *feature_list* is the resolved feature names,
+            and *index_df* has only the index columns.
         """
         if features is None:
             if default_features_fn == "get_pred_vars":
@@ -666,34 +770,47 @@ class SpatioTemporalDataset:
         if isinstance(features, str):
             features = [features]
 
-        # Single collect with all features
-        sub_df = self.get_subset_dataframe(
+        # Keep data lazy – no collect
+        sub_lf = self._get_subset_lazy(
             time_ids=time_ids, entity_ids=entity_ids, features=features,
         )
 
-        times, entities, _ = self._index.get_unique_values(sub_df)
+        # Build index_df from filter parameters + cached metadata
+        # (avoids a collect just to discover unique values)
+        if time_ids is not None:
+            times = [time_ids] if isinstance(time_ids, int) else list(time_ids)
+        else:
+            times = self._unique_times
+        if entity_ids is not None:
+            entities = [entity_ids] if isinstance(entity_ids, int) else list(entity_ids)
+        else:
+            entities = self._unique_entities
 
         index_df = pl.DataFrame({
             self.time_col: [t for t in times for _ in entities],
             self.entity_col: [e for _ in times for e in entities],
         })
 
-        return sub_df, features, index_df
+        return sub_lf, features, index_df
 
     def _feature_to_tensor(
         self,
-        sub_df: pl.DataFrame,
+        sub_lf: pl.LazyFrame,
         feature: str,
     ) -> Optional[np.ndarray]:
-        """Convert a single feature from an already-collected DataFrame
-        to a 3D tensor (Time, Entity, Sample).
+        """Convert a single feature from a LazyFrame to a 3D tensor
+        (Time, Entity, Sample).
+
+        Collects only the index columns and the requested feature
+        column — materialisation is deferred to this numpy boundary.
 
         Returns ``None`` if the tensor is empty.
         """
-        # Select only the index columns + this feature to avoid
-        # passing unnecessary columns to the tensor converter.
         keep = list(self._index.index_cols) + [feature]
-        feat_df = sub_df.select([c for c in keep if c in sub_df.columns])
+        schema_names = sub_lf.collect_schema().names()
+        feat_df = sub_lf.select(
+            [c for c in keep if c in schema_names]
+        ).collect(engine="streaming")
 
         tensor = self._tensor_mod.convert(
             feat_df, [feature], self._index, self._dist_layout,
@@ -944,12 +1061,14 @@ class SpatioTemporalDataset:
             if features is None:
                 feat_list = feat_list[:max_features]
             
-            sub_df = self.get_subset_dataframe(
+            # Stay lazy until the numpy boundary
+            sub_lf = self._get_subset_lazy(
                 time_ids=time_ids,
                 entity_ids=entity_ids,
                 sample_idx=sample_idx,
                 features=feat_list,
             )
+            sub_df = sub_lf.collect(engine="streaming")
             
             if sub_df.is_empty():
                 return True
@@ -989,13 +1108,12 @@ class SpatioTemporalDataset:
         Returns:
             TensorBundle with properly shaped tensors.
         """
-        # Always use get_subset_dataframe so we only collect the
-        # requested columns instead of the entire dataset.
-        df = self.get_subset_dataframe(
+        # Stay lazy until the numpy boundary, then collect.
+        df = self._get_subset_lazy(
             time_ids=time_ids,
             entity_ids=entity_ids,
             features=columns,
-        )
+        ).collect(engine="streaming")
         
         converter = TensorConverter(
             time_col=self.time_col,
@@ -1096,6 +1214,8 @@ class CountryDataset(SpatioTemporalDataset):
         cache_tensors: bool = True,
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
+        known_time_ids: Optional[List[int]] = None,
+        known_entity_ids: Optional[List[int]] = None,
     ):
         """Initialize CountryDataset.
 
@@ -1110,12 +1230,16 @@ class CountryDataset(SpatioTemporalDataset):
             cache_tensors: Enable tensor caching.
             metadata_path: Path to country metadata file.
             fetch_metadata: If True, fetch metadata via viewser Queryset.
+            known_time_ids: Pre-computed unique time IDs.
+            known_entity_ids: Pre-computed unique entity IDs.
         """
         super().__init__(
             data=data, time_col=time_col, entity_col=entity_col,
             sample_col=sample_col, target_cols=target_cols,
             fix_structure=fix_structure, auto_broadcast=auto_broadcast,
             cache_tensors=cache_tensors,
+            known_time_ids=known_time_ids,
+            known_entity_ids=known_entity_ids,
         )
         
         # Initialize metadata handler
@@ -1213,6 +1337,8 @@ class CountryMonthDataset(CountryDataset):
         cache_tensors: bool = True,
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
+        known_time_ids: Optional[List[int]] = None,
+        known_entity_ids: Optional[List[int]] = None,
     ):
         """Initialize CountryMonthDataset.
 
@@ -1227,6 +1353,8 @@ class CountryMonthDataset(CountryDataset):
             cache_tensors: Enable tensor caching.
             metadata_path: Path to country metadata file.
             fetch_metadata: If True, fetch metadata via viewser Queryset.
+            known_time_ids: Pre-computed unique time IDs.
+            known_entity_ids: Pre-computed unique entity IDs.
         """
         super().__init__(
             data=data, time_col=time_col, entity_col=entity_col,
@@ -1234,6 +1362,8 @@ class CountryMonthDataset(CountryDataset):
             fix_structure=fix_structure, auto_broadcast=auto_broadcast,
             cache_tensors=cache_tensors,
             metadata_path=metadata_path, fetch_metadata=fetch_metadata,
+            known_time_ids=known_time_ids,
+            known_entity_ids=known_entity_ids,
         )
     
     # -------------------------------------------------------------------------
@@ -1324,6 +1454,8 @@ class PriogridDataset(SpatioTemporalDataset):
         country_mapping: Optional[Union[str, Path, pl.DataFrame]] = None,
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
+        known_time_ids: Optional[List[int]] = None,
+        known_entity_ids: Optional[List[int]] = None,
     ):
         """Initialize PriogridDataset.
 
@@ -1339,12 +1471,16 @@ class PriogridDataset(SpatioTemporalDataset):
             country_mapping: Grid-to-country mapping (file or DataFrame).
             metadata_path: Path to grid metadata file.
             fetch_metadata: If True, fetch metadata via viewser Queryset.
+            known_time_ids: Pre-computed unique time IDs.
+            known_entity_ids: Pre-computed unique entity IDs.
         """
         super().__init__(
             data=data, time_col=time_col, entity_col=entity_col,
             sample_col=sample_col, target_cols=target_cols,
             fix_structure=fix_structure, auto_broadcast=auto_broadcast,
             cache_tensors=cache_tensors,
+            known_time_ids=known_time_ids,
+            known_entity_ids=known_entity_ids,
         )
         
         # Initialize metadata handler
@@ -1353,8 +1489,8 @@ class PriogridDataset(SpatioTemporalDataset):
         self._metadata: Optional[MetadataModule] = None
         self._reconciler: Optional[ReconciliationModule] = None
         
-        # Reconciled dataframe - populated by reconcile()
-        self.reconciled_dataframe: Optional[pl.DataFrame] = None
+        # Reconciled data – stored as LazyFrame; collect via property.
+        self._reconciled_lf: Optional[pl.LazyFrame] = None
         
         if country_mapping is not None:
             self._load_country_mapping(country_mapping)
@@ -1362,6 +1498,27 @@ class PriogridDataset(SpatioTemporalDataset):
             self._pg_meta.load_from_file(metadata_path)
         elif fetch_metadata:
             self._pg_meta.fetch()
+    
+    # -------------------------------------------------------------------------
+    # Reconciled data (public accessor)
+    # -------------------------------------------------------------------------
+
+    @property
+    def reconciled_dataframe(self) -> Optional[pl.DataFrame]:
+        """Materialise and return the reconciled DataFrame, or None."""
+        if self._reconciled_lf is None:
+            return None
+        return self._reconciled_lf.collect(engine="streaming")
+
+    @reconciled_dataframe.setter
+    def reconciled_dataframe(self, value: Optional[pl.DataFrame]) -> None:
+        """Accept an eager DataFrame and store it lazily."""
+        if value is None:
+            self._reconciled_lf = None
+        elif isinstance(value, pl.LazyFrame):
+            self._reconciled_lf = value
+        else:
+            self._reconciled_lf = value.lazy()
     
     def _load_country_mapping(
         self,
@@ -1371,24 +1528,31 @@ class PriogridDataset(SpatioTemporalDataset):
         if isinstance(mapping, (str, Path)):
             path = Path(mapping)
             if path.suffix == ".parquet":
-                mapping_df = pl.read_parquet(path)
+                mapping_lf = pl.scan_parquet(path)
             else:
-                mapping_df = pl.read_csv(path)
+                mapping_lf = pl.scan_csv(path)
+        elif isinstance(mapping, pl.LazyFrame):
+            mapping_lf = mapping
         else:
-            mapping_df = mapping.clone()
+            mapping_lf = mapping.clone().lazy()
         
         # Handle column name variations
         entity_col = self.entity_col
-        if "priogrid_id" in mapping_df.columns and entity_col not in mapping_df.columns:
-            mapping_df = mapping_df.rename({"priogrid_id": entity_col})
+        mapping_cols = mapping_lf.collect_schema().names()
+        if "priogrid_id" in mapping_cols and entity_col not in mapping_cols:
+            mapping_lf = mapping_lf.rename({"priogrid_id": entity_col})
+            mapping_cols = mapping_lf.collect_schema().names()
         
         required = {entity_col, "country_id"}
-        missing = required - set(mapping_df.columns)
+        missing = required - set(mapping_cols)
         if missing:
             raise ValidationError(f"Country mapping missing columns: {missing}")
         
         self._metadata = MetadataModule(entity_col)
-        self._metadata.load_from_dataframe(mapping_df, entity_col)
+        # load_from_dataframe now accepts eager and wraps as lazy internally
+        self._metadata.load_from_dataframe(
+            mapping_lf.collect(engine="streaming"), entity_col,
+        )
         
         if self._metadata._country_to_entities:
             self._reconciler = ReconciliationModule(self._metadata)
@@ -1563,9 +1727,9 @@ class PriogridDataset(SpatioTemporalDataset):
         if self._metadata is None:
             raise ReconciliationError("Country mapping not loaded.")
         
-        # Initialize reconciled dataframe on first call
-        if self.reconciled_dataframe is None:
-            self.reconciled_dataframe = self._lf.collect()
+        # Initialize reconciled LazyFrame on first call
+        if self._reconciled_lf is None:
+            self._reconciled_lf = self._lf
         
         entity_ids = self._metadata.get_entities_for_country(country_id)
         if not entity_ids:
@@ -1594,20 +1758,22 @@ class PriogridDataset(SpatioTemporalDataset):
         }
         update_df = pl.DataFrame(update_records)
 
-        # Use anti-join + concat to update only the affected rows
+        # Use anti-join + concat to update only the affected rows.
+        # The result is wrapped back as a LazyFrame.
         join_cols = [self.time_col, self.entity_col]
-        unchanged = self.reconciled_dataframe.join(
+        reconciled_df = self._reconciled_lf.collect(engine="streaming")
+        unchanged = reconciled_df.join(
             update_df.select(join_cols), on=join_cols, how="anti"
         )
-        changed = self.reconciled_dataframe.join(
+        changed = reconciled_df.join(
             update_df, on=join_cols, how="inner", suffix="_new"
         ).with_columns(
             pl.col(f"{feature}_new").alias(feature)
         ).drop(f"{feature}_new")
 
-        self.reconciled_dataframe = pl.concat(
+        self._reconciled_lf = pl.concat(
             [unchanged, changed], how="diagonal_relaxed"
-        ).sort(join_cols)
+        ).sort(join_cols).lazy()
         
         self._logger.info(
             f"Reconciled {feature} for country {country_id} at time {time_id}"
@@ -1641,6 +1807,8 @@ class PriogridMonthDataset(PriogridDataset):
         country_mapping: Optional[Union[str, Path, pl.DataFrame]] = None,
         metadata_path: Optional[Union[str, Path]] = None,
         fetch_metadata: bool = False,
+        known_time_ids: Optional[List[int]] = None,
+        known_entity_ids: Optional[List[int]] = None,
     ):
         """Initialize PriogridMonthDataset.
 
@@ -1656,6 +1824,8 @@ class PriogridMonthDataset(PriogridDataset):
             country_mapping: Grid-to-country mapping (file or DataFrame).
             metadata_path: Path to grid metadata file.
             fetch_metadata: If True, fetch metadata via viewser Queryset.
+            known_time_ids: Pre-computed unique time IDs.
+            known_entity_ids: Pre-computed unique entity IDs.
         """
         super().__init__(
             data=data, time_col=time_col, entity_col=entity_col,
@@ -1664,6 +1834,8 @@ class PriogridMonthDataset(PriogridDataset):
             cache_tensors=cache_tensors,
             country_mapping=country_mapping,
             metadata_path=metadata_path, fetch_metadata=fetch_metadata,
+            known_time_ids=known_time_ids,
+            known_entity_ids=known_entity_ids,
         )
     
     # -------------------------------------------------------------------------

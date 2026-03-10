@@ -125,7 +125,7 @@ class HistoricalLineGraph:
         entity_ids: List[int],
         targets: List[str],
     ) -> Optional[pl.DataFrame]:
-        """One Polars query for all historical entities."""
+        """Query for all historical entities."""
         if self.historical_dataset is None:
             return None
         try:
@@ -146,7 +146,7 @@ class HistoricalLineGraph:
         targets: List[str],
         alpha: float,
     ) -> Tuple[Optional[pl.DataFrame], Optional[pl.DataFrame], Optional[pl.DataFrame]]:
-        """One Polars query each for predictions, HDI, and MAP."""
+        """Query for all forecast entities."""
         if self.forecast_dataset is None:
             return None, None, None
 

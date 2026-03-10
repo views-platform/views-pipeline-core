@@ -94,7 +94,7 @@ class LoaderModule:
                 # Eager read to avoid pyo3 panics (EINVAL / os error 22)
                 # that occur with scan_parquet on certain Polars versions
                 # during multi-threaded collect on macOS.
-                return pl.read_parquet(path).lazy()
+                return pl.scan_parquet(path)
             if path.suffix == ".csv":
                 return pl.scan_csv(path)
 
