@@ -321,12 +321,30 @@ class EvaluationAdapter:
                 f"its own explicit origin-anchored mapping."
             )
 
-        all_y_true   = []
-        all_y_pred   = []
-        all_times    = []
-        all_units    = []
-        all_origins  = []
-        all_steps    = []
+        # ── Pre-compute actual-index lookup (once, numpy — no pandas objects in loop) ──
+        act_time = actual.index.get_level_values(0).values.astype(np.int64)
+        act_unit = actual.index.get_level_values(1).values.astype(np.int64)
+        act_y_true_vals = actual[target].values
+
+        # Coerce object-dtype actuals once (legacy list-in-cell support)
+        if act_y_true_vals.dtype == object:
+            act_y_true_vals = np.array([
+                x[0] if isinstance(x, (list, np.ndarray)) and len(x) > 0 else x
+                for x in act_y_true_vals
+            ], dtype=np.float64)
+
+        # Compound key: time × scale + unit  (unique as long as unit_id < scale)
+        _scale = int(act_unit.max()) + 1
+        act_keys = act_time * _scale + act_unit     # (N_actual,) int64
+
+        # Sort once for O(log N) binary search per origin (vs O(N) pandas engine per origin)
+        _sort_idx  = np.argsort(act_keys)
+        act_keys_s = act_keys[_sort_idx]            # sorted compound keys
+
+        # ── Pass 1: validate and collect row-index arrays (no large data copies) ──
+        # origin_info entries: (pf_locs, act_locs, times_i, units_i, steps_i, seq_idx)
+        origin_info = []
+        sample_count = None
 
         for i, pf in enumerate(predictions):
             seq_mapping = step_mapping[i] if isinstance(step_mapping, list) else step_mapping
@@ -345,71 +363,95 @@ class EvaluationAdapter:
                         f"model's actual forecast origin for this sequence."
                     )
 
-            # Build a temporary MultiIndex from PF identifiers for alignment.
-            pf_index = pd.MultiIndex.from_arrays(
-                [pf.identifiers['time'], pf.identifiers['unit']],
-                names=actual.index.names,
-            )
+            # NaN check before int64 cast (NaN silently becomes a garbage int64 value)
+            pf_time_raw = pf.identifiers['time']
+            pf_unit_raw = pf.identifiers['unit']
+            if np.any(pd.isna(pf_time_raw)):
+                raise ValueError(f"NaN detected in 'time' identifiers of sequence {i}.")
+            if np.any(pd.isna(pf_unit_raw)):
+                raise ValueError(f"NaN detected in 'unit' identifiers of sequence {i}.")
 
-            common_idx = actual.index.intersection(pf_index)
-            if common_idx.empty:
+            pf_time = pf_time_raw.astype(np.int64)
+            pf_unit = pf_unit_raw.astype(np.int64)
+            pf_keys = pf_time * _scale + pf_unit
+
+            # Numpy intersection: no pandas MultiIndex objects created per origin
+            pf_mask = np.isin(pf_keys, act_keys_s)
+            pf_locs = np.where(pf_mask)[0]
+
+            if pf_locs.size == 0:
                 logger.warning(
                     f"Sequence {i}: no overlap between prediction index and actuals index. "
                     f"This sequence contributes zero rows to the EvaluationFrame."
                 )
                 continue
 
-            pf_locs = pf_index.get_indexer(common_idx)
+            # Map matched pf-key positions to actual row positions (binary search)
+            pos = np.searchsorted(act_keys_s, pf_keys[pf_locs])
+            act_locs = _sort_idx[pos]
 
-            y_pred_seq = pf.y_pred[pf_locs]
-            y_true_seq = actual.loc[common_idx, target].values
-
-            if y_true_seq.dtype == object:
-                y_true_seq = np.array([
-                    x[0] if isinstance(x, (list, np.ndarray)) and len(x) > 0 else x
-                    for x in y_true_seq
-                ])
-
-            times = pf.identifiers['time'][pf_locs]
-            units = pf.identifiers['unit'][pf_locs]
-
-            if np.any(pd.isna(times)):
-                raise ValueError(f"NaN detected in 'time' identifiers of sequence {i}.")
-            if np.any(pd.isna(units)):
-                raise ValueError(f"NaN detected in 'unit' identifiers of sequence {i}.")
-
-            all_y_true.append(y_true_seq)
-            all_y_pred.append(y_pred_seq)
-            all_times.append(times)
-            all_units.append(units)
-            all_origins.append(np.full(len(y_true_seq), i))
+            # Pre-compute tiny identifier arrays (stored as metadata, not large data)
+            times_i = pf_time[pf_locs]
+            units_i = pf_unit[pf_locs]
 
             if seq_mapping is not None:
-                steps = np.array([seq_mapping[t] for t in times])
+                steps_i = np.array([seq_mapping[t] for t in times_i], dtype=np.int64)
             else:
-                unique_times = pd.Series(times).unique()
+                unique_times = np.unique(times_i)
                 time_to_step = {t: idx + 1 for idx, t in enumerate(unique_times)}
-                steps = np.array([time_to_step[t] for t in times])
-            all_steps.append(steps)
+                steps_i = np.array([time_to_step[t] for t in times_i], dtype=np.int64)
 
-        if not all_y_true:
+            # Sample-count consistency (first non-empty sequence sets the count)
+            sc = pf.y_pred.shape[1]
+            if sample_count is None:
+                sample_count = sc
+            elif sc != sample_count:
+                raise ValueError(
+                    "Inconsistent sample counts across PredictionFrame sequences: "
+                    f"{{{sample_count}, {sc}}}."
+                )
+
+            origin_info.append((pf_locs, act_locs, times_i, units_i, steps_i, i))
+
+        if not origin_info:
             raise ValueError("need at least one array to concatenate")
 
-        sample_counts = [y.shape[1] for y in all_y_pred]
-        if len(set(sample_counts)) > 1:
-            raise ValueError(
-                "Inconsistent sample counts across PredictionFrame sequences: "
-                f"{set(sample_counts)}."
-            )
+        # ── Pre-allocate output arrays (one allocation, no list growth, no concat temp) ──
+        total_rows = sum(len(info[0]) for info in origin_info)
+        S = sample_count
+
+        y_true_out = np.empty(total_rows, dtype=act_y_true_vals.dtype)
+        y_pred_out = np.empty((total_rows, S), dtype=predictions[0].y_pred.dtype)
+        time_out   = np.empty(total_rows, dtype=np.int64)
+        unit_out   = np.empty(total_rows, dtype=np.int64)
+        origin_out = np.empty(total_rows, dtype=np.int64)
+        step_out   = np.empty(total_rows, dtype=np.int64)
+
+        # ── Pass 2: fill pre-allocated slices in-place ──────────────────────
+        # pf.y_pred[pf_locs] is a temporary copy (~149 MB for pgm/16 samples);
+        # freed immediately after the in-place write — no accumulation across origins.
+        offset = 0
+        for (pf_locs, act_locs, times_i, units_i, steps_i, seq_idx), pf in zip(
+            origin_info, [predictions[info[5]] for info in origin_info]
+        ):
+            n  = len(pf_locs)
+            sl = slice(offset, offset + n)
+            y_pred_out[sl] = pf.y_pred[pf_locs]
+            y_true_out[sl] = act_y_true_vals[act_locs]
+            time_out[sl]   = times_i
+            unit_out[sl]   = units_i
+            origin_out[sl] = seq_idx
+            step_out[sl]   = steps_i
+            offset += n
 
         return EvaluationFrame(
-            y_true=np.concatenate(all_y_true),
-            y_pred=np.concatenate(all_y_pred),
+            y_true=y_true_out,
+            y_pred=y_pred_out,
             identifiers={
-                'time':   np.concatenate(all_times),
-                'unit':   np.concatenate(all_units),
-                'origin': np.concatenate(all_origins),
-                'step':   np.concatenate(all_steps),
+                'time':   time_out,
+                'unit':   unit_out,
+                'origin': origin_out,
+                'step':   step_out,
             },
             metadata={'target': target}
         )
