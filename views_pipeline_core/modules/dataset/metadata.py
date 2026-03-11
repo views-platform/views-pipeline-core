@@ -845,7 +845,7 @@ class MetadataModule:
             return
         
         # Targeted collect of only the two columns needed
-        mapping_df = self._cache.select([self.entity_col, "country_id"]).collect()
+        mapping_df = self._cache.select([self.entity_col, "country_id"]).collect(engine="streaming")
         
         self._entity_to_country = dict(zip(
             mapping_df[self.entity_col].to_list(),
@@ -880,7 +880,7 @@ class MetadataModule:
         result = self._cache.select([self.entity_col, lat_col, lon_col])
         if entity_ids is not None:
             result = result.filter(pl.col(self.entity_col).is_in(entity_ids))
-        return result.collect()
+        return result.collect(engine="streaming")
     
     def get_region(
         self,
@@ -900,7 +900,7 @@ class MetadataModule:
         
         if entity_ids is not None:
             result = result.filter(pl.col(self.entity_col).is_in(entity_ids))
-        return result.collect()
+        return result.collect(engine="streaming")
     
     def get_all_countries(self) -> List[int]:
         if self._country_to_entities is None:
@@ -910,7 +910,7 @@ class MetadataModule:
     def get_all_entities(self) -> List[int]:
         if self._cache is None:
             return []
-        return self._cache.select(pl.col(self.entity_col).unique()).collect()[self.entity_col].to_list()
+        return self._cache.select(pl.col(self.entity_col).unique()).collect(engine="streaming")[self.entity_col].to_list()
     
     def __repr__(self) -> str:
         if self._cache is None:
