@@ -28,25 +28,7 @@ from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 import os
 
-# from views_pipeline_core.modules.wandb import (
-#     add_wandb_metrics,
-#     log_wandb_log_dict,
-#     wandb_alert,
-#     format_metadata_dict,
-#     format_evaluation_dict,
-#     get_latest_run,
-#     timestamp_to_date,
-# )
 from views_pipeline_core.modules.wandb import get_latest_run
-# from views_pipeline_core.files.utils import (
-#     read_dataframe,
-#     save_dataframe,
-#     handle_single_log_creation,
-#     generate_evaluation_file_name,
-#     generate_model_file_name,
-#     generate_output_file_name,
-#     generate_evaluation_report_name,
-# )
 
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
@@ -2163,9 +2145,9 @@ class ForecastingModelManager(ModelManager):
                     # Type enforcement guard (ADR-033, fail-loud).
                     if isinstance(raw_preds, dict):
                         raise ValueError(
-                            f"prediction_format='dataframe' declared but "
-                            f"_evaluate_model_artifact() returned a dict, expected "
-                            f"List[pd.DataFrame]. Model contract violation."
+                            "prediction_format='dataframe' declared but "
+                            "_evaluate_model_artifact() returned a dict, expected "
+                            "List[pd.DataFrame]. Model contract violation."
                         )
                     self._assert_predictions_in_step_window(raw_preds)
                     # Validate (sniff) and save each prediction DataFrame.
@@ -2351,9 +2333,9 @@ class ForecastingModelManager(ModelManager):
                     # Step C — Type enforcement guard (ADR-033, fail-loud).
                     if isinstance(df_predictions, dict):
                         raise ValueError(
-                            f"prediction_format='dataframe' declared but "
-                            f"_forecast_model_artifact() returned a dict, expected "
-                            f"pd.DataFrame. Model contract violation."
+                            "prediction_format='dataframe' declared but "
+                            "_forecast_model_artifact() returned a dict, expected "
+                            "pd.DataFrame. Model contract violation."
                         )
 
                     CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
@@ -2456,9 +2438,9 @@ class ForecastingModelManager(ModelManager):
                 else:
                     if isinstance(raw_preds_sweep, dict):
                         raise ValueError(
-                            f"prediction_format='dataframe' declared but "
-                            f"_evaluate_sweep() returned a dict, expected "
-                            f"List[pd.DataFrame]. Model contract violation."
+                            "prediction_format='dataframe' declared but "
+                            "_evaluate_sweep() returned a dict, expected "
+                            "List[pd.DataFrame]. Model contract violation."
                         )
 
                 # ADR-033: PF path skips CorePredictionSniffer (PF is self-validating

@@ -397,20 +397,6 @@ class AggregationManager:
             # find target columns
             model_cols = [c for c in df.columns if c.startswith(target_column)]
 
-            #    def pool_row(row, *, rng=rng):
-
-            #        samples_list = [np.array(val) for val in row]
-
-            #        # decide how many samples to draw from each model
-            #        sample_counts = rng.multinomial(n_samples, weights)
-
-            #        pool = []
-            #        for s, count in zip(samples_list, sample_counts):
-            #                pool.extend(rng.choice(s, size=count, replace=True))
-            #        return (pool,)
-
-            #    pools = df.select(model_cols).map_rows(pool_row)
-            #    pooled_cols.append(pools.to_series().alias(target_column))
             n_rows = df.height
             model_arrays = []
             for col in model_cols:
