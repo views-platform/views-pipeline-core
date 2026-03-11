@@ -1,7 +1,7 @@
 import sys
 import re
 import pyprojroot
-from typing import Union, Optional, List, Dict
+from typing import Callable, Union, Optional, List, Dict
 import logging
 import importlib
 from abc import abstractmethod
@@ -1556,6 +1556,44 @@ class ForecastingModelManager(ModelManager):
             "_evaluate_model_artifact method must be implemented by subclasses."
         )
 
+    def _evaluate_model_artifact_streaming(
+        self,
+        eval_type: str,
+        artifact_name: str,
+        origin_sink: Callable[[int, Dict[str, PredictionFrame]], None],
+    ) -> None:
+        """
+        Call origin_sink(origin_idx, pf_dict) once per rolling origin.
+
+        origin_sink receives a dict mapping each target name to the single
+        PredictionFrame for that origin. The sink is responsible for saving
+        the PF to disk and freeing it before returning.
+
+        Subclasses should override this method to emit one origin at a time
+        without accumulating all origins in memory first. Overriding is the
+        primary way to eliminate the M×T×PF_size memory spike.
+
+        Default behaviour
+        -----------------
+        Wraps the existing batch ``_evaluate_model_artifact()`` for backward
+        compatibility with models that have not yet adopted streaming. The full
+        batch dict is loaded once and then emitted origin by origin — memory
+        footprint is unchanged relative to the old code path, but the sink
+        interface is honoured so callers written for streaming still work.
+        """
+        raw_preds = self._evaluate_model_artifact(eval_type, artifact_name)
+        if not isinstance(raw_preds, dict):
+            raise ModelEvaluationException(
+                f"prediction_format='prediction_frame' declared but "
+                f"_evaluate_model_artifact() returned {type(raw_preds).__name__}, "
+                f"expected Dict[str, List[PredictionFrame]]. "
+                f"Model contract violation."
+            )
+        n_origins = len(next(iter(raw_preds.values())))
+        for i in range(n_origins):
+            pf_dict = {target: pf_list[i] for target, pf_list in raw_preds.items()}
+            origin_sink(i, pf_dict)
+
     @abstractmethod
     def _forecast_model_artifact(self, artifact_name: str) -> Union[pd.DataFrame, Dict[str, PredictionFrame]]:
         """
@@ -2065,55 +2103,72 @@ class ForecastingModelManager(ModelManager):
                         f"({len(_steps)} steps total). Model inference starting."
                     )
 
-                raw_preds = self._evaluate_model_artifact(
-                    self._eval_type, self.args.artifact_name
-                )
+                import gc
+                import shutil
+                import concurrent.futures
 
-                # Step C — Type enforcement guard (ADR-033, fail-loud).
                 if self._prediction_format == "prediction_frame":
-                    if not isinstance(raw_preds, dict):
-                        raise ValueError(
-                            f"prediction_format='prediction_frame' declared but "
-                            f"_evaluate_model_artifact() returned "
-                            f"{type(raw_preds).__name__}, expected "
-                            f"Dict[str, List[PredictionFrame]]. Model contract violation."
-                        )
+                    # ── PF path — streaming evaluation ───────────────────────────────
+                    # Process one origin at a time so at most one origin's PredictionFrames
+                    # are alive simultaneously.  Each origin writes:
+                    #   Track A  staging/_pf_staging/origin_i/target/ — compact .npy,
+                    #            used by the metrics reload below (mmap-safe)
+                    #   Track B  data_generated/predictions_*.parquet — list-in-cell,
+                    #            for downstream consumers (unchanged format)
+                    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+                        PredictionFrameConverter,
+                    )
+                    converter = PredictionFrameConverter()
+                    staging_path = self._model_path.data_generated / "_pf_staging"
+                    all_targets: List[str] = []
+                    n_sequences = 0
+
+                    def _origin_sink(
+                        origin_idx: int, pf_dict: Dict[str, PredictionFrame]
+                    ) -> None:
+                        nonlocal n_sequences
+                        if not all_targets:
+                            all_targets.extend(pf_dict.keys())
+                        for target in list(pf_dict.keys()):
+                            pf = pf_dict.pop(target)  # remove from dict → refcount drops
+                            # Track A — compact numpy (metrics)
+                            pf.save(staging_path / f"origin_{origin_idx}" / target)
+                            # Track B — list-in-cell parquet (delivery)
+                            # Skipped when skip_predictions_delivery=True to
+                            # reduce peak memory.  Ensemble downstream will not
+                            # receive prediction parquets for this run.
+                            if not self.configs.get("skip_predictions_delivery", False):
+                                table = converter.to_arrow_table(
+                                    pf, target, level=self.configs["level"]
+                                )
+                                self._save_predictions(
+                                    table, self._model_path.data_generated, origin_idx,
+                                    send_alert=False,
+                                )
+                                del table
+                            del pf
+                            gc.collect()  # return ~1.6 GB to OS per target
+                        del pf_dict  # now empty — trivial
+                        gc.collect()
+                        n_sequences += 1
+
+                    self._evaluate_model_artifact_streaming(
+                        self._eval_type, self.args.artifact_name, origin_sink=_origin_sink
+                    )
                 else:
+                    # ── DF path (legacy DataFrame format) ────────────────────────────
+                    raw_preds = self._evaluate_model_artifact(
+                        self._eval_type, self.args.artifact_name
+                    )
+                    # Type enforcement guard (ADR-033, fail-loud).
                     if isinstance(raw_preds, dict):
                         raise ValueError(
                             f"prediction_format='dataframe' declared but "
                             f"_evaluate_model_artifact() returned a dict, expected "
                             f"List[pd.DataFrame]. Model contract violation."
                         )
-
-                # Step window check: for PF path use first target's sequences
-                # (all targets share the same temporal structure).
-                if self._prediction_format == "prediction_frame":
-                    self._assert_predictions_in_step_window(next(iter(raw_preds.values())))
-                else:
                     self._assert_predictions_in_step_window(raw_preds)
-
-                import concurrent.futures
-
-                if self._prediction_format == "prediction_frame":
-                    # PF path: PredictionFrame is self-validating at construction.
-                    # Skip the DF-centric CorePredictionSniffer.
-                    # Step D — iterate all targets from the dict (multi-target support).
-                    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
-                        PredictionFrameConverter,
-                    )
-                    converter = PredictionFrameConverter()
-                    n_sequences = 0
-                    for target, pf_sequence_list in raw_preds.items():
-                        n_sequences = len(pf_sequence_list)
-                        for i, pf in enumerate(pf_sequence_list):
-                            df_for_save = converter.to_prediction_df(pf, target)
-                            self._save_predictions(
-                                df_for_save, self._model_path.data_generated, i, send_alert=False
-                            )
-                            del df_for_save
-                else:
-                    # DF path: validate (sniff) and save each prediction DataFrame.
+                    # Validate (sniff) and save each prediction DataFrame.
                     n_sequences = len(raw_preds)
 
                     def validate_and_save(
@@ -2164,11 +2219,37 @@ class ForecastingModelManager(ModelManager):
                 ])
 
                 if has_metrics:
-                    self._evaluate_prediction_dataframe(
-                        raw_preds, self._eval_type
-                    )
+                    if self.configs.get("skip_evaluation_metrics", False):
+                        logger.warning(
+                            "skip_evaluation_metrics=True — skipping metric evaluation "
+                            "to avoid peak y_pred_out allocation at high sample counts."
+                        )
+                    elif self._prediction_format == "prediction_frame":
+                        # Reload PFs from Track A staging files via mmap.
+                        # Only accessed pages enter RAM — peak memory is bounded
+                        # by the EvaluationAdapter's sequential access pattern,
+                        # not by M × T × PF_size simultaneously.
+                        raw_preds_for_metrics = {
+                            target: [
+                                PredictionFrame.load(
+                                    staging_path / f"origin_{i}" / target, mmap=True
+                                )
+                                for i in range(n_sequences)
+                            ]
+                            for target in all_targets
+                        }
+                        self._evaluate_prediction_dataframe(
+                            raw_preds_for_metrics, self._eval_type
+                        )
+                        del raw_preds_for_metrics
+                        gc.collect()
+                    else:
+                        self._evaluate_prediction_dataframe(raw_preds, self._eval_type)
                 else:
                     logger.warning("No metrics specified in config")
+
+                if self._prediction_format == "prediction_frame":
+                    shutil.rmtree(staging_path, ignore_errors=True)
 
                 self._wandb_module.send_alert(
                     title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully.",
@@ -2737,39 +2818,41 @@ class ForecastingModelManager(ModelManager):
 
     def _save_predictions(
         self,
-        df_predictions: pd.DataFrame,
+        df_predictions,
         path_generated: Union[str, Path],
         sequence_number: int = None,
         send_alert: bool = True,
     ) -> None:
         """
         Save predictions to disk and prediction store.
-        
-        Saves prediction DataFrame to parquet file and optionally
-        uploads to central VIEWS prediction store.
-        
+
+        Saves prediction DataFrame (or Arrow Table for the PF evaluation path)
+        to parquet file and optionally uploads to central VIEWS prediction store.
+
         Internal Use:
             Called after evaluation and forecasting.
-        
+
         Args:
-            df_predictions: Predictions DataFrame
+            df_predictions: Predictions as pd.DataFrame or pa.Table (Fix A Arrow path).
             path_generated: Directory for saving
             sequence_number: Sequence number for evaluation runs.
                 None for forecasting runs.
             send_alert: Whether to send a WandB alert.
-        
+
         Side Effects:
             - Saves parquet file
-            - Uploads to prediction store (if enabled)
+            - Uploads to prediction store (if enabled, DataFrame path only)
             - Sends completion notification
-        
+
         Raises:
             PipelineException: If save fails
-        
+
         Note:
             - Filename includes timestamp and sequence number
             - Prediction store requires use_prediction_store=True
         """
+        import pyarrow as pa
+        import pyarrow.parquet as pq
         from views_pipeline_core.files.utils import (
             save_dataframe,
             generate_output_file_name,
@@ -2787,9 +2870,14 @@ class ForecastingModelManager(ModelManager):
                 file_extension=PipelineConfig().dataframe_format,
             )
 
-            save_dataframe(df_predictions, path_generated / self._predictions_name)
+            if isinstance(df_predictions, pa.Table):
+                # Fix A — Arrow path: zero-copy write, no Python list materialisation
+                pq.write_table(df_predictions, path_generated / self._predictions_name)
+                # NOTE: prediction-store upload skipped for Arrow path (TODO if needed)
+            else:
+                save_dataframe(df_predictions, path_generated / self._predictions_name)
 
-            if self._use_prediction_store:
+            if self._use_prediction_store and not isinstance(df_predictions, pa.Table):
                 name = f"{self._model_path.model_name}_{self._predictions_name.split('.')[0]}"
                 df_predictions.forecasts.set_run(self._pred_store_name)
                 df_predictions.forecasts.to_store(name=name, overwrite=True)
@@ -2874,7 +2962,10 @@ class ForecastingModelManager(ModelManager):
             self.configs.get("regression_targets", []) +
             self.configs.get("classification_targets", [])
         )
-        df_actual = df_viewser[all_targets]
+        import gc
+        df_actual = df_viewser[all_targets].copy()
+        del df_viewser
+        gc.collect()
 
         # Task definitions: target lists only.
         # EvaluationManager reads the metric keys (regression_point_metrics,

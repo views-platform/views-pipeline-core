@@ -1,12 +1,13 @@
 """
 Unit tests for PredictionFrameConverter.
 
-Tests are grouped into four classes matching the public methods:
+Tests are grouped into five classes matching the public methods:
 
-  TestToLegacyDfs             — to_legacy_dfs()
-  TestToPredictionDf      — to_prediction_df()
-  TestAuditParityEf           — audit_parity_ef()
+  TestToLegacyDfs              — to_legacy_dfs()
+  TestToPredictionDf           — to_prediction_df()
+  TestAuditParityEf            — audit_parity_ef()
   TestAuditPredictionStructure — audit_prediction_structure()
+  TestToArrowTable             — to_arrow_table()  [Fix A]
 
 TDD phases:
   RED  → tests exist, import fails (class not yet created)
@@ -243,3 +244,109 @@ class TestAuditPredictionStructure:
         # df has column 'pred_wrong_target', not 'pred_lr_sb'
         with pytest.raises(ValueError, match="pred_lr_sb|column|conversion"):
             PredictionFrameConverter().audit_prediction_structure(pf, df, "lr_sb")
+
+
+# ---------------------------------------------------------------------------
+# TestToArrowTable  (Fix A — zero-copy Arrow write)
+# ---------------------------------------------------------------------------
+
+class TestToArrowTable:
+    """
+    to_arrow_table() converts PredictionFrame → pa.Table without Python list
+    materialisation. Proves Fix A is correct.
+
+    RED  → AttributeError: 'PredictionFrameConverter' has no 'to_arrow_table'
+    GREEN → all pass after implementation
+    """
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    import polars as pl
+
+    def _make_tiny_pf(self, n_samples: int = 4, value: float = 0.5):
+        """2 months × 3 units = 6 rows, configurable sample count and value."""
+        return _make_pf([445, 446], [1, 2, 3], n_samples=n_samples, value=value)
+
+    def test_column_names_cm(self):
+        """level='cm' → columns: month_id, country_id, pred_{target}."""
+        import pyarrow as pa
+        pf = self._make_tiny_pf()
+        table = PredictionFrameConverter().to_arrow_table(pf, "sb", level="cm")
+        assert isinstance(table, pa.Table)
+        assert "month_id" in table.column_names
+        assert "country_id" in table.column_names
+        assert "pred_sb" in table.column_names
+        assert "priogrid_id" not in table.column_names
+
+    def test_column_names_pgm(self):
+        """level='pgm' → columns: month_id, priogrid_id, pred_{target}."""
+        import pyarrow as pa
+        pf = self._make_tiny_pf()
+        table = PredictionFrameConverter().to_arrow_table(pf, "ns_best", level="pgm")
+        assert isinstance(table, pa.Table)
+        assert "month_id" in table.column_names
+        assert "priogrid_id" in table.column_names
+        assert "pred_ns_best" in table.column_names
+        assert "country_id" not in table.column_names
+
+    def test_dtype_list_float32(self):
+        """pred_{target} Arrow type must be List<float32>."""
+        import pyarrow as pa
+        pf = self._make_tiny_pf()
+        table = PredictionFrameConverter().to_arrow_table(pf, "sb", level="cm")
+        field = table.schema.field("pred_sb")
+        assert pa.types.is_list(field.type), f"Expected List type, got {field.type}"
+        assert field.type.value_type == pa.float32(), (
+            f"Expected float32 values, got {field.type.value_type}"
+        )
+
+    def test_values_correct(self):
+        """Cell values must match y_pred within float32 tolerance."""
+        pf = self._make_tiny_pf(n_samples=3, value=7.25)
+        table = PredictionFrameConverter().to_arrow_table(pf, "sb", level="cm")
+        first_cell = table.column("pred_sb")[0].as_py()
+        assert len(first_cell) == 3
+        assert all(abs(v - 7.25) < 1e-4 for v in first_cell)
+
+    def test_row_count(self):
+        """table.num_rows must equal pf number of rows."""
+        pf = self._make_tiny_pf()
+        table = PredictionFrameConverter().to_arrow_table(pf, "sb", level="cm")
+        assert table.num_rows == len(pf.identifiers["time"])
+
+    def test_unknown_level_raises(self):
+        """Unsupported level must raise ValueError."""
+        pf = self._make_tiny_pf()
+        with pytest.raises(ValueError, match="[Uu]nsupported level"):
+            PredictionFrameConverter().to_arrow_table(pf, "sb", level="xyz")
+
+    def test_round_trip_polars(self, tmp_path):
+        """Write to parquet, read with pl.read_parquet(): dtype List(Float32), correct values."""
+        import pyarrow.parquet as pq
+        import polars as pl
+        pf = self._make_tiny_pf(n_samples=4, value=3.14)
+        table = PredictionFrameConverter().to_arrow_table(pf, "sb", level="cm")
+        path = tmp_path / "test.parquet"
+        pq.write_table(table, path)
+
+        df_pl = pl.read_parquet(path)
+        assert df_pl["pred_sb"].dtype == pl.List(pl.Float32)
+        assert df_pl.height == len(pf.identifiers["time"])
+        first_cell = df_pl["pred_sb"][0].to_list()
+        assert len(first_cell) == 4
+        assert all(abs(v - 3.14) < 1e-4 for v in first_cell)
+
+    def test_round_trip_pandas_compat(self, tmp_path):
+        """pyarrow-written parquet must be readable by pandas (backward compat check)."""
+        import pyarrow.parquet as pq
+        pf = self._make_tiny_pf(n_samples=2, value=2.5)
+        table = PredictionFrameConverter().to_arrow_table(pf, "sb", level="cm")
+        path = tmp_path / "test.parquet"
+        pq.write_table(table, path)
+
+        df_pd = pd.read_parquet(path)
+        assert "pred_sb" in df_pd.columns
+        first_cell = df_pd["pred_sb"].iloc[0]
+        assert hasattr(first_cell, "__len__"), "Cell must be list-like (list or ndarray)"
+        assert len(first_cell) == 2
+        assert abs(float(first_cell[0]) - 2.5) < 1e-4

@@ -9,9 +9,17 @@ list-in-cell cells from every model's saved predictions.
 """
 import logging
 import numpy as np
+import pyarrow as pa
 from typing import Any, List
 
 import pandas as pd
+
+# Column-name constants for the Arrow parquet format.
+_TIME_COL = "month_id"
+_LEVEL_TO_ENTITY_COL: dict = {
+    "cm":  "country_id",
+    "pgm": "priogrid_id",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -175,3 +183,59 @@ class PredictionFrameConverter:
                 f"not found in converted DF (columns: {list(df.columns)})."
             )
         logger.info("PF STRUCTURAL INTEGRITY OK for %s", target.upper())
+
+    def to_arrow_table(
+        self,
+        pf: Any,      # PredictionFrame (duck-typed)
+        target: str,
+        level: str,
+    ) -> pa.Table:
+        """
+        Convert a single PredictionFrame to a pa.Table without Python list
+        materialisation (Fix A — zero-copy Arrow write).
+
+        Column layout (flat, no MultiIndex):
+            month_id          int64
+            country_id        int64   (level='cm')
+          OR
+            priogrid_id       int64   (level='pgm')
+            pred_{target}     List<float32>
+
+        The written parquet is backward-compatible: pd.read_parquet() reads
+        pred_{target} as object dtype (list/ndarray cells), matching the format
+        produced by to_prediction_df() + df.to_parquet().
+
+        Args:
+            pf:     PredictionFrame to convert.
+            target: Target variable name (column becomes 'pred_{target}').
+            level:  Spatial level — 'cm' (country-month) or 'pgm' (PRIO-grid-month).
+
+        Returns:
+            pa.Table with columns [month_id, {entity_col}, pred_{target}].
+
+        Raises:
+            ValueError: If level is not 'cm' or 'pgm'.
+        """
+        if level not in _LEVEL_TO_ENTITY_COL:
+            raise ValueError(
+                f"Unsupported level '{level}'. "
+                f"Expected one of {sorted(_LEVEL_TO_ENTITY_COL)}"
+            )
+        entity_col = _LEVEL_TO_ENTITY_COL[level]
+
+        n_rows, n_samples = pf.y_pred.shape
+
+        # Build ListArray from flat numpy — zero-copy, no Python list objects
+        flat_values = pa.array(pf.y_pred.reshape(-1), type=pa.float32())
+        offsets = pa.array(
+            np.arange(0, (n_rows + 1) * n_samples, n_samples, dtype=np.int32)
+        )
+        list_array = pa.ListArray.from_arrays(offsets, flat_values)
+
+        return pa.table(
+            {
+                _TIME_COL:         pf.identifiers["time"],
+                entity_col:        pf.identifiers["unit"],
+                f"pred_{target}":  list_array,
+            }
+        )

@@ -12,6 +12,29 @@ from views_pipeline_core.data.handlers import CMDataset, PGMDataset, _ViewsDatas
 logger = logging.getLogger(__name__)
 
 
+def _arrow_series_to_numpy(series: pl.Series, n: int, s: int) -> np.ndarray:
+    """
+    Extract an (n, s) float32 numpy array from a Polars List(Float32) series.
+
+    Zero-copy path: Polars → LargeListArray → flatten → numpy view → reshape.
+    No Python list intermediary. Replaces ``np.asarray(series.to_list(), dtype=float)``.
+
+    NOTE: Polars emits LargeListArray (int64 offsets) rather than ListArray, so we
+    use ``flatten()`` for portability across pyarrow versions and Polars Arrow mappings.
+
+    Args:
+        series: Polars Series with dtype List(Float32), length n.
+        n:      Number of rows (outer list length).
+        s:      Number of samples per row (inner list length, must be uniform).
+
+    Returns:
+        numpy.ndarray of shape (n, s), dtype float32.
+    """
+    arrow_col = series.to_arrow()   # LargeListArray or ListArray
+    flat = arrow_col.flatten()      # Float32Array of length n * s
+    return flat.to_numpy(zero_copy_only=False).reshape(n, s)
+
+
 @dataclass
 class _ModelSpec:
     name: str
@@ -71,9 +94,12 @@ class AggregationManager:
             name: Optional name for the model (used in column renaming)
         """
 
-        # Read in dataframe as polars dataframe
-
-        df = self._load_to_polars(data)
+        # Read in dataframe as polars dataframe.
+        # Dispatch: fast Arrow path for Arrow parquet files, legacy path for everything else.
+        if isinstance(data, (str, Path)) and Path(data).suffix == ".parquet":
+            df = self._load_parquet_direct(data)
+        else:
+            df = self._load_to_polars(data)
 
         # Validate Weights
 
@@ -385,10 +411,11 @@ class AggregationManager:
 
             #    pools = df.select(model_cols).map_rows(pool_row)
             #    pooled_cols.append(pools.to_series().alias(target_column))
+            n_rows = df.height
             model_arrays = []
             for col in model_cols:
-                # df[col].to_list() -> List[List[...]] with length n_rows
-                arr = np.asarray(df[col].to_list())
+                # Zero-copy Arrow buffer extraction replaces to_list() + np.asarray()
+                arr = _arrow_series_to_numpy(df[col], n_rows, n_samples).astype(float)
                 # Basic sanity check
                 if arr.ndim != 2 or arr.shape[1] != n_samples:
                     raise ValueError(
@@ -490,11 +517,9 @@ class AggregationManager:
             # Build a single 3D array: (n_rows, n_models, n_samples)
             model_stack = np.empty((n_rows, n_models, n_samples), dtype=float)
 
-            # Only unavoidable Python loop: reading Polars list columns into NumPy
+            # Zero-copy path: Arrow buffer extraction replaces to_list() + np.asarray()
             for j, col in enumerate(model_cols):
-                # Each element in df[col] is a list/array of length n_samples
-                col_vals = df[col].to_list()
-                arr = np.asarray(col_vals, dtype=float)  # (n_rows, n_samples)
+                arr = _arrow_series_to_numpy(df[col], n_rows, n_samples)
                 if arr.ndim != 2 or arr.shape[1] != n_samples:
                     raise ValueError(
                         f"Column {col} does not have shape (n_rows, {n_samples}). "
@@ -696,6 +721,60 @@ class AggregationManager:
         point_agg = point_df.select(self.index_cols)
 
         return point_df, point_agg
+
+    def _load_parquet_direct(self, path: Union[str, Path]) -> pl.DataFrame:
+        """
+        Read an Arrow parquet file with pl.read_parquet() — no pandas or dataset
+        wrapping (Fix B — zero-copy read).
+
+        Expects flat columns as written by PredictionFrameConverter.to_arrow_table():
+            month_id        int64
+            country_id      int64  (or priogrid_id)
+            pred_{target}   List<float32>
+
+        No gap-filling is performed (CMDataset/PGMDataset preprocessing is bypassed).
+        PredictionFrame only contains valid cells; the ensemble aggregates valid cells
+        only; downstream mapping can add zeros for water pixels as needed.
+
+        Args:
+            path: Path to the Arrow parquet file.
+
+        Returns:
+            pl.DataFrame with flat columns (no MultiIndex).
+
+        Raises:
+            ValueError: If required index or target columns are missing.
+            TypeError:  If index columns are not integer or target columns are not List.
+        """
+        path = Path(path)
+        df = pl.read_parquet(path)
+
+        missing_index = [c for c in self.index_cols if c not in df.columns]
+        if missing_index:
+            raise ValueError(
+                f"Parquet '{path.name}' missing index columns: {missing_index}"
+            )
+
+        if self.target_cols:
+            missing_target = [c for c in self.target_cols if c not in df.columns]
+            if missing_target:
+                raise ValueError(
+                    f"Parquet '{path.name}' missing target columns: {missing_target}"
+                )
+
+        for col in self.index_cols:
+            if not isinstance(df[col].dtype, pl.datatypes.IntegerType):
+                raise TypeError(
+                    f"Index column '{col}' must be integer, got {df[col].dtype}"
+                )
+
+        for col in (self.target_cols or []):
+            if not isinstance(df[col].dtype, pl.datatypes.List):
+                raise TypeError(
+                    f"Target column '{col}' must be List, got {df[col].dtype}"
+                )
+
+        return df
 
     def _load_to_polars(
         self, data: Union[pl.DataFrame, pd.DataFrame, str, Path]

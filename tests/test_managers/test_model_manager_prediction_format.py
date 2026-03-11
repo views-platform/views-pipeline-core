@@ -467,8 +467,10 @@ def _run_execute_eval(manager: _ForecastStub, list_predictions: list) -> Mock:
                 with patch.object(
                     ForecastingModelManager, "_evaluate_prediction_dataframe"
                 ):
-                    manager._execute_model_evaluation()
-                    return MockSniffer
+                    with patch.object(PredictionFrame, "save"):
+                        with patch.object(PredictionFrame, "load", return_value=Mock()):
+                            manager._execute_model_evaluation()
+                            return MockSniffer
 
 
 def _run_evaluate_prediction_df(
@@ -735,8 +737,9 @@ class TestPFDictDispatch:
     GREEN after Steps A-E: manager iterates dict.items() for all targets.
     """
 
-    def test_pf_eval_single_target_dict_calls_to_legacy_dfs(self):
-        """Single-target dict eval: to_prediction_df called exactly once with correct target."""
+    def test_pf_eval_single_target_dict_calls_to_arrow_table(self):
+        """Single-target dict eval: to_arrow_table called exactly once with correct target."""
+        import pyarrow as pa
         from views_pipeline_core.managers.prediction.prediction_frame_converter import (
             PredictionFrameConverter,
         )
@@ -745,21 +748,26 @@ class TestPFDictDispatch:
         manager = _make_eval_stub("prediction_frame")
         manager._test_eval_return = {"lr_sb": [pf]}
 
+        dummy_table = pa.table({"month_id": [445, 445], "priogrid_id": [1, 2],
+                                 "pred_lr_sb": [[1.0, 1.0], [1.0, 1.0]]})
         with patch.object(
-            PredictionFrameConverter, "to_prediction_df", return_value=_make_dummy_df()
-        ) as mock_tld:
+            PredictionFrameConverter, "to_arrow_table", return_value=dummy_table
+        ) as mock_tat:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
                     with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-                        manager._execute_model_evaluation()
+                        with patch.object(PredictionFrame, "save"):
+                            with patch.object(PredictionFrame, "load", return_value=Mock()):
+                                manager._execute_model_evaluation()
 
-        mock_tld.assert_called_once()
-        # Positional args: (pf, target)
-        _pf, _target = mock_tld.call_args[0]
+        mock_tat.assert_called_once()
+        # Positional args: (pf, target, level=...)
+        _pf, _target = mock_tat.call_args[0]
         assert _target == "lr_sb"
 
-    def test_pf_eval_multi_target_dict_calls_to_legacy_dfs_per_target(self):
-        """Two-target dict eval: to_prediction_df called once per target, both targets used."""
+    def test_pf_eval_multi_target_dict_calls_to_arrow_table_per_target(self):
+        """Two-target dict eval: to_arrow_table called once per target, both targets used."""
+        import pyarrow as pa
         from views_pipeline_core.managers.prediction.prediction_frame_converter import (
             PredictionFrameConverter,
         )
@@ -768,16 +776,20 @@ class TestPFDictDispatch:
         manager = _make_eval_stub("prediction_frame")
         manager._test_eval_return = {"lr_sb": [pf1], "ged_ns": [pf2]}
 
+        dummy_table = pa.table({"month_id": [445, 445], "priogrid_id": [1, 2],
+                                 "pred_lr_sb": [[1.0, 1.0], [1.0, 1.0]]})
         with patch.object(
-            PredictionFrameConverter, "to_prediction_df", return_value=_make_dummy_df()
-        ) as mock_tld:
+            PredictionFrameConverter, "to_arrow_table", return_value=dummy_table
+        ) as mock_tat:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
                     with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-                        manager._execute_model_evaluation()
+                        with patch.object(PredictionFrame, "save"):
+                            with patch.object(PredictionFrame, "load", return_value=Mock()):
+                                manager._execute_model_evaluation()
 
-        assert mock_tld.call_count == 2
-        targets_called = {call[0][1] for call in mock_tld.call_args_list}
+        assert mock_tat.call_count == 2
+        targets_called = {call[0][1] for call in mock_tat.call_args_list}
         assert targets_called == {"lr_sb", "ged_ns"}
 
     def test_pf_forecast_single_target_dict_calls_to_legacy_dfs(self):
@@ -1023,3 +1035,120 @@ class TestPFEvalCleanPath:
             f"returned by from_prediction_frames() ({expected_ef!r}). "
             "The parity bridge EF must not reach evaluate()."
         )
+
+
+# ── OOM mitigation: skip_predictions_delivery + actuals free ─────────────────
+
+class TestOOMMitigation:
+    """
+    Tests for the two OOM-mitigation changes:
+
+    1. skip_predictions_delivery=True skips Track B (to_prediction_df + _save_predictions)
+       while keeping Track A (pf.save) intact.
+
+    2. _evaluate_prediction_dataframe() frees df_viewser (actuals, ~6 GB) immediately
+       after extracting df_actual, before the per-target metrics loop.
+    """
+
+    def test_skip_predictions_delivery_skips_track_b(self):
+        """
+        When configs['skip_predictions_delivery'] = True, Track B is suppressed:
+        - converter.to_prediction_df must NOT be called
+        - _save_predictions must NOT be called
+        - PredictionFrame.save (Track A) MUST still be called
+        """
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
+        )
+
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ] = True
+        manager._test_eval_return = {"lr_sb": [pf]}
+
+        with patch.object(PredictionFrameConverter, "to_prediction_df") as mock_convert:
+            with patch.object(
+                ForecastingModelManager, "_assert_predictions_in_step_window"
+            ):
+                with patch.object(
+                    ForecastingModelManager, "_evaluate_prediction_dataframe"
+                ):
+                    with patch(
+                        "views_pipeline_core.files.utils.handle_single_log_creation"
+                    ):
+                        with patch.object(PredictionFrame, "save") as mock_save:
+                            with patch.object(
+                                PredictionFrame, "load", return_value=Mock()
+                            ):
+                                manager._execute_model_evaluation()
+
+        mock_convert.assert_not_called()
+        manager._save_predictions.assert_not_called()
+        mock_save.assert_called()  # Track A must still run
+
+    def test_df_viewser_freed_before_target_loop(self):
+        """
+        _evaluate_prediction_dataframe() must contain 'del df_viewser' to free
+        the actuals DataFrame (~6 GB) before the per-target metrics loop.
+        Without this, df_viewser coexists with the EvaluationAdapter allocation
+        across all T iterations.
+        """
+        import inspect
+
+        source = inspect.getsource(
+            ForecastingModelManager._evaluate_prediction_dataframe
+        )
+        assert "del df_viewser" in source, (
+            "_evaluate_prediction_dataframe() must explicitly 'del df_viewser' after "
+            "extracting df_actual. The actuals DataFrame (~6 GB at pgm scale) must be "
+            "freed before the per-target metrics loop to avoid coexisting with the "
+            "EvaluationAdapter's y_pred_out pre-allocation."
+        )
+
+    def test_pf_dict_entries_freed_per_target(self):
+        """
+        _origin_sink must use pf_dict.pop(target) to free each PF immediately
+        after saving, rather than iterating pf_dict.items() (which keeps all T
+        PFs alive until del pf_dict at the end of the loop).
+
+        At S=64, T=6 targets: all-at-once peak = 9.54 GB; pop pattern peak = 1.59 GB.
+        This structural test guards against regression to the ineffective
+        'for target, pf in pf_dict.items() / del pf_dict' pattern.
+        """
+        import inspect
+
+        source = inspect.getsource(ForecastingModelManager._execute_model_evaluation)
+        assert "pf_dict.pop(" in source, (
+            "_origin_sink must use pf_dict.pop(target) to remove each PF from the "
+            "dict immediately after saving. The 'for target, pf in pf_dict.items()' "
+            "pattern keeps all T PFs alive simultaneously (up to 9.54 GB at S=64, "
+            "T=6) and cannot be freed inside the loop."
+        )
+
+    def test_skip_evaluation_metrics_skips_metrics_call(self):
+        """
+        When configs['skip_evaluation_metrics'] = True, _evaluate_prediction_dataframe
+        must NOT be called — the 20+ GB y_pred_out pre-allocation at high sample
+        counts (S=64) is bypassed entirely.
+        """
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_evaluation_metrics"
+        ] = True
+        manager._test_eval_return = {"lr_sb": [pf]}
+
+        with patch.object(
+            ForecastingModelManager, "_evaluate_prediction_dataframe"
+        ) as mock_eval_df:
+            with patch.object(
+                ForecastingModelManager, "_assert_predictions_in_step_window"
+            ):
+                with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
+                    with patch.object(PredictionFrame, "save"):
+                        with patch.object(PredictionFrame, "load", return_value=Mock()):
+                            manager._execute_model_evaluation()
+
+        mock_eval_df.assert_not_called()
