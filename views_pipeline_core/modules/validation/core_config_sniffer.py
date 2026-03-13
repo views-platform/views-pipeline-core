@@ -37,6 +37,10 @@ MAX_SHIFT_COUNT      = 12
 # Supported prediction output formats — extend here when new formats are supported
 SUPPORTED_PREDICTION_FORMATS = frozenset({"dataframe", "prediction_frame"})
 
+# Evaluation mode — optional config key; controls whether samples are kept or collapsed
+SUPPORTED_EVALUATION_MODES  = frozenset({"stochastic", "point"})
+SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
+
 # Run-type identifiers
 FORECASTING_RUN_TYPE = "forecasting"   # used in sniff_all() guard
 
@@ -77,6 +81,7 @@ class CoreConfigSniffer:
         self._check_currently_supported_values()
         self._check_level()
         self._check_prediction_format()
+        self._check_evaluation_mode()
         if run_type != FORECASTING_RUN_TYPE:
             self._check_evaluation_contract(run_type)
         logger.info("CoreConfigSniffer: Config audited (run_type='%s').", run_type)
@@ -188,6 +193,38 @@ class CoreConfigSniffer:
                 f"Update SUPPORTED_PREDICTION_FORMATS in core_config_sniffer.py "
                 f"when a new format is ready."
             )
+
+    def _check_evaluation_mode(self) -> None:
+        """
+        Validate the optional evaluation_mode / aggregate_method config keys.
+
+        evaluation_mode is optional. When present it must be in SUPPORTED_EVALUATION_MODES.
+        When evaluation_mode='point', aggregate_method is required and must be in
+        SUPPORTED_AGGREGATE_METHODS. aggregate_method without evaluation_mode is ignored.
+        """
+        mode = self._c.get("evaluation_mode")
+        if mode is None:
+            return
+        if mode not in SUPPORTED_EVALUATION_MODES:
+            raise ValueError(
+                f"CoreConfigSniffer: evaluation_mode='{mode}' is not supported. "
+                f"Supported: {sorted(SUPPORTED_EVALUATION_MODES)}. "
+                f"Update SUPPORTED_EVALUATION_MODES in core_config_sniffer.py when ready."
+            )
+        if mode == "point":
+            method = self._c.get("aggregate_method")
+            if method is None:
+                raise ValueError(
+                    "CoreConfigSniffer: evaluation_mode='point' requires "
+                    "aggregate_method to be set. "
+                    f"Supported: {sorted(SUPPORTED_AGGREGATE_METHODS)}."
+                )
+            if method not in SUPPORTED_AGGREGATE_METHODS:
+                raise ValueError(
+                    f"CoreConfigSniffer: aggregate_method='{method}' is not supported. "
+                    f"Supported: {sorted(SUPPORTED_AGGREGATE_METHODS)}. "
+                    f"Update SUPPORTED_AGGREGATE_METHODS in core_config_sniffer.py when ready."
+                )
 
     def _check_evaluation_contract(self, run_type: str) -> None:
         if run_type not in self._partition_dict:

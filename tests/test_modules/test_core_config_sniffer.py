@@ -267,3 +267,68 @@ class TestCoreConfigSniffer:
         configs = _valid_configs()
         configs["prediction_format"] = "prediction_frame"
         CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+
+# ---------------------------------------------------------------------------
+# TestEvaluationModeValidation — new config keys: evaluation_mode / aggregate_method
+# ---------------------------------------------------------------------------
+
+class TestEvaluationModeValidation:
+    """
+    Tests for the optional evaluation_mode / aggregate_method config keys.
+
+    - evaluation_mode is optional; absent → no raise.
+    - Supported values: "stochastic", "point".
+    - When evaluation_mode="point", aggregate_method is required.
+    - Supported aggregate_method values: "arithmetic_mean".
+    """
+
+    def test_stochastic_mode_passes(self):
+        """evaluation_mode='stochastic' with no aggregate_method → valid."""
+        configs = {**_valid_configs(), "evaluation_mode": "stochastic"}
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_point_mode_with_arithmetic_mean_passes(self):
+        """evaluation_mode='point' + aggregate_method='arithmetic_mean' → valid."""
+        configs = {
+            **_valid_configs(),
+            "evaluation_mode": "point",
+            "aggregate_method": "arithmetic_mean",
+        }
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_point_mode_missing_aggregate_method_raises(self):
+        """evaluation_mode='point' without aggregate_method must raise ValueError."""
+        configs = {**_valid_configs(), "evaluation_mode": "point"}
+        with pytest.raises(ValueError, match="aggregate_method"):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_unsupported_evaluation_mode_raises(self):
+        """Unsupported evaluation_mode value must raise ValueError."""
+        configs = {**_valid_configs(), "evaluation_mode": "bayesian"}
+        with pytest.raises(ValueError, match="evaluation_mode"):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_unsupported_aggregate_method_raises(self):
+        """Unsupported aggregate_method value must raise ValueError."""
+        configs = {
+            **_valid_configs(),
+            "evaluation_mode": "point",
+            "aggregate_method": "geometric_mean",
+        }
+        with pytest.raises(ValueError, match="aggregate_method"):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_absent_evaluation_mode_does_not_raise(self):
+        """evaluation_mode is optional — absent key must not raise."""
+        configs = _valid_configs()
+        configs.pop("evaluation_mode", None)
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_aggregate_method_without_evaluation_mode_is_silently_ignored(self):
+        """
+        aggregate_method alone (no evaluation_mode) must not raise.
+        Documents that aggregate_method is only validated when evaluation_mode='point'.
+        """
+        configs = {**_valid_configs(), "aggregate_method": "arithmetic_mean"}
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")

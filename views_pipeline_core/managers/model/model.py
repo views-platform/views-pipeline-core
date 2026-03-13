@@ -2458,7 +2458,16 @@ class ForecastingModelManager(ModelManager):
                             df, targets=self.configs["targets"]
                         )
 
-                if self.configs.get("metrics"):
+                has_metrics = any([
+                    self.configs.get("metrics"),
+                    self.configs.get("regression_metrics"),
+                    self.configs.get("classification_metrics"),
+                    self.configs.get("regression_point_metrics"),
+                    self.configs.get("regression_sample_metrics"),
+                    self.configs.get("classification_point_metrics"),
+                    self.configs.get("classification_sample_metrics"),
+                ])
+                if has_metrics:
                     self._evaluate_prediction_dataframe(raw_preds_sweep, self._eval_type)
                 else:
                     raise PipelineException("No evaluation metrics specified in config_meta.py")
