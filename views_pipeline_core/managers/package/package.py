@@ -200,7 +200,7 @@ class PackageManager:
             bool: True if the name is valid, False otherwise.
         """
         # Define a regex pattern for names starting with "views_"
-        pattern = rf"^{PipelineConfig().organization_name}-.*$"
+        pattern = rf"^{PipelineConfig.organization_name}-.*$"
         # Check if the name matches the pattern
         if re.match(pattern, name):
             return True
@@ -239,7 +239,7 @@ class PackageManager:
             )
             self.add_dependency(
                 package_name="views-pipeline-core",
-                version=PipelineConfig().views_pipeline_core_version_range,
+                version=PipelineConfig.views_pipeline_core_version_range,
             )
             if result.returncode != 0:
                 logging.error(f"Poetry run failed with error: {result.stderr}")

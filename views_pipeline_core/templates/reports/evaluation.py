@@ -103,7 +103,7 @@ class EvaluationReportTemplate:
             markdown_text += (
                 f"**Constituent Models**: {metadata_dict.get('models', None)}  \n"
             )
-        markdown_text += f"**Pipeline Version**: {PipelineConfig().current_version}"
+        markdown_text += f"**Pipeline Version**: {PipelineConfig.current_version}"
         report_manager.add_markdown(markdown_text=markdown_text)
 
         task_definition_md = (

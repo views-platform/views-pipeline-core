@@ -1,1 +1,1 @@
-from .model import ModelManager, ModelPathManager, ForecastingModelManager
+from .model import ModelManager as ModelManager, ModelPathManager as ModelPathManager, ForecastingModelManager as ForecastingModelManager

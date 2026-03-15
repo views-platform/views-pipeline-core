@@ -1983,7 +1983,10 @@ class _PGDataset(_ViewsDataset):
             return combined.to_frame(name="name")
 
     def get_region(self) -> pd.DataFrame:
-        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        """Get continent using GW code ranges (Gleditsch & Ward system).
+
+        Public API — geographic classification utility for reporting and spatial filtering.
+        """
         self._build_entity_metadata_cache()
         gwcode = self._entity_metadata_cache["gwcode"].reindex(self.dataframe.index)
 
@@ -2180,8 +2183,11 @@ class _CDataset(_ViewsDataset):
             }
         )
 
-    def get_region(self) -> pd.DataFrame:
-        """Get combined region information"""
+    def get_region_flags(self) -> pd.DataFrame:
+        """Get boolean region flags (in_africa, in_me).
+
+        Public API — geographic classification utility for reporting and spatial filtering.
+        """
         self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
@@ -2195,7 +2201,10 @@ class _CDataset(_ViewsDataset):
         )
 
     def get_region(self) -> pd.DataFrame:
-        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        """Get continent using GW code ranges (Gleditsch & Ward system).
+
+        Public API — geographic classification utility for reporting and spatial filtering.
+        """
         self._build_entity_metadata_cache()
         gwcode = self._entity_metadata_cache["gwcode"].reindex(self.dataframe.index)
 

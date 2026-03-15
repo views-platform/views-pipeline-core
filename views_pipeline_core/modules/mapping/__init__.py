@@ -1,1 +1,1 @@
-from .mapping import MappingModule
+from .mapping import MappingModule as MappingModule

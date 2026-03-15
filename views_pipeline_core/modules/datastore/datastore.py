@@ -264,51 +264,6 @@ class DatastoreModule:
             NotImplementedError: If file is a DataFrame (not yet supported).
             TypeError: If file is not a Path, str, or DataFrame.
         """
-        # if name is None:
-        #     name = self.model_path.model_name
-        # metadata = FileMetadata(
-        #     loa=loa, name=name, type=type, targets=targets, description=description, category=category
-        # ).to_dict()
-        # if isinstance(file, pd.DataFrame):
-        #     raise NotImplementedError(
-        #         "Uploading a DataFrame directly is not implemented."
-        #     )
-        # elif isinstance(file, (Path, str)):
-        #     file_path = str(file)
-        #     upload_result = self.__appwrite_file_manager.upload_file_with_metadata(
-        #         bucket_id=self.__appwrite_file_manager_config.bucket_id,
-        #         filename=filename,
-        #         file_path=file_path,
-        #         metadata=metadata,
-        #         collection_name=self.__appwrite_file_manager_config.collection_name,
-        #         collection_id=self.__appwrite_file_manager_config.collection_id,
-        #     ).to_dict()
-        # else:
-        #     raise TypeError("file must be a Path, str, or pd.DataFrame")
-
-        # if upload_result.get("code") == "storage_bucket_not_found":
-        #     logger.info(
-        #         f"Bucket '{self.__appwrite_file_manager_config.bucket_id}' not found. Creating it..."
-        #     )
-        #     try:
-        #         self.__appwrite_file_manager.create_bucket(
-        #             bucket_id=self.__appwrite_file_manager_config.bucket_id,
-        #             name=self.__appwrite_file_manager_config.bucket_name,
-        #         )
-        #     except Exception as e:
-        #         logger.error(f"Failed to create bucket: {e}")
-        #         return OperationResult(success=False, error=str(e))
-
-        #     upload_result = self.__appwrite_file_manager.upload_file_with_metadata(
-        #         bucket_id=self.__appwrite_file_manager_config.bucket_id,
-        #         file_path=file_path,
-        #         filename=filename,
-        #         metadata=metadata,
-        #         collection_name=self.__appwrite_file_manager_config.collection_name,
-        #         collection_id=self.__appwrite_file_manager_config.collection_id,
-        #     ).to_dict()
-        
-        # return OperationResult(**upload_result)
         logger.warning("upload_predictions is deprecated. Use upload_data instead.")
         return self.upload_data(
             file=file,

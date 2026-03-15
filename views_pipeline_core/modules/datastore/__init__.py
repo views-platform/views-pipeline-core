@@ -1,1 +1,1 @@
-from .datastore import (FileMetadata, DatastoreModule)
+from .datastore import FileMetadata as FileMetadata, DatastoreModule as DatastoreModule

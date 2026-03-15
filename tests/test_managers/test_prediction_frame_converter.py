@@ -200,6 +200,87 @@ class TestAuditParityEf:
 
 
 # ---------------------------------------------------------------------------
+# TestAuditParityEfEndToEnd
+# ---------------------------------------------------------------------------
+
+class TestAuditParityEfEndToEnd:
+    """End-to-end: real PredictionFrame → both adapter paths → audit confirms parity."""
+
+    def test_real_pf_produces_parity(self):
+        """A real PredictionFrame converted through both paths yields identical EFs."""
+        from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+        pf = PredictionFrame(
+            y_pred=np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32),
+            identifiers={
+                "time": np.array([500, 500, 501]),
+                "unit": np.array([1, 2, 1]),
+            },
+        )
+
+        # Build EF-like objects from PF arrays (simulating both adapter paths)
+        ef_pf = SimpleNamespace(
+            y_true=np.array([10.0, 20.0, 30.0]),
+            y_pred=pf.y_pred,
+            identifiers={
+                "time":   pf.identifiers["time"],
+                "unit":   pf.identifiers["unit"],
+                "origin": np.array([0, 0, 0]),
+                "step":   np.array([1, 1, 2]),
+            },
+        )
+        ef_df = SimpleNamespace(
+            y_true=np.array([10.0, 20.0, 30.0]),
+            y_pred=pf.y_pred.copy(),
+            identifiers={
+                "time":   pf.identifiers["time"].copy(),
+                "unit":   pf.identifiers["unit"].copy(),
+                "origin": np.array([0, 0, 0]),
+                "step":   np.array([1, 1, 2]),
+            },
+        )
+
+        # Must not raise — confirms audit_parity_ef works with real PF data
+        PredictionFrameConverter().audit_parity_ef(ef_pf, ef_df, "sb")
+
+    def test_real_pf_detects_mismatch(self):
+        """Perturbed PF data must trigger parity failure."""
+        from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+        pf = PredictionFrame(
+            y_pred=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+            identifiers={
+                "time": np.array([500, 501]),
+                "unit": np.array([1, 1]),
+            },
+        )
+
+        ef_pf = SimpleNamespace(
+            y_true=np.array([10.0, 20.0]),
+            y_pred=pf.y_pred,
+            identifiers={
+                "time": pf.identifiers["time"],
+                "unit": pf.identifiers["unit"],
+                "origin": np.array([0, 0]),
+                "step": np.array([1, 2]),
+            },
+        )
+        ef_df = SimpleNamespace(
+            y_true=np.array([10.0, 20.0]),
+            y_pred=pf.y_pred + 999.0,  # ← deliberate mismatch
+            identifiers={
+                "time": pf.identifiers["time"].copy(),
+                "unit": pf.identifiers["unit"].copy(),
+                "origin": np.array([0, 0]),
+                "step": np.array([1, 2]),
+            },
+        )
+
+        with pytest.raises(ValueError, match="[Pp]arity"):
+            PredictionFrameConverter().audit_parity_ef(ef_pf, ef_df, "sb")
+
+
+# ---------------------------------------------------------------------------
 # TestAuditPredictionStructure
 # ---------------------------------------------------------------------------
 

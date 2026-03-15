@@ -573,7 +573,7 @@ class EnsembleManager(ForecastingModelManager):
             )
             file_path = (
                 path_generated
-                / f"predictions_{run_type}_{ts}{seq_suffix}{PipelineConfig().dataframe_format}"
+                / f"predictions_{run_type}_{ts}{seq_suffix}{PipelineConfig.dataframe_format}"
             )
             if file_path.exists():
                 pred = read_dataframe(file_path)
@@ -753,54 +753,6 @@ class EnsembleManager(ForecastingModelManager):
                 f"Could not find latest C dataset for {cm_model} locally: {e}"
             )
             return None
-
-    @staticmethod
-    def _get_aggregated_df_old(
-        df_to_aggregate: List[pd.DataFrame], aggregation: str
-    ) -> pd.DataFrame:
-        """
-        Aggregates DataFrames using mean or median aggregation.
-        Handles single-element lists by converting to scalars.
-
-        Args:
-            df_to_aggregate (List[pd.DataFrame]): List of DataFrames to aggregate.
-            aggregation (str): Aggregation method ('mean' or 'median').
-
-        Returns:
-            pd.DataFrame: Aggregated DataFrame.
-        """
-        processed_dfs = []
-
-        for df in df_to_aggregate:
-            df_processed = df.copy()
-
-            for col in df_processed.columns:
-
-                def process_element(elem):
-                    if isinstance(elem, list):
-                        if len(elem) == 1:
-                            return elem[0]
-                        elif len(elem) == 0:
-                            return None
-                        else:
-                            raise ValueError(
-                                f"Aggregating distributions is not supported. "
-                                f"Found list with {len(elem)} values in column '{col}'."
-                            )
-                    return elem
-
-                df_processed[col] = df_processed[col].apply(process_element)
-
-            processed_dfs.append(df_processed)
-
-        concatenated = pd.concat(processed_dfs)
-
-        if aggregation == "mean":
-            return concatenated.groupby(level=[0, 1]).mean()
-        elif aggregation == "median":
-            return concatenated.groupby(level=[0, 1]).median()
-        else:
-            raise ValueError(f"Invalid aggregation method: {aggregation}")
 
     def _get_aggregated_df(
         self,

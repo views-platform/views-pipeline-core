@@ -1,1 +1,1 @@
-from .reconciliation import ReconciliationModule
+from .reconciliation import ReconciliationModule as ReconciliationModule

@@ -1,1 +1,1 @@
-from .aggregator import AggregationManager, _ModelSpec
+from .aggregator import AggregationManager as AggregationManager, _ModelSpec as _ModelSpec

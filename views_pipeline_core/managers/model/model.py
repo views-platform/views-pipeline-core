@@ -603,7 +603,7 @@ class ModelPathManager:
             for f in self.data_raw.iterdir()
             if f.is_file()
             and f.stem.startswith(f"{run_type}_viewser_df")
-            and f.suffix == PipelineConfig().dataframe_format
+            and f.suffix == PipelineConfig.dataframe_format
         ]
         return sorted(paths, reverse=True)
 
@@ -627,7 +627,7 @@ class ModelPathManager:
             for f in self.data_generated.iterdir()
             if f.is_file()
             and f.stem.startswith(f"predictions_{run_type}")
-            and f.suffix == PipelineConfig().dataframe_format
+            and f.suffix == PipelineConfig.dataframe_format
         ]
         return sorted(paths, reverse=True)
 
@@ -650,7 +650,7 @@ class ModelPathManager:
             for f in self.data_generated.iterdir()
             if f.is_file()
             and f.stem.startswith(f"eval_{run_type}_{conflict_type}")
-            and f.suffix == PipelineConfig().dataframe_format
+            and f.suffix == PipelineConfig.dataframe_format
         ]
         return sorted(paths, reverse=True)
 
@@ -1110,14 +1110,13 @@ class ModelManager:
         else:
             self._pred_store_name = None
 
-        self.set_dataframe_format(format=".parquet")
         if self.__class__.__instances__ == 1:
             self.__ascii_splash()
 
     def __ascii_splash(self) -> None:
         from art import text2art
 
-        _pc = PipelineConfig()
+        _pc = PipelineConfig
         text = text2art(
             f"{self._model_path.model_name.replace('-', ' ')}", font="random-medium"
         )
@@ -2111,6 +2110,16 @@ class ForecastingModelManager(ModelManager):
                         nonlocal n_sequences
                         if not all_targets:
                             all_targets.extend(pf_dict.keys())
+                        else:
+                            missing = set(all_targets) - set(pf_dict.keys())
+                            if missing:
+                                logger.warning(
+                                    "Origin %d is missing targets %s present "
+                                    "in origin 0. These targets will not be "
+                                    "saved for this origin, and mmap reload "
+                                    "will fail at metric evaluation time.",
+                                    origin_idx, sorted(missing),
+                                )
                         for target in list(pf_dict.keys()):
                             pf = pf_dict.pop(target)  # remove from dict → refcount drops
                             # Track A — compact numpy (metrics)
@@ -2753,21 +2762,21 @@ class ForecastingModelManager(ModelManager):
                 target_identifier,
                 self.configs["run_type"],
                 self.configs["timestamp"],
-                PipelineConfig().dataframe_format,
+                PipelineConfig.dataframe_format,
             )
             eval_ts_path = generate_evaluation_file_name(
                 "ts",
                 target_identifier,
                 self.configs["run_type"],
                 self.configs["timestamp"],
-                PipelineConfig().dataframe_format,
+                PipelineConfig.dataframe_format,
             )
             eval_month_path = generate_evaluation_file_name(
                 "month",
                 target_identifier,
                 self.configs["run_type"],
                 self.configs["timestamp"],
-                PipelineConfig().dataframe_format,
+                PipelineConfig.dataframe_format,
             )
 
             save_dataframe(df_month_wise_evaluation, path_generated / eval_month_path)
@@ -2858,7 +2867,7 @@ class ForecastingModelManager(ModelManager):
                 self.configs["run_type"],
                 self.configs["timestamp"],
                 sequence_number,
-                file_extension=PipelineConfig().dataframe_format,
+                file_extension=PipelineConfig.dataframe_format,
             )
 
             if isinstance(df_predictions, pa.Table):
@@ -2941,7 +2950,7 @@ class ForecastingModelManager(ModelManager):
         else:
             df_path = (
                 ModelPathManager(self.configs["models"][0]).data_raw
-                / f"{self.configs['run_type']}_viewser_df{PipelineConfig().dataframe_format}"
+                / f"{self.configs['run_type']}_viewser_df{PipelineConfig.dataframe_format}"
             )
             df_viewser = read_dataframe(df_path)
 
@@ -2998,6 +3007,13 @@ class ForecastingModelManager(ModelManager):
                         )
                         continue
                     step_mappings = self._get_evaluation_step_mappings(n_sequences=len(raw_preds))
+
+                    logger.debug(
+                        "PF path: assuming target '%s' aligns with "
+                        "PredictionFrame.y_pred by model-author contract "
+                        "(ADR-033). No cross-check performed.",
+                        target,
+                    )
 
                     ef = EvaluationAdapter.from_prediction_frames(
                         actual=actual_slice,

@@ -1,2 +1,2 @@
-from .report import ReportModule
+from .report import ReportModule as ReportModule
 from .utils import *

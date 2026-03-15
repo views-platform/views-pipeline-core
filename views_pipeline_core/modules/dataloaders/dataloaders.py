@@ -13,15 +13,10 @@ from views_pipeline_core.managers.model import ModelPathManager
 from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer, _PARTITION_TRAIN, _PARTITION_TEST
 from ingester3.ViewsMonth import ViewsMonth
 
-# import views_transformation_library as vtl
 import views_transformation_library.views_2 as views2
-# import views_transformation_library.splag4d as splag4d
 import views_transformation_library.missing as missing
 from viewser import Queryset
 import traceback
-# import views_transformation_library.splag_country as splag_country
-# import views_transformation_library.spatial_tree as spatial_tree
-# import views_transformation_library.spacetime_distance as spacetime_distance
 from dotenv import load_dotenv
 from typing import Tuple, List, Any
 import ast
@@ -886,7 +881,7 @@ class ViewsDataLoader:
                 f".env file found but could not be loaded: {dotenv_path}"
             )
 
-        # months_to_update = PipelineConfig().months_to_update #read from .env
+        # months_to_update = PipelineConfig.months_to_update #read from .env
         months_to_update_str = os.getenv("month_to_update")
         if not months_to_update_str or months_to_update_str == "":
             raise ValueError("Could not find months to update in the .env file. Add the line: month_to_update=[123, 124, 125]")

@@ -1,1 +1,1 @@
-from .statistics import PosteriorDistributionAnalyzer, ForecastReconciler
+from .statistics import PosteriorDistributionAnalyzer as PosteriorDistributionAnalyzer, ForecastReconciler as ForecastReconciler
