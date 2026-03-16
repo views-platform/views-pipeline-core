@@ -518,9 +518,6 @@ def _run_evaluate_prediction_df(
                                 {445 + s: s for s in range(1, 37)}
                             ]
                             with patch.object(
-                                ForecastingModelManager, "_audit_parity"
-                            ):
-                                with patch.object(
                                     PredictionFrameConverter, "audit_parity_ef"
                                 ):
                                     with patch.object(
@@ -938,24 +935,20 @@ def _run_pf_eval_clean_path(manager: _ForecastStub, list_predictions: dict) -> t
                                     PredictionFrameConverter, "audit_parity_ef"
                                 ):
                                     with patch.object(
-                                        ForecastingModelManager, "_audit_parity"
-                                    ) as mock_ap:
-                                        with patch.object(
-                                            ForecastingModelManager,
-                                            "_generate_evaluation_table",
-                                            return_value="",
-                                        ):
-                                            with patch("wandb.summary"):
-                                                manager._evaluate_prediction_dataframe(
-                                                    list_predictions, "calibration"
-                                                )
-                                                return (
-                                                    MockEM.return_value.evaluate,
-                                                    mock_tld,
-                                                    mock_ap,
-                                                    mock_fpf,
-                                                    mock_fd,
-                                                )
+                                        ForecastingModelManager,
+                                        "_generate_evaluation_table",
+                                        return_value="",
+                                    ):
+                                        with patch("wandb.summary"):
+                                            manager._evaluate_prediction_dataframe(
+                                                list_predictions, "calibration"
+                                            )
+                                            return (
+                                                MockEM.return_value.evaluate,
+                                                mock_tld,
+                                                mock_fpf,
+                                                mock_fd,
+                                            )
 
 
 class TestPFEvalCleanPath:
@@ -978,7 +971,7 @@ class TestPFEvalCleanPath:
         """PF path must call EvaluationManager.evaluate() exactly once."""
         pf = _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
-        mock_evaluate, _, _, _, _ = _run_pf_eval_clean_path(
+        mock_evaluate, _, _, _ = _run_pf_eval_clean_path(
             manager, {"lr_sb": [pf]}
         )
         assert mock_evaluate.call_count == 1, (
@@ -991,7 +984,7 @@ class TestPFEvalCleanPath:
         """PF path must never call evaluate(ef=None) — legacy path must be bypassed."""
         pf = _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
-        mock_evaluate, _, _, _, _ = _run_pf_eval_clean_path(
+        mock_evaluate, _, _, _ = _run_pf_eval_clean_path(
             manager, {"lr_sb": [pf]}
         )
         for call_args in mock_evaluate.call_args_list:
@@ -1001,18 +994,12 @@ class TestPFEvalCleanPath:
                 "The legacy evaluate(ef=None) call must be removed."
             )
 
-    def test_pf_eval_does_not_call_audit_parity(self):
-        """_audit_parity() (level-2 metric parity) must NOT be called on PF path.
-
-        Level-1 EF parity (array comparison via audit_parity_ef) is sufficient;
-        level-2 metric parity is redundant and doubles memory/compute.
-        """
-        pf = _make_simple_pf()
-        manager = _make_eval_stub("prediction_frame")
-        _, _, mock_ap, _, _ = _run_pf_eval_clean_path(
-            manager, {"lr_sb": [pf]}
+    def test_pf_eval_audit_parity_method_removed(self):
+        """_audit_parity() must not exist — parity proving scaffolding deleted."""
+        assert not hasattr(ForecastingModelManager, "_audit_parity"), (
+            "_audit_parity() method still exists on ForecastingModelManager. "
+            "It should have been deleted as part of parity proving removal."
         )
-        mock_ap.assert_not_called()
 
     def test_pf_eval_evaluate_called_with_ef_from_prediction_frames(self):
         """evaluate() must receive the EF built from PredictionFrames, not from DataFrames.
@@ -1022,7 +1009,7 @@ class TestPFEvalCleanPath:
         """
         pf = _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
-        mock_evaluate, _, _, mock_fpf, _ = _run_pf_eval_clean_path(
+        mock_evaluate, _, mock_fpf, _ = _run_pf_eval_clean_path(
             manager, {"lr_sb": [pf]}
         )
         # The EF returned by from_prediction_frames() is the sentinel mock_ef_pf.
@@ -1035,6 +1022,137 @@ class TestPFEvalCleanPath:
             f"returned by from_prediction_frames() ({expected_ef!r}). "
             "The parity bridge EF must not reach evaluate()."
         )
+
+
+# ── Clean DF evaluation path (symmetric with PF) ─────────────────────────────
+
+
+def _run_df_eval_clean_path(manager: _ForecastStub, list_predictions: list) -> tuple:
+    """
+    Run manager._evaluate_prediction_dataframe() for the DF path with
+    fine-grained mocks.
+
+    Returns (mock_evaluate, mock_audit_parity) so callers can assert:
+    - evaluate() call count and kwargs
+    - _audit_parity() call count (must be zero — parity proving removed)
+    """
+    from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
+
+    actuals_df = pd.DataFrame(
+        {"lr_sb": [1.0, 2.0]},
+        index=pd.MultiIndex.from_tuples(
+            [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
+        ),
+    )
+    eval_result = {
+        "step":        ({}, pd.DataFrame()),
+        "time_series": ({}, pd.DataFrame()),
+        "month":       ({}, pd.DataFrame()),
+    }
+
+    with patch("views_pipeline_core.files.utils.read_dataframe", return_value=actuals_df):
+        with patch.object(
+            ForecastingModelManager, "prepare_actuals_df", return_value=actuals_df
+        ):
+            with patch(
+                "views_evaluation.evaluation.evaluation_manager.EvaluationManager"
+            ) as MockEM:
+                MockEM.return_value.evaluate.return_value = eval_result
+                with patch.object(EvaluationAdapter, "from_dataframes") as mock_fd:
+                    mock_fd.return_value = MagicMock(name="ef_from_dataframes")
+                    with patch.object(
+                        ForecastingModelManager, "_get_evaluation_step_mappings"
+                    ) as mock_sm:
+                        mock_sm.return_value = [{445 + s: s for s in range(1, 37)}]
+                        with patch.object(
+                            ForecastingModelManager,
+                            "_generate_evaluation_table",
+                            return_value="",
+                        ):
+                            with patch("wandb.summary"):
+                                manager._evaluate_prediction_dataframe(
+                                    list_predictions, "calibration"
+                                )
+                                return MockEM.return_value.evaluate
+
+
+class TestDFEvalCleanPath:
+    """
+    Verify the DF evaluation path is clean (symmetric with PF path):
+
+    (a) evaluate() is called exactly once — no dual execution.
+    (b) evaluate() is called with ef=<EvaluationFrame> — not ef=None.
+    (c) _audit_parity() is never called — transition scaffolding removed.
+    """
+
+    def test_df_eval_calls_evaluate_exactly_once(self):
+        """DF path must call EvaluationManager.evaluate() exactly once."""
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0], [3.0, 4.0]]},
+            index=pd.MultiIndex.from_tuples(
+                [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        manager = _make_eval_stub("dataframe")
+        mock_evaluate = _run_df_eval_clean_path(manager, [df])
+        assert mock_evaluate.call_count == 1, (
+            f"Expected evaluate() called once on DF path, "
+            f"got {mock_evaluate.call_count}. "
+            "Remove the legacy dual-execution parity proving mode."
+        )
+
+    def test_df_eval_does_not_call_evaluate_with_ef_none(self):
+        """DF path must call evaluate(ef=<EvaluationFrame>), never ef=None."""
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0], [3.0, 4.0]]},
+            index=pd.MultiIndex.from_tuples(
+                [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        manager = _make_eval_stub("dataframe")
+        mock_evaluate = _run_df_eval_clean_path(manager, [df])
+        for call_args in mock_evaluate.call_args_list:
+            ef_val = call_args.kwargs.get("ef")
+            assert ef_val is not None, (
+                "evaluate() was called with ef=None on the DF path. "
+                "The DF path should build an EvaluationFrame and pass it."
+            )
+
+    def test_df_eval_audit_parity_method_removed(self):
+        """_audit_parity() must not exist — parity proving scaffolding deleted."""
+        assert not hasattr(ForecastingModelManager, "_audit_parity"), (
+            "_audit_parity() method still exists on ForecastingModelManager. "
+            "It should have been deleted as part of parity proving removal."
+        )
+
+
+# ── Arrow + prediction store guard ───────────────────────────────────────────
+
+
+class TestArrowStoreGuard:
+    """Prediction store upload must fail loud for Arrow Tables."""
+
+    def test_arrow_table_with_store_raises(self):
+        """_save_predictions must raise for pa.Table + prediction store (fail loud)."""
+        import pyarrow as pa
+        import tempfile
+        from views_pipeline_core.exceptions import PipelineException
+
+        manager = _make_stub("prediction_frame")
+        manager._use_prediction_store = True
+        manager._pred_store_name = "test_store"
+        manager._datastore = None
+        # Add config keys needed by _save_predictions
+        manager._config_manager.get_combined_config.return_value.update({
+            "run_type": "calibration",
+            "timestamp": "20260316_000000",
+        })
+
+        table = pa.table({"col": [1, 2, 3]})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with pytest.raises(PipelineException, match="Arrow Tables"):
+                # Call real method (stub overrides _save_predictions with Mock)
+                ForecastingModelManager._save_predictions(manager, table, Path(tmpdir), 0)
 
 
 # ── OOM mitigation: skip_predictions_delivery + actuals free ─────────────────

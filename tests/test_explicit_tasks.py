@@ -83,8 +83,8 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
         # EvaluationManager WAS instantiated (no-args constructor)
         mock_eval_cls.assert_called_once_with()
-        # evaluate WAS called for the target (Twice: Legacy + Shadow)
-        assert mock_eval_cls.return_value.evaluate.call_count == 2
+        # evaluate called once per target via EvaluationFrame
+        assert mock_eval_cls.return_value.evaluate.call_count == 1
 
 @patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={})
 @patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', return_value=MagicMock())
@@ -192,6 +192,6 @@ def test_scalar_gate_distribution_with_sample_metrics(mock_read, mock_splash, mo
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
         # EvaluationManager instantiated once with no args (metrics are read from config inside)
         mock_eval_cls.assert_called_once_with()
-        # evaluate was called twice (Legacy + Shadow) for the single target
-        assert mock_eval_cls.return_value.evaluate.call_count == 2
+        # evaluate called once per target via EvaluationFrame
+        assert mock_eval_cls.return_value.evaluate.call_count == 1
         

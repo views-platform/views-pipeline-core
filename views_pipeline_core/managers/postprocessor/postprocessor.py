@@ -1,16 +1,14 @@
-import wandb
-from typing import Union
-from pathlib import Path
-
 import logging
 from abc import abstractmethod
+from argparse import Namespace
+from pathlib import Path
+from typing import Union
+
+import wandb
+
+from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.managers.model import ModelManager, ModelPathManager
 
-logger = logging.getLogger(__name__)
-
-import logging
-from views_pipeline_core.exceptions import PipelineException
-from argparse import Namespace
 logger = logging.getLogger(__name__)
 
 # ============================================================ Postprocessor Path Manager ============================================================

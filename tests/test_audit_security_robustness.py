@@ -96,8 +96,8 @@ def test_G4_multi_task_loop_separation(mock_deps):
         mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
         
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
-        # Should be called 4 times (2 targets * 2 calls per target: Legacy + Shadow)
-        assert mock_eval_inst.evaluate.call_count == 4
+        # Called once per target (2 targets × 1 call each via EvaluationFrame)
+        assert mock_eval_inst.evaluate.call_count == 2
 
 # ============================================================
 # BEIGE TEAM: Robustness & Boundary
@@ -212,15 +212,13 @@ def test_GI_1_strict_separation_proof(mock_deps):
         # by EvaluationManager.evaluate() internally, not pre-selected by model.py
         mock_eval_mgr_cls.assert_called_once_with()
 
-        # evaluate called 4 times: twice per target (Legacy + Shadow)
-        assert mock_eval_inst.evaluate.call_count == 4
+        # evaluate called once per target via EvaluationFrame (no dual execution)
+        assert mock_eval_inst.evaluate.call_count == 2
 
-        # Call 0: Legacy Regression
-        # Call 1: Shadow Regression
-        # Call 2: Legacy Classification
-        # Call 3: Shadow Classification
+        # Call 0: Regression target
+        # Call 1: Classification target
         assert mock_eval_inst.evaluate.call_args_list[0].args[2] == "reg_t"
-        assert mock_eval_inst.evaluate.call_args_list[2].args[2] == "class_t"
+        assert mock_eval_inst.evaluate.call_args_list[1].args[2] == "class_t"
 
 def test_GI_2_no_name_inference_proof(mock_deps):
     """PROVE that naming a target 'regression' while putting it in classification bucket works exactly as configured."""

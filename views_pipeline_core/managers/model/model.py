@@ -2867,13 +2867,18 @@ class ForecastingModelManager(ModelManager):
             )
 
             if isinstance(df_predictions, pa.Table):
-                # Fix A — Arrow path: zero-copy write, no Python list materialisation
+                # Arrow path: zero-copy write, no Python list materialisation
                 pq.write_table(df_predictions, path_generated / self._predictions_name)
-                # NOTE: prediction-store upload skipped for Arrow path (TODO if needed)
             else:
                 save_dataframe(df_predictions, path_generated / self._predictions_name)
 
-            if self._use_prediction_store and not isinstance(df_predictions, pa.Table):
+            if self._use_prediction_store:
+                if isinstance(df_predictions, pa.Table):
+                    raise NotImplementedError(
+                        "Prediction store upload is not yet supported for Arrow Tables "
+                        "(PredictionFrame evaluation path). Save as parquet only, or "
+                        "disable prediction_store for this model."
+                    )
                 name = f"{self._model_path.model_name}_{self._predictions_name.split('.')[0]}"
                 df_predictions.forecasts.set_run(self._pred_store_name)
                 df_predictions.forecasts.to_store(name=name, overwrite=True)
@@ -3046,22 +3051,9 @@ class ForecastingModelManager(ModelManager):
                         step_mapping=step_mappings,
                     )
 
-                    # --- EXPLICIT PARITY PROVING MODE (DF path) ---
-                    # 1. Run Legacy (DataFrame-based)
-                    legacy_result = evaluation_manager.evaluate(
-                        actual_slice, pred_slices, target, self.configs, ef=None
+                    eval_result_dict = evaluation_manager.evaluate(
+                        actual_slice, None, target, self.configs, ef=ef
                     )
-
-                    # 2. Run Shadow (EvaluationFrame-based)
-                    shadow_result = evaluation_manager.evaluate(
-                        actual_slice, pred_slices, target, self.configs, ef=ef
-                    )
-
-                    # 3. Explicit Comparison & Audit
-                    self._audit_parity(legacy_result, shadow_result, target)
-
-                    # 4. Use Shadow Result
-                    eval_result_dict = shadow_result
 
                 # Initialize local variables to avoid UnboundLocalError
                 step_wise_evaluation, df_step_wise_evaluation = ({}, pd.DataFrame())
@@ -3313,51 +3305,6 @@ class ForecastingModelManager(ModelManager):
                     f"and the model generates more, the bug is in "
                     f"_evaluate_model_artifact (views-models)."
                 )
-
-    def _audit_parity(self, legacy: Dict, shadow: Dict, target: str) -> None:
-        """
-        Audit and verify parity between legacy and shadow evaluation results.
-        
-        Uses the result DataFrames as the bit-wise ground truth to avoid 
-        dependency on internal library metric containers.
-        """
-        import pandas as pd
-        
-        logger.info(f"AUDITING PARITY for target: {target}")
-        
-        keys = ["step", "time_series", "month"]
-        for key in keys:
-            leg_res = legacy.get(key)
-            shad_res = shadow.get(key)
-            
-            # Check structure existence
-            if not leg_res or not shad_res:
-                if leg_res != shad_res:
-                    raise ValueError(f"Parity Failure ({key}): Existence mismatch. Legacy={bool(leg_res)}, Shadow={bool(shad_res)}")
-                continue
-                
-            # Extract DataFrames (the second element of the 2-tuple)
-            _, leg_df = leg_res
-            _, shad_df = shad_res
-            
-            # Compare DataFrames bit-wise
-            try:
-                pd.testing.assert_frame_equal(
-                    leg_df.sort_index(axis=1).sort_index(axis=0), 
-                    shad_df.sort_index(axis=1).sort_index(axis=0),
-                    check_dtype=False,
-                    check_exact=False,
-                    rtol=1e-5,
-                    atol=1e-8
-                )
-                logger.info(f"  - {key.ljust(12)}: [OK] Bit-wise parity confirmed.")
-            except AssertionError as e:
-                raise ValueError(f"Parity Failure ({key}): Result DataFrame mismatch detected.\n{e}")
-
-        logger.info("\033[92m" + "#" * 80 + "\n"
-                    f"# PARITY CONFIRMED for {target.upper()}\n"
-                    "# Local Orchestrator alignment matches Library-internal alignment exactly.\n"
-                    "#" * 80 + "\033[0m")
 
     def _generate_evaluation_table(self, metric_dict: Dict) -> str:
         """
