@@ -90,8 +90,8 @@ results.append(audit_log("G4", "Green", "PASS", "Code contains 'for target in se
 
 # G5: Partition Resolution
 try:
-    if manager._resolve_evaluation_sequence_number("long") == 36:
-        results.append(audit_log("G5", "Green", "PASS", "Long partition correctly maps to 36 months."))
+    if manager._resolve_evaluation_sequence_number("long") == 37:
+        results.append(audit_log("G5", "Green", "PASS", "Long evaluation correctly maps to 37 sequences (36 shifts + 1 base)."))
 except Exception:
     results.append(audit_log("G5", "Green", "FAIL", "Partition mapping failed."))
 

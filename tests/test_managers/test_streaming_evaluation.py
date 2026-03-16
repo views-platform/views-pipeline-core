@@ -16,7 +16,6 @@ import weakref
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 from views_pipeline_core.managers.model.model import ForecastingModelManager

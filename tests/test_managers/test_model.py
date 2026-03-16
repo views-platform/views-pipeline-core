@@ -268,14 +268,14 @@ class TestForecastingModelManagerInit:
 
 class TestForecastingModelManagerStatic:
     def test_resolve_evaluation_sequence_standard(self):
-        """Test standard evaluation sequence count."""
+        """Standard evaluation: MAX_SHIFT_COUNT + 1 = 13 sequences."""
         n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
-        assert n == 12
-        
+        assert n == 13  # base origin + 12 shifts
+
     def test_resolve_evaluation_sequence_long(self):
-        """Test long evaluation sequence count."""
+        """Long evaluation: 3 * MAX_SHIFT_COUNT + 1 = 37 sequences."""
         n = ForecastingModelManager._resolve_evaluation_sequence_number("long")
-        assert n == 36
+        assert n == 37  # base origin + 36 shifts
         
     def test_resolve_evaluation_sequence_complete(self):
         """Test complete evaluation returns None."""

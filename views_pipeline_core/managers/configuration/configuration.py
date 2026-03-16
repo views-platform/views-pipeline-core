@@ -1,7 +1,12 @@
-from typing import Dict, Optional, List, Any
+from __future__ import annotations
+
+from typing import Dict, Optional, List, Any, TYPE_CHECKING
 import logging
 from datetime import datetime
 from views_pipeline_core.cli.args import ForecastingModelArgs
+
+if TYPE_CHECKING:
+    from views_pipeline_core.modules.wandb import WandBModule
 
 logger = logging.getLogger(__name__)
 

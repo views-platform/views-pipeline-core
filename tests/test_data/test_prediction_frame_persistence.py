@@ -12,12 +12,10 @@ With mmap=True the y_pred array is memory-mapped (read-only view from disk,
 no full copy into RAM).
 """
 
-import gc
 import tempfile
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 

@@ -1677,38 +1677,34 @@ class ForecastingModelManager(ModelManager):
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
         """
-        Get number of evaluation sequences for type.
-        
-        Maps evaluation type to sequence count for temporal evaluation.
-        
-        Evaluation Types:
-            - standard: 12 sequences (1 year)
-            - long: 36 sequences (3 years)
-            - complete: None (full period, needs calculation)
-            - live: 12 sequences (current year)
-        
+        Total number of rolling-origin evaluation sequences for a given eval type.
+
+        The count includes the base-origin sequence (sequence 0, no shift) plus
+        one sequence per shift.  For example, ``"standard"`` with
+        ``MAX_SHIFT_COUNT = 12`` yields 13 sequences (0 … 12).
+
         Args:
             eval_type: Type of evaluation
-        
+
         Returns:
             Number of sequences, or None for complete type
-        
+
         Raises:
             ValueError: If eval_type invalid
-        
+
         Example:
             >>> n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
             >>> print(n)
-            12
+            13
         """
         if eval_type == "standard":
-            return 12
+            return MAX_SHIFT_COUNT + 1       # 13: base origin + 12 shifts
         elif eval_type == "long":
-            return 36
+            return 3 * MAX_SHIFT_COUNT + 1   # 37: base origin + 36 shifts
         elif eval_type == "complete":
             return None  # currently set as None because sophisticated calculation is needed
         elif eval_type == "live":
-            return 12
+            return MAX_SHIFT_COUNT + 1       # 13: same as standard
         else:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
