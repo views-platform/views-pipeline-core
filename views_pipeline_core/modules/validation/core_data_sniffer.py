@@ -13,7 +13,9 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Canonical MultiIndex layouts supported by the pipeline.
+# Canonical MultiIndex layouts for RAW VIEWSER data (before dataset construction).
+# Uses priogrid_gid because CoreDataSniffer audits data BEFORE the _PGDataset
+# rename boundary (see ADR-034). Downstream code uses priogrid_id.
 # Extend these constants (not inline checks) when new levels are added.
 EXPECTED_INDEX_NAMES: Dict[str, tuple] = {
     "pgm": ("priogrid_gid", "month_id"),

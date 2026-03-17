@@ -200,10 +200,6 @@ class EnsembleManager(ForecastingModelManager):
                 )
 
             except Exception:
-                # logger.error(
-                #     f"{self._model_path.target.title()} training: {e}",
-                #     exc_info=True,
-                # )
                 raise PipelineException(
                     f"Training failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -241,7 +237,6 @@ class EnsembleManager(ForecastingModelManager):
                 )
 
             except Exception:
-                # logger.error(f"Error evaluating model: {e}", exc_info=True)
                 raise PipelineException(
                     f"Evaluation failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -273,10 +268,6 @@ class EnsembleManager(ForecastingModelManager):
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
             except Exception:
-                # logger.error(
-                #     f"Error forecasting {self._model_path.target}: {e}",
-                #     exc_info=True,
-                # )
                 raise PipelineException(
                     f"Forecasting failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -311,7 +302,6 @@ class EnsembleManager(ForecastingModelManager):
 
         for model_name in tqdm.tqdm(self.configs["models"], desc="Evaluating ensemble"):
             tqdm.tqdm.write(f"Current model: {model_name}")
-            # dfs.append(self._evaluate_model_artifact(model_name))
             eval_results[model_name] = self._evaluate_model_artifact(model_name)
 
         n_outputs = len(next(iter(eval_results.values())))
@@ -319,7 +309,6 @@ class EnsembleManager(ForecastingModelManager):
 
         tqdm.tqdm.write("Aggregating metrics...")
         for i in range(n_outputs):
-            # model_dfs_i = {model_name: dfs[i] for model_name, dfs in eval_results.items()}
             model_dfs_i = {}
             for model_name, dfs in eval_results.items():
                 if i >= len(dfs):
@@ -336,7 +325,6 @@ class EnsembleManager(ForecastingModelManager):
             )
 
             aggregated_outputs.append(df_agg)
-            # dfs_agg.append(df_agg)
 
         return aggregated_outputs
 
@@ -348,7 +336,6 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             pd.DataFrame: The aggregated (and possibly reconciled) forecast DataFrame.
         """
-        # dfs = []
         model_dfs: Dict[str, pd.DataFrame] = {}
 
         for model_name in tqdm.tqdm(
@@ -357,7 +344,6 @@ class EnsembleManager(ForecastingModelManager):
             tqdm.tqdm.write(f"Current model: {model_name}")
             df = self._forecast_model_artifact(model_name)
             model_dfs[model_name] = df
-            # dfs.append(self._forecast_model_artifact(model_name))
 
         df_prediction = self._get_aggregated_df(
             df_to_aggregate=model_dfs, aggregation=self.configs["aggregation"]

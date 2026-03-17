@@ -736,26 +736,17 @@ class TestSaveMethods:
                         return manager
     
     def test_save_predictions(self, manager, mock_model_path):
-        """Test saving predictions."""
+        """Test saving predictions delegates to PredictionIOManager."""
         df = pd.DataFrame({"pred_ged_sb": [1, 2, 3]})
-        
-        # Mock Path.mkdir to avoid filesystem operations
+
         with patch('pathlib.Path.mkdir'):
-            # Patch the correct import path
-            with patch('views_pipeline_core.files.utils.save_dataframe') as mock_save:
-                with patch('views_pipeline_core.files.utils.generate_output_file_name', return_value="predictions.parquet"):
+            with patch('views_pipeline_core.managers.prediction.io.save_dataframe') as mock_save:
+                with patch('views_pipeline_core.managers.prediction.io.generate_output_file_name', return_value="predictions.parquet"):
                     manager._save_predictions(df, mock_model_path.data_generated)
-                    
-                    # Verify save was called
+
                     mock_save.assert_called_once()
-                    # Verify alert was sent
                     manager._wandb_module.send_alert.assert_called()
                 
-    def test_save_model_artifact(self, manager, mock_model_path):
-        """Test saving model artifact to WandB."""
-        manager._save_model_artifact("calibration")
-        
-        manager._wandb_module.log_artifact.assert_called_once()
 
 
 

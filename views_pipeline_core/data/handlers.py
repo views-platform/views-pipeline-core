@@ -88,7 +88,9 @@ class _ViewsDataset:
     ) -> None:
         if not isinstance(dataframe, pd.DataFrame) or dataframe.empty:
             raise ValueError("Dataframe is empty or not a valid DataFrame")
-        # This is a hack and should be removed in the future when Viewser is updated to get rid of priogrid_gid.
+        # ADR-034: Rename boundary. VIEWSER delivers priogrid_gid (UCDP source);
+        # all downstream pipeline code uses priogrid_id (matches country_id/month_id).
+        # Remove this rename when VIEWSER is updated to emit priogrid_id natively.
         if dataframe.index.names[1] == "priogrid_gid":
             logger.warning(
                 "_PGDataset index 1 is 'priogrid_gid', renaming to 'priogrid_id'"

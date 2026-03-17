@@ -124,13 +124,8 @@ def _run_execute_forecast(manager, mock_df_result=None):
         "views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer"
     ) as MockSniffer:
         with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-            with patch.object(ForecastingModelManager, "dataset_class"):
-                with patch(
-                    "views_pipeline_core.managers.model.model.DatasetTransformationModule"
-                ) as MockTM:
-                    MockTM.return_value.get_dataframe.return_value = mock_df_result
-                    manager._execute_model_forecasting()
-                    return MockSniffer
+            manager._execute_model_forecasting()
+            return MockSniffer
 
 
 # ── Phase 4A: Forecast dispatch ───────────────────────────────────────────────
@@ -1137,12 +1132,22 @@ class TestArrowStoreGuard:
         import pyarrow as pa
         import tempfile
         from views_pipeline_core.exceptions import PipelineException
+        from views_pipeline_core.managers.prediction.io import PredictionIOManager
 
         manager = _make_stub("prediction_frame")
         manager._use_prediction_store = True
         manager._pred_store_name = "test_store"
         manager._datastore = None
-        # Add config keys needed by _save_predictions
+        # Set up PredictionIOManager on the stub
+        manager._io = PredictionIOManager(
+            model_path=manager._model_path,
+            wandb_module=manager._wandb_module,
+            wandb_notifications=False,
+            use_prediction_store=True,
+            datastore=None,
+            pred_store_name="test_store",
+        )
+        # Add config keys needed by _save_predictions delegation
         manager._config_manager.get_combined_config.return_value.update({
             "run_type": "calibration",
             "timestamp": "20260316_000000",
@@ -1151,7 +1156,6 @@ class TestArrowStoreGuard:
         table = pa.table({"col": [1, 2, 3]})
         with tempfile.TemporaryDirectory() as tmpdir:
             with pytest.raises(PipelineException, match="Arrow Tables"):
-                # Call real method (stub overrides _save_predictions with Mock)
                 ForecastingModelManager._save_predictions(manager, table, Path(tmpdir), 0)
 
 

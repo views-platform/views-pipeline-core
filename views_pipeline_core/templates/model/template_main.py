@@ -39,7 +39,7 @@ def generate(script_path: Path) -> bool:
     code = """import wandb
 import warnings
 from pathlib import Path
-from views_pipeline_core.cli.utils import parse_args, validate_arguments
+from views_pipeline_core.cli import ForecastingModelArgs
 from views_pipeline_core.managers.model import ModelPathManager
 
 # Import your model manager class here
@@ -62,15 +62,14 @@ except Exception as e:
 
 if __name__ == "__main__":
     wandb.login()
-    args = parse_args()
-    validate_arguments(args)
+    args = ForecastingModelArgs.parse_args()
 
     manager = YourModelManager(
         model_path=model_path,
         wandb_notifications=args.wandb_notifications,
         use_prediction_store=args.prediction_store,
     )
-    
+
     if args.sweep:
         manager.execute_sweep_run(args)
     else:

@@ -320,7 +320,6 @@ def generate_output_file_name(
     Returns:
         str: The generated prediction file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
     if sequence_number is not None:
         return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}{file_extension}"
     else:
@@ -347,7 +346,6 @@ def generate_evaluation_file_name(
     Returns:
         str: The generated prediction file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
     return f"eval_{run_type}_{target_identifier}_{evaluation_type}_{timestamp}{file_extension}"
 
 
@@ -370,5 +368,4 @@ def generate_evaluation_report_name(
     Returns:
         str: The generated prediction file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
     return f"eval_{run_type}_{conflict_type}_{timestamp}{file_extension}"

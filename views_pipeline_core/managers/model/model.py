@@ -23,7 +23,6 @@ from views_pipeline_core.exceptions import (
     ModelEvaluationException,
     PipelineException,
 )
-from views_pipeline_core.modules.transformations import DatasetTransformationModule
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 import os
@@ -319,9 +318,7 @@ class ModelPathManager:
                 if (current_path / marker).exists():
                     return current_path
                 current_path = current_path.parent
-                # print("CURRENT PATH ", current_path)
         except Exception:
-            # logger.error(f"Error finding project root: {e}")
             raise FileNotFoundError(
                 f"{marker} not found in the directory hierarchy. Unable to find project root. {current_path}"
             )
@@ -536,7 +533,6 @@ class ModelPathManager:
                 return path_input.exists() and len(path_input.parts) > 1
             else:
                 return len(path_input.parts) > 1
-            # return path_input.exists() and len(path_input.parts) > 1
         except Exception as e:
             logger.error(f"Error checking if input is a path: {e}")
             return False
@@ -729,7 +725,6 @@ class ModelPathManager:
                 logger.debug(f"Queryset {self.queryset_path} imported successfully.")
                 if hasattr(self._queryset, "generate"):
                     return self._queryset.generate()
-                # return self._queryset.generate() if self._queryset else None
                 else:
                     logger.warning(
                         f"Queryset {self.queryset_path} does not have a `generate` method. Continuing..."
@@ -818,7 +813,6 @@ class ModelPathManager:
         print("\n{:<20}\t{:<50}".format("Name", "Path"))
         print("=" * 72)
         for attr, value in self.__dict__.items():
-            # value = getattr(self, attr)
             if attr not in self._ignore_attributes and isinstance(value, Path):
                 print("{:<20}\t{:<50}".format(str(attr), str(value)))
 
@@ -1434,6 +1428,17 @@ class ForecastingModelManager(ModelManager):
 
         super().__init__(model_path, wandb_notifications, use_prediction_store)
 
+        from views_pipeline_core.managers.prediction.io import PredictionIOManager
+
+        self._io = PredictionIOManager(
+            model_path=self._model_path,
+            wandb_module=self._wandb_module,
+            wandb_notifications=self._wandb_notifications,
+            use_prediction_store=self._use_prediction_store,
+            datastore=self._datastore,
+            pred_store_name=self._pred_store_name,
+        )
+
     @abstractmethod
     def _train_model_artifact(self) -> any:
         """
@@ -1673,6 +1678,18 @@ class ForecastingModelManager(ModelManager):
         if dataset_cls:
             return partial(dataset_cls)
         return None
+
+    def _has_evaluation_metrics(self) -> bool:
+        """Return True if any metric keys are specified in config."""
+        return any([
+            self.configs.get("metrics"),
+            self.configs.get("regression_metrics"),
+            self.configs.get("classification_metrics"),
+            self.configs.get("regression_point_metrics"),
+            self.configs.get("regression_sample_metrics"),
+            self.configs.get("classification_point_metrics"),
+            self.configs.get("classification_sample_metrics"),
+        ])
 
     @staticmethod
     def _resolve_evaluation_sequence_number(eval_type: str) -> int:
@@ -2161,8 +2178,8 @@ class ForecastingModelManager(ModelManager):
                     def validate_and_save(
                         df, idx, configs, model_path, save_predictions_func
                     ):
-                        print(
-                            f"\nValidating evaluation dataframe of sequence {idx+1}/{n_sequences}"
+                        logger.info(
+                            f"Validating evaluation dataframe of sequence {idx+1}/{n_sequences}"
                         )
                         CorePredictionSniffer(level=configs["level"]).sniff_predictions(
                             df, targets=configs["targets"]
@@ -2195,15 +2212,7 @@ class ForecastingModelManager(ModelManager):
                     train=False,
                 )
 
-                has_metrics = any([
-                    self.configs.get("metrics"),
-                    self.configs.get("regression_metrics"),
-                    self.configs.get("classification_metrics"),
-                    self.configs.get("regression_point_metrics"),
-                    self.configs.get("regression_sample_metrics"),
-                    self.configs.get("classification_point_metrics"),
-                    self.configs.get("classification_sample_metrics"),
-                ])
+                has_metrics = self._has_evaluation_metrics()
 
                 if has_metrics:
                     if self.configs.get("skip_evaluation_metrics", False):
@@ -2322,14 +2331,6 @@ class ForecastingModelManager(ModelManager):
                     for target, _pf in pf_dict.items():
                         df_target = converter.to_prediction_df(_pf, target)
                         converter.audit_prediction_structure(_pf, df_target, target)
-
-                        # TEMPORARY: Undo transformations before saving per target.
-                        forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=df_target)
-                        forecast_transformation_module = DatasetTransformationModule(
-                            dataset=forecast_dataset
-                        )
-                        forecast_transformation_module.undo_all_transformations()
-                        df_target = forecast_transformation_module.get_dataframe()
                         self._save_predictions(df_target, self._model_path.data_generated)
                 else:
                     # DF path: existing validation (unchanged).
@@ -2346,16 +2347,6 @@ class ForecastingModelManager(ModelManager):
                     CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
                         df_predictions, targets=self.configs["targets"]
                     )
-
-                    # ------------------------------------
-                    # TEMPORARY: Undo transformations before saving.
-                    forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=df_predictions)
-                    forecast_transformation_module = DatasetTransformationModule(
-                        dataset=forecast_dataset
-                    )
-                    forecast_transformation_module.undo_all_transformations()
-                    df_predictions = forecast_transformation_module.get_dataframe()
-                    # ------------------------------------
 
                     self._save_predictions(df_predictions, self._model_path.data_generated)
 
@@ -2452,8 +2443,8 @@ class ForecastingModelManager(ModelManager):
                 # at construction). The DF path validates each sequence as before.
                 if self._prediction_format != "prediction_frame":
                     for i, df in enumerate(raw_preds_sweep):
-                        print(
-                            f"\nValidating evaluation dataframe of sequence {i+1}/{len(raw_preds_sweep)}"
+                        logger.info(
+                            f"Validating evaluation dataframe of sequence {i+1}/{len(raw_preds_sweep)}"
                         )
                         from views_pipeline_core.modules.validation.core_prediction_sniffer import (
                             CorePredictionSniffer,
@@ -2463,15 +2454,7 @@ class ForecastingModelManager(ModelManager):
                             df, targets=self.configs["targets"]
                         )
 
-                has_metrics = any([
-                    self.configs.get("metrics"),
-                    self.configs.get("regression_metrics"),
-                    self.configs.get("classification_metrics"),
-                    self.configs.get("regression_point_metrics"),
-                    self.configs.get("regression_sample_metrics"),
-                    self.configs.get("classification_point_metrics"),
-                    self.configs.get("classification_sample_metrics"),
-                ])
+                has_metrics = self._has_evaluation_metrics()
                 if has_metrics:
                     self._evaluate_prediction_dataframe(raw_preds_sweep, self._eval_type)
                 else:
@@ -2570,14 +2553,6 @@ class ForecastingModelManager(ModelManager):
                             run_type=self.args.run_type
                         )[0]
                     )
-                    # TEMPORARY: Undo transformations before saving. Ensure predictions are in original space.
-                    # forecast_dataset = self.dataset_class(loa=self.configs.get("level"))(source=forecast_df)
-                    # forecast_transformation_module = DatasetTransformationModule(
-                    #     dataset=forecast_dataset
-                    # )
-                    # forecast_transformation_module.undo_all_transformations()
-                    # forecast_df = forecast_transformation_module.get_dataframe()
-
                     logger.info("Using latest forecast dataframe")
                 except Exception as e:
                     raise FileNotFoundError(
@@ -2591,19 +2566,6 @@ class ForecastingModelManager(ModelManager):
                 logger.info(
                     f"Generating forecast report for {self._model_path.target} {self.configs['name']}..."
                 )
-
-                # ------------------------------------
-                # TEMPORARY: Update target names based on transformations. Undo transformations first if necessary.
-                historical_transformation_module = DatasetTransformationModule(
-                    dataset=self.dataset_class(loa=self.configs.get("level"))(source=historical_df, targets=self.configs.get("targets"))
-                )
-                historical_transformation_module.undo_transformations(column_names=self.configs.get("targets"))
-                updated_targets = []
-                for target in self.configs.get("targets"):
-                    updated_targets.append(historical_transformation_module.get_current_column_name(original_name=target))
-                self._config_manager.add_config({"targets": updated_targets})
-                historical_df = historical_transformation_module.get_dataframe()
-                # ------------------------------------
 
                 forecast_template = ForecastReportTemplate(
                     config=self.configs,
@@ -2629,50 +2591,6 @@ class ForecastingModelManager(ModelManager):
             finally:
                 self._wandb_module.finish_run()
 
-    def _save_model_artifact(self, run_type: str) -> None:
-        """
-        Upload model artifact to WandB.
-        
-        Creates WandB artifact from saved model file for versioning
-        and tracking.
-        
-        Internal Use:
-            Called after training to version model artifacts.
-        
-        Args:
-            run_type: Run type for artifact naming
-        
-        Raises:
-            PipelineException: If artifact upload fails
-        
-        Side Effects:
-            - Creates WandB artifact
-            - Uploads model file
-            - Logs artifact reference
-        """
-        # Save the artifact to WandB
-        try:
-            _latest_model_artifact_path = (
-                self._model_path.get_latest_model_artifact_path(run_type=run_type)
-            )
-
-            self._wandb_module.log_artifact(
-                artifact_path=_latest_model_artifact_path,
-                artifact_name=f"{run_type}_{self._model_path.target}_artifact",
-                artifact_type=self._model_path.target,
-                description=f"Latest {run_type} {self._model_path.target} artifact",
-            )
-
-            logger.info(
-                f"Artifact for run type: {run_type} saved to WandB successfully."
-            )
-
-        except Exception as e:
-            # logger.error(f"Error saving artifact to WandB: {e}", exc_info=True)
-            raise PipelineException(
-                f"Error saving artifact to WandB: {e}",
-                wandb_module=self._wandb_module,
-            )
 
     def _save_eval_report(self, eval_report, path_reports, target_identifier):
         """
@@ -2720,97 +2638,16 @@ class ForecastingModelManager(ModelManager):
         path_generated: Union[str, Path],
         target_identifier: str,
     ) -> None:
-        """
-        Save evaluation metrics to disk and WandB.
-        
-        Saves three levels of evaluation metrics (step, time-series, month)
-        to parquet files and logs to WandB.
-        
-        Internal Use:
-            Called by _evaluate_prediction_dataframe().
-        
-        Args:
-            df_step_wise_evaluation: Metrics per prediction step
-            df_time_series_wise_evaluation: Metrics per time series
-            df_month_wise_evaluation: Metrics per month
-            path_generated: Directory for saving files
-            target_identifier: Target identifier for filename
-        
-        Side Effects:
-            - Saves three parquet files
-            - Logs tables to WandB
-            - Sends completion notification
-        
-        Raises:
-            PipelineException: If save fails
-        """
-        from views_pipeline_core.files.utils import (
-            save_dataframe,
-            generate_evaluation_file_name,
+        """Delegate to PredictionIOManager."""
+        self._io.save_evaluations(
+            df_step_wise_evaluation,
+            df_time_series_wise_evaluation,
+            df_month_wise_evaluation,
+            path_generated,
+            target_identifier,
+            run_type=self.configs["run_type"],
+            timestamp=self.configs["timestamp"],
         )
-
-        try:
-            path_generated = Path(path_generated)
-            path_generated.mkdir(parents=True, exist_ok=True)
-
-            eval_step_path = generate_evaluation_file_name(
-                "step",
-                target_identifier,
-                self.configs["run_type"],
-                self.configs["timestamp"],
-                PipelineConfig.dataframe_format,
-            )
-            eval_ts_path = generate_evaluation_file_name(
-                "ts",
-                target_identifier,
-                self.configs["run_type"],
-                self.configs["timestamp"],
-                PipelineConfig.dataframe_format,
-            )
-            eval_month_path = generate_evaluation_file_name(
-                "month",
-                target_identifier,
-                self.configs["run_type"],
-                self.configs["timestamp"],
-                PipelineConfig.dataframe_format,
-            )
-
-            save_dataframe(df_month_wise_evaluation, path_generated / eval_month_path)
-            save_dataframe(
-                df_time_series_wise_evaluation, path_generated / eval_ts_path
-            )
-            save_dataframe(df_step_wise_evaluation, path_generated / eval_step_path)
-
-            self._wandb_module.save(str(path_generated / eval_month_path))
-            self._wandb_module.save(str(path_generated / eval_ts_path))
-            self._wandb_module.save(str(path_generated / eval_step_path))
-
-            self._wandb_module.log(
-                {
-                    "evaluation_metrics_month": wandb.Table(
-                        dataframe=df_month_wise_evaluation
-                    ),
-                    "evaluation_metrics_ts": wandb.Table(
-                        dataframe=df_time_series_wise_evaluation
-                    ),
-                    "evaluation_metrics_step": wandb.Table(
-                        dataframe=df_step_wise_evaluation
-                    ),
-                }
-            )
-
-            self._wandb_module.send_alert(
-                title=f"{self._model_path.target.title()} Outputs Saved",
-                text=f"Evaluation metrics saved at {path_generated.relative_to(self._model_path.root)}.",
-                notifications_enabled=self._wandb_notifications,
-            )
-
-        except Exception as e:
-            logger.error(f"Error saving model outputs: {e}", exc_info=True)
-            raise PipelineException(
-                f"Error saving model outputs: {e}",
-                wandb_module=self._wandb_module,
-            )
 
     def _save_predictions(
         self,
@@ -2819,96 +2656,17 @@ class ForecastingModelManager(ModelManager):
         sequence_number: int = None,
         send_alert: bool = True,
     ) -> None:
-        """
-        Save predictions to disk and prediction store.
-
-        Saves prediction DataFrame (or Arrow Table for the PF evaluation path)
-        to parquet file and optionally uploads to central VIEWS prediction store.
-
-        Internal Use:
-            Called after evaluation and forecasting.
-
-        Args:
-            df_predictions: Predictions as pd.DataFrame or pa.Table (Fix A Arrow path).
-            path_generated: Directory for saving
-            sequence_number: Sequence number for evaluation runs.
-                None for forecasting runs.
-            send_alert: Whether to send a WandB alert.
-
-        Side Effects:
-            - Saves parquet file
-            - Uploads to prediction store (if enabled, DataFrame path only)
-            - Sends completion notification
-
-        Raises:
-            PipelineException: If save fails
-
-        Note:
-            - Filename includes timestamp and sequence number
-            - Prediction store requires use_prediction_store=True
-        """
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-        from views_pipeline_core.files.utils import (
-            save_dataframe,
-            generate_output_file_name,
+        """Delegate to PredictionIOManager. Signature preserved for EnsembleManager compat."""
+        self._io.save_predictions(
+            df_predictions,
+            path_generated,
+            run_type=self.configs["run_type"],
+            timestamp=self.configs["timestamp"],
+            level=self.configs.get("level"),
+            targets=self.configs.get("targets"),
+            sequence_number=sequence_number,
+            send_alert=send_alert,
         )
-
-        try:
-            path_generated = Path(path_generated)
-            path_generated.mkdir(parents=True, exist_ok=True)
-
-            self._predictions_name = generate_output_file_name(
-                "predictions",
-                self.configs["run_type"],
-                self.configs["timestamp"],
-                sequence_number,
-                file_extension=PipelineConfig.dataframe_format,
-            )
-
-            if isinstance(df_predictions, pa.Table):
-                # Arrow path: zero-copy write, no Python list materialisation
-                pq.write_table(df_predictions, path_generated / self._predictions_name)
-            else:
-                save_dataframe(df_predictions, path_generated / self._predictions_name)
-
-            if self._use_prediction_store:
-                if isinstance(df_predictions, pa.Table):
-                    raise NotImplementedError(
-                        "Prediction store upload is not yet supported for Arrow Tables "
-                        "(PredictionFrame evaluation path). Save as parquet only, or "
-                        "disable prediction_store for this model."
-                    )
-                name = f"{self._model_path.model_name}_{self._predictions_name.split('.')[0]}"
-                df_predictions.forecasts.set_run(self._pred_store_name)
-                df_predictions.forecasts.to_store(name=name, overwrite=True)
-
-                if self._datastore is not None:
-                    try:
-                        self._datastore.upload_data(file=path_generated / self._predictions_name,
-                                                        filename=self._predictions_name,
-                                                        loa=self.configs.get("level"),
-                                                        name=self._model_path.model_name,
-                                                        targets=self.configs.get("targets"),
-                                                        category="forecast",
-                                                        description="",
-                                                        type=self._model_path.target),
-                        logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
-                    except Exception as e:
-                        logger.error(f"Error uploading predictions to datastore: {e}", exc_info=True)
-
-            if send_alert:
-                self._wandb_module.send_alert(
-                    title="Predictions Saved",
-                    text=f"Predictions saved at {path_generated.relative_to(self._model_path.root)}.",
-                    notifications_enabled=self._wandb_notifications,
-                )
-
-        except Exception as e:
-            raise PipelineException(
-                f"Error saving predictions: {e}",
-                wandb_module=self._wandb_module,
-            )
 
     def _evaluate_prediction_dataframe(
         self, df_predictions, eval_type, ensemble=False
@@ -3306,49 +3064,11 @@ class ForecastingModelManager(ModelManager):
                     f"_evaluate_model_artifact (views-models)."
                 )
 
-    def _generate_evaluation_table(self, metric_dict: Dict) -> str:
-        """
-        Format metrics as markdown table.
-        
-        Creates readable table from WandB summary metrics for
-        notifications and reports.
-        
-        Internal Use:
-            Called when sending evaluation notifications.
-        
-        Args:
-            metric_dict: WandB summary metrics dictionary
-        
-        Returns:
-            Formatted markdown table string
-        
-        Example:
-            >>> table = self._generate_evaluation_table(wandb.summary._as_dict())
-            >>> print(table)
-            ```
-            | Metric | Value |
-            |--------|-------|
-            | MSE    | 0.045 |
-            ```
-        """
-        from tabulate import tabulate
-
-        # create an empty dataframe with columns 'Metric' and 'Value'
-        metric_df = pd.DataFrame(columns=["Metric", "Value"])
-        for key, value in metric_dict.items():
-            try:
-                if not str(key).startswith("_"):
-                    value = float(value)
-                    # add metric and value to the dataframe
-                    metric_df = pd.concat(
-                        [metric_df, pd.DataFrame([{"Metric": key, "Value": value}])],
-                        ignore_index=True,
-                    ).sort_values(by="Metric")
-            except Exception:
-                continue
-        result = tabulate(metric_df, headers="keys", tablefmt="grid")
-        print(result)
-        return f"```\n{result}\n```"
+    @staticmethod
+    def _generate_evaluation_table(metric_dict: Dict) -> str:
+        """Delegate to PredictionIOManager."""
+        from views_pipeline_core.managers.prediction.io import PredictionIOManager
+        return PredictionIOManager.generate_evaluation_table(metric_dict)
 
     def _execute_evaluation_reporting(self) -> None:
         """

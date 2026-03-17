@@ -790,7 +790,9 @@ class AggregationManager:
         time_name, entity_name = _ViewsDataset(data).original_index.names
 
         # ---------- 2) Wrap in CMDataset or PGMDataset ----------
-        # Decide based on the *second index level* entity_id --> country_id OR priogrid_id
+        # Decide based on the *second index level* entity_id --> country_id OR priogrid_id.
+        # Accepts priogrid_gid and pg_id defensively for data from any pipeline stage
+        # (ADR-034: priogrid_gid is pre-rename, priogrid_id is post-rename).
         if entity_name == "country_id":
             ds = CMDataset(pdf)
         elif entity_name in ("priogrid_id", "priogrid_gid", "pg_id"):

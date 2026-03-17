@@ -45,10 +45,6 @@ dotenv.load_dotenv(dotenv.find_dotenv())
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# APPWRITE_DATASTORE_PROJECT_ID = os.getenv("APPWRITE_DATASTORE_PROJECT_ID")
-# APPWRITE_ENDPOINT = os.getenv("APPWRITE_ENDPOINT")
-# APPWRITE_DATASTORE_API_KEY = os.getenv("APPWRITE_DATASTORE_API_KEY")
-
 
 class FileMetadata:
     """Metadata container for prediction files with validation.

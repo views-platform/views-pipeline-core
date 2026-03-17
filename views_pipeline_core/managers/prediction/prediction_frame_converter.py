@@ -15,6 +15,8 @@ from typing import Any, List
 import pandas as pd
 
 # Column-name constants for the Arrow parquet format.
+# Uses priogrid_id (post-rename convention, ADR-034). The _PGDataset rename
+# boundary has already been crossed before predictions reach this converter.
 _TIME_COL = "month_id"
 _LEVEL_TO_ENTITY_COL: dict = {
     "cm":  "country_id",
