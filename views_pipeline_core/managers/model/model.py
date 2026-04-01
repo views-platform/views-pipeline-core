@@ -713,6 +713,13 @@ class ModelPathManager:
         logger.info(f"Artifact used: {model_files[0]}")
 
         return self.artifacts / model_files[0]
+    
+    def get_latest_forecasting_file_path(self):
+        """Get the latest forecasting file path."""
+        forecast_files = sorted(self.data_generated.glob("predictions_forecasting_*.parquet"))
+        if not forecast_files:
+            raise FileNotFoundError("No forecasting files found.")
+        return self.data_generated / forecast_files[-1].name
 
     def get_queryset(self) -> Optional[Dict[str, str]]:
         """
