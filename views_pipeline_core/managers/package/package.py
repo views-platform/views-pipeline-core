@@ -55,7 +55,7 @@ class PackageManager:
                 self.manager = None
 
             # Get the main directory of the package inside the package
-            print("Initialized package manager with package path.")
+            logger.info("Initialized package manager with package path.")
             self._init_with_path = True
         else:
             if not PackageManager.validate_package_name(package_path):
@@ -64,7 +64,7 @@ class PackageManager:
             self.latest_version = self.get_latest_release_version_from_github(
                 self.package_name
             )
-            print("Initialized package manager with package name.")
+            logger.info("Initialized package manager with package name.")
             self._init_with_path = False
 
     # method to replace all special characters in a string with underscores
@@ -317,7 +317,7 @@ class PackageManager:
             try:
                 subprocess.run(["poetry", "--version"], capture_output=True, check=True)
             except subprocess.CalledProcessError:
-                print(
+                logger.warning(
                     "Poetry is not installed or not found in the system PATH. Installing Poetry..."
                 )
                 subprocess.run(["pip", "install", "poetry"], check=True)

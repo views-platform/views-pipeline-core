@@ -34,21 +34,6 @@ def save_python_script(output_file: Path, code: str, override=False) -> bool:
     py_compile.PyCompileError: If there is an error compiling the Python script (e.g., syntax error in the code).
     """
     if output_file.exists() and not override:
-        # while True:
-        #     overwrite = (
-        #         input(
-        #             f"The file {output_file} already exists. Do you want to overwrite it? (y/n): "
-        #         )
-        #         .strip()
-        #         .lower()
-        #     )
-        #     if overwrite in {"y", "n"}:
-        #         break  # Exit the loop if the input is valid
-        #     logger.info("Invalid input. Please enter 'y' for yes or 'n' for no.")
-
-        # if overwrite == "n":
-        #     logger.info("Script not saved.")
-        #     return False
         logger.info(f"Script {output_file} already exists. Skipping.")
         return False
 

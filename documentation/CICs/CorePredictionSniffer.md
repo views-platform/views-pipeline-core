@@ -3,7 +3,7 @@
 **Status:** Active
 **Owner:** Orchestration Core
 **Last reviewed:** 2026-03-02
-**Related ADRs:** ADR-032 (Sniffer Pattern)
+**Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern)
 
 ---
 
@@ -151,6 +151,11 @@ CorePredictionSniffer().sniff_predictions(df, targets="ged_sb")
 
 - Canonical index names are defined in `EXPECTED_INDEX_NAMES` in
   `core_data_sniffer.py`. No inline checks; update the constant there.
+
+## 12. Known Deviations
+
+- **PredictionFrame not yet supported:** Currently validates `pd.DataFrame` outputs only. `PredictionFrame` validation is handled by `PredictionFrame._validate_input()` at construction time. CIC Section 11 documents the planned migration.
+- **No value range validation:** Validates structural properties (non-empty, correct columns, correct index) but does not validate that prediction values are in reasonable ranges (e.g., non-negative for conflict counts).
 
 ---
 

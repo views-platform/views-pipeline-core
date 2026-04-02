@@ -3,7 +3,7 @@
 **Status:** Active
 **Owner:** Orchestration Core
 **Last reviewed:** 2026-03-03
-**Related ADRs:** ADR-032 (Sniffer Pattern), ADR-033 (PredictionFrame Adoption)
+**Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern), ADR-042 (PredictionFrame Adoption)
 
 ---
 
@@ -152,6 +152,12 @@ if result:   # sniff_all returns None; absence of exception is the success signa
   contract.
 - `SUPPORTED_PREDICTION_FORMATS` is added alongside existing `SUPPORTED_*` constants.
   Extend it there — not via inline checks — when new formats are supported.
+
+## 12. Known Deviations
+
+- **Target name format not validated:** The sniffer validates config keys and supported values but does not validate that target names contain conflict type codes (sb/os/ns). This assumption is enforced downstream in `ForecastingModelManager._evaluate_prediction_dataframe()` where it causes a hard crash (Technical Risk R2).
+- **No validation of script existence:** Config references model scripts (train, predict) but the sniffer does not verify these scripts exist on disk.
+- **Evaluation contract check assumes fixed geometry:** `_check_evaluation_contract()` hardcodes `test_len = time_steps + MAX_SHIFT_COUNT = 48`. If these constants change independently, the check may become inconsistent.
 
 ---
 

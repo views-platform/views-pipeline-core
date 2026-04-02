@@ -466,18 +466,6 @@ class TestDataFileMethods:
         assert len(paths) == 2
         assert "20241106" in str(paths[0])
         
-    def test_get_eval_file_paths(self, mock_project_root):
-        """Test getting evaluation file paths"""
-        manager = ModelPathManager("purple_alien", validate=True)
-        
-        # Create eval files
-        (manager.data_generated / "eval_calibration_sb_20241105.parquet").touch()
-        (manager.data_generated / "eval_calibration_os_20241105.parquet").touch()
-        
-        paths = manager._get_eval_file_paths("calibration", "sb")
-        
-        assert len(paths) == 1
-        assert "sb" in str(paths[0])
 
 
 # ============================================================================

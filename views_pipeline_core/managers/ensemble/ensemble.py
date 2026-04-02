@@ -200,6 +200,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
 
             except Exception:
+                logger.error(f"Ensemble training failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Training failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -237,6 +238,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
 
             except Exception:
+                logger.error(f"Ensemble evaluation failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Evaluation failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -268,6 +270,7 @@ class EnsembleManager(ForecastingModelManager):
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
             except Exception:
+                logger.error(f"Ensemble forecasting failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Forecasting failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,

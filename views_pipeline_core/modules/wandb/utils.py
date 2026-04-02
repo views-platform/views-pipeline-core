@@ -282,10 +282,6 @@ def format_evaluation_dict(evaluation_dict):
             key = key[1:]
 
         if key == "timestamp":
-            # try:
-            #     formatted_dict[key] = timestamp_to_date(float(value))
-            # except (ValueError, TypeError):
-            #     formatted_dict[key] = value
             continue
         elif key == "runtime":
             # convert seconds to hours, minutes, and seconds

@@ -103,6 +103,7 @@ class PredictionIOManager:
                 )
 
         except Exception as e:
+            logger.error(f"Error saving predictions: {e}", exc_info=True)
             raise PipelineException(
                 f"Error saving predictions: {e}",
                 wandb_module=self._wandb_module,

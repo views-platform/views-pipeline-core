@@ -1,5 +1,6 @@
 from typing import Dict, List
 from pathlib import Path
+import logging
 import wandb
 import pandas as pd
 from views_pipeline_core.managers.model import ModelPathManager, ForecastingModelManager
@@ -10,7 +11,6 @@ from views_pipeline_core.modules.wandb import (
     timestamp_to_date,
 )
 from views_pipeline_core.modules.reports import (
-    # filter_metrics_from_dict,
     search_for_item_name,
     filter_metrics_by_eval_type_and_metrics,
 )
@@ -19,7 +19,6 @@ from views_pipeline_core.files.utils import (
 )
 from views_pipeline_core.modules.reports import ReportModule
 from views_pipeline_core.configs.pipeline import PipelineConfig
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -122,21 +121,6 @@ class EvaluationReportTemplate:
         report_manager.add_heading("Task Description", level=2)
         report_manager.add_markdown(markdown_text=task_definition_md)
 
-        # Evaluation scheme description
-        # eval_scheme_md = (
-        #     f"This evaluation scheme uses a **fixed-origin**, **expanding context window** with a **rolling-origin**, **fixed-length target window** strategy.\n"
-        #     f"A single **frozen trained model artifact** — trained once on data spanning a **fixed-origin**, **fixed-length training period** — is used throughout.\n"
-        #     f"    - The model is trained once on historical data ending at a defined cutoff date, then saved as a **frozen model artifact** (not retrained).\n"
-        #     f"    - The model generates forecasts for a **fixed forecast horizon** of {len(metadata_dict.get('steps', [*range(1, 36 + 1, 1)]))} temporal units, beginning immediately after the context window ends.\n"
-        #     f"    - At each of the {ForecastingModelManager._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())} evaluation iterations, the context window is expanded by one additional temporal unit of input data, always starting from the original origin and ending at a new cutoff.\n"
-        #     f"    - The **target window** — a fixed-length, out-of-sample segment of the **target feature** — shifts forward by one temporal unit at each iteration, beginning immediately after the context window ends.\n"
-        #     f"    - The frozen model artifact is re-applied at each iteration using the updated context window, while the model parameters remain unchanged.\n"
-        #     f"    - **Forecast performance** is assessed by comparing the model's predictions to the ground-truth values observed in each corresponding target window of the **holdout set**.\n"
-        #     f"    - This strategy evaluates the **stability and robustness** of a fixed model under operational conditions, where retraining is deferred and forecasts are updated as new input data becomes available.\n"
-        # )
-        # report_manager.add_heading("Evaluation Scheme Description", level=2)
-        # report_manager.add_markdown(markdown_text=eval_scheme_md)
-
         # Model-specific report content
         if self.model_path.target in ("model", "ensemble"):
             self._add_report_content(
@@ -237,7 +221,7 @@ class EvaluationReportTemplate:
                 if verified_partition_dict is None:
                     verified_partition_dict = partition_metadata_dict
                 elif verified_partition_dict != partition_metadata_dict:
-                    print(verified_partition_dict, partition_metadata_dict)
+                    logger.error("Partition metadata mismatch: %s vs %s", verified_partition_dict, partition_metadata_dict)
                     raise ValueError(
                         f"Partition metadata mismatch between models: Offending model: {model_name}"
                     )

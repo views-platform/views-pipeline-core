@@ -3,7 +3,7 @@
 **Status:** Active
 **Owner:** Orchestration Core
 **Last reviewed:** 2026-03-03
-**Related ADRs:** ADR-033 (PredictionFrame Adoption)
+**Related ADRs:** ADR-003 (Authority of Declarations), ADR-009 (Boundary Contracts), ADR-042 (PredictionFrame Adoption)
 
 ---
 
@@ -28,7 +28,7 @@ layers, without coupling either side to Pandas.
 - This class does **not** infer identifiers from array position or data content.
   Identifiers must be provided explicitly by the model; no guessing.
 - This class does **not** perform lead-time (step) assignment. That is the
-  orchestrator's responsibility (ADR-030, ADR-031).
+  orchestrator's responsibility (ADR-030, ADR-040).
 
 ---
 
@@ -84,7 +84,7 @@ layers, without coupling either side to Pandas.
 
 - **Created by**: `ModelManager` subclasses via `_forecast_model_artifact()`,
   `_evaluate_model_artifact()`, or `_evaluate_sweep()` when
-  `configs["prediction_format"] == "prediction_frame"` (ADR-033).
+  `configs["prediction_format"] == "prediction_frame"` (ADR-042).
 - **Consumed by**: `PandasAdapter.from_prediction_frame()` /
   `from_prediction_frames()` (converts to `EvaluationFrame` for evaluation)
   and by the `ModelManager` persistence shim (converts to DataFrame for storage
@@ -150,9 +150,9 @@ pf = PredictionFrame(
 
 ## 11. Evolution Notes
 
-- **Active migration in progress.** Per ADR-033, `PredictionFrame` is being
+- **Active migration in progress.** Per ADR-042, `PredictionFrame` is being
   adopted as the primary model output format via the Strangler Fig pattern.
-  Migration sequence: forecast → calibration/validation → sweep. See ADR-033
+  Migration sequence: forecast → calibration/validation → sweep. See ADR-042
   for the full migration contract and parity requirements.
 - **Persistence format.** During the migration window, `ModelManager` converts
   PredictionFrame to DataFrame for storage (downstream compatibility). When
@@ -163,6 +163,12 @@ pf = PredictionFrame(
   `CorePredictionSniffer` will add a PF branch with level-range validation
   (`unit` values in the valid `priogrid_gid` / `country_id` range). See
   `CorePredictionSniffer.md` Section 11 for the two-precondition migration path.
+
+## 12. Known Deviations
+
+- **No NaN validation at construction:** `_validate_input()` checks shape and identifiers but does not reject arrays containing NaN or Inf values. NaN handling is left to downstream consumers.
+- **Storage format is split files:** Currently saves as `y_pred.npy` + `identifiers.npz` (two files). Evolution Notes document planned migration to single `.npz` file.
+- **No metadata beyond identifiers:** PredictionFrame carries only `time` and `unit` identifiers. It does not carry model name, run type, or timestamp — these are managed externally by the orchestrator.
 
 ---
 

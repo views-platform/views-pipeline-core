@@ -3,7 +3,7 @@
 **Status:** Active
 **Owner:** Orchestration Core
 **Last reviewed:** 2026-03-02
-**Related ADRs:** ADR-032 (Sniffer Pattern)
+**Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern)
 
 ---
 
@@ -132,6 +132,11 @@ CoreDataSniffer(...).sniff_loaded_data(df_predictions)  # use CorePredictionSnif
 - `_TRAINING_RUN_TYPES`, `_PARTITION_TRAIN`, `_PARTITION_TEST` are internal
   constants. If the partition dict contract ever changes, update them — not the
   inline strings they replaced.
+
+## 12. Known Deviations
+
+- **No schema validation beyond MultiIndex:** Validates index structure and partition compatibility but does not validate column names, dtypes, or value ranges of feature columns.
+- **viewser API drift not detected:** If viewser returns a DataFrame with correct structure but changed semantics (renamed features, different units), the sniffer will pass it.
 
 ---
 

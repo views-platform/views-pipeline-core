@@ -627,29 +627,6 @@ class ModelPathManager:
         ]
         return sorted(paths, reverse=True)
 
-    def _get_eval_file_paths(self, run_type: str, conflict_type: str) -> List[Path]:
-        """
-        Get evaluation file paths for run type and conflict type.
-
-        Internal Use:
-            Used by evaluation reporting methods.
-
-        Args:
-            run_type: Run type
-            conflict_type: Conflict type ('sb', 'os', 'ns')
-
-        Returns:
-            Sorted list of evaluation file paths (newest first)
-        """
-        paths = [
-            f
-            for f in self.data_generated.iterdir()
-            if f.is_file()
-            and f.stem.startswith(f"eval_{run_type}_{conflict_type}")
-            and f.suffix == PipelineConfig.dataframe_format
-        ]
-        return sorted(paths, reverse=True)
-
     def get_latest_model_artifact_path(self, run_type: str) -> Path:
         """
         Get path to latest model artifact for run type.
@@ -1569,12 +1546,14 @@ class ForecastingModelManager(ModelManager):
         """
         raw_preds = self._evaluate_model_artifact(eval_type, artifact_name)
         if not isinstance(raw_preds, dict):
-            raise ModelEvaluationException(
+            err_msg = (
                 f"prediction_format='prediction_frame' declared but "
                 f"_evaluate_model_artifact() returned {type(raw_preds).__name__}, "
                 f"expected Dict[str, List[PredictionFrame]]. "
                 f"Model contract violation."
             )
+            logger.error(err_msg)
+            raise ModelEvaluationException(err_msg)
         n_origins = len(next(iter(raw_preds.values())))
         for i in range(n_origins):
             pf_dict = {target: pf_list[i] for target, pf_list in raw_preds.items()}
@@ -1961,6 +1940,7 @@ class ForecastingModelManager(ModelManager):
                 )
 
             except Exception as e:
+                logger.error(f"Data fetching failed: {e}", exc_info=True)
                 raise DataFetchException(
                     f"Data fetching failed: {e}",
                     wandb_module=self._wandb_module,
@@ -2458,6 +2438,7 @@ class ForecastingModelManager(ModelManager):
                 if has_metrics:
                     self._evaluate_prediction_dataframe(raw_preds_sweep, self._eval_type)
                 else:
+                    logger.error("No evaluation metrics specified in config_meta.py")
                     raise PipelineException("No evaluation metrics specified in config_meta.py")
             finally:
                 self._wandb_module.finish_run()
@@ -2584,6 +2565,7 @@ class ForecastingModelManager(ModelManager):
                     models_path=self._model_path.models,
                 )
             except Exception:
+                logger.error(f"Forecast report generation failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Forecast report generation failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -2625,6 +2607,7 @@ class ForecastingModelManager(ModelManager):
                 json.dump(eval_report, f)
 
         except Exception as e:
+            logger.error(f"Error saving evaluation report: {e}", exc_info=True)
             raise PipelineException(
                 f"Error saving evaluation report: {e}",
                 wandb_module=self._wandb_module,
@@ -3135,6 +3118,7 @@ class ForecastingModelManager(ModelManager):
                     models_path=self._model_path.models,
                 )
             except Exception:
+                logger.error(f"Evaluation report generation failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Evaluation report generation failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,

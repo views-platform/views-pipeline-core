@@ -3,8 +3,7 @@
 **Status:** Active
 **Owner:** Orchestration Core
 **Last reviewed:** 2026-03-03
-**Related ADRs:** ADR-030 (Orchestrator-Led Alignment), ADR-031 (Authority over
-Inference), ADR-033 (PredictionFrame Adoption)
+**Related ADRs:** ADR-003 (Authority of Declarations), ADR-009 (Boundary Contracts), ADR-039 (Orchestrator-Led Alignment), ADR-040 (Authority over Inference), ADR-042 (PredictionFrame Adoption)
 
 ---
 
@@ -29,7 +28,7 @@ lead-time assignment so that the evaluation engine receives a clean, dense
   re-packages them.
 - This class does **not** infer lead-time (step) values from data content.
   Steps are assigned from an explicit `step_mapping` provided by the
-  orchestrator (ADR-031).
+  orchestrator (ADR-040).
 
 ---
 
@@ -99,7 +98,7 @@ lead-time assignment so that the evaluation engine receives a clean, dense
 
 - **Called from**: `ModelManager` after model inference, before metric
   computation. `ModelManager` selects which adapter method to call based on
-  `configs["prediction_format"]` (ADR-033, ADR-031).
+  `configs["prediction_format"]` (ADR-042, ADR-040).
 - **Downstream**: The only component authorised to instantiate
   `EvaluationFrame` for production evaluation tasks.
 - **Dependencies**: `pandas`, `numpy`, `views_evaluation`.
@@ -166,6 +165,11 @@ ef = EvaluationAdapter.from_prediction_frames(actual, pf_list, "ged_sb")
 - **Class renamed** from `PandasAdapter` to `EvaluationAdapter` (2026-03-06) once
   `from_prediction_frames()` made the pandas-specific name misleading — the PF methods
   operate on pure numpy arrays and have no pandas dependency.
+
+## 12. Known Deviations
+
+- **Parity bridge is temporary:** `from_dataframes()` exists as a legacy bridge for DataFrame-based models. It will be deprecated when all models migrate to PredictionFrame (ADR-042).
+- **Zero-overlap sequences produce warnings, not errors:** When a prediction sequence has zero overlap with actuals, the adapter logs a warning and skips rather than raising. This is intentional but means partial evaluation results are possible.
 
 ---
 

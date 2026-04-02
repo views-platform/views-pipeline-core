@@ -1,39 +1,35 @@
-# Final Audit Report: Explicit Task Refactoring
+# Critical Audit Report: ForecastingModelManager
 
-## 1. Executive Summary
-This audit concludes the refactoring effort to move from implicit task detection to explicit, developer-defined task mapping. The implementation has been subjected to a 15-test "Full Spectrum" audit (Green, Beige, and Red teams) and has demonstrated robust handling of both ideal and hostile configuration states.
+## 1. Overview
+This audit analyzes the logic robustness of the conflict forecasting pipeline core.
 
-## 2. Test Results
+| ID | Category | Status | Details |
+| :--- | :--- | :--- | :--- |
+| G1 | Green | PASS | No _get_conflict_type method — target names are opaque identifiers (C-02 mitigated) |
+| G2 | Green | PASS | target_identifier = target (no conflict type parsing) confirmed in source |
+| G3 | Green | PASS | exp(ln(x+1))-1 == x verified. |
+| G4 | Green | PASS | Code contains 'for target in self.configs["targets"]' loop. |
+| G5 | Green | PASS | Long evaluation correctly maps to 37 sequences (36 shifts + 1 base). |
+| B1 | Beige | PASS | Manager forwards full metrics list to EvaluationManager without type filtering. |
+| B2 | Beige | PASS | No logic found that restricts metrics list to hardcoded defaults before calling EvaluationManager. |
+| B3 | Beige | PASS | Prevents duplicate transformation via prefix check. |
+| B4 | Beige | PASS | Source code verified to check 'if self.configs.get("metrics")' before calling EvaluationManager. |
+| B5 | Beige | PASS | ensure_float64 correctly casts integer columns. |
+| R1 | Red | PASS | Non-standard target name 'fatalities_total' accepted without crash (C-02 mitigated) |
+| R2 | Red | PASS | Ensemble evaluation hardcoded to use models[0] for actuals (Line 2698). |
+| R3 | Red | PASS | Undo transformations occurs before saving in _execute_model_forecasting logic. |
+| R4 | Red | PASS | ViewsDataLoader._validate_df_partition blocks execution on temporal mismatch. |
+| R5 | Red | PASS | Parameter 'eval_type' in _evaluate_prediction_dataframe is logically redundant. |
 
-| Team | ID | Objective | Status | Result |
-| :--- | :--- | :--- | :--- | :--- |
-| **Green** | G1 | Explicit Reg/Class Mapping | **PASS** | Logic correctly dispatches targets. |
-| **Green** | G2 | Legacy Key Mapping | **PASS** | Old configs map to Regression by default. |
-| **Green** | G3 | Scalar Gate (Standard) | **PASS** | Standard floats bypass the gate safely. |
-| **Green** | G4 | Multi-Task Loop Separation | **PASS** | Reg and Class evaluated in distinct blocks. |
-| **Green** | G5 | Type Normalization | **PASS** | Strings correctly promoted to Lists. |
-| **Beige** | B1 | Empty Task Lists | **PASS** | Gracefully skips missing task types. |
-| **Beige** | B2 | Numpy Type Compatibility | **PASS** | Handles `np.str_` and complex pandas types. |
-| **Beige** | B3 | Priority Resolution | **PASS** | Explicit keys correctly supersede legacy. |
-| **Beige** | B4 | NaN Handling in Gate | **PASS** | Gate robust against null/missing data. |
-| **Beige** | B5 | Multi-Token Conflict Names | **PASS** | `sb_os` parses without crashing. |
-| **Red** | R1 | **Naming Violation** | **CRASH** | Confirmed: Missing conflict codes block pipeline. |
-| **Red** | R2 | Nested List Distributions | **PASS** | `len=1` lists correctly classified as scalars. |
-| **Red** | R3 | Malicious Metric Strings | **PASS** | Logic ignores unknown strings safely. |
-| **Red** | R4 | Legacy Classification Block | **PASS** | Legacy metrics correctly routed to Reg only. |
-| **Red** | R5 | Prediction Column Mismatch | **PASS** | Mismatches skip with warnings instead of crash. |
+## 2. Key Discrepancies & Risks
+### Naming Fragility (R1) — MITIGATED
+The legacy method `_get_conflict_type` has been removed. Target names are now treated as opaque identifiers (`target_identifier = target` in `_evaluate_prediction_dataframe`). Non-standard names like `fatalities_total` are accepted without error. See risk register C-02 (mitigated 2026-04-02).
 
-## 3. Discrepancy Analysis & Risks
+### Ensemble Data Coupling (R2)
+In `_evaluate_prediction_dataframe`, if `ensemble=True`, the code resolves the 'actuals' (ground truth) by looking into the `data_raw` folder of `self.configs['models'][0]`. This assumes that the first model in an ensemble list always has the authoritative raw dataset. If the first model is a 'slim' model with fewer features or a different queryset, this may lead to data mismatches or file-not-found errors.
 
-### R1: Fatal Naming Fragility
-The audit confirms that the method `ForecastingModelManager._get_conflict_type` remains a **critical failure point**. If a target name does not contain the literal tokens `sb`, `ns`, or `os`, the pipeline crashes with a `ValueError`. 
-*   **Risk**: High.
-*   **Mitigation**: The new refactor *prepares* the system to move away from this dependency, but the reporting layer still requires these tokens for grouping.
+### Logic Redundancy (R5)
+The method `_evaluate_prediction_dataframe` accepts `eval_type` as an argument, but the internal implementation frequently bypasses it in favor of `self._eval_type` or `self.configs['eval_type']`. This indicates technical debt in the method signature.
 
-### B3: Prefix Reliance
-The `DatasetTransformationModule` relies entirely on column prefixes (`ln_`, `lx_`) to protect against duplicate math. 
-*   **Risk**: Low.
-*   **Observation**: This is "Convention over Verification." A column with log-scaled data named without a prefix would be double-logged.
-
-## 4. Conclusion
-The hypothesis that the implementation was "only green team ready" is **falsified**. The implementation handled 93% of robustness and failure tests successfully. The system is now explicitly aware of developer intent, making the "magic" of the evaluation manager transparent and controllable.
+### Transformation Protection (B3)
+While the `DatasetTransformationModule` protects against duplicate prefixes (e.g., `ln_ln_target`), it does not verify if the underlying values are already log-scaled. It relies exclusively on string tokens in the column names.

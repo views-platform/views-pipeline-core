@@ -893,21 +893,6 @@ class AppwriteMetadataHandler:
         self.databases = databases
         self.config = config
 
-    # def _get_metadata_database_name(self, bucket_name: str) -> str:
-    #     return f"{bucket_name} Metadata"
-
-    # def _get_metadata_database_id(self, bucket_name: str) -> str:
-    #     clean_name = "".join(c for c in bucket_name if c.isalnum())
-    #     return f"{clean_name}_metadata".lower()
-
-    # def _get_collection_id(self, bucket_name: str, collection_name: str, collection_id: str = None) -> str:
-    #     # Use custom collection_id if provided, otherwise generate one
-    #     if collection_id:
-    #         return collection_id
-
-    #     clean_bucket_name = "".join(c for c in bucket_name if c.isalnum()).lower()
-    #     return f"{collection_name}"
-
     def create_database_if_not_exists(self, database_id: str = None, database_name: str = None) -> OperationResult:
         """Create metadata database if it doesn't exist.
 
@@ -1702,69 +1687,6 @@ class AppWriteFileModule:
         
         return sha256_hash.hexdigest()
     
-    # def _file_exists_by_hash(
-    #     self,
-    #     bucket_id: str,
-    #     file_hash: str,
-    #     filename: str = None
-    # ) -> OperationResult:
-    #     try:
-    #         # First try to find by hash in metadata
-    #         # bucket_info = self.get_bucket(bucket_id)
-    #         # if not bucket_info.success:
-    #         #     return OperationResult(success=False, error="Bucket not found")
-            
-    #         # bucket_name = bucket_info.data["name"]
-    #         # search_result = self.metadata_manager.check_file_exists_by_hash(
-    #         #     bucket_name, file_hash, self.config.collection_name, self.config.collection_id, self.config.database_id
-    #         # )
-    #         search_result = self.metadata_manager.check_file_exists_by_hash(
-    #             file_hash, 
-    #             self.config.collection_name, 
-    #             self.config.collection_id, 
-    #             self.config.database_id
-    #         )
-            
-    #         if search_result.success:
-    #             return OperationResult(
-    #                 success=True,
-    #                 data=search_result.data,
-    #                 code="FOUND_BY_HASH"
-    #             )
-            
-    #         # Fallback to filename check if hash not found
-    #         if filename:
-    #             all_files = []
-    #             offset = 0
-    #             limit = DEFAULT_PAGE_LIMIT
-                
-    #             while True:
-    #                 result = self.storage.list_files(
-    #                     bucket_id, [Query.limit(limit), Query.offset(offset)]
-    #                 )
-    #                 files_chunk = result.get("files", [])
-    #                 all_files.extend(files_chunk)
-                    
-    #                 if len(files_chunk) < limit:
-    #                     break
-    #                 offset += limit
-                
-    #             for file in all_files:
-    #                 if file["name"] == filename:
-    #                     return OperationResult(
-    #                         success=True,
-    #                         data=file,
-    #                         code="FOUND_BY_NAME"
-    #                     )
-            
-    #         return OperationResult(success=False, code="NOT_FOUND")
-
-    #     except AppwriteException as e:
-    #         return OperationResult(
-    #             success=False,
-    #             error=e.message,
-    #             code=e.type
-    #         )
     def _file_exists_by_hash(
     self,
     bucket_id: str,
