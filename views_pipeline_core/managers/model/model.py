@@ -2765,6 +2765,9 @@ class ForecastingModelManager(ModelManager):
                     del raw_preds
                     gc.collect()
 
+                    # legacy_compatibility=True preserves step-wise truncation to shortest
+                    # sequence, matching the deleted EvaluationManager wrapper behavior.
+                    # Flip to False only after verifying numeric equivalence (see C-29).
                     report = evaluator.evaluate(ef=ef, legacy_compatibility=True)
                     del ef
                     gc.collect()
@@ -2788,6 +2791,7 @@ class ForecastingModelManager(ModelManager):
                         step_mapping=step_mappings,
                     )
 
+                    # See PF path comment above re: legacy_compatibility (C-29).
                     report = evaluator.evaluate(ef=ef, legacy_compatibility=True)
 
                 # Extract native dict format for WandB logging and DataFrames for file saving

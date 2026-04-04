@@ -64,7 +64,7 @@ class ReconciliationModule:
             raise TypeError(f"Expected _PGDataset, got {type(pg_dataset)}")
 
         self._device = self.__detect_torch_device()
-        print(f"Using device: {self._device}")
+        logger.info(f"Using device: {self._device}")
         self._reconciler = ForecastReconciler(device=self._device)
         self._pg_dataset._build_country_to_grids_cache()
 

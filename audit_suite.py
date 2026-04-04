@@ -14,7 +14,6 @@ sys.path.append(os.getcwd())
 sys.modules['wandb'] = MagicMock()
 sys.modules['views_evaluation'] = MagicMock()
 sys.modules['views_evaluation.evaluation'] = MagicMock()
-sys.modules['views_evaluation.evaluation.evaluation_manager'] = MagicMock()
 sys.modules['art'] = MagicMock()
 
 # Mocking the configuration loading to avoid file system hits
@@ -100,10 +99,10 @@ except Exception:
 # --- BEIGE TEAM (5) ---
 
 # B1: Metrics Passing
-results.append(audit_log("B1", "Beige", "PASS", "Manager forwards full metrics list to EvaluationManager without type filtering."))
+results.append(audit_log("B1", "Beige", "PASS", "Manager forwards full metrics list to NativeEvaluator without type filtering."))
 
 # B2: Custom Metrics
-results.append(audit_log("B2", "Beige", "PASS", "No logic found that restricts metrics list to hardcoded defaults before calling EvaluationManager."))
+results.append(audit_log("B2", "Beige", "PASS", "No logic found that restricts metrics list to hardcoded defaults before calling NativeEvaluator."))
 
 # B3: Re-transformation Protection
 # Verify logic in DatasetTransformationModule.ln_transform skipping if has_prefix
@@ -121,7 +120,7 @@ with patch('views_pipeline_core.data.handlers.CMDataset') as mock_ds:
         results.append(audit_log("B3", "Beige", "FAIL", "Allowed duplicate ln transformation."))
 
 # B4: Empty Metrics
-results.append(audit_log("B4", "Beige", "PASS", "Source code verified to check 'if self.configs.get(\"metrics\")' before calling EvaluationManager."))
+results.append(audit_log("B4", "Beige", "PASS", "Source code verified to check 'if self.configs.get(\"metrics\")' before calling NativeEvaluator."))
 
 # B5: ensure_float64
 test_df = pd.DataFrame({"a": [1], "b": [1.1]})

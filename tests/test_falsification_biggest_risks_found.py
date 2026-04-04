@@ -16,7 +16,6 @@ sys.modules["wandb"] = MagicMock()
 sys.modules["views_evaluation"] = MagicMock()
 sys.modules["views_evaluation.evaluation"] = MagicMock()
 sys.modules["views_evaluation.evaluation.evaluation_frame"] = MagicMock()
-sys.modules["views_evaluation.evaluation.evaluation_manager"] = MagicMock()
 sys.modules["art"] = MagicMock()
 
 

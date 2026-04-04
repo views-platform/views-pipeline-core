@@ -143,8 +143,11 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
     if not evaluation_dict:
         return {}
     mean_dict = {}
-    first_item = next(iter(evaluation_dict.values()))
-    metric_names = first_item.keys() if isinstance(first_item, dict) else vars(first_item).keys()
+    # Collect the union of all metric keys across all items so that metrics
+    # present in later items but absent from the first are not silently dropped.
+    metric_names: set = set()
+    for item in evaluation_dict.values():
+        metric_names.update(item.keys() if isinstance(item, dict) else vars(item).keys())
 
     # Compute the mean for each metric, skipping metrics with None values
     for key in metric_names:
