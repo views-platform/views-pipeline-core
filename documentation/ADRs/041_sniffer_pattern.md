@@ -1,4 +1,4 @@
-# ADR-050: The Sniffer Pattern — Structural Auditing at Trust Boundaries
+# ADR-041: The Sniffer Pattern — Structural Auditing at Trust Boundaries
 
 **Status:** Accepted
 **Date:** 2026-03-02
@@ -82,15 +82,15 @@ All trust-boundary validation in this repository follows the **Sniffer Pattern**
    would need to import from an external model or evaluation repo to perform a check,
    that check does not belong here.
 
-### Naming note — relation to ADR-058
+### Naming note — relation to ADR-040
 
-ADR-058 ("The No-Sniffing Rule") forbids **semantic inference**: deducing computation
+ADR-040 ("The No-Sniffing Rule") forbids **semantic inference**: deducing computation
 semantics (task type, prediction type, lead-time step) from data content.
 
 The `Core*Sniffer` naming is adopted from the hydranet `DataSniffer` pattern and refers
 to **structural auditing**: validating that data meets an explicit, pre-declared contract.
 A sniffer makes no computation decisions; it either passes silently or raises immediately.
-ADR-058's prohibition is orthogonal and remains fully in force.
+ADR-040's prohibition is orthogonal and remains fully in force.
 
 ### Active sniffers
 

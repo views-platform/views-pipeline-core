@@ -58,7 +58,7 @@ It does zero-copy Arrow reads. But it never touches a PredictionFrame object —
 
 ### Implication
 
-**No work needed to make ensembles PF-aware.** The Strangler Fig pattern (ADR-033) correctly isolates PredictionFrame within individual model boundaries. The parquet layer is the permanent interface. This is by design, not a gap.
+**No work needed to make ensembles PF-aware.** The Strangler Fig pattern (ADR-042) correctly isolates PredictionFrame within individual model boundaries. The parquet layer is the permanent interface. This is by design, not a gap.
 
 ---
 
@@ -81,7 +81,7 @@ The `--monthly` shorthand auto-sets: `run_type=forecasting, train=True, forecast
 | Step | PredictionFrame path | DataFrame path |
 |------|---------------------|----------------|
 | **Inference** | `_forecast_model_artifact()` → `Dict[str, PredictionFrame]` | `_forecast_model_artifact()` → `pd.DataFrame` |
-| **Type guard** | Fail-loud if not dict (ADR-033) | Fail-loud if dict returned |
+| **Type guard** | Fail-loud if not dict (ADR-042) | Fail-loud if dict returned |
 | **Validation** | `audit_prediction_structure()` (PF is self-validating) | `CorePredictionSniffer.sniff_predictions()` |
 | **Conversion** | `PredictionFrameConverter.to_prediction_df()` → DataFrame | (none needed) |
 | **Save local** | `save_dataframe()` → parquet | `save_dataframe()` → parquet |
@@ -239,7 +239,7 @@ Authentication: API key required via `X-API-Key` header.
 
 1. **Parquet is the universal contract.** Both PF and DF paths converge to identical parquet files. This is the permanent interface between models, ensembles, and external consumers.
 
-2. **PredictionFrame is invisible to ensembles.** The Strangler Fig migration (ADR-033) correctly scopes PF within individual model boundaries. No ensemble changes needed — ever.
+2. **PredictionFrame is invisible to ensembles.** The Strangler Fig migration (ADR-042) correctly scopes PF within individual model boundaries. No ensemble changes needed — ever.
 
 3. **Two upload destinations.** views-forecasts store (internal) and Appwrite cloud (external). Both triggered by `--prediction_store` flag.
 

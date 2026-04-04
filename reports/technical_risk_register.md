@@ -1,8 +1,8 @@
 # Technical Risk Register
 
-**Last updated:** 2026-04-02
+**Last updated:** 2026-04-04
 **Governing ADR:** ADR-044 (Technical Risk Register)
-**Entry count:** 26
+**Entry count:** 33
 
 ---
 
@@ -41,8 +41,6 @@
 | C-08 | 4 | **PipelineConfig singleton read at import time.** Reads pyproject.toml at module import. If imported before working directory is correct, version/config will be wrong. | Library imported from unexpected working directory (e.g., during testing) | repo-assimilation | Open |
 | C-10 | 3 | **No test coverage for visualization, mapping, templates, packaging.** These modules produce user-facing outputs. Regressions caught only in production. | Any modification to MappingModule, PlotDistribution, HistoricalLineGraph, template generators, or PackageManager | repo-assimilation | Open |
 | C-11 | 3 | **Appwrite credential assumption.** Environment variables for Appwrite auth assumed present. Missing credentials cause runtime failures during upload after significant compute investment. | Appwrite credentials not set in environment, discovered only after training completes | repo-assimilation | Open |
-| C-12 | — | **~~Deprecated shims in cli/utils.py.~~** CLOSED (2026-04-02). File removed during tech debt cleanup — confirmed no imports existed anywhere. | — | repo-assimilation | Closed |
-| C-13 | — | **~~audit_suite.py tests non-existent method.~~** CLOSED (2026-04-03). G1, G2, R1 tests rewritten: G1 verifies `_get_conflict_type` does NOT exist; G2 verifies opaque `target_identifier = target` in source; R1 verifies non-standard target names accepted. Report updated. | — | C-02 investigation | Closed |
 | C-14 | 2 | **No data versioning for raw viewser data.** Data fetched from viewser is cached to `data_raw/` with only timestamps distinguishing files. No queryset hash, version tag, or manifest. Two runs with different querysets produce files in the same directory with no way to detect inconsistency. | Model performance changes between runs and team cannot determine whether the model or input data changed; also triggers C-03 (ensemble data coupling) | expert-code-review | Open |
 | C-15 | 3 | **No timeouts on external operations.** viewser data fetching, Appwrite uploads, and WandB API calls all run without explicit timeouts. A slow upstream service blocks the pipeline indefinitely. | Upstream service (viewser, Appwrite, WandB) becomes slow but not unreachable; pipeline hangs with no error | expert-code-review | Open |
 | C-16 | 3 | **No integration tests.** All ~913 tests are unit tests with sys.modules-level mocks. No test exercises `execute_single_run()` against even synthetic data. The gap between "all tests pass" and "the pipeline works" is unknown. | Any decomposition PR (e.g., EvaluationOrchestrator extraction) passes all unit tests but breaks the actual pipeline | expert-code-review | Open |
@@ -51,11 +49,14 @@
 | C-19 | 2 | **ForecastingModelManager: 5 of 10 CIC failure modes untested.** `ModelTrainingException`, `ModelEvaluationException`, `ModelForecastingException`, temporal coverage violation (`_assert_predictions_in_step_window`), and wrong sequence count are documented in the CIC but have zero test coverage. These are the most common production failure paths. | Training, evaluation, or forecasting fails in production; exception type, WandB alert propagation, or cleanup behavior is wrong | test-review | Open |
 | C-20 | 2 | **No pipeline ordering safety.** No test or runtime check verifies that `_execute_model_evaluation()` is called only after `_execute_data_fetching()` completes. Wrong-order execution produces `FileNotFoundError` or empty results rather than an explicit pipeline-stage error. | Downstream model calls pipeline methods out of order; or refactoring reorders stage execution in `_execute_model_tasks()` | test-review | Open |
 | C-21 | 3 | **Test suite is 83% green, 7% beige — system-level interaction tests nearly absent.** Suite treats components as independent units. No tests for: wrong-order execution, partial target failure (3/5 succeed), ensemble sub-model resolution mismatch, or decision-support metadata completeness. Leveson/STAMP analysis reveals the deepest blind spot. | System-level failure arising from correct individual components interacting incorrectly (e.g., ensemble model reordering, partial evaluation results) | test-review | Open |
-| C-22 | — | **~~ADR-008 systematic violation.~~** CLOSED (2026-04-03). Added `logger.error()` before all ~10 PipelineException raises across `model.py`, `ensemble.py`, `extractor.py`, `prediction/io.py`. | — | falsification-audit | Closed |
 | C-23 | 1 | **NaN silently propagates into training tensors.** `_ViewsDataset.to_tensor()` (`handlers.py:372-503`) has zero NaN checks in `_features_to_tensor()` or `_prediction_to_tensor()`. NaN in feature columns flows into model training tensors undetected. For a conflict forecasting system, this means models train on corrupted data silently. | Upstream viewser data contains NaN values (missing observations, partial data); model trains on NaN-containing tensors producing garbage predictions | falsification-audit | Open |
 | C-24 | 2 | **ConfigurationManager silently overrides safety-critical parameters.** `get_combined_config()` uses `dict.update()` to merge 5 sources. If `config_hyperparameters` has `level:"cm"` and `config_deployment` has `level:"pgm"`, deployment silently wins. No conflict detection, no warning, no log. `CoreConfigSniffer` validates the merged result but cannot detect the override. | User sets level in hyperparameters; deployment config overrides it; user doesn't realize the model is running at the wrong spatial resolution | falsification-audit | Open |
-| C-25 | — | **~~ReconciliationModule.max_workers parameter inoperative.~~** CLOSED (2026-04-03). Fixed `ProcessPoolExecutor(max_workers=None)` → `ProcessPoolExecutor(max_workers=num_of_workers)` in `reconciliation.py:241`. | — | falsification-audit | Closed |
 | C-26 | 3 | **EvaluationAdapter silently truncates on sparse actuals.** `from_dataframes()` produces a truncated EvaluationFrame when actuals partially cover the prediction window (e.g., 3/12 months). No warning logged unless overlap is exactly zero. Metrics computed on truncated data appear normal. | Data sparsity in actuals (missing months); evaluation metrics computed on partial data without any indication of incompleteness | falsification-audit | Open |
+| C-28 | 4 | **Stale module mocks reference deleted infrastructure.** `audit_suite.py:17` and `tests/test_falsification_biggest_risks_found.py:19` still mock `sys.modules['views_evaluation.evaluation.evaluation_manager']`. Neither file imports from that path — purely defensive dead code that misleads future maintainers about active dependencies. | Someone trusts mock setup as documentation of which modules are actually imported | post-migration-audit | Open |
+| C-29 | 3 | **`legacy_compatibility=True` is an undocumented behavioral decision.** Both `evaluator.evaluate()` calls in `model.py:2768,2791` hardcode `legacy_compatibility=True`, preserving step-wise truncation to shortest sequence (a known legacy bug). The NativeEvaluator default is `False`. No inline comment, no config surface, no ADR documents this choice. Rationale exists only in `reports/evaluation_report_migration_plan.md:559,575`. | Developer flips to `False` without understanding it changes metric values; or flag is never flipped, silently preserving a legacy bug indefinitely | post-migration-audit | Open |
+| C-30 | 3 | **No cross-repo contract test pattern.** `test_evaluation_integration.py` catches import breakage (added reactively after 2026-04-03 incident) but does not test signature stability, return type structure, or behavioral changes. No CI matrix, no minimum-version testing. | views-evaluation changes a method signature, return type, or default behavior; pipeline-core tests pass but integration fails | post-migration-audit | Open |
+| C-31 | 3 | **Dual evaluation paths are now functionally identical.** PF path (`model.py:2740-2770`) and DF path (`model.py:2773-2791`) both end with `evaluator.evaluate(ef=ef, legacy_compatibility=True)`. Only differ in EvaluationFrame construction. Parity audits removed (post-mortem 2026-03-03). No tracked retirement timeline for DF path. Two code paths without active parity verification increase maintenance burden and divergence risk. | Maintenance change to one path but not the other; or refactoring attempt that must update both paths in lockstep | post-migration-audit | Open |
+| C-32 | 3 | **`calculate_mean_evaluation_metrics()` uses first item's keys only.** `wandb/utils.py:147` determines which metrics to average by inspecting `first_item.keys()`. With dict-based results (post-migration), metrics absent from the first group but present in later groups are silently dropped from the mean. The old dataclass path was immune because `vars()` always returned all 12 fields. TDD-red test: `test_falsification_foundational_fix.py::test_falsify_P1_calculate_mean_uses_union_of_keys`. | Future code change causes NativeEvaluator to compute different metric sets per group (e.g., conditional metrics, sparse evaluation); WandB mean metrics silently incomplete | post-migration-audit | Open |
 
 ---
 
@@ -74,6 +75,8 @@
 | C-13 | **audit_suite.py tests non-existent method.** G1/G2/R1 called `_get_conflict_type()`. | Tests rewritten to validate current opaque-identifier behavior. Report updated. | 2026-04-03 |
 | C-22 | **ADR-008 systematic violation.** ~10 PipelineException raises without preceding logger.error. | Added `logger.error()` before all raise sites across 4 files. | 2026-04-03 |
 | C-25 | **ReconciliationModule.max_workers inoperative.** `ProcessPoolExecutor(max_workers=None)` ignored computed value. | Fixed to `ProcessPoolExecutor(max_workers=num_of_workers)`. | 2026-04-03 |
+| C-27 | **Version constraint for views-evaluation stale.** `pyproject.toml` declared `"^0.3.0"`, actual installed v0.5.0. | Updated to `"^0.5.0"`. | 2026-04-04 |
+| C-33 | **ADR file-to-header number mismatch.** 4 ADR files (039-042) had internal header numbers (050, 051, 057, 058) different from filenames. 2 phantom ADRs (030, 033) referenced in CICs/code but never existed. 97 cross-references across 44 files. | Headers renumbered to match filenames; all cross-references updated. | 2026-04-04 |
 
 ---
 
@@ -93,6 +96,7 @@ Concerns are opened during:
 - Expert reviews
 - Tech debt audits
 - Falsification audits
+- Post-migration audits
 - Repo assimilation
 
 Concerns are closed when:

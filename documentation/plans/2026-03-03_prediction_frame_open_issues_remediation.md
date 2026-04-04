@@ -259,7 +259,7 @@ if len(_all_targets) > 1:
     logger.warning(
         f"PF path: only '{_primary_target}' will be saved. "
         f"Multi-target PF output is not yet supported. "
-        f"Targets {_all_targets[1:]} are dropped. See ADR-033 Issue 3."
+        f"Targets {_all_targets[1:]} are dropped. See ADR-042 Issue 3."
     )
 ```
 
@@ -304,7 +304,7 @@ if prediction_format == "prediction_frame":
     )
     df_predictions = _pf_to_legacy_dfs([_pf], _target)[0]
 
-    # Parity audit (ADR-033): PF-derived EF vs DF-derived EF.
+    # Parity audit (ADR-042): PF-derived EF vs DF-derived EF.
     # Requires actuals DF for alignment — load lazily.
     # NOTE: Forecast does not have actuals for future months; skip the
     # full EF comparison.  Instead, audit the converted DF structurally:
@@ -370,7 +370,7 @@ identifier contract).
 
 **Recommended short-term**: Option B — add a clear logger.warning inside the PF
 dispatch block stating that `y_pred` must correspond to `target` by convention,
-and that this is the model author's responsibility per ADR-033.
+and that this is the model author's responsibility per ADR-042.
 
 ### Implementation
 
@@ -379,7 +379,7 @@ Add to `_evaluate_prediction_dataframe()` PF dispatch block:
 ```python
 logger.debug(
     f"PF path: assuming raw_preds[i].y_pred corresponds to target '{target}'. "
-    f"Target-to-PF alignment is the model author's responsibility (ADR-033)."
+    f"Target-to-PF alignment is the model author's responsibility (ADR-042)."
 )
 ```
 

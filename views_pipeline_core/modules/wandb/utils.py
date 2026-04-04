@@ -57,14 +57,16 @@ def generate_wandb_step_wise_log_dict(
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
         dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
-            where the keys are steps and values are `EvaluationMetrics` instances.
+            where the keys are steps and values are `EvaluationMetrics` instances or plain dicts.
         step (str): The specific time step (month forecasted) for which metrics are logged (e.g., 'step01').
         target_identifier (str): The target identifier for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and step.
     """
-    for key, value in asdict(dict_of_eval_dicts[step]).items():
+    entry = dict_of_eval_dicts[step]
+    items = entry.items() if isinstance(entry, dict) else asdict(entry).items()
+    for key, value in items:
         if value is not None:
             log_dict[f"step-wise/{target_identifier}/{key}"] = value
 
@@ -83,14 +85,16 @@ def generate_wandb_month_wise_log_dict(
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
         dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
-            where the keys are months and values are `EvaluationMetrics` instances.
+            where the keys are months and values are `EvaluationMetrics` instances or plain dicts.
         month (str): The specific month for which metrics are logged (e.g., 'month501').
         target_identifier (str): The target identifier for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and month.
     """
-    for key, value in asdict(dict_of_eval_dicts[month]).items():
+    entry = dict_of_eval_dicts[month]
+    items = entry.items() if isinstance(entry, dict) else asdict(entry).items()
+    for key, value in items:
         if value is not None:
             log_dict[f"month-wise/{target_identifier}/{key}"] = value
 
@@ -109,14 +113,16 @@ def generate_wandb_time_series_wise_log_dict(
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
         dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
-            where the keys are time series and values are `EvaluationMetrics` instances.
+            where the keys are time series and values are `EvaluationMetrics` instances or plain dicts.
         time_series (str): The specific time series for which metrics are logged (e.g., 'ts01').
         target_identifier (str): The target identifier for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and time series
     """
-    for key, value in asdict(dict_of_eval_dicts[time_series]).items():
+    entry = dict_of_eval_dicts[time_series]
+    items = entry.items() if isinstance(entry, dict) else asdict(entry).items()
+    for key, value in items:
         if value is not None:
             log_dict[f"time-series-wise/{target_identifier}/{key}"] = value
 
@@ -129,7 +135,7 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
 
     Args:
         evaluation_dict (dict): A dictionary of evaluation metrics,
-            where the keys are time steps, months, or time series, and values are `EvaluationMetrics` instances.
+            where the keys are time steps, months, or time series, and values are `EvaluationMetrics` instances or plain dicts.
 
     Returns:
         dict: A dictionary of mean evaluation metrics for the input dictionary.
@@ -138,13 +144,16 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
         return {}
     mean_dict = {}
     first_item = next(iter(evaluation_dict.values()))
-    metric_names = vars(first_item).keys()
+    metric_names = first_item.keys() if isinstance(first_item, dict) else vars(first_item).keys()
 
     # Compute the mean for each metric, skipping metrics with None values
     for key in metric_names:
         valid_values = [
             value
-            for value in (vars(item).get(key) for item in evaluation_dict.values())
+            for value in (
+                (item.get(key) if isinstance(item, dict) else vars(item).get(key))
+                for item in evaluation_dict.values()
+            )
             if value is not None
         ]
         if valid_values:

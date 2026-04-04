@@ -28,7 +28,7 @@ layers, without coupling either side to Pandas.
 - This class does **not** infer identifiers from array position or data content.
   Identifiers must be provided explicitly by the model; no guessing.
 - This class does **not** perform lead-time (step) assignment. That is the
-  orchestrator's responsibility (ADR-030, ADR-040).
+  orchestrator's responsibility (ADR-039, ADR-040).
 
 ---
 

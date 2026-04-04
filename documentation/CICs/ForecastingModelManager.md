@@ -47,7 +47,7 @@ configuration to `ConfigurationManager`.
 - Guarantees that `CorePredictionSniffer.sniff_predictions()` is called on
   every prediction DataFrame before it is saved (DF path). On the PF path,
   `PredictionFrame` is self-validating at construction.
-- Guarantees that type enforcement guards (ADR-033) reject mismatched return
+- Guarantees that type enforcement guards (ADR-042) reject mismatched return
   types: a `dict` return when `prediction_format="dataframe"` is declared, or
   a non-dict return when `prediction_format="prediction_frame"` is declared.
 - Guarantees that `_assert_predictions_in_step_window()` validates temporal
@@ -113,7 +113,7 @@ configuration to `ConfigurationManager`.
 | Training fails | `ModelTrainingException` with WandB alert |
 | Evaluation fails | `ModelEvaluationException` with WandB alert |
 | Forecasting fails | `ModelForecastingException` with WandB alert |
-| Return type mismatches `prediction_format` | `ValueError` (ADR-033 fail-loud guard) |
+| Return type mismatches `prediction_format` | `ValueError` (ADR-042 fail-loud guard) |
 | Prediction temporal coverage outside step window | `ValueError` from `_assert_predictions_in_step_window()` with diagnostic hints |
 | Wrong number of evaluation sequences | `ValueError` from `_assert_predictions_in_step_window()` |
 
@@ -136,7 +136,7 @@ ForecastingModelManager
     |-- CorePredictionSniffer      (DF path: prediction validation)
     |-- PredictionFrame            (PF path: self-validating)
     |-- EvaluationAdapter          (metrics bridge)
-    |-- EvaluationManager          (metrics calculation, from views-evaluation)
+    |-- NativeEvaluator            (metrics calculation, from views-evaluation)
     |-- ForecastReportTemplate     (report generation)
     |-- EvaluationReportTemplate   (report generation)
     |
@@ -210,7 +210,7 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
 - `tests/test_managers/test_model.py` -- unit tests for `ModelManager` and
   `ForecastingModelManager` initialization, config loading, arg validation.
 - `tests/test_managers/test_model_manager_prediction_format.py` -- tests for
-  ADR-033 type enforcement guards on both DF and PF code paths.
+  ADR-042 type enforcement guards on both DF and PF code paths.
 - `tests/test_managers/test_streaming_evaluation.py` -- tests for streaming
   PF evaluation via `_evaluate_model_artifact_streaming` and the origin sink
   pattern.

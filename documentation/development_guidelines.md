@@ -235,12 +235,13 @@ import pandas as pd
 import numpy as np
 
 
-class EvaluationManager:
-    """Calculate and organize evaluation metrics."""
+class EvaluationAdapter:
+    """Adapt predictions and actuals into EvaluationFrame for NativeEvaluator."""
     
-    def __init__(self, metrics: List[str]):
+    @classmethod
+    def from_dataframes(cls, actual, predictions, target, step_mapping):
         """
-        Initialize evaluation manager.
+        Build an EvaluationFrame from DataFrames.
         
         Args:
             metrics: List of metric names to calculate
@@ -940,7 +941,7 @@ from views_pipeline_core.managers.path import ModelPathManager
 # Module layer
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
 from views_pipeline_core.modules.wandb import WandBModule
-from views_pipeline_core.modules.evaluation import EvaluationManager
+from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
 
 # Data layer
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset

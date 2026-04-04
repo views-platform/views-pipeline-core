@@ -445,7 +445,7 @@ class TestParityClosure:
     PredictionFrameConverter.to_legacy_dfs() → from_dataframes() path
     produce bit-wise identical EvaluationFrames for the same input data.
 
-    This is the primary correctness anchor for the ADR-033 parity bridge:
+    This is the primary correctness anchor for the ADR-042 parity bridge:
     both adapter paths must agree before the legacy DF path can be retired.
     """
 

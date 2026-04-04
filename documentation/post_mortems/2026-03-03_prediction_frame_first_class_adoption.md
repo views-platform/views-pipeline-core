@@ -13,7 +13,7 @@ systematic, TDD-driven migration of `PredictionFrame` as a first-class model
 output format throughout `ForecastingModelManager`.  Six phases were executed:
 
 ### Phase 0 — Documentation anchors
-- **ADR-033** (`documentation/ADRs/033_prediction_frame_adoption.md`): Formalised
+- **ADR-042** (`documentation/ADRs/042_prediction_frame_adoption.md`): Formalised
   the Strangler Fig pattern for the DF → PF migration.  Defined `prediction_format`
   as the sole dispatch authority (no `isinstance` checks).  Established the parity
   contract and migration sequence (forecast → calibration/validation → sweep).
@@ -96,7 +96,7 @@ access (the inconsistency is a known open issue).
 
 ## 2. Why was it done?
 
-- **ADR-033** formalised a transition away from Pandas-backed predictions that
+- **ADR-042** formalised a transition away from Pandas-backed predictions that
   couples model inference to the Pandas library and forces list-in-cell sample
   storage that does not scale to subnational resolution.
 - `PredictionFrame` eliminates the "Pandas sandwich": model authors writing

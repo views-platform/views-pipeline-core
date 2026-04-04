@@ -1,4 +1,4 @@
-# ADR-057: Orchestrator-Led Data Alignment & PredictionFrame Standard
+# ADR-039: Orchestrator-Led Data Alignment & PredictionFrame Standard
 
 **Status:** Accepted  
 **Date:** 2026-02-27  
@@ -26,7 +26,7 @@ The "Join" (intersection of truth and predictions) is now an orchestration conce
 We introduce `PredictionFrame` as the universal inference output container.
 - **Internal State**: Synchronized NumPy arrays for `y_pred` and `identifiers`.
 - **Decoupling**: Models return `PredictionFrame`, allowing them to bypass Pandas entirely.
-- **Explicit Metadata**: All spatiotemporal identifiers must be explicitly provided (as per ADR-058).
+- **Explicit Metadata**: All spatiotemporal identifiers must be explicitly provided (as per ADR-040).
 
 ### 3. Dual-Track Migration & Parity Proving
 To ensure zero regression during the transition:

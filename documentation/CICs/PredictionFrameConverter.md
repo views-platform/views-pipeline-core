@@ -9,7 +9,7 @@
 
 ## 1. Purpose
 
-`PredictionFrameConverter` is the I/O adapter between the `PredictionFrame` object (ADR-033/042) and the list-in-cell DataFrame/Arrow formats used for disk persistence and ensemble consumption. It owns three concerns:
+`PredictionFrameConverter` is the I/O adapter between the `PredictionFrame` object (ADR-042/042) and the list-in-cell DataFrame/Arrow formats used for disk persistence and ensemble consumption. It owns three concerns:
 
 1. **Format conversion**: PredictionFrame to list-in-cell DataFrame (`to_prediction_df`), to legacy DataFrame list (`to_legacy_dfs`), and to zero-copy Arrow table (`to_arrow_table`).
 2. **Structural auditing**: Verifying that conversions preserve row counts and column names (`audit_prediction_structure`).
@@ -146,7 +146,7 @@ Tests live in `tests/test_managers/test_prediction_frame_converter.py`.
 
 ## 12. Known Deviations
 
-- **Parity bridge is temporary**: `to_legacy_dfs` and `audit_parity_ef` exist solely for the ADR-033 Strangler Fig transition. They are annotated with `# DoD #3 removal target` comments and should be deleted once the legacy DataFrame path is deprecated.
+- **Parity bridge is temporary**: `to_legacy_dfs` and `audit_parity_ef` exist solely for the ADR-042 Strangler Fig transition. They are annotated with `# DoD #3 removal target` comments and should be deleted once the legacy DataFrame path is deprecated.
 - **`AssertionError` typo**: The `audit_parity_ef` method catches `AssertionError` (a typo for `AssertionError` -- note: this is Python's `AssertionError` vs `AssertionError`). In practice, `np.testing.assert_allclose` raises `AssertionError` which the except clause may not catch if the typo is `AssertionError`. This is a latent bug that will surface when an actual parity failure occurs.
 
 ---

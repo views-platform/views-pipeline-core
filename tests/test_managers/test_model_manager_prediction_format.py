@@ -488,20 +488,21 @@ def _run_evaluate_prediction_df(
             [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
         ),
     )
-    eval_result = {
-        "step":        ({}, pd.DataFrame()),
-        "time_series": ({}, pd.DataFrame()),
-        "month":       ({}, pd.DataFrame()),
+    mock_report = MagicMock()
+    mock_report.to_dict.return_value = {
+        "target": "lr_sb", "task": "regression", "pred_type": "point",
+        "schemas": {"step": {}, "time_series": {}, "month": {}},
     }
+    mock_report.to_dataframe.return_value = pd.DataFrame()
 
     with patch("views_pipeline_core.files.utils.read_dataframe", return_value=actuals_df):
         with patch.object(
             ForecastingModelManager, "prepare_actuals_df", return_value=actuals_df
         ):
             with patch(
-                "views_evaluation.evaluation.evaluation_manager.EvaluationManager"
-            ) as MockEM:
-                MockEM.return_value.evaluate.return_value = eval_result
+                "views_evaluation.NativeEvaluator"
+            ) as MockEvaluator:
+                MockEvaluator.return_value.evaluate.return_value = mock_report
                 with patch.object(EvaluationAdapter, "from_prediction_frames") as mock_fpf:
                     mock_fpf.return_value = MagicMock()
                     with patch.object(EvaluationAdapter, "from_dataframes") as mock_fd:
@@ -894,11 +895,12 @@ def _run_pf_eval_clean_path(manager: _ForecastStub, list_predictions: dict) -> t
             [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
         ),
     )
-    eval_result = {
-        "step":        ({}, pd.DataFrame()),
-        "time_series": ({}, pd.DataFrame()),
-        "month":       ({}, pd.DataFrame()),
+    mock_report = MagicMock()
+    mock_report.to_dict.return_value = {
+        "target": "lr_sb", "task": "regression", "pred_type": "point",
+        "schemas": {"step": {}, "time_series": {}, "month": {}},
     }
+    mock_report.to_dataframe.return_value = pd.DataFrame()
 
     # Distinct sentinels so we can tell which EF object reached evaluate()
     mock_ef_pf     = MagicMock(name="ef_from_prediction_frames")
@@ -909,9 +911,9 @@ def _run_pf_eval_clean_path(manager: _ForecastStub, list_predictions: dict) -> t
             ForecastingModelManager, "prepare_actuals_df", return_value=actuals_df
         ):
             with patch(
-                "views_evaluation.evaluation.evaluation_manager.EvaluationManager"
-            ) as MockEM:
-                MockEM.return_value.evaluate.return_value = eval_result
+                "views_evaluation.NativeEvaluator"
+            ) as MockEvaluator:
+                MockEvaluator.return_value.evaluate.return_value = mock_report
                 with patch.object(
                     EvaluationAdapter, "from_prediction_frames", return_value=mock_ef_pf
                 ) as mock_fpf:
@@ -939,7 +941,7 @@ def _run_pf_eval_clean_path(manager: _ForecastStub, list_predictions: dict) -> t
                                                 list_predictions, "calibration"
                                             )
                                             return (
-                                                MockEM.return_value.evaluate,
+                                                MockEvaluator.return_value.evaluate,
                                                 mock_tld,
                                                 mock_fpf,
                                                 mock_fd,
@@ -963,7 +965,7 @@ class TestPFEvalCleanPath:
     """
 
     def test_pf_eval_calls_evaluate_exactly_once(self):
-        """PF path must call EvaluationManager.evaluate() exactly once."""
+        """PF path must call NativeEvaluator.evaluate() exactly once."""
         pf = _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
         mock_evaluate, _, _, _ = _run_pf_eval_clean_path(
@@ -1039,20 +1041,21 @@ def _run_df_eval_clean_path(manager: _ForecastStub, list_predictions: list) -> t
             [(445, 1), (445, 2)], names=["month_id", "priogrid_gid"]
         ),
     )
-    eval_result = {
-        "step":        ({}, pd.DataFrame()),
-        "time_series": ({}, pd.DataFrame()),
-        "month":       ({}, pd.DataFrame()),
+    mock_report = MagicMock()
+    mock_report.to_dict.return_value = {
+        "target": "lr_sb", "task": "regression", "pred_type": "point",
+        "schemas": {"step": {}, "time_series": {}, "month": {}},
     }
+    mock_report.to_dataframe.return_value = pd.DataFrame()
 
     with patch("views_pipeline_core.files.utils.read_dataframe", return_value=actuals_df):
         with patch.object(
             ForecastingModelManager, "prepare_actuals_df", return_value=actuals_df
         ):
             with patch(
-                "views_evaluation.evaluation.evaluation_manager.EvaluationManager"
-            ) as MockEM:
-                MockEM.return_value.evaluate.return_value = eval_result
+                "views_evaluation.NativeEvaluator"
+            ) as MockEvaluator:
+                MockEvaluator.return_value.evaluate.return_value = mock_report
                 with patch.object(EvaluationAdapter, "from_dataframes") as mock_fd:
                     mock_fd.return_value = MagicMock(name="ef_from_dataframes")
                     with patch.object(
@@ -1068,7 +1071,7 @@ def _run_df_eval_clean_path(manager: _ForecastStub, list_predictions: list) -> t
                                 manager._evaluate_prediction_dataframe(
                                     list_predictions, "calibration"
                                 )
-                                return MockEM.return_value.evaluate
+                                return MockEvaluator.return_value.evaluate
 
 
 class TestDFEvalCleanPath:
@@ -1081,7 +1084,7 @@ class TestDFEvalCleanPath:
     """
 
     def test_df_eval_calls_evaluate_exactly_once(self):
-        """DF path must call EvaluationManager.evaluate() exactly once."""
+        """DF path must call NativeEvaluator.evaluate() exactly once."""
         df = pd.DataFrame(
             {"pred_lr_sb": [[1.0, 2.0], [3.0, 4.0]]},
             index=pd.MultiIndex.from_tuples(

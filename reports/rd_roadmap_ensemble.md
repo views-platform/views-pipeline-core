@@ -12,7 +12,7 @@
 
 `EnsembleManager` (ensemble.py, 827 lines) orchestrates multi-model ensembles: training member models via subprocess, loading their predictions, aggregating results via `AggregationManager` (Polars-based), and optionally reconciling country-grid hierarchies via `ReconciliationModule`.
 
-PredictionFrame is invisible to the ensemble. Member models that use PredictionFrame convert to parquet before the ensemble loads them. This is architecturally correct (ADR-033) and the parquet format is the permanent cross-model contract.
+PredictionFrame is invisible to the ensemble. Member models that use PredictionFrame convert to parquet before the ensemble loads them. This is architecturally correct (ADR-042) and the parquet format is the permanent cross-model contract.
 
 ### SOLID violations inventory
 

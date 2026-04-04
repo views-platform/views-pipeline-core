@@ -1,4 +1,4 @@
-# ADR-058: Authority of Declarations Over Inference (The "No-Sniffing" Rule)
+# ADR-040: Authority of Declarations Over Inference (The "No-Sniffing" Rule)
 
 **Status:** Accepted  
 **Date:** 2026-02-25  
@@ -51,19 +51,19 @@ the system **must fail loudly and immediately**.
 - **Evaluation Core is dumb**: It only reads what is declared in the `EvaluationFrame`.
 - **No sniffing**: Do not check `isinstance(x, list)` to determine if a task is probabilistic. Rely on the `is_sample` flag in the `EvaluationFrame`.
 
-## Naming Note — Relation to ADR-050 (Sniffer Pattern)
+## Naming Note — Relation to ADR-041 (Sniffer Pattern)
 
 The term "sniffing" in this ADR refers specifically to **semantic inference**: deducing
 computation intent (task type, prediction type, lead-time) from data content, for example
 by checking `isinstance(x, list)` to determine if a task is probabilistic. This pattern
 is forbidden.
 
-The `Core*Sniffer` classes introduced in March 2026 (see ADR-050) use the word "sniffer"
+The `Core*Sniffer` classes introduced in March 2026 (see ADR-041) use the word "sniffer"
 in the sense of the hydranet `DataSniffer` pattern — meaning **structural auditing** at
 a trust boundary. A structural audit validates that declared contracts are met; it makes
 no processing decisions and never modifies data. These are orthogonal concerns.
 
-This ADR's prohibition remains fully in force. ADR-050 complements it by mandating
+This ADR's prohibition remains fully in force. ADR-041 complements it by mandating
 explicit structural auditing at every trust boundary.
 
 ## Consequences

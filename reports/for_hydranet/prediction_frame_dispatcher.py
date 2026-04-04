@@ -1,6 +1,6 @@
 """
 PredictionFrameConverter — orchestrates PF-to-legacy-DF conversion,
-EvaluationFrame construction, and parity auditing for the ADR-033 PF path.
+EvaluationFrame construction, and parity auditing for the ADR-042 PF path.
 
 Extracts the three inline PF dispatch blocks from ForecastingModelManager so
 they can be independently tested and later extended for multi-target support
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class PredictionFrameConverter:
     """
     Orchestrates PF-to-legacy-DF conversion, EvaluationFrame construction,
-    and parity auditing for the ADR-033 PF path.
+    and parity auditing for the ADR-042 PF path.
 
     All three public methods are stateless; the class exists for cohesion and
     to provide a clean extension point for multi-target dispatch.
@@ -120,7 +120,7 @@ class PredictionFrameConverter:
         """
         Compare two EvaluationFrame objects for bit-wise parity.
 
-        Used during the ADR-033 Strangler Fig transition to verify that the
+        Used during the ADR-042 Strangler Fig transition to verify that the
         PredictionFrame adapter path produces numerically identical output to
         the legacy DataFrame adapter path for the same underlying predictions.
 

@@ -159,7 +159,7 @@ Key testing gaps:
 ## 11. Evolution Notes
 
 - The `lr`, `max_iters`, and `tol` parameters are passed through to `ForecastReconciler` but are documented as "currently unused" in the worker docstring. These may become active when the reconciliation algorithm is refined.
-- The hardcoded `max_workers` formula (`min(32, os.cpu_count() + 4)`) follows the Python 3.8+ `ThreadPoolExecutor` default. Note that the actual `ProcessPoolExecutor` call passes `max_workers=None` rather than `num_of_workers`, which means it uses the Python default (`os.cpu_count()`).
+- The hardcoded `max_workers` formula (`min(32, os.cpu_count() + 4)`) follows the Python 3.8+ `ThreadPoolExecutor` default. `ProcessPoolExecutor` receives the computed `num_of_workers` value (fixed 2026-04-03, C-25).
 - WandB alerts are sent via `WandBModule.send_alert()` (static method) rather than through an injected instance, making it harder to test without WandB being configured.
 
 ---
@@ -168,7 +168,7 @@ Key testing gaps:
 
 - **No dedicated test file**: The class is only tested indirectly via statistics tests. This is a significant coverage gap for a class that orchestrates parallel computation across large datasets.
 - **Device detection uses `print()` not `logger`**: The `__init__` method calls `print(f"Using device: {self._device}")` instead of `logger.info()`. This is inconsistent with the project's logging conventions.
-- **`max_workers` parameter is ignored**: The `reconcile` method computes `num_of_workers` from the `max_workers` parameter but then passes `max_workers=None` to `ProcessPoolExecutor(max_workers=None)`, which means the parameter has no effect. This is a bug.
+- **~~`max_workers` parameter is ignored~~**: Fixed 2026-04-03 (C-25). `ProcessPoolExecutor` now receives `max_workers=num_of_workers`.
 - **Partial failure is silent to the caller**: Failed tasks are logged and alerted via WandB, but `reconcile()` returns normally with partial results. The commented-out `RuntimeError` raise suggests this was considered but not implemented. Callers have no programmatic way to detect that some tasks failed without parsing logs.
 - **Torch device may behave differently across environments**: CUDA availability, MPS availability, and CPU core count all vary. The class handles this gracefully via fallback, but the `print()` output will differ.
 - **Log transform heuristic in `to_reconciler`**: The reconciliation worker relies on `_ViewsDataset.to_reconciler()` which detects `ln_` or `lx_` in feature names to decide whether to un-log. This is a naming-convention-based heuristic rather than an explicit declaration.

@@ -1,4 +1,4 @@
-# ADR-051: PredictionFrame Adoption — Strangler Fig Migration from pd.DataFrame
+# ADR-042: PredictionFrame Adoption — Strangler Fig Migration from pd.DataFrame
 
 **Status:** Accepted
 **Date:** 2026-03-03
@@ -53,7 +53,7 @@ inference methods using the **Strangler Fig pattern**:
    `CoreConfigSniffer.MANDATORY_KEYS`. The only accepted values are `"dataframe"`
    and `"prediction_frame"` (constant `SUPPORTED_PREDICTION_FORMATS`). Models that
    have not yet migrated declare `"prediction_format": "dataframe"`. No default,
-   no inference. This is a direct application of ADR-058.
+   no inference. This is a direct application of ADR-040.
 
 2. **Dispatch by declaration.** `ModelManager` reads `configs["prediction_format"]`
    and routes to the appropriate adapter path. `isinstance` checks are prohibited.
@@ -150,7 +150,7 @@ migrated simultaneously. Running both paths and comparing their outputs on real 
 provides higher confidence than any static analysis or unit test — it is a continuous
 integration check that runs on production inputs.
 
-The `prediction_format` config key follows directly from ADR-058: the orchestrator
+The `prediction_format` config key follows directly from ADR-040: the orchestrator
 declares semantics; the pipeline does not infer them. A model that moves to
 PredictionFrame declares it explicitly; the pipeline routes accordingly. No magic,
 no `isinstance`, no silent defaults.

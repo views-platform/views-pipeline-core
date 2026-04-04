@@ -6,7 +6,7 @@
 | Status              | Active |
 | Date                | 2026-03-17 |
 | Supersedes          | None |
-| Related             | ADR-050 (sniffer pattern), ADR-051 (PredictionFrame adoption) |
+| Related             | ADR-041 (sniffer pattern), ADR-042 (PredictionFrame adoption) |
 
 ## Context
 

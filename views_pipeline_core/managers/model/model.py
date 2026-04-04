@@ -1457,9 +1457,9 @@ class ForecastingModelManager(ModelManager):
     @property
     def _prediction_format(self) -> str:
         """
-        Return the declared prediction format from config (Step A — DRY, ADR-033).
+        Return the declared prediction format from config (Step A — DRY, ADR-042).
 
-        Defaults to ``"dataframe"`` so pre-ADR-033 models (which lack the key)
+        Defaults to ``"dataframe"`` so pre-ADR-042 models (which lack the key)
         continue to route to the existing DF path without any config change.
         """
         return self.configs.get("prediction_format", "dataframe")
@@ -1471,7 +1471,7 @@ class ForecastingModelManager(ModelManager):
         """
         Evaluate model artifact. Must be implemented by subclasses.
 
-        Return type contract (ADR-033):
+        Return type contract (ADR-042):
             - ``"dataframe"`` path: return ``List[pd.DataFrame]``, one per evaluation
               sequence.  Each DataFrame must have a MultiIndex ``[time, unit]`` and a
               column ``pred_{target}`` whose cells are lists of sample floats.
@@ -1482,7 +1482,7 @@ class ForecastingModelManager(ModelManager):
               taken from ``X.index`` level 0; ``identifiers["unit"]`` must contain
               ``priogrid_gid`` / ``country_id`` values from level 1.  The model
               author is responsible for populating identifiers and the dict keys
-              correctly (ADR-033).
+              correctly (ADR-042).
 
         Contract:
             Must:
@@ -1564,7 +1564,7 @@ class ForecastingModelManager(ModelManager):
         """
         Generate future forecasts. Must be implemented by subclasses.
 
-        Return type contract (ADR-033):
+        Return type contract (ADR-042):
             - ``"dataframe"`` path: return a ``pd.DataFrame`` with a MultiIndex
               ``[time, unit]`` and a column ``pred_{target}`` per target.
             - ``"prediction_frame"`` path: return
@@ -1574,7 +1574,7 @@ class ForecastingModelManager(ModelManager):
               ``X.index`` level 0; ``identifiers["unit"]`` must contain
               ``priogrid_gid`` / ``country_id`` values from level 1.  The model
               author is responsible for populating identifiers and the dict keys
-              correctly (ADR-033).
+              correctly (ADR-042).
 
         Contract:
             Must:
@@ -1614,7 +1614,7 @@ class ForecastingModelManager(ModelManager):
         """
         Evaluate model during sweep. Must be implemented by subclasses.
 
-        Return type contract (ADR-033):
+        Return type contract (ADR-042):
             Same as ``_evaluate_model_artifact``: return ``List[pd.DataFrame]`` for
             the ``"dataframe"`` path or ``Dict[str, List[PredictionFrame]]`` for the
             ``"prediction_frame"`` path (one key per target, one PF per sequence).
@@ -2144,7 +2144,7 @@ class ForecastingModelManager(ModelManager):
                     raw_preds = self._evaluate_model_artifact(
                         self._eval_type, self.args.artifact_name
                     )
-                    # Type enforcement guard (ADR-033, fail-loud).
+                    # Type enforcement guard (ADR-042, fail-loud).
                     if isinstance(raw_preds, dict):
                         raise ValueError(
                             "prediction_format='dataframe' declared but "
@@ -2297,7 +2297,7 @@ class ForecastingModelManager(ModelManager):
                     )
                     pf_dict = self._forecast_model_artifact(self.args.artifact_name)
 
-                    # Step C — Type enforcement guard (ADR-033, fail-loud).
+                    # Step C — Type enforcement guard (ADR-042, fail-loud).
                     if not isinstance(pf_dict, dict):
                         raise ValueError(
                             f"prediction_format='prediction_frame' declared but "
@@ -2316,7 +2316,7 @@ class ForecastingModelManager(ModelManager):
                     # DF path: existing validation (unchanged).
                     df_predictions = self._forecast_model_artifact(self.args.artifact_name)
 
-                    # Step C — Type enforcement guard (ADR-033, fail-loud).
+                    # Step C — Type enforcement guard (ADR-042, fail-loud).
                     if isinstance(df_predictions, dict):
                         raise ValueError(
                             "prediction_format='dataframe' declared but "
@@ -2403,7 +2403,7 @@ class ForecastingModelManager(ModelManager):
                 )
                 raw_preds_sweep = self._evaluate_sweep(self._eval_type, model)
 
-                # Step C — Type enforcement guard (ADR-033, fail-loud).
+                # Step C — Type enforcement guard (ADR-042, fail-loud).
                 if self._prediction_format == "prediction_frame":
                     if not isinstance(raw_preds_sweep, dict):
                         raise ValueError(
@@ -2419,7 +2419,7 @@ class ForecastingModelManager(ModelManager):
                             "List[pd.DataFrame]. Model contract violation."
                         )
 
-                # ADR-033: PF path skips CorePredictionSniffer (PF is self-validating
+                # ADR-042: PF path skips CorePredictionSniffer (PF is self-validating
                 # at construction). The DF path validates each sequence as before.
                 if self._prediction_format != "prediction_frame":
                     for i, df in enumerate(raw_preds_sweep):
@@ -2669,7 +2669,7 @@ class ForecastingModelManager(ModelManager):
             ensemble: Whether predictions from ensemble model
         
         Side Effects:
-            - Calculates metrics using EvaluationManager
+            - Calculates metrics using NativeEvaluator
             - Logs metrics to WandB
             - Saves evaluation files
             - Sends summary notification
@@ -2680,8 +2680,7 @@ class ForecastingModelManager(ModelManager):
             - Groups metrics by conflict type
             - Enforces scalar predictions for point metrics
         """
-        import pandas as pd
-        from views_evaluation.evaluation.evaluation_manager import EvaluationManager
+        from views_evaluation import NativeEvaluator
         from views_pipeline_core.files.utils import read_dataframe
 
         if not ensemble:
@@ -2710,15 +2709,14 @@ class ForecastingModelManager(ModelManager):
         gc.collect()
 
         # Task definitions: target lists only.
-        # EvaluationManager reads the metric keys (regression_point_metrics,
-        # regression_sample_metrics, etc.) directly from the config passed to
-        # evaluate(). Point vs uncertainty dispatch is also handled internally.
+        # NativeEvaluator resolves task/pred_type from config and EvaluationFrame.
+        # Metric dispatch is handled by MetricCatalog (views-evaluation).
         tasks = {
             "regression":     self.configs.get("regression_targets", []),
             "classification": self.configs.get("classification_targets", []),
         }
 
-        evaluation_manager = EvaluationManager()
+        evaluator = NativeEvaluator(self.configs)
 
         for task_type, targets in tasks.items():
             if not targets:
@@ -2731,15 +2729,15 @@ class ForecastingModelManager(ModelManager):
 
                 target_identifier = target
 
-                # EvaluationManager.evaluate() operates on one target at a time and
-                # requires exactly one column named pred_{target} per prediction DataFrame.
+                # NativeEvaluator.evaluate() operates on one target at a time via
+                # an EvaluationFrame built by the EvaluationAdapter.
                 from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
 
                 actual_slice = df_actual[[target]]
 
                 if self._prediction_format == "prediction_frame":
                     # PF path: df_predictions is Dict[str, List[PredictionFrame]].
-                    # Pop frees memory for each target as we go (ADR-033 DoD #1.5).
+                    # Pop frees memory for each target as we go (ADR-042 DoD #1.5).
                     import gc
                     raw_preds = df_predictions.pop(target, None)
                     if raw_preds is None:
@@ -2753,7 +2751,7 @@ class ForecastingModelManager(ModelManager):
                     logger.debug(
                         "PF path: assuming target '%s' aligns with "
                         "PredictionFrame.y_pred by model-author contract "
-                        "(ADR-033). No cross-check performed.",
+                        "(ADR-042). No cross-check performed.",
                         target,
                     )
 
@@ -2767,9 +2765,7 @@ class ForecastingModelManager(ModelManager):
                     del raw_preds
                     gc.collect()
 
-                    eval_result_dict = evaluation_manager.evaluate(
-                        actual_slice, None, target, self.configs, ef=ef
-                    )
+                    report = evaluator.evaluate(ef=ef, legacy_compatibility=True)
                     del ef
                     gc.collect()
 
@@ -2792,35 +2788,17 @@ class ForecastingModelManager(ModelManager):
                         step_mapping=step_mappings,
                     )
 
-                    eval_result_dict = evaluation_manager.evaluate(
-                        actual_slice, None, target, self.configs, ef=ef
-                    )
+                    report = evaluator.evaluate(ef=ef, legacy_compatibility=True)
 
-                # Initialize local variables to avoid UnboundLocalError
-                step_wise_evaluation, df_step_wise_evaluation = ({}, pd.DataFrame())
-                time_series_wise_evaluation, df_time_series_wise_evaluation = ({}, pd.DataFrame())
-                month_wise_evaluation, df_month_wise_evaluation = ({}, pd.DataFrame())
+                # Extract native dict format for WandB logging and DataFrames for file saving
+                schemas = report.to_dict()["schemas"]
+                step_wise_evaluation = schemas.get("step", {})
+                time_series_wise_evaluation = schemas.get("time_series", {})
+                month_wise_evaluation = schemas.get("month", {})
 
-                # Safety check: Ensure all expected keys are present and have enough values to unpack
-                for eval_key in ["step", "time_series", "month"]:
-                    try:
-                        # Attempt to retrieve the 2-tuple (metrics_dict, dataframe)
-                        res = eval_result_dict[eval_key]
-                        
-                        # Type and length check
-                        if not isinstance(res, (list, tuple)) or len(res) < 2:
-                            raise ValueError(f"Expected 2-tuple, got {type(res)} with length {len(res) if hasattr(res, '__len__') else 'N/A'}")
-
-                        # Unpack into local variables
-                        if eval_key == "step":
-                            step_wise_evaluation, df_step_wise_evaluation = res
-                        elif eval_key == "time_series":
-                            time_series_wise_evaluation, df_time_series_wise_evaluation = res
-                        elif eval_key == "month":
-                            month_wise_evaluation, df_month_wise_evaluation = res
-                            
-                    except (KeyError, TypeError, ValueError, IndexError) as e:
-                        logger.warning(f"Evaluation for {target} returned invalid data for '{eval_key}': {e}. Skipping WandB/File logging for this component.")
+                df_step_wise_evaluation = report.to_dataframe("step")
+                df_time_series_wise_evaluation = report.to_dataframe("time_series")
+                df_month_wise_evaluation = report.to_dataframe("month")
 
                 self._wandb_module.log_evaluation_results(
                     step_wise_evaluation,

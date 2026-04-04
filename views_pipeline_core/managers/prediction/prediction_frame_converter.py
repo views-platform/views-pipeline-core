@@ -1,6 +1,6 @@
 """
 PredictionFrameConverter — PF-to-DataFrame I/O adapter and structural auditing
-for the ADR-033 PredictionFrame path.
+for the ADR-042 PredictionFrame path.
 
 Converts PredictionFrame objects to the list-in-cell parquet format required for
 disk persistence and downstream consumption by the ensemble manager. This format
@@ -111,7 +111,7 @@ class PredictionFrameConverter:
         """
         Compare two EvaluationFrame objects for bit-wise parity.
 
-        Used during the ADR-033 Strangler Fig transition to verify that the
+        Used during the ADR-042 Strangler Fig transition to verify that the
         PredictionFrame adapter path produces numerically identical output to
         the legacy DataFrame adapter path for the same underlying predictions.
 
