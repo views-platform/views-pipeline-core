@@ -411,22 +411,35 @@ class ConfigurationManager:
         """
         return list(self.get_combined_config().items())
 
+    # Keys where silent override between config sources could cause incorrect results.
+    _SAFETY_CRITICAL_KEYS = frozenset({"level", "run_type", "prediction_format"})
+
     def _get_raw_combined_config(self) -> Dict:
         """
         Get a pure merge of all configuration sources without normalization.
         Used for validation to check exactly what the user provided.
+
+        Logs a WARNING when a safety-critical key is overridden by a later
+        source (e.g., deployment overrides hyperparameters for 'level').
         """
         config = {}
-        if self.partition_dict:
-            config.update(self.partition_dict)
-        if self.config_hyperparameters:
-            config.update(self.config_hyperparameters)
-        if self.config_deployment:
-            config.update(self.config_deployment)
-        if self.config_meta:
-            config.update(self.config_meta)
-        if self._runtime_config:
-            config.update(self._runtime_config)
+        sources = [
+            ("partition_dict", self.partition_dict),
+            ("config_hyperparameters", self.config_hyperparameters),
+            ("config_deployment", self.config_deployment),
+            ("config_meta", self.config_meta),
+            ("_runtime_config", self._runtime_config),
+        ]
+        for source_name, source_dict in sources:
+            if not source_dict:
+                continue
+            for key, value in source_dict.items():
+                if key in config and key in self._SAFETY_CRITICAL_KEYS and config[key] != value:
+                    logger.warning(
+                        f"Safety-critical key '{key}' overridden: "
+                        f"'{config[key]}' → '{value}' (by {source_name})"
+                    )
+                config[key] = value
         return config
 
     def get_combined_config(self) -> Dict:

@@ -10,6 +10,14 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _safe_wandb_log(data: dict) -> None:
+    """Log to WandB with error suppression. Never crash the pipeline for a logging failure."""
+    try:
+        wandb.log(data)
+    except Exception as e:
+        logger.error(f"Failed to log to WandB: {e}")
+
+
 def add_wandb_metrics():
     """
     Defines the WandB metrics for step-wise, month-wise, and time-series-wise evaluation.
@@ -190,7 +198,7 @@ def log_wandb_log_dict(
         step_wise_log_dict = generate_wandb_step_wise_log_dict(
             log_dict, step_wise_evaluation, step, target_identifier
         )
-        wandb.log(step_wise_log_dict)
+        _safe_wandb_log(step_wise_log_dict)
 
     for month in month_wise_evaluation.keys():
         m = int(re.search(r"\d+", month).group())
@@ -199,7 +207,7 @@ def log_wandb_log_dict(
         month_wise_log_dict = generate_wandb_month_wise_log_dict(
             log_dict, month_wise_evaluation, month, target_identifier
         )
-        wandb.log(month_wise_log_dict)
+        _safe_wandb_log(month_wise_log_dict)
 
     for time_series in time_series_wise_evaluation.keys():
         ts = int(re.search(r"\d+", time_series).group())
@@ -208,7 +216,7 @@ def log_wandb_log_dict(
         ts_wise_log_dict = generate_wandb_time_series_wise_log_dict(
             log_dict, time_series_wise_evaluation, time_series, target_identifier
         )
-        wandb.log(ts_wise_log_dict)
+        _safe_wandb_log(ts_wise_log_dict)
 
     # Calculate and log the mean evaluation metrics
     mean_step_wise = calculate_mean_evaluation_metrics(step_wise_evaluation)
@@ -218,13 +226,13 @@ def log_wandb_log_dict(
     )
 
     for key, value in mean_step_wise.items():
-        wandb.log({f"step-wise/{target_identifier}/{key}_mean": value})
+        _safe_wandb_log({f"step-wise/{target_identifier}/{key}_mean": value})
 
     for key, value in mean_month_wise.items():
-        wandb.log({f"month-wise/{target_identifier}/{key}_mean": value})
+        _safe_wandb_log({f"month-wise/{target_identifier}/{key}_mean": value})
 
     for key, value in mean_time_series_wise.items():
-        wandb.log({f"time-series-wise/{target_identifier}/{key}_mean": value})
+        _safe_wandb_log({f"time-series-wise/{target_identifier}/{key}_mean": value})
         
 
 def wandb_alert(

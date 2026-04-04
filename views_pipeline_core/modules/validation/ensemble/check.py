@@ -160,6 +160,51 @@ def validate_partition_config(ensemble_manager, model_manager, run_type):
         return False
     return True
 
+def validate_ensemble_raw_data_alignment(model_names, run_type):
+    """
+    Validate that all ensemble models have consistent raw data files.
+
+    Compares file sizes of the raw viewser parquet across all models.
+    Different sizes indicate different querysets, which means models[0]
+    is not a reliable source for actuals (C-03).
+
+    Args:
+        model_names: List of model name strings in the ensemble
+        run_type: 'calibration' | 'validation' | 'forecasting'
+
+    Returns:
+        True if all models have consistent raw data, False otherwise
+    """
+    from views_pipeline_core.managers.model import ModelPathManager
+    from views_pipeline_core.configs.pipeline import PipelineConfig
+
+    if len(model_names) <= 1:
+        return True
+
+    filename = f"{run_type}_viewser_df{PipelineConfig.dataframe_format}"
+    sizes = {}
+    for name in model_names:
+        path = ModelPathManager(name).data_raw / filename
+        if not path.exists():
+            logger.warning(f"Raw data file missing for model {name}: {path}")
+            continue
+        sizes[name] = path.stat().st_size
+
+    if not sizes:
+        return True
+
+    unique_sizes = set(sizes.values())
+    if len(unique_sizes) > 1:
+        logger.warning(
+            f"Ensemble raw data inconsistency: models have different file sizes "
+            f"for {filename}. This may indicate different querysets. "
+            f"Sizes: {sizes}"
+        )
+        return False
+
+    return True
+
+
 def validate_ensemble_model(config):
     """
     Validate data partition compatibility between ensemble and constituent model.

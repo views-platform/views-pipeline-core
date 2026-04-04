@@ -6,6 +6,7 @@ These tests are in TDD RED state -- they FAIL against the current code.
 Fix the code to make them pass, then re-run /falsify to verify.
 """
 import ast
+import logging
 import sys
 from unittest.mock import MagicMock
 
@@ -123,22 +124,27 @@ def test_falsify_05_silent_level_override():
     mgr = ConfigurationManager(
         config_hyperparameters=hp,
         config_deployment=deploy,
+        config_meta={},
     )
-    merged = mgr.get_combined_config()
+
+    # Capture warnings from the configuration module's logger
+    config_logger = logging.getLogger("views_pipeline_core.managers.configuration.configuration")
+    handler = logging.handlers.MemoryHandler(capacity=100)
+    handler.setLevel(logging.WARNING)
+    config_logger.addHandler(handler)
+    try:
+        merged = mgr.get_combined_config()
+    finally:
+        config_logger.removeHandler(handler)
 
     # The override itself is expected (deployment > hyperparameters).
-    # What is NOT expected is the SILENCE of the override.
-    # This test asserts that when two sources disagree on 'level',
-    # at least a warning is produced.
-    # Currently: no warning, no log, no trace.
     assert merged["level"] == "pgm", "Priority merge should pick deployment"
 
-    # TODO: When conflict detection is added, verify a warning was logged.
-    # For now, this test documents the gap:
-    assert False, (
-        "ConfigurationManager silently overrides safety-critical 'level' parameter "
-        "from 'cm' (hyperparameters) to 'pgm' (deployment) with no warning. "
-        "A conflict between config sources for level/run_type should log a WARNING."
+    # A warning must be logged when a safety-critical key is overridden.
+    warning_messages = [r.message for r in handler.buffer if r.levelno >= logging.WARNING]
+    assert any("level" in msg and "overridden" in msg.lower() for msg in warning_messages), (
+        f"ConfigurationManager silently overrides safety-critical 'level' parameter "
+        f"from 'cm' to 'pgm' with no warning. Got warnings: {warning_messages}"
     )
 
 
