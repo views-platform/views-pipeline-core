@@ -7,6 +7,9 @@ synthetic data, bypassing ProcessPoolExecutor for determinism.
 The goal is to break the zero-test-coverage barrier for the only CIC'd
 class with no tests, enabling safe future modifications.
 """
+from concurrent.futures import Future
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pandas as pd
 import torch
@@ -155,3 +158,120 @@ class TestForecastReconcilerDirect:
         # Zero cells must stay zero (proportional scaling preserves zeros)
         assert adjusted[0, 0] == 0.0, f"Zero cell became {adjusted[0, 0]}"
         assert adjusted[0, 2] == 0.0, f"Zero cell became {adjusted[0, 2]}"
+
+
+# ── BEIGE: Parallel execution orchestration ─────────────────────────────────
+
+
+def _make_reconcile_stub():
+    """Create a ReconciliationModule instance with mocked internals,
+    bypassing __init__ validation that requires real datasets."""
+    mod = object.__new__(ReconciliationModule)
+    mod._c_dataset = MagicMock()
+    mod._pg_dataset = MagicMock()
+    mod._device = torch.device("cpu")
+    mod._reconciler = MagicMock()
+    mod._wandb_notifications = False
+    # Minimal valid sets — 1 country, 1 time, 1 target
+    mod._valid_cids = [1]
+    mod._valid_time_ids = {100}
+    mod._valid_targets = {"pred_ged_sb"}
+    # get_subset_dataframe and get_subset_by_country_id return DataFrames
+    mod._c_dataset.get_subset_dataframe.return_value = pd.DataFrame()
+    mod._pg_dataset.get_subset_by_country_id.return_value = pd.DataFrame()
+    return mod
+
+
+class TestReconcileOrchestration:
+    """Tests for reconcile() parallel execution, partial failure, and result collection."""
+
+    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
+    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    def test_reconcile_collects_successful_results(self, MockExecutor, MockWandB):
+        """Successful worker results must be applied to the pg_dataset."""
+        mod = _make_reconcile_stub()
+        result_tensor = torch.tensor([[1.0, 2.0]])
+
+        # Make executor.submit return a future that resolves to a known result
+        future = Future()
+        future.set_result((1, 100, "pred_ged_sb", result_tensor))
+        mock_executor_instance = MagicMock()
+        mock_executor_instance.submit.return_value = future
+        mock_executor_instance.__enter__ = MagicMock(return_value=mock_executor_instance)
+        mock_executor_instance.__exit__ = MagicMock(return_value=False)
+        MockExecutor.return_value = mock_executor_instance
+
+        mod.reconcile(max_workers=1)
+
+        # pg_dataset.reconcile must be called with the successful result
+        mod._pg_dataset.reconcile.assert_called_once_with(
+            country_id=1, time_id=100, reconciled_tensor=result_tensor, feature="pred_ged_sb"
+        )
+
+    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
+    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    def test_reconcile_continues_on_partial_failure(self, MockExecutor, MockWandB):
+        """Failed tasks must be logged and skipped — reconcile() must not raise."""
+        mod = _make_reconcile_stub()
+        # 2 countries, each with 1 time × 1 target = 2 tasks
+        mod._valid_cids = [1, 2]
+
+        # Task 1 succeeds, task 2 fails
+        future_ok = Future()
+        future_ok.set_result((1, 100, "pred_ged_sb", torch.tensor([[1.0]])))
+        future_fail = Future()
+        future_fail.set_exception(RuntimeError("worker crashed"))
+
+        mock_executor_instance = MagicMock()
+        mock_executor_instance.submit.side_effect = [future_ok, future_fail]
+        mock_executor_instance.__enter__ = MagicMock(return_value=mock_executor_instance)
+        mock_executor_instance.__exit__ = MagicMock(return_value=False)
+        MockExecutor.return_value = mock_executor_instance
+
+        # Should NOT raise — partial failure is logged, not propagated
+        mod.reconcile(max_workers=1)
+
+        # Only the successful result should be applied
+        assert mod._pg_dataset.reconcile.call_count == 1
+        # WandB alert should be sent for the failure
+        assert MockWandB.send_alert.call_count >= 1
+
+    @patch("views_pipeline_core.modules.reconciliation.reconciliation.as_completed", return_value=iter([]))
+    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
+    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    @patch("os.cpu_count", return_value=4)
+    def test_reconcile_uses_computed_max_workers(self, mock_cpu, MockPPE, MockWandB, mock_as_completed):
+        """When max_workers=None, ProcessPoolExecutor must receive min(32, cpu_count+4)."""
+        mod = _make_reconcile_stub()
+
+        mock_instance = MagicMock()
+        mock_instance.__enter__ = MagicMock(return_value=mock_instance)
+        mock_instance.__exit__ = MagicMock(return_value=False)
+        mock_instance.submit.return_value = MagicMock()
+        MockPPE.return_value = mock_instance
+
+        mod.reconcile(max_workers=None)
+
+        MockPPE.assert_called_once_with(max_workers=8)
+
+    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
+    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    def test_reconcile_sends_completion_alert(self, MockExecutor, MockWandB):
+        """reconcile() must send a WandB alert on completion."""
+        mod = _make_reconcile_stub()
+
+        future = Future()
+        future.set_result((1, 100, "pred_ged_sb", torch.tensor([[1.0]])))
+        mock_executor_instance = MagicMock()
+        mock_executor_instance.submit.return_value = future
+        mock_executor_instance.__enter__ = MagicMock(return_value=mock_executor_instance)
+        mock_executor_instance.__exit__ = MagicMock(return_value=False)
+        MockExecutor.return_value = mock_executor_instance
+
+        mod.reconcile(max_workers=1)
+
+        # Final completion alert must be sent
+        alert_calls = MockWandB.send_alert.call_args_list
+        assert any("successfully completed" in str(c) for c in alert_calls), (
+            f"No completion alert found in WandB calls: {alert_calls}"
+        )

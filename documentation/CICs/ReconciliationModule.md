@@ -166,8 +166,8 @@ Key testing gaps:
 
 ## 12. Known Deviations
 
-- **No dedicated test file**: The class is only tested indirectly via statistics tests. This is a significant coverage gap for a class that orchestrates parallel computation across large datasets.
-- **Device detection uses `print()` not `logger`**: The `__init__` method calls `print(f"Using device: {self._device}")` instead of `logger.info()`. This is inconsistent with the project's logging conventions.
+- **~~No dedicated test file~~**: Resolved 2026-04-04. `test_reconciliation.py` has 10 tests: 6 worker characterization + 4 parallel orchestration (result collection, partial failure, max_workers, completion alert).
+- **~~Device detection uses `print()` not `logger`~~**: Fixed 2026-04-04. Changed to `logger.info()`.
 - **~~`max_workers` parameter is ignored~~**: Fixed 2026-04-03 (C-25). `ProcessPoolExecutor` now receives `max_workers=num_of_workers`.
 - **Partial failure is silent to the caller**: Failed tasks are logged and alerted via WandB, but `reconcile()` returns normally with partial results. The commented-out `RuntimeError` raise suggests this was considered but not implemented. Callers have no programmatic way to detect that some tasks failed without parsing logs.
 - **Torch device may behave differently across environments**: CUDA availability, MPS availability, and CPU core count all vary. The class handles this gracefully via fallback, but the `print()` output will differ.
