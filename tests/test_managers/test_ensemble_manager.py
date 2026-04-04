@@ -507,7 +507,8 @@ class TestExecuteShellScript:
             
             mock_run.assert_called_once_with(
                 ["python", "main.py", "--train"],
-                check=True
+                check=True,
+                timeout=7200,
             )
     
     def test_execute_shell_script_failure_raises(self, manager, mock_wandb_module):
@@ -831,3 +832,27 @@ class TestLoadOrGeneratePrediction:
                             )
                             
                             assert result.equals(sample_dataframe)
+
+
+# ============================================================================
+# Subprocess Timeout Tests
+# ============================================================================
+
+class TestSubprocessTimeout:
+    """Verify that _execute_shell_script passes a timeout to subprocess.run."""
+
+    def test_shell_script_passes_timeout(self, manager, mock_ensemble_path):
+        """subprocess.run must receive a timeout parameter to prevent indefinite hangs."""
+        model_path = MagicMock(spec=ModelPathManager)
+        model_args = MagicMock(spec=ForecastingModelArgs)
+        model_args.to_shell_command.return_value = ["echo", "test"]
+
+        with patch("subprocess.run") as mock_run:
+            manager._execute_shell_script(model_path, "test_model", model_args)
+
+            mock_run.assert_called_once()
+            call_kwargs = mock_run.call_args
+            assert "timeout" in call_kwargs.kwargs, (
+                "subprocess.run() called without timeout parameter. "
+                "Ensemble sub-model execution can hang indefinitely without a timeout."
+            )

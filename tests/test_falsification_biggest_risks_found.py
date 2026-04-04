@@ -9,6 +9,7 @@ import ast
 import sys
 from unittest.mock import MagicMock
 
+import pytest
 import numpy as np
 import pandas as pd
 
@@ -88,20 +89,18 @@ def test_falsify_02_nan_silent_in_to_tensor():
 
     idx = pd.MultiIndex.from_tuples(
         [(1, 500), (1, 501), (2, 500), (2, 501)],
-        names=["priogrid_gid", "month_id"],
+        names=["month_id", "priogrid_id"],
     )
     df = pd.DataFrame(
         {"feature_a": [1.0, np.nan, 3.0, 4.0], "feature_b": [5.0, 6.0, np.nan, 8.0]},
         index=idx,
     )
-    ds = _ViewsDataset(df)
-    tensor = ds.to_tensor()
+    ds = _ViewsDataset(df, targets=["feature_a", "feature_b"], broadcast_features=True)
 
-    # This SHOULD fail (NaN detected) but currently passes silently
-    assert not np.isnan(tensor).any(), (
-        "to_tensor() silently produced a tensor containing NaN. "
-        "Feature columns with NaN should be caught at the data boundary."
-    )
+    # to_tensor() should raise ValueError when NaN values are present
+    # in feature columns, rather than silently propagating them.
+    with pytest.raises(ValueError, match="(?i)nan"):
+        ds.to_tensor()
 
 
 def test_falsify_05_silent_level_override():

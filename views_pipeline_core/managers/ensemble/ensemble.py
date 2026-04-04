@@ -503,7 +503,16 @@ class EnsembleManager(ForecastingModelManager):
         try:
             shell_command = model_args.to_shell_command(model_path)
             logger.info(f"Executing shell command: {' '.join(shell_command)}")
-            subprocess.run(shell_command, check=True)
+            subprocess.run(shell_command, check=True, timeout=7200)
+        except subprocess.TimeoutExpired:
+            logger.error(
+                f"Shell command timed out for model {model_name} after 7200s",
+            )
+            raise PipelineException(
+                f"Shell command timed out for model {model_name} after 7200s. "
+                "Consider increasing the timeout or investigating the model script.",
+                wandb_module=self._wandb_module,
+            )
         except Exception as e:
             logger.error(
                 f"Error during shell command execution for model {model_name}: {e}",

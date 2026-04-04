@@ -385,7 +385,9 @@ class _ViewsDataset:
         """
         if self.is_prediction:
             if not hasattr(self, "_prediction_tensor_cache"):
-                self._prediction_tensor_cache = self._prediction_to_tensor()
+                tensor = self._prediction_to_tensor()
+                self._check_tensor_nan(tensor)
+                self._prediction_tensor_cache = tensor
             return self._prediction_tensor_cache
         else:
             if not self.broadcast_features:
@@ -393,9 +395,9 @@ class _ViewsDataset:
                     "Tensor operations are disabled when broadcast_features=False"
                 )
             if not hasattr(self, "_features_tensor_cache"):
-                self._features_tensor_cache = self._features_to_tensor(
-                    include_targets=True
-                )
+                tensor = self._features_to_tensor(include_targets=True)
+                self._check_tensor_nan(tensor)
+                self._features_tensor_cache = tensor
             if include_targets:
                 return self._features_tensor_cache
             else:
@@ -404,6 +406,18 @@ class _ViewsDataset:
                     self.dataframe.columns.get_loc(var) for var in self.features
                 ]
                 return self._features_tensor_cache[:, :, :, feature_indices]
+
+    @staticmethod
+    def _check_tensor_nan(tensor: np.ndarray) -> None:
+        """Raise if tensor contains NaN. Fail Loud and Proud (ADR-008)."""
+        nan_mask = np.isnan(tensor)
+        if nan_mask.any():
+            # Report which feature indices contain NaN
+            nan_features = np.unique(np.where(nan_mask)[-1]).tolist()
+            raise ValueError(
+                f"Tensor contains NaN values in feature indices {nan_features}. "
+                "Upstream data must be cleaned before tensor conversion."
+            )
 
     def _features_to_tensor(self, include_targets: bool = True) -> np.ndarray:
         """
