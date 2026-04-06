@@ -2,8 +2,9 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-04-01
-**Related ADRs:** ADR-001 (Ontology), ADR-002 (Topology), ADR-009 (Boundary Contracts)
+**Last reviewed:** 2026-04-07
+**File:** `views_pipeline_core/data/model_path.py` (canonical); re-exported from `managers/model/model.py` for backward compatibility
+**Related ADRs:** ADR-001 (Ontology), ADR-002 (Topology), ADR-009 (Boundary Contracts), ADR-045 (Pipeline Stage Architecture, E6)
 
 ---
 

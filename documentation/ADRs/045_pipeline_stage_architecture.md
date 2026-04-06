@@ -43,36 +43,44 @@ ForecastingModelManager (thin façade, ~500 LOC)
 └── Manages WandB run lifecycle
 
 Stages (independently testable, ~150-250 LOC each)
-├── EvaluationStage(wandb_module, io_manager)
+├── PredictionIOManager(model_path)              [E1, completed]
+│   └── save/load predictions, evaluations, evaluation tables
+├── EvaluationStage(wandb_module, io_manager)    [E2, completed]
 │   └── evaluate(predictions, EvaluationContext) → metrics published
-├── TrainingStage(wandb_module)           [future]
-├── ForecastingStage(wandb_module, io_manager) [future]
-├── ReportingStage(wandb_module)          [future]
-└── DataFetchingStage(data_loader)        [future]
+├── ReportingStage(wandb_module)                 [E3, completed]
+│   └── generate_forecast_report / generate_evaluation_report
+├── ForecastingStage(wandb_module, io_manager)   [E4, completed]
+│   └── process_and_save_forecast(predictions, ForecastingContext)
+├── TrainingStage(wandb_module)                  [E5, completed]
+│   └── finalize_training(TrainingContext)
+└── DataFetchingStage(data_loader)               [future]
 
 Context Objects (frozen dataclasses, passed explicitly)
-├── EvaluationContext(configs, model_path, prediction_format, ...)
-├── TrainingContext(configs, model_path, ...)  [future]
-└── ForecastingContext(configs, model_path, ...) [future]
+├── BaseStageContext(configs, model_path, run_type)
+├── EvaluationContext(... + prediction_format, partition_dict, data_loader, ...)
+├── ReportingContext(... + entity)
+├── ForecastingContext(... + prediction_format)
+└── TrainingContext(... + sweep)
 ```
 
 ### Migration Strategy
 
 Staged Strangler Fig extraction, one stage per PR:
 
-1. **E2 (this PR):** Extract `EvaluationStage` with `EvaluationContext`. Delegate from `_evaluate_prediction_dataframe()`.
-2. **E3 (future):** Extract `ReportingStage` from `_execute_forecast_reporting()` and `_execute_evaluation_reporting()`.
-3. **E4 (future):** Extract `ForecastingStage` from `_execute_model_forecasting()`.
-4. **E5 (future):** Extract `TrainingStage` from `_execute_model_training()`.
-5. **E6 (completed):** Relocated `ModelPathManager` from `managers/model/model.py` to `data/model_path.py`. Re-export shim in `managers/model/model.py` maintains all existing import paths.
+1. **E1 (completed):** Extract `PredictionIOManager` for prediction persistence. Delegate from facade.
+2. **E2 (completed):** Extract `EvaluationStage` with `EvaluationContext`. Delegate from `_evaluate_prediction_dataframe()`.
+3. **E3 (completed):** Extract `ReportingStage` from `_execute_forecast_reporting()` and `_execute_evaluation_reporting()`.
+4. **E4 (completed):** Extract `ForecastingStage` from `_execute_model_forecasting()`.
+5. **E5 (completed):** Extract `TrainingStage` from `_execute_model_training()`.
+6. **E6 (completed):** Relocated `ModelPathManager` from `managers/model/model.py` to `data/model_path.py`. Re-export shim in `managers/model/model.py` maintains all existing import paths.
 
 Each extraction follows the same pattern: create frozen context → extract stage class → delegate from façade → verify existing tests pass.
 
 ### Deferred Decisions
 
 - **ModelPathManager relocation** — completed (E6). Relocated to `data/model_path.py` with re-export shim. Zero downstream changes required.
-- **Abstract method context parameters** — evolving `_train_model_artifact(self)` to `_train_model_artifact(self, context=None)` requires downstream model repo updates. Deferred until at least 2 stages are extracted.
-- **Pipeline composition** — a `Pipeline` container that composes stages is valuable but premature before 3+ stages exist.
+- **Abstract method context parameters** — evolving `_train_model_artifact(self)` to `_train_model_artifact(self, context=None)` requires downstream model repo updates. All 5 stages are now extracted; context parameter evolution can proceed when downstream repos are ready.
+- **Pipeline composition** — a `Pipeline` container that composes stages. All 5 stages exist; composition container is now feasible but not yet prioritized.
 
 ## Implementation Notes
 
