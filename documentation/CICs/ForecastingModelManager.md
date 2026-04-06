@@ -257,16 +257,18 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
 - `TrainingStage` was extracted (ADR-045 E5) from
   `_execute_model_training()`. The facade calls the abstract
   `_train_model_artifact()` then delegates log creation and alerts.
+- `ModelPathManager` was relocated (ADR-045 E6) from
+  `managers/model/model.py` to `data/model_path.py`. Re-export shim
+  in `managers/model/model.py` maintains all existing import paths.
+  This resolves Root Cause #1 (inverted dependencies).
 
 ---
 
 ## 12. Known Deviations
 
-- **God class (3210 LOC):** `ForecastingModelManager` and its parent
-  `ModelManager` coexist in a single 3210-line file alongside
-  `ModelPathManager`. This is a known structural debt. The E1 extraction of
-  `PredictionIOManager` was the first decomposition step; further extraction
-  of evaluation orchestration and reporting is planned.
+- **Facade file (~1960 LOC):** `ForecastingModelManager` and its parent
+  `ModelManager` coexist in `model.py` (~1960 LOC after E1-E6 extractions,
+  down from 3049). `ModelPathManager` has been relocated to `data/model_path.py`.
 - **Target name regex assumption (R2):** The DF evaluation path assumes
   prediction columns are named `pred_{target}`. If a model uses a different
   naming convention, the column slice fails silently.

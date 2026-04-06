@@ -64,13 +64,13 @@ Staged Strangler Fig extraction, one stage per PR:
 2. **E3 (future):** Extract `ReportingStage` from `_execute_forecast_reporting()` and `_execute_evaluation_reporting()`.
 3. **E4 (future):** Extract `ForecastingStage` from `_execute_model_forecasting()`.
 4. **E5 (future):** Extract `TrainingStage` from `_execute_model_training()`.
-5. **E6 (future):** Relocate `ModelPathManager` from `managers/` to `data/` (cross-repo impact — separate ADR).
+5. **E6 (completed):** Relocated `ModelPathManager` from `managers/model/model.py` to `data/model_path.py`. Re-export shim in `managers/model/model.py` maintains all existing import paths.
 
 Each extraction follows the same pattern: create frozen context → extract stage class → delegate from façade → verify existing tests pass.
 
 ### Deferred Decisions
 
-- **ModelPathManager relocation** — impacts all downstream model repos. Requires separate ADR and coordinated migration.
+- **ModelPathManager relocation** — completed (E6). Relocated to `data/model_path.py` with re-export shim. Zero downstream changes required.
 - **Abstract method context parameters** — evolving `_train_model_artifact(self)` to `_train_model_artifact(self, context=None)` requires downstream model repo updates. Deferred until at least 2 stages are extracted.
 - **Pipeline composition** — a `Pipeline` container that composes stages is valuable but premature before 3+ stages exist.
 
