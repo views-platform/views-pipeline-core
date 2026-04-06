@@ -136,6 +136,7 @@ ForecastingModelManager
     |-- EvaluationStage            (metrics orchestration, ADR-045 E2)
     |-- ReportingStage             (report generation, ADR-045 E3)
     |-- ForecastingStage           (forecast post-processing, ADR-045 E4)
+    |-- TrainingStage              (training post-processing, ADR-045 E5)
     |-- CorePredictionSniffer      (DF path: prediction validation)
     |-- PredictionFrame            (PF path: self-validating)
     |
@@ -229,6 +230,9 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
 - `tests/test_managers/test_forecasting_stage.py` -- 10 tests for
   `ForecastingStage` (ADR-045 E4): DF/PF paths, type enforcement guards,
   CorePredictionSniffer validation, per-target save, log creation, alerts.
+- `tests/test_managers/test_training_stage.py` -- 7 tests for
+  `TrainingStage` (ADR-045 E5): frozen context, log creation, WandB alerts,
+  sweep flag in alert text.
 
 ---
 
@@ -250,6 +254,9 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
   `_execute_model_forecasting()`. The facade calls the abstract
   `_forecast_model_artifact()` (subclass-specific) then delegates
   type enforcement, validation, and persistence to the stage.
+- `TrainingStage` was extracted (ADR-045 E5) from
+  `_execute_model_training()`. The facade calls the abstract
+  `_train_model_artifact()` then delegates log creation and alerts.
 
 ---
 

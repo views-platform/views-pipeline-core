@@ -10,7 +10,6 @@ from datetime import datetime
 import traceback
 from views_pipeline_core.cli import ForecastingModelArgs
 from views_pipeline_core.exceptions import ModelForecastingException
-import wandb
 import pandas as pd
 from pathlib import Path
 from functools import partial
@@ -1437,6 +1436,13 @@ class ForecastingModelManager(ModelManager):
             wandb_notifications=self._wandb_notifications,
         )
 
+        from views_pipeline_core.managers.training.stage import TrainingStage
+
+        self._training_stage = TrainingStage(
+            wandb_module=self._wandb_module,
+            wandb_notifications=self._wandb_notifications,
+        )
+
     @abstractmethod
     def _train_model_artifact(self) -> any:
         """
@@ -1972,37 +1978,18 @@ class ForecastingModelManager(ModelManager):
     def _execute_model_training(self) -> None:
         """
         Train model and save artifact.
-        
-        Executes model training using configured hyperparameters,
-        saves trained artifact, logs metrics to WandB, and creates
-        execution logs.
-        
-        Pipeline Stage:
-            train
-        
+
+        Calls the abstract _train_model_artifact() (subclass-specific),
+        then delegates post-training bookkeeping to TrainingStage (ADR-045 E5).
+        WandB lifecycle stays in this facade method.
+
         Side Effects:
             - Creates WandB run (job_type="train")
-            - Creates artifact in self._model_path.artifacts
-            - Creates training log entry
-            - Logs metrics to WandB
-            - Sends completion notification
-        
-        Raises:
-            ModelTrainingException: If training fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_model_training()
-            INFO: Training purple_alien...
-            INFO: Training completed. Model saved.
-        
-        Note:
-            - Calls abstract _train_model_artifact()
-            - Artifact naming: {run_type}_model_{timestamp}.{ext}
-            - WandB run finished in parent context
+            - Creates artifact via abstract method
+            - Creates training log and sends alert via TrainingStage
         """
         import traceback
-        from views_pipeline_core.files.utils import handle_single_log_creation
+        from views_pipeline_core.managers.training.stage import TrainingContext
 
         with self._wandb_module.initialize_run(
             project=self._project,
@@ -2015,17 +2002,13 @@ class ForecastingModelManager(ModelManager):
                 )
                 self._train_model_artifact()
 
-                handle_single_log_creation(
+                context = TrainingContext(
+                    configs=self.configs,
                     model_path=self._model_path,
-                    config=self.configs,
-                    train=True,
+                    run_type=self.args.run_type,
+                    sweep=self._sweep,
                 )
-
-                self._wandb_module.send_alert(
-                    title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
-                    text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```",
-                    notifications_enabled=self._wandb_notifications,
-                )
+                self._training_stage.finalize_training(context)
 
             except Exception as e:
                 logger.error(
