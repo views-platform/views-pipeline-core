@@ -65,6 +65,8 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
     manager._generate_evaluation_table = MagicMock(return_value="table")
     manager._wandb_module = MagicMock()
     manager._wandb_notifications = False
+    manager._evaluation_stage._wandb_module = manager._wandb_module
+    manager._evaluation_stage._io = MagicMock()
 
     # Prediction is a distribution (list of samples); column must be named pred_{target}
     df_pred = pd.DataFrame({
@@ -113,6 +115,8 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
     manager._generate_evaluation_table = MagicMock(return_value="table")
     manager._wandb_module = MagicMock()
     manager._wandb_notifications = False
+    manager._evaluation_stage._wandb_module = manager._wandb_module
+    manager._evaluation_stage._io = MagicMock()
     
     # Prediction contains a scalar point estimate; column must be named pred_{target}
     df_pred = pd.DataFrame({
@@ -160,6 +164,8 @@ def test_scalar_gate_distribution_with_sample_metrics(mock_read, mock_splash, mo
     manager._generate_evaluation_table = MagicMock(return_value="table")
     manager._wandb_module = MagicMock()
     manager._wandb_notifications = False
+    manager._evaluation_stage._wandb_module = manager._wandb_module
+    manager._evaluation_stage._io = MagicMock()
 
     # Prediction is a distribution; column must be named pred_{target}
     df_pred = pd.DataFrame({

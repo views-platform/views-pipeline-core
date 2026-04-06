@@ -438,6 +438,12 @@ def _make_eval_stub(prediction_format: str) -> _ForecastStub:
     m._save_evaluations = Mock()
     m._partition_dict = {"calibration": {"train": (121, 444), "test": (445, 492)}}
     m._eval_type = "calibration"
+    m._io = MagicMock()
+
+    from views_pipeline_core.managers.evaluation.stage import EvaluationStage
+    m._evaluation_stage = EvaluationStage(
+        wandb_module=wm, io_manager=m._io,
+    )
 
     return m
 
@@ -644,6 +650,13 @@ def _make_sweep_stub(prediction_format: str) -> _ForecastStub:
     m._save_evaluations = Mock()
     m._partition_dict = {"calibration": {"train": (121, 444), "test": (445, 492)}}
     m._eval_type = "calibration"
+    m._io = MagicMock()
+
+    from views_pipeline_core.managers.evaluation.stage import EvaluationStage
+    m._evaluation_stage = EvaluationStage(
+        wandb_module=wm, io_manager=m._io,
+    )
+
     return m
 
 
@@ -1215,18 +1228,17 @@ class TestOOMMitigation:
 
     def test_df_viewser_freed_before_target_loop(self):
         """
-        _evaluate_prediction_dataframe() must contain 'del df_viewser' to free
+        EvaluationStage._load_actuals() must contain 'del df_viewser' to free
         the actuals DataFrame (~6 GB) before the per-target metrics loop.
         Without this, df_viewser coexists with the EvaluationAdapter allocation
         across all T iterations.
         """
         import inspect
+        from views_pipeline_core.managers.evaluation.stage import EvaluationStage
 
-        source = inspect.getsource(
-            ForecastingModelManager._evaluate_prediction_dataframe
-        )
+        source = inspect.getsource(EvaluationStage._load_actuals)
         assert "del df_viewser" in source, (
-            "_evaluate_prediction_dataframe() must explicitly 'del df_viewser' after "
+            "EvaluationStage._load_actuals() must explicitly 'del df_viewser' after "
             "extracting df_actual. The actuals DataFrame (~6 GB at pgm scale) must be "
             "freed before the per-target metrics loop to avoid coexisting with the "
             "EvaluationAdapter's y_pred_out pre-allocation."

@@ -1416,6 +1416,14 @@ class ForecastingModelManager(ModelManager):
             pred_store_name=self._pred_store_name,
         )
 
+        from views_pipeline_core.managers.evaluation.stage import EvaluationStage
+
+        self._evaluation_stage = EvaluationStage(
+            wandb_module=self._wandb_module,
+            io_manager=self._io,
+            wandb_notifications=self._wandb_notifications,
+        )
+
     @abstractmethod
     def _train_model_artifact(self) -> any:
         """
@@ -2680,153 +2688,18 @@ class ForecastingModelManager(ModelManager):
             - Groups metrics by conflict type
             - Enforces scalar predictions for point metrics
         """
-        from views_evaluation import NativeEvaluator
-        from views_pipeline_core.files.utils import read_dataframe
+        from views_pipeline_core.managers.evaluation.stage import EvaluationContext
 
-        if not ensemble:
-            df_path = self._model_path._get_raw_data_file_paths(
-                run_type=self.args.run_type
-            )[0]
-            df_viewser = read_dataframe(df_path)
-        else:
-            df_path = (
-                ModelPathManager(self.configs["models"][0]).data_raw
-                / f"{self.configs['run_type']}_viewser_df{PipelineConfig.dataframe_format}"
-            )
-            df_viewser = read_dataframe(df_path)
-
-        logger.info(f"df_viewser read from {df_path}")
-        df_viewser = self.prepare_actuals_df(df_viewser)
-        # Read actuals for all declared targets directly from the canonical Tier 3 keys,
-        # not from the legacy "targets" alias.
-        all_targets = (
-            self.configs.get("regression_targets", []) +
-            self.configs.get("classification_targets", [])
+        context = EvaluationContext(
+            configs=self.configs,
+            model_path=self._model_path,
+            prediction_format=self._prediction_format,
+            partition_dict=self._partition_dict,
+            run_type=self.args.run_type,
+            data_loader=getattr(self, '_data_loader', None),
+            prepare_actuals_df=self.prepare_actuals_df,
         )
-        import gc
-        df_actual = df_viewser[all_targets].copy()
-        del df_viewser
-        gc.collect()
-
-        # Task definitions: target lists only.
-        # NativeEvaluator resolves task/pred_type from config and EvaluationFrame.
-        # Metric dispatch is handled by MetricCatalog (views-evaluation).
-        tasks = {
-            "regression":     self.configs.get("regression_targets", []),
-            "classification": self.configs.get("classification_targets", []),
-        }
-
-        evaluator = NativeEvaluator(self.configs)
-
-        for task_type, targets in tasks.items():
-            if not targets:
-                continue
-
-            logger.info(f"Processing {task_type} tasks for evaluation...")
-
-            for target in targets:
-                logger.info(f"Calculating {task_type} evaluation metrics for {target}")
-
-                target_identifier = target
-
-                # NativeEvaluator.evaluate() operates on one target at a time via
-                # an EvaluationFrame built by the EvaluationAdapter.
-                from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
-
-                actual_slice = df_actual[[target]]
-
-                if self._prediction_format == "prediction_frame":
-                    # PF path: df_predictions is Dict[str, List[PredictionFrame]].
-                    # Pop frees memory for each target as we go (ADR-042 DoD #1.5).
-                    import gc
-                    raw_preds = df_predictions.pop(target, None)
-                    if raw_preds is None:
-                        logger.warning(
-                            f"PF path: target '{target}' not found in predictions dict "
-                            f"(keys: {list(df_predictions.keys())}). Skipping."
-                        )
-                        continue
-                    step_mappings = self._get_evaluation_step_mappings(n_sequences=len(raw_preds))
-
-                    logger.debug(
-                        "PF path: assuming target '%s' aligns with "
-                        "PredictionFrame.y_pred by model-author contract "
-                        "(ADR-042). No cross-check performed.",
-                        target,
-                    )
-
-                    ef = EvaluationAdapter.from_prediction_frames(
-                        actual=actual_slice,
-                        predictions=raw_preds,
-                        target=target,
-                        step_mapping=step_mappings,
-                    )
-
-                    del raw_preds
-                    gc.collect()
-
-                    # legacy_compatibility=True preserves step-wise truncation to shortest
-                    # sequence, matching the deleted EvaluationManager wrapper behavior.
-                    # Flip to False only after verifying numeric equivalence (see C-29).
-                    report = evaluator.evaluate(ef=ef, legacy_compatibility=True)
-                    del ef
-                    gc.collect()
-
-                else:
-                    # DF path: df_predictions is List[pd.DataFrame].
-                    raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
-                    first_df = raw_preds[0]
-                    if f"pred_{target}" not in first_df.columns:
-                        logger.warning(
-                            f"Column pred_{target} not found in prediction columns. Skipping."
-                        )
-                        continue
-                    pred_slices = [df[[f"pred_{target}"]] for df in raw_preds]
-                    # Fulfill ADR-031: Explicit per-sequence step mappings.
-                    step_mappings = self._get_evaluation_step_mappings(n_sequences=len(pred_slices))
-                    ef = EvaluationAdapter.from_dataframes(
-                        actual=actual_slice,
-                        predictions=pred_slices,
-                        target=target,
-                        step_mapping=step_mappings,
-                    )
-
-                    # See PF path comment above re: legacy_compatibility (C-29).
-                    report = evaluator.evaluate(ef=ef, legacy_compatibility=True)
-
-                # Extract native dict format for WandB logging and DataFrames for file saving
-                schemas = report.to_dict()["schemas"]
-                step_wise_evaluation = schemas.get("step", {})
-                time_series_wise_evaluation = schemas.get("time_series", {})
-                month_wise_evaluation = schemas.get("month", {})
-
-                df_step_wise_evaluation = report.to_dataframe("step")
-                df_time_series_wise_evaluation = report.to_dataframe("time_series")
-                df_month_wise_evaluation = report.to_dataframe("month")
-
-                self._wandb_module.log_evaluation_results(
-                    step_wise_evaluation,
-                    month_wise_evaluation,
-                    time_series_wise_evaluation,
-                    target_identifier,
-                )
-
-                if not self.configs["sweep"]:
-                    self._save_evaluations(
-                        df_step_wise_evaluation,
-                        df_time_series_wise_evaluation,
-                        df_month_wise_evaluation,
-                        self._model_path.data_generated,
-                        target_identifier,
-                    )
-
-        import wandb
-
-        self._wandb_module.send_alert(
-            title=f"Metrics for {self._model_path.model_name}",
-            text=f"{self._generate_evaluation_table(wandb.summary._as_dict())}",
-            notifications_enabled=self._wandb_notifications,
-        )
+        self._evaluation_stage.evaluate(df_predictions, context, ensemble=ensemble)
 
     def _get_evaluation_step_mappings(self, n_sequences: int) -> List[Dict[int, int]]:
         """

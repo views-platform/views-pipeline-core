@@ -133,10 +133,9 @@ ForecastingModelManager
     |-- ConfigurationManager       (config merging)
     |-- WandBModule                (session lifecycle, alerts)
     |-- PredictionIOManager        (save/load predictions, evaluations)
+    |-- EvaluationStage            (metrics orchestration, ADR-045 Stage pattern)
     |-- CorePredictionSniffer      (DF path: prediction validation)
     |-- PredictionFrame            (PF path: self-validating)
-    |-- EvaluationAdapter          (metrics bridge)
-    |-- NativeEvaluator            (metrics calculation, from views-evaluation)
     |-- ForecastReportTemplate     (report generation)
     |-- EvaluationReportTemplate   (report generation)
     |

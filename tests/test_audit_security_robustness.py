@@ -30,6 +30,7 @@ def mock_deps():
     with patch.dict(sys.modules, {
         'views_evaluation': mock_eval_mod,
         'views_evaluation.evaluation': MagicMock(),
+        'views_evaluation.evaluation.evaluation_frame': MagicMock(),
         'art': MagicMock(),
         'wandb': mock_wandb
     }):
@@ -57,6 +58,10 @@ def get_test_manager():
                     manager._generate_evaluation_table = MagicMock(return_value="table")
                     manager._wandb_module = MagicMock()
                     manager._wandb_notifications = False
+                    # Mock the evaluation stage's collaborators to match the
+                    # mocked manager (stage was constructed before these mocks)
+                    manager._evaluation_stage._wandb_module = manager._wandb_module
+                    manager._evaluation_stage._io = MagicMock()
                     return manager
 
 # ============================================================
