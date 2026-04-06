@@ -16,22 +16,21 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
 
+from views_pipeline_core.types import BaseStageContext
+
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class EvaluationContext:
+class EvaluationContext(BaseStageContext):
     """Immutable context for evaluation. Passed explicitly, not pulled from self.
 
-    Fields mirror what _evaluate_prediction_dataframe previously accessed via
-    self.configs, self._model_path, self.args, etc. Making them explicit
-    documents the actual dependency surface.
+    Extends BaseStageContext (configs, model_path, run_type) with
+    evaluation-specific fields.  Making dependencies explicit documents
+    the actual dependency surface of the evaluation stage.
     """
-    configs: Dict
-    model_path: Any  # ModelPathManager — typed as Any to avoid circular import
     prediction_format: str
     partition_dict: Dict
-    run_type: str
     data_loader: Any  # ViewsDataLoader or None
     prepare_actuals_df: Callable  # Hook: df → df (from subclass)
 

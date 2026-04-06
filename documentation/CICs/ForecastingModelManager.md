@@ -213,6 +213,12 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
 - `tests/test_managers/test_streaming_evaluation.py` -- tests for streaming
   PF evaluation via `_evaluate_model_artifact_streaming` and the origin sink
   pattern.
+- `tests/test_managers/test_evaluation_stage.py` -- 17 tests for
+  `EvaluationStage` (ADR-045 E2): frozen context, DF/PF paths, ensemble
+  actuals, step mappings, multiple targets, context contract compliance.
+- `tests/test_managers/test_execute_model_evaluation.py` -- 10 characterization
+  tests for `_execute_model_evaluation()`: DF validation+save, type enforcement,
+  PF streaming, skip-metrics, no-metrics, WandB lifecycle, sequence count.
 
 ---
 
