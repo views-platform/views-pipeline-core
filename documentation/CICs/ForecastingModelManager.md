@@ -133,11 +133,10 @@ ForecastingModelManager
     |-- ConfigurationManager       (config merging)
     |-- WandBModule                (session lifecycle, alerts)
     |-- PredictionIOManager        (save/load predictions, evaluations)
-    |-- EvaluationStage            (metrics orchestration, ADR-045 Stage pattern)
+    |-- EvaluationStage            (metrics orchestration, ADR-045 E2)
+    |-- ReportingStage             (report generation, ADR-045 E3)
     |-- CorePredictionSniffer      (DF path: prediction validation)
     |-- PredictionFrame            (PF path: self-validating)
-    |-- ForecastReportTemplate     (report generation)
-    |-- EvaluationReportTemplate   (report generation)
     |
     v
 Subclass in views-models (implements abstract methods)
@@ -148,6 +147,9 @@ Subclass in views-models (implements abstract methods)
   `ViewsDataLoader`'s responsibility.
 - It delegates all persistence to `PredictionIOManager` (extracted in E1
   refactoring, commit `017c85a`).
+- It delegates report generation to `ReportingStage` (extracted in E3
+  refactoring). `ForecastReportTemplate` and `EvaluationReportTemplate`
+  are now consumed by the stage, not by the facade directly.
 
 ---
 
@@ -219,6 +221,10 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
 - `tests/test_managers/test_execute_model_evaluation.py` -- 10 characterization
   tests for `_execute_model_evaluation()`: DF validation+save, type enforcement,
   PF streaming, skip-metrics, no-metrics, WandB lifecycle, sequence count.
+- `tests/test_managers/test_reporting_stage.py` -- 11 tests for
+  `ReportingStage` (ADR-045 E3): frozen context, forecast report (model +
+  ensemble paths), evaluation report, missing data errors, WandB alerts,
+  context contract compliance.
 
 ---
 
@@ -232,6 +238,10 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
   and `_generate_evaluation_table` now delegate to `self._io`.
 - The `prepare_actuals_df` hook was added for subclasses that manufacture
   derived targets (e.g., binary signals from raw counts).
+- `ReportingStage` was extracted (ADR-045 E3) from
+  `_execute_forecast_reporting()` and `_execute_evaluation_reporting()`.
+  Both facade methods now construct a frozen `ReportingContext` and delegate.
+  Dead code `_save_eval_report()` was removed (zero callers).
 
 ---
 

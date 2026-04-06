@@ -27,8 +27,6 @@ from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 import os
 
-from views_pipeline_core.modules.wandb import get_latest_run
-
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
 
@@ -1424,6 +1422,13 @@ class ForecastingModelManager(ModelManager):
             wandb_notifications=self._wandb_notifications,
         )
 
+        from views_pipeline_core.managers.reporting.stage import ReportingStage
+
+        self._reporting_stage = ReportingStage(
+            wandb_module=self._wandb_module,
+            wandb_notifications=self._wandb_notifications,
+        )
+
     @abstractmethod
     def _train_model_artifact(self) -> any:
         """
@@ -2454,36 +2459,16 @@ class ForecastingModelManager(ModelManager):
     def _execute_forecast_reporting(self) -> None:
         """
         Generate forecast visualization report.
-        
-        Creates HTML report with maps and time-series visualizations
-        of forecasts. Combines historical data with future predictions.
-        
-        Pipeline Stage:
-            report (forecasting)
-        
+
+        Delegates to ReportingStage.generate_forecast_report() (ADR-045 E3).
+        WandB lifecycle stays in this facade method.
+
         Side Effects:
             - Creates WandB run (job_type="report")
-            - Loads historical and forecast data
-            - Generates interactive maps
-            - Creates time-series plots
-            - Saves HTML report to reports/
+            - Generates HTML report via ReportingStage
             - Sends completion notification
-        
-        Raises:
-            PipelineException: If report generation fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_forecast_reporting()
-            INFO: Generating forecast report...
-            INFO: Report saved to reports/report_forecasting_*.html
-        
-        Note:
-            - Requires both historical and forecast data
-            - Handles both model and ensemble targets
         """
-        import pandas as pd
-        from views_pipeline_core.files.utils import read_dataframe
+        from views_pipeline_core.managers.reporting.stage import ReportingContext
 
         with self._wandb_module.initialize_run(
             project=self._project,
@@ -2491,87 +2476,13 @@ class ForecastingModelManager(ModelManager):
             job_type="report",
         ):
             try:
-                logger.info(
-                    f"Generating forecast report for {self._model_path.target} {self.configs['name']}..."
-                )
-                if self._model_path._target == "ensemble":
-                    models = self.configs.get("models")
-                    reference_index = None
-                    historical_df = None
-                    for model in models:
-                        mp = ModelPathManager(model_path=model, validate=True)
-                        config = ModelManager(
-                            model_path=mp,
-                            wandb_notifications=False,
-                            use_prediction_store=False,
-                        ).configs
-                        df = read_dataframe(
-                            file_path=mp._get_raw_data_file_paths(
-                                run_type=self.args.run_type
-                            )[0]
-                        )
-                        if reference_index is None or historical_df is None:
-                            reference_index = df.index
-                            historical_df = pd.DataFrame(index=reference_index)
-                        targets = config.get("targets")
-                        targets = targets if isinstance(targets, list) else [targets]
-                        for target in targets:
-                            if target not in historical_df.columns:
-                                if df.index.equals(reference_index):
-                                    historical_df[target] = df[target]
-                                else:
-                                    logger.warning(
-                                        f"Index mismatch for target {target} in model {model}. Skipping this target."
-                                    )
-                                    continue
-                elif self._model_path._target == "model":
-                    historical_df = read_dataframe(
-                        self._model_path._get_raw_data_file_paths(
-                            run_type=self.args.run_type
-                        )[0]
-                    )
-
-                else:
-                    raise ValueError(
-                        f"Invalid target type: {self._model_path._target}. Expected 'model' or 'ensemble'."
-                    )
-                
-                try:
-                    forecast_df = read_dataframe(
-                        self._model_path._get_generated_predictions_data_file_paths(
-                            run_type=self.args.run_type
-                        )[0]
-                    )
-                    logger.info("Using latest forecast dataframe")
-                except Exception as e:
-                    raise FileNotFoundError(
-                        f"Forecast dataframe was probably not found. Please run the pipeline in forecasting mode with '--run_type forecasting' to generate the forecast dataframe. More info: {e}"
-                    )
-
-                from views_pipeline_core.templates.reports.forecast import (
-                    ForecastReportTemplate,
-                )
-
-                logger.info(
-                    f"Generating forecast report for {self._model_path.target} {self.configs['name']}..."
-                )
-
-                forecast_template = ForecastReportTemplate(
-                    config=self.configs,
+                context = ReportingContext(
+                    configs=self.configs,
                     model_path=self._model_path,
                     run_type=self.args.run_type,
+                    entity=self._entity,
                 )
-                report_path = forecast_template.generate(
-                    forecast_dataframe=forecast_df, historical_dataframe=historical_df
-                )
-
-                self._wandb_module.send_alert(
-                    title="Forecast Report Generated",
-                    text=f"Forecast report for {self._model_path.target} {self._model_path.model_name} has been successfully "
-                    f"generated and saved locally at {report_path}.",
-                    notifications_enabled=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
+                self._reporting_stage.generate_forecast_report(context)
             except Exception:
                 logger.error(f"Forecast report generation failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -2581,45 +2492,6 @@ class ForecastingModelManager(ModelManager):
             finally:
                 self._wandb_module.finish_run()
 
-
-    def _save_eval_report(self, eval_report, path_reports, target_identifier):
-        """
-        Save evaluation metrics report as JSON.
-        
-        Internal Use:
-            Called during evaluation reporting.
-        
-        Args:
-            eval_report: Dictionary of evaluation metrics
-            path_reports: Directory for saving reports
-            target_identifier: Target identifier code for filename
-        
-        Raises:
-            PipelineException: If save fails
-        """
-        import json
-        from views_pipeline_core.files.utils import generate_evaluation_report_name
-
-        try:
-            path_reports = Path(path_reports)
-            path_reports.mkdir(parents=True, exist_ok=True)
-
-            eval_report_path = generate_evaluation_report_name(
-                self.configs["run_type"],
-                target_identifier,
-                self.configs["timestamp"],
-                file_extension=".json",
-            )
-
-            with open(path_reports / eval_report_path, "w") as f:
-                json.dump(eval_report, f)
-
-        except Exception as e:
-            logger.error(f"Error saving evaluation report: {e}", exc_info=True)
-            raise PipelineException(
-                f"Error saving evaluation report: {e}",
-                wandb_module=self._wandb_module,
-            )
 
     def _save_evaluations(
         self,
@@ -2911,39 +2783,16 @@ class ForecastingModelManager(ModelManager):
     def _execute_evaluation_reporting(self) -> None:
         """
         Generate evaluation visualization report.
-        
-        Creates HTML report with evaluation metrics, comparisons to
-        baselines, and performance visualizations.
-        
-        Pipeline Stage:
-            report (evaluation)
-        
+
+        Delegates to ReportingStage.generate_evaluation_report() (ADR-045 E3).
+        WandB lifecycle stays in this facade method.
+
         Side Effects:
             - Creates WandB run (job_type="report")
-            - Loads latest WandB run data
-            - Generates evaluation report
-            - Saves HTML to reports/
+            - Generates HTML report via ReportingStage
             - Sends completion notification
-        
-        Raises:
-            PipelineException: If report generation fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_evaluation_reporting()
-            INFO: Generating evaluation report...
-            INFO: Report saved to reports/report_calibration_*.html
-        
-        Note:
-            - Retrieves metrics from latest WandB run
-            - Includes comparison to baseline models
         """
-
-        latest_run = get_latest_run(
-            entity=self._entity,
-            model_name=self._model_path.model_name,
-            run_type=self.args.run_type,
-        )
+        from views_pipeline_core.managers.reporting.stage import ReportingContext
 
         with self._wandb_module.initialize_run(
             project=self._project,
@@ -2951,27 +2800,13 @@ class ForecastingModelManager(ModelManager):
             job_type="report",
         ):
             try:
-                from views_pipeline_core.templates.reports.evaluation import (
-                    EvaluationReportTemplate,
+                context = ReportingContext(
+                    configs=self.configs,
+                    model_path=self._model_path,
+                    run_type=self.args.run_type,
+                    entity=self._entity,
                 )
-
-                for target in self.configs["targets"]:
-                    evaluation_template = EvaluationReportTemplate(
-                        config=self.configs,
-                        model_path=self._model_path,
-                        run_type=self.args.run_type,
-                    )
-                    report_path = evaluation_template.generate(
-                        wandb_run=latest_run, target=target
-                    )
-
-                self._wandb_module.send_alert(
-                    title="Evaluation Report Generated",
-                    text=f"Evaluation report for {self._model_path.model_name} has been successfully "
-                    f"generated and saved locally at {report_path}.",
-                    notifications_enabled=self._wandb_notifications,
-                    models_path=self._model_path.models,
-                )
+                self._reporting_stage.generate_evaluation_report(context)
             except Exception:
                 logger.error(f"Evaluation report generation failed: {traceback.format_exc()}")
                 raise PipelineException(
