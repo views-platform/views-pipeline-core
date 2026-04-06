@@ -1429,6 +1429,14 @@ class ForecastingModelManager(ModelManager):
             wandb_notifications=self._wandb_notifications,
         )
 
+        from views_pipeline_core.managers.forecasting.stage import ForecastingStage
+
+        self._forecasting_stage = ForecastingStage(
+            wandb_module=self._wandb_module,
+            io_manager=self._io,
+            wandb_notifications=self._wandb_notifications,
+        )
+
     @abstractmethod
     def _train_model_artifact(self) -> any:
         """
@@ -2260,37 +2268,19 @@ class ForecastingModelManager(ModelManager):
     def _execute_model_forecasting(self) -> None:
         """
         Generate future predictions.
-        
-        Creates forecasts for future time periods, validates structure,
-        and saves predictions to disk and optionally to prediction store.
-        
-        Pipeline Stage:
-            forecast
-        
+
+        Calls the abstract _forecast_model_artifact() (subclass-specific),
+        then delegates post-processing to ForecastingStage (ADR-045 E4).
+        WandB lifecycle stays in this facade method.
+
         Side Effects:
             - Creates WandB run (job_type="forecast")
-            - Generates future predictions
-            - Validates prediction DataFrame
-            - Saves to data/generated
-            - Uploads to prediction store (if enabled)
+            - Generates predictions via abstract method
+            - Validates, converts, and saves via ForecastingStage
             - Sends completion notification
-        
-        Raises:
-            ModelForecastingException: If forecasting fails
-        
-        Example:
-            >>> # Internal usage
-            >>> self._execute_model_forecasting()
-            INFO: Forecasting purple_alien...
-            INFO: Forecasts saved.
-        
-        Note:
-            - Only valid for run_type='forecasting'
-            - Prediction store requires use_prediction_store=True
         """
         import traceback
-        from views_pipeline_core.modules.validation.core_prediction_sniffer import CorePredictionSniffer
-        from views_pipeline_core.files.utils import handle_single_log_creation
+        from views_pipeline_core.managers.forecasting.stage import ForecastingContext
 
         with self._wandb_module.initialize_run(
             project=self._project,
@@ -2298,62 +2288,14 @@ class ForecastingModelManager(ModelManager):
             job_type="forecast",
         ):
             try:
-                logger.info(
-                    f"Forecasting {self._model_path.target} {self.configs['name']}..."
-                )
-
-                if self._prediction_format == "prediction_frame":
-                    # PF path: PredictionFrame is self-validating at construction;
-                    # the DF-specific CorePredictionSniffer is not applicable here.
-                    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
-                        PredictionFrameConverter,
-                    )
-                    pf_dict = self._forecast_model_artifact(self.args.artifact_name)
-
-                    # Step C — Type enforcement guard (ADR-042, fail-loud).
-                    if not isinstance(pf_dict, dict):
-                        raise ValueError(
-                            f"prediction_format='prediction_frame' declared but "
-                            f"_forecast_model_artifact() returned "
-                            f"{type(pf_dict).__name__}, expected "
-                            f"Dict[str, PredictionFrame]. Model contract violation."
-                        )
-
-                    # Step D — iterate all targets from the dict (multi-target support).
-                    converter = PredictionFrameConverter()
-                    for target, _pf in pf_dict.items():
-                        df_target = converter.to_prediction_df(_pf, target)
-                        converter.audit_prediction_structure(_pf, df_target, target)
-                        self._save_predictions(df_target, self._model_path.data_generated)
-                else:
-                    # DF path: existing validation (unchanged).
-                    df_predictions = self._forecast_model_artifact(self.args.artifact_name)
-
-                    # Step C — Type enforcement guard (ADR-042, fail-loud).
-                    if isinstance(df_predictions, dict):
-                        raise ValueError(
-                            "prediction_format='dataframe' declared but "
-                            "_forecast_model_artifact() returned a dict, expected "
-                            "pd.DataFrame. Model contract violation."
-                        )
-
-                    CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
-                        df_predictions, targets=self.configs["targets"]
-                    )
-
-                    self._save_predictions(df_predictions, self._model_path.data_generated)
-
-                handle_single_log_creation(
+                predictions = self._forecast_model_artifact(self.args.artifact_name)
+                context = ForecastingContext(
+                    configs=self.configs,
                     model_path=self._model_path,
-                    config=self.configs,
-                    train=False,
+                    run_type=self.args.run_type,
+                    prediction_format=self._prediction_format,
                 )
-
-                self._wandb_module.send_alert(
-                    title=f"Forecasting for {self._model_path.target} {self.configs['name']} completed successfully.",
-                    notifications_enabled=self._wandb_notifications,
-                )
-
+                self._forecasting_stage.process_and_save_forecast(predictions, context)
             except Exception as e:
                 logger.error(
                     f"Error forecasting {self._model_path.target}: {e}", exc_info=True

@@ -135,6 +135,7 @@ ForecastingModelManager
     |-- PredictionIOManager        (save/load predictions, evaluations)
     |-- EvaluationStage            (metrics orchestration, ADR-045 E2)
     |-- ReportingStage             (report generation, ADR-045 E3)
+    |-- ForecastingStage           (forecast post-processing, ADR-045 E4)
     |-- CorePredictionSniffer      (DF path: prediction validation)
     |-- PredictionFrame            (PF path: self-validating)
     |
@@ -225,6 +226,9 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
   `ReportingStage` (ADR-045 E3): frozen context, forecast report (model +
   ensemble paths), evaluation report, missing data errors, WandB alerts,
   context contract compliance.
+- `tests/test_managers/test_forecasting_stage.py` -- 10 tests for
+  `ForecastingStage` (ADR-045 E4): DF/PF paths, type enforcement guards,
+  CorePredictionSniffer validation, per-target save, log creation, alerts.
 
 ---
 
@@ -242,6 +246,10 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
   `_execute_forecast_reporting()` and `_execute_evaluation_reporting()`.
   Both facade methods now construct a frozen `ReportingContext` and delegate.
   Dead code `_save_eval_report()` was removed (zero callers).
+- `ForecastingStage` was extracted (ADR-045 E4) from
+  `_execute_model_forecasting()`. The facade calls the abstract
+  `_forecast_model_artifact()` (subclass-specific) then delegates
+  type enforcement, validation, and persistence to the stage.
 
 ---
 

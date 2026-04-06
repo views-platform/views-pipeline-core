@@ -100,6 +100,12 @@ def _make_stub(prediction_format: str) -> _ForecastStub:
 
     # Capture saves
     m._save_predictions = Mock()
+    m._io = MagicMock()
+
+    from views_pipeline_core.managers.forecasting.stage import ForecastingStage
+    m._forecasting_stage = ForecastingStage(
+        wandb_module=wm, io_manager=m._io,
+    )
 
     return m
 
@@ -445,6 +451,11 @@ def _make_eval_stub(prediction_format: str) -> _ForecastStub:
         wandb_module=wm, io_manager=m._io,
     )
 
+    from views_pipeline_core.managers.forecasting.stage import ForecastingStage
+    m._forecasting_stage = ForecastingStage(
+        wandb_module=wm, io_manager=m._io,
+    )
+
     return m
 
 
@@ -657,6 +668,11 @@ def _make_sweep_stub(prediction_format: str) -> _ForecastStub:
         wandb_module=wm, io_manager=m._io,
     )
 
+    from views_pipeline_core.managers.forecasting.stage import ForecastingStage
+    m._forecasting_stage = ForecastingStage(
+        wandb_module=wm, io_manager=m._io,
+    )
+
     return m
 
 
@@ -817,7 +833,7 @@ class TestPFDictDispatch:
         mock_tld.assert_called_once()
 
     def test_pf_forecast_multi_target_dict_saves_each_target(self):
-        """Two-target dict forecast: _save_predictions called once per target."""
+        """Two-target dict forecast: save_predictions called once per target via io_manager."""
         from views_pipeline_core.managers.prediction.prediction_frame_converter import (
             PredictionFrameConverter,
         )
@@ -831,7 +847,8 @@ class TestPFDictDispatch:
             with patch.object(PredictionFrameConverter, "audit_prediction_structure"):
                 _run_execute_forecast(manager, mock_df_result=dummy_df)
 
-        assert manager._save_predictions.call_count == 2
+        # E4: saves now go through ForecastingStage → io_manager, not facade._save_predictions
+        assert manager._io.save_predictions.call_count == 2
 
 
 class TestTypeEnforcementGuards:
