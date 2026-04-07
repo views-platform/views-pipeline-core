@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-04-07
 **Governing ADR:** ADR-044 (Technical Risk Register)
-**Entry count:** 39 concerns + 7 disagreements
+**Entry count:** 40 concerns + 7 disagreements
 
 ---
 
@@ -56,6 +56,7 @@
 | C-37 | 3 | **God class: DatasetTransformationModule (1,410 LOC at time of audit, 19 methods, 13 public).** `modules/transformations/transformations.py`. Forward transforms (ln/lx/lr) and reverse transforms share identical validate→rename→apply→track pattern but are fully duplicated across 7 methods (728 LOC). Decomposition candidates: (1) ColumnNamingTracker — prefix manipulation + column mapping, 206 LOC; (2) TransformationAuditLog — history tracking, ~60 LOC; (3) Template Method for forward/reverse — reduces 728 LOC to ~400. Live metrics: `test_falsification_no_god_classes.py::test_P4`. | New transformation type added, or modification to undo logic | falsification-audit (2026-04-07) | Open |
 | C-38 | 2 | **No domain entity layer — Critical Business Rules dissolved into mechanism code.** Architecture screams "PIPELINE" (`managers/`, `modules/`, `data/`) not "CONFLICT FORECASTING SYSTEM." Spatial level is a bare string (`"cm"`/`"pgm"`) in 15+ files. Temporal partitions are untyped dicts. Forecast horizon is hardcoded as `SUPPORTED_TIME_STEPS={36}`. Rolling-origin step-mapping formula duplicated in `model.py:1715` AND `stage.py:251`. Reconciliation invariants (sum constraint, zero-preservation, non-negativity) implicit in tensor ops. Per Clean Architecture Ch.20-22: Entities should be innermost circle, unsullied by mechanism. Stories: S-01 (SpatialLevel), S-02 (TemporalPartition), S-03 (ForecastHorizon), S-04 (ReconciliationInvariants). | Any new domain concept introduced as bare strings/dicts rather than typed domain objects; or refactoring that moves domain logic without surfacing it | expert-code-review (2026-04-07) | Open |
 | C-39 | 3 | **Rolling-origin step-mapping formula duplicated in `model.py:1715-1718` and `stage.py:251-253`.** Both compute identical `{base_origin + i + s: s}` dicts. Both duplicate the base_origin resolution logic (forecasting vs calibration/validation branching). Fix to one location requires finding and patching the other. Story S-07 consolidates via `ForecastHorizon.build_step_mappings()`. | Any modification to rolling-origin evaluation semantics | expert-code-review (2026-04-07) | Open |
+| C-40 | 2 | **At >64 samples, prediction persistence + evaluation paths exceed typical workstation RAM (~16 GB).** `to_prediction_df()` causes 33x memory explosion (measured: 4,766 MB peak for 179 MB PredictionFrame). `from_prediction_frames()` loads all sequences simultaneously (measured: 3,138 MB). Arrow zero-copy write (`to_arrow_table()`) mitigates save-path peak but evaluation-path scaling remains. At 252 samples pgm scale: ~64 GB projected peak. `NpzSaver` (Phase 6 Task 2) bypasses conversion entirely for internal storage; `LocalParquetSaver` uses Arrow zero-copy for delivery format. Future: zarr for chunked cloud-native access when downstream consumers migrate. | Model configured with >64 samples at pgm level; or global grid at any sample count | expert-code-review (2026-04-07) | Open |
 
 ---
 
