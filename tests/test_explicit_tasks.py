@@ -54,6 +54,7 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
         "targets": ["target_sb"],
         "name": "test",
         "sweep": False,
+        "steps": list(range(1, 37)),
         "run_type": "calibration",
         "timestamp": "20260101",
     }
@@ -104,6 +105,7 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
         "targets": ["target_sb"],
         "name": "test",
         "sweep": False,
+        "steps": list(range(1, 37)),
         "run_type": "calibration",
         "timestamp": "20260101"
     }
@@ -153,6 +155,7 @@ def test_scalar_gate_distribution_with_sample_metrics(mock_read, mock_splash, mo
         "targets": ["target_sb"],
         "name": "test",
         "sweep": False,
+        "steps": list(range(1, 37)),
         "run_type": "calibration",
         "timestamp": "20260101",
     }

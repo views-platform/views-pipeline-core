@@ -14,6 +14,7 @@ Responsibilities:
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 from views_pipeline_core.types import BaseStageContext
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class ReportingStage:
 
         Raises:
             FileNotFoundError: If forecast dataframe is not found.
-            ValueError: If model_path._target is not 'model' or 'ensemble'.
+            ValueError: If model_path.target is not 'model' or 'ensemble'.
         """
         from views_pipeline_core.files.utils import read_dataframe
 
@@ -111,7 +112,7 @@ class ReportingStage:
 
         return report_path
 
-    def generate_evaluation_report(self, context: ReportingContext) -> Path:
+    def generate_evaluation_report(self, context: ReportingContext) -> Optional[Path]:
         """Fetch latest WandB run, generate HTML evaluation report per target.
 
         Args:
@@ -165,12 +166,12 @@ class ReportingStage:
         """Load historical actuals for forecast report.
 
         Dispatches between single-model and ensemble paths based on
-        context.model_path._target.
+        context.model_path.target.
         """
         import pandas as pd
         from views_pipeline_core.files.utils import read_dataframe
 
-        if context.model_path._target == "ensemble":
+        if context.model_path.target == "ensemble":
             from views_pipeline_core.managers.model import (
                 ModelPathManager,
                 ModelManager,
@@ -209,7 +210,7 @@ class ReportingStage:
 
             return historical_df
 
-        elif context.model_path._target == "model":
+        elif context.model_path.target == "model":
             return read_dataframe(
                 context.model_path._get_raw_data_file_paths(
                     run_type=context.run_type
@@ -218,6 +219,6 @@ class ReportingStage:
 
         else:
             raise ValueError(
-                f"Invalid target type: {context.model_path._target}. "
+                f"Invalid target type: {context.model_path.target}. "
                 f"Expected 'model' or 'ensemble'."
             )

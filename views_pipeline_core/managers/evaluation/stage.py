@@ -30,9 +30,9 @@ class EvaluationContext(BaseStageContext):
     the actual dependency surface of the evaluation stage.
     """
     prediction_format: str
-    partition_dict: Dict
+    partition_dict: Dict[str, Any]
     data_loader: Any  # ViewsDataLoader or None
-    prepare_actuals_df: Callable  # Hook: df → df (from subclass)
+    prepare_actuals_df: Callable  # (pd.DataFrame) -> pd.DataFrame
 
 
 class EvaluationStage:
@@ -246,7 +246,7 @@ class EvaluationStage:
                 )
             base_origin = context.partition_dict[run_type]["test"][0] - 1
 
-        steps = context.configs.get("steps", [*range(1, 36 + 1, 1)])
+        steps = context.configs["steps"]
 
         mappings = [
             {base_origin + i + s: s for s in steps} for i in range(n_sequences)

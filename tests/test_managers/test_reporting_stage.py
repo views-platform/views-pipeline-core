@@ -49,7 +49,6 @@ def _make_context(**overrides):
     mp = defaults["model_path"]
     mp.model_name = "test_model"
     mp.target = "model"
-    mp._target = "model"
     mp.models = Path("/tmp/models")
     mp.reports = Path("/tmp/reports")
     mp._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
@@ -110,7 +109,7 @@ class TestForecastReportModel:
 
         stage = _make_stage()
         ctx = _make_context()
-        ctx.model_path._target = "model"
+        ctx.model_path.target = "model"
 
         mock_read.return_value = pd.DataFrame({"lr_sb": [0.1]})
         mock_template_cls.return_value.generate.return_value = Path(
@@ -137,7 +136,7 @@ class TestForecastReportModel:
 
         stage = _make_stage()
         ctx = _make_context()
-        ctx.model_path._target = "model"
+        ctx.model_path.target = "model"
 
         mock_read.return_value = pd.DataFrame({"lr_sb": [0.1]})
         mock_template_cls.return_value.generate.return_value = Path(
@@ -178,7 +177,7 @@ class TestForecastReportEnsemble:
                 "run_type": "calibration",
             },
         )
-        ctx.model_path._target = "ensemble"
+        ctx.model_path.target = "ensemble"
 
         # Mock sub-model path managers
         mock_sub_mp = MagicMock()
@@ -216,7 +215,7 @@ class TestForecastReportErrors:
 
         stage = _make_stage()
         ctx = _make_context()
-        ctx.model_path._target = "model"
+        ctx.model_path.target = "model"
 
         # First call (historical) succeeds, second call (forecast) fails
         mock_read.side_effect = [
@@ -228,10 +227,10 @@ class TestForecastReportErrors:
             stage.generate_forecast_report(ctx)
 
     def test_invalid_target_type_raises_value_error(self):
-        """Invalid _target value must raise ValueError."""
+        """Invalid target value must raise ValueError."""
         stage = _make_stage()
         ctx = _make_context()
-        ctx.model_path._target = "invalid"
+        ctx.model_path.target = "invalid"
 
         with pytest.raises(ValueError, match="Invalid target type"):
             stage.generate_forecast_report(ctx)

@@ -192,21 +192,9 @@ class ModelManager:
             config_sweep=self._config_sweep,
         )
 
-        try:
-            from views_pipeline_core.modules.dataloaders import ViewsDataLoader
-
-            self._data_loader = ViewsDataLoader(
-                model_path=self._model_path,
-                steps=len(
-                    self._config_hyperparameters.get("steps", [*range(1, 36 + 1, 1)])
-                ),
-                partition_dict=self._partition_dict,
-            )
-        except Exception:
-            logger.error(
-                "No Queryset detected for ViewsDataLoader. Skipping...", exc_info=False
-            )
-            self._data_loader = None
+        # ViewsDataLoader is constructed lazily via _initialize_data_loader(),
+        # called after CoreConfigSniffer.sniff_all() guarantees configs are valid.
+        self._data_loader = None
 
         if use_prediction_store:
             from views_pipeline_core.modules.datastore import DatastoreModule
@@ -883,6 +871,27 @@ class ForecastingModelManager(ModelManager):
         else:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
 
+    def _initialize_data_loader(self):
+        """Construct ViewsDataLoader after config validation guarantees steps exists.
+
+        Called from execute_single_run() and execute_sweep_run() after
+        CoreConfigSniffer.sniff_all() has validated the configuration.
+        """
+        try:
+            from views_pipeline_core.modules.dataloaders import ViewsDataLoader
+
+            self._data_loader = ViewsDataLoader(
+                model_path=self._model_path,
+                steps=len(self.configs["steps"]),
+                partition_dict=self._partition_dict,
+            )
+        except Exception:
+            logger.error(
+                "No Queryset detected for ViewsDataLoader. Skipping...",
+                exc_info=False,
+            )
+            self._data_loader = None
+
     def execute_single_run(self, args: ForecastingModelArgs) -> None:
         """
         Execute single pipeline run with given arguments.
@@ -936,6 +945,9 @@ class ForecastingModelManager(ModelManager):
         # is inaccessible, before any side effects (WandB login, data fetching, etc.)
         self._assert_partition_config_accessible(args.run_type)
         CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
+
+        # Construct ViewsDataLoader now that config is validated
+        self._initialize_data_loader()
 
         self._wandb_module.login()
 
@@ -995,6 +1007,9 @@ class ForecastingModelManager(ModelManager):
         self._args = args
 
         CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
+
+        # Construct ViewsDataLoader now that config is validated
+        self._initialize_data_loader()
 
         self._wandb_module.login()
 
@@ -1224,7 +1239,7 @@ class ForecastingModelManager(ModelManager):
                 # This makes the expected outcome visible in the run log so any
                 # mismatch with actual model output can be diagnosed from logs alone.
                 if self.args.run_type != "forecasting":
-                    _steps = self.configs.get("steps", list(range(1, 37)))
+                    _steps = self.configs["steps"]
                     _base_origin = self._partition_dict[self.args.run_type]['test'][0] - 1
                     logger.info(
                         f"Declared temporal window: base_origin={_base_origin}, "
@@ -1693,7 +1708,7 @@ class ForecastingModelManager(ModelManager):
             # last prediction month. test[0] - 1 is correct in all cases.
             base_origin = self._partition_dict[run_type]['test'][0] - 1
 
-        steps = self.configs.get("steps", [*range(1, 36 + 1, 1)])
+        steps = self.configs["steps"]
 
         mappings = [
             {base_origin + i + s: s for s in steps}
@@ -1803,7 +1818,7 @@ class ForecastingModelManager(ModelManager):
             rogue = pred_months - set(mapping.keys())
             if rogue:
                 base_origin = min(mapping) - 1
-                declared_steps = self.configs.get("steps", list(range(1, 37)))
+                declared_steps = self.configs["steps"]
                 declared_max_step = max(declared_steps)
                 rogue_steps = sorted(m - base_origin for m in rogue)
                 # Detect origin shift: if the first declared step month is absent from

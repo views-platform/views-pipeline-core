@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Protocol, runtime_checkable
+from typing import Any, Dict, List, Protocol, runtime_checkable
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +82,6 @@ class BaseStageContext:
     and provides a single place to add cross-cutting fields (e.g. a
     future ``run_id`` for idempotency tracking).
     """
-    configs: Dict
+    configs: Dict[str, Any]
     model_path: ModelPathProtocol
     run_type: str
