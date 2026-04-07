@@ -21,7 +21,6 @@ from views_pipeline_core.exceptions import (
 )
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.prediction_frame import PredictionFrame
-import os
 
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
@@ -197,23 +196,12 @@ class ModelManager:
         self._data_loader = None
 
         if use_prediction_store:
+            from views_pipeline_core.configs.prediction_store import PredictionStoreConfig
             from views_pipeline_core.modules.datastore import DatastoreModule
-            from views_pipeline_core.modules.appwrite import AppwriteConfig
+
+            self._pred_store_config = PredictionStoreConfig.from_environment()
             self._pred_store_name = self.__get_pred_store_name()
-            self._appwrite_config = AppwriteConfig(
-                path_manager=self._model_path,
-                endpoint=os.getenv("APPWRITE_ENDPOINT"),
-                project_id=os.getenv("APPWRITE_DATASTORE_PROJECT_ID"),
-                credentials=os.getenv("APPWRITE_DATASTORE_API_KEY"),
-                auth_method="api_key",
-                cache_ttl_hours=24,
-                bucket_id=os.getenv("APPWRITE_PROD_FORECASTS_BUCKET_ID"),
-                bucket_name=os.getenv("APPWRITE_PROD_FORECASTS_BUCKET_NAME"),
-                collection_id=os.getenv("APPWRITE_PROD_FORECASTS_COLLECTION_ID"),
-                collection_name=os.getenv("APPWRITE_PROD_FORECASTS_COLLECTION_NAME"),
-                database_id=os.getenv("APPWRITE_METADATA_DATABASE_ID"),
-                database_name=os.getenv("APPWRITE_METADATA_DATABASE_NAME"),
-            )
+            self._appwrite_config = self._pred_store_config.to_appwrite_config(self._model_path)
             self._datastore = DatastoreModule(appwrite_file_manager_config=self._appwrite_config)
         else:
             self._pred_store_name = None
