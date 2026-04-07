@@ -1,8 +1,8 @@
 # Technical Risk Register
 
-**Last updated:** 2026-04-06
+**Last updated:** 2026-04-07
 **Governing ADR:** ADR-044 (Technical Risk Register)
-**Entry count:** 37
+**Entry count:** 40
 
 ---
 
@@ -51,6 +51,9 @@
 | C-30 | 3 | **No cross-repo contract test pattern.** `test_evaluation_integration.py` catches import breakage (added reactively after 2026-04-03 incident) but does not test signature stability, return type structure, or behavioral changes. No CI matrix, no minimum-version testing. | views-evaluation changes a method signature, return type, or default behavior; pipeline-core tests pass but integration fails | post-migration-audit | Open |
 | C-31 | 3 | **Dual evaluation paths are now functionally identical.** PF path and DF path (both in `evaluation/stage.py:94-106`) both end with `evaluator.evaluate(ef=ef, legacy_compatibility=True)`. Only differ in EvaluationFrame construction. Parity audits removed (post-mortem 2026-03-03). No tracked retirement timeline for DF path. Two code paths without active parity verification increase maintenance burden and divergence risk. | Maintenance change to one path but not the other; or refactoring attempt that must update both paths in lockstep | post-migration-audit | Open |
 | C-34 | 2 | **`_execute_model_evaluation()` is the most complex unextracted method (226 LOC, partially mitigated).** Contains PF/DF dual-path dispatch, streaming origin sink closure with 5 nonlocal captures, staging directory management, mmap reload, and threadpool validation. 10 characterization tests added (2026-04-06) covering DF path, PF streaming, skip-metrics, no-metrics, WandB lifecycle, and sequence count validation. Origin sink closure remains an ad-hoc Visitor with mutable state. | E3-E5 extraction modifying adjacent code in `_execute_model_evaluation()` without checking characterization tests; or origin sink closure mutation bugs during refactoring | expert-code-review (2026-04-06) | Open |
+| C-35 | 3 | **God class: AppWriteFileModule (1,724 LOC at time of audit, 22 methods).** `modules/appwrite/file.py`. 7 responsibility areas. Upload methods alone are 700 LOC (`upload_file_with_metadata` is 449 LOC). Auth/cache/metadata already partially extracted to collaborators. Decomposition candidates: (1) UploadOrchestrator — 4 upload methods, 700 LOC; (2) FileHashingService — hash + dedup, 119 LOC; (3) BucketManager — 3 bucket methods, 170 LOC; (4) UserInfoAccessor — 2 auth-query methods, 93 LOC. Live metrics: `test_falsification_no_god_classes.py::test_P2`. | Any modification to upload workflow or new storage operation added to this class | falsification-audit (2026-04-07) | Open |
+| C-36 | 3 | **God class: _ViewsDataset (1,621 LOC at time of audit, 46 methods, 22 public).** `data/handlers.py`. 12 responsibility areas including validation, tensor conversion, statistics, HDI analysis, MAP analysis, reconciliation export. Decomposition candidates: (1) DatasetValidator — 5 methods, 130 LOC; (2) TensorConverter — tensor↔dataframe, 180 LOC; (3) HDIAnalyzer — 5 methods, 157 LOC; (4) MAPAnalyzer — 5 methods + joblib parallelization, 169 LOC; (5) ReconcilerExporter — `to_reconciler()`, 53 LOC. Live metrics: `test_falsification_no_god_classes.py::test_P3`. | Any new analysis method added, or modification to tensor conversion logic | falsification-audit (2026-04-07) | Open |
+| C-37 | 3 | **God class: DatasetTransformationModule (1,410 LOC at time of audit, 19 methods, 13 public).** `modules/transformations/transformations.py`. Forward transforms (ln/lx/lr) and reverse transforms share identical validate→rename→apply→track pattern but are fully duplicated across 7 methods (728 LOC). Decomposition candidates: (1) ColumnNamingTracker — prefix manipulation + column mapping, 206 LOC; (2) TransformationAuditLog — history tracking, ~60 LOC; (3) Template Method for forward/reverse — reduces 728 LOC to ~400. Live metrics: `test_falsification_no_god_classes.py::test_P4`. | New transformation type added, or modification to undo logic | falsification-audit (2026-04-07) | Open |
 
 ---
 
