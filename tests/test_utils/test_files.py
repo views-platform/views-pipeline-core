@@ -98,20 +98,6 @@ def sample_dataframe():
         "column2": ["a", "b", "c"]
     })
 
-# def test_save_dataframe_csv(tmp_path, sample_dataframe):
-#     save_path = tmp_path / "test.csv"
-#     save_dataframe(sample_dataframe, save_path)
-#     assert save_path.exists()
-#     df = pd.read_csv(save_path)
-#     pd.testing.assert_frame_equal(df, sample_dataframe)
-
-# def test_save_dataframe_xlsx(tmp_path, sample_dataframe):
-#     save_path = tmp_path / "test.xlsx"
-#     save_dataframe(sample_dataframe, save_path)
-#     assert save_path.exists()
-#     df = pd.read_excel(save_path)
-#     pd.testing.assert_frame_equal(df, sample_dataframe)
-
 def test_save_dataframe_parquet(tmp_path, sample_dataframe):
     save_path = tmp_path / "test.parquet"
     save_dataframe(sample_dataframe, save_path)
@@ -131,8 +117,3 @@ def test_save_dataframe_invalid_extension(tmp_path, sample_dataframe):
     with pytest.raises(ValueError, match="A valid file extension must be provided.E.g. .pkl or .parquet"):
         save_dataframe(sample_dataframe, save_path)
 
-# def test_read_dataframe_csv(tmp_path, sample_dataframe):
-#     file_path = tmp_path / "test.csv"
-#     sample_dataframe.to_csv(file_path)
-#     df = read_dataframe(file_path)
-#     pd.testing.assert_frame_equal(df, sample_dataframe)

@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-04-07
 **Governing ADR:** ADR-044 (Technical Risk Register)
-**Entry count:** 43
+**Entry count:** 39 concerns + 7 disagreements
 
 ---
 
@@ -42,7 +42,7 @@
 | C-11 | 3 | **Appwrite credential assumption.** Environment variables for Appwrite auth assumed present. Missing credentials cause runtime failures during upload after significant compute investment. | Appwrite credentials not set in environment, discovered only after training completes | repo-assimilation | Open |
 | C-14 | 2 | **No data versioning for raw viewser data.** Data fetched from viewser is cached to `data_raw/` with only timestamps distinguishing files. No queryset hash, version tag, or manifest. Two runs with different querysets produce files in the same directory with no way to detect inconsistency. Domain angle: distinct querysets may represent different conflict populations — without versioning, a model performance regression cannot be attributed to model change vs. data change, violating forecasting integrity. See S-02 (PartitionSet) for typed partition provenance. | Model performance changes between runs and team cannot determine whether the model or input data changed; also triggers C-03 (ensemble data coupling) | expert-code-review | Open |
 | C-15 | 3 | **No timeouts on external operations (partially mitigated).** Ensemble subprocess execution now has a 7200s timeout (2026-04-04). viewser data fetching, Appwrite uploads, and WandB API calls still run without explicit timeouts. | Upstream service (viewser, Appwrite, WandB) becomes slow but not unreachable; pipeline hangs with no error | expert-code-review | Open |
-| C-16 | 3 | **No integration tests.** All ~923 tests are unit tests with sys.modules-level mocks. No test exercises `execute_single_run()` against even synthetic data. The gap between "all tests pass" and "the pipeline works" is unknown. | Any decomposition PR (e.g., EvaluationOrchestrator extraction) passes all unit tests but breaks the actual pipeline | expert-code-review | Open |
+| C-16 | 3 | **No integration tests.** All ~996 tests are unit tests with sys.modules-level mocks. No test exercises `execute_single_run()` against even synthetic data. The gap between "all tests pass" and "the pipeline works" is unknown. | Any decomposition PR (e.g., EvaluationOrchestrator extraction) passes all unit tests but breaks the actual pipeline | expert-code-review | Open |
 | C-17 | 3 | **Rolling-origin step mapping assumes temporal contiguity.** `_get_evaluation_step_mappings()` assumes month IDs in the test partition are contiguous. VIEWS data is temporally contiguous by design — the edge case (sparse conflict data with gaps) does not occur in practice. Domain angle: temporal contiguity is a Critical Business Rule of VIEWS conflict forecasting, not an edge case. It should be enforced as a domain invariant, not accepted as a data assumption. Addressed by S-02 (PartitionSet validates non-overlap), S-06 (wires into config sniffer), S-07 (consolidates step-mapping). | Data with missing months enters the evaluation pipeline (e.g., sparse conflict data) | expert-code-review | Accepted |
 | C-18 | 3 | **ReconciliationModule test coverage now substantial (DOWNGRADED from Tier 2).** 10 tests total: 6 worker characterization + 4 parallel orchestration tests. Remaining gap (real multiprocessing) would require integration test infrastructure beyond current scope. | Subtle concurrency bug not caught by mocked executor; or device-specific behavior difference | test-review | Accepted |
 | C-21 | 3 | **Test suite is 83% green, 7% beige — system-level interaction tests nearly absent.** Suite treats components as independent units. No tests for: wrong-order execution, partial target failure (3/5 succeed), ensemble sub-model resolution mismatch, or decision-support metadata completeness. Leveson/STAMP analysis reveals the deepest blind spot. | System-level failure arising from correct individual components interacting incorrectly (e.g., ensemble model reordering, partial evaluation results) | test-review | Open |
@@ -69,19 +69,19 @@
 
 | ID | Description | Resolution | Date |
 |----|-------------|------------|------|
+| C-04 | **Silent WandB failure.** Asymmetric error handling — some calls suppress, some propagate, some have no try/except. | All `wandb.log()` calls wrapped with `_safe_wandb_log()`. Consistent suppress-and-log pattern. | 2026-04-04 |
 | C-09 | **ensemble_aggregator vs dataloaders duplication.** Investigation found these serve different purposes: `AggregationManager` (ensemble pooling) vs `ViewsDataLoader` (data fetching). Not duplicated. | False alarm — different modules with different responsibilities | 2026-04-02 |
 | C-12 | **Deprecated shims in cli/utils.py.** `parse_args()` and `validate_arguments()` deprecated wrappers. | File removed — no imports existed anywhere in codebase or tests | 2026-04-02 |
 | C-13 | **audit_suite.py tests non-existent method.** G1/G2/R1 called `_get_conflict_type()`. | Tests rewritten to validate current opaque-identifier behavior. Report updated. | 2026-04-03 |
+| C-19 | **ForecastingModelManager failure modes untested.** 5 of 10 CIC failure modes had zero test coverage. | 5 tests added: Training, Evaluation, Forecasting, DataFetch exception propagation + wrong sequence count. | 2026-04-04 |
+| C-20 | **No pipeline ordering safety.** No tests verified execution order. | 3 tests added: data-fetch-before-tasks, train→evaluate→forecast order, missing-data-loader failure. | 2026-04-04 |
 | C-22 | **ADR-008 systematic violation.** ~10 PipelineException raises without preceding logger.error. | Added `logger.error()` before all raise sites across 4 files. | 2026-04-03 |
 | C-23 | **NaN silently propagates into training tensors.** `_ViewsDataset.to_tensor()` had zero NaN checks. | Added `_check_tensor_nan()` — raises `ValueError` on NaN. Falsification test passes. | 2026-04-04 |
+| C-24 | **ConfigurationManager silently overrides safety-critical parameters.** `dict.update()` merge with no conflict detection. | Added `_SAFETY_CRITICAL_KEYS` + conflict logging in `_get_raw_combined_config()`. Falsification test passes. | 2026-04-04 |
 | C-25 | **ReconciliationModule.max_workers inoperative.** `ProcessPoolExecutor(max_workers=None)` ignored computed value. | Fixed to `ProcessPoolExecutor(max_workers=num_of_workers)`. | 2026-04-03 |
 | C-27 | **Version constraint for views-evaluation stale.** `pyproject.toml` declared `"^0.3.0"`, actual installed v0.5.0. | Updated to `"^0.5.0"`. | 2026-04-04 |
 | C-28 | **Stale module mocks reference deleted infrastructure.** `audit_suite.py` and `test_falsification_biggest_risks_found.py` mocked deleted `evaluation_manager`. | Removed stale mocks. | 2026-04-04 |
 | C-32 | **`calculate_mean_evaluation_metrics()` uses first item's keys only.** Metrics absent from first group silently dropped from mean. | Fixed to collect union of all keys. Test now passes. | 2026-04-04 |
-| C-04 | **Silent WandB failure.** Asymmetric error handling — some calls suppress, some propagate, some have no try/except. | All `wandb.log()` calls wrapped with `_safe_wandb_log()`. Consistent suppress-and-log pattern. | 2026-04-04 |
-| C-19 | **ForecastingModelManager failure modes untested.** 5 of 10 CIC failure modes had zero test coverage. | 5 tests added: Training, Evaluation, Forecasting, DataFetch exception propagation + wrong sequence count. | 2026-04-04 |
-| C-20 | **No pipeline ordering safety.** No tests verified execution order. | 3 tests added: data-fetch-before-tasks, train→evaluate→forecast order, missing-data-loader failure. | 2026-04-04 |
-| C-24 | **ConfigurationManager silently overrides safety-critical parameters.** `dict.update()` merge with no conflict detection. | Added `_SAFETY_CRITICAL_KEYS` + conflict logging in `_get_raw_combined_config()`. Falsification test passes. | 2026-04-04 |
 | C-33 | **ADR file-to-header number mismatch.** 4 ADR files (039-042) had internal header numbers (050, 051, 057, 058) different from filenames. 2 phantom ADRs (030, 033) referenced in CICs/code but never existed. 97 cross-references across 44 files. | Headers renumbered to match filenames; all cross-references updated. | 2026-04-04 |
 
 ---

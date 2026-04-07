@@ -162,39 +162,6 @@ class TestAddHtml:
         assert '<script' in script
 
 
-# class TestAddMarkdown:
-#     """Test suite for add_markdown method."""
-
-#     @pytest.fixture
-#     def report(self):
-#         """Create a fresh report instance."""
-#         return ReportModule()
-
-#     def test_add_markdown_with_package(self, report):
-#         """Test markdown rendering when package is available."""
-#         # Mock at the builtins level to catch the import
-#         with patch('builtins.__import__', side_effect=lambda name, *args: 
-#                    MagicMock(markdown=MagicMock(return_value="<h1>Title</h1>")) if name == 'markdown' else __import__(name, *args)):
-#             report.add_markdown("# Title")
-            
-#             assert 'markdown-container' in report.content[-1]
-
-#     def test_add_markdown_without_package(self, report):
-#         """Test markdown fallback when package is unavailable."""
-#         # Mock the import to raise ImportError
-#         original_import = __builtins__.__import__
-#         def mock_import(name, *args, **kwargs):
-#             if name == 'markdown':
-#                 raise ImportError("No module named 'markdown'")
-#             return original_import(name, *args, **kwargs)
-        
-#         with patch('builtins.__import__', side_effect=mock_import):
-#             report.add_markdown("# Title")
-            
-#             # Should have fallback message
-#             assert any('Markdown rendering unavailable' in str(item) for item in report.content)
-
-
 class TestAddKeyValueList:
     """Test suite for add_key_value_list method."""
 

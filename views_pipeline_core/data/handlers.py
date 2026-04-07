@@ -344,8 +344,6 @@ class _ViewsDataset:
         Returns:
             List[str]: A list of column names from the dataframe that start with 'pred_'.
         """
-        # if self.targets:
-        #     raise ValueError("Cannot identify prediction variables when dependent variables are specified")
         return [col for col in self.dataframe.columns if col.startswith("pred_")]
 
     def get_features(self) -> List[str]:
@@ -1975,14 +1973,6 @@ class _PGDataset(_ViewsDataset):
 
     def get_name(self, with_id: bool = False) -> pd.DataFrame:
         """Get country names for each priogrid"""
-        # # Get country IDs from priogrids
-        # country_ids = self._get_entity_attr("c_id")
-
-        # # Create temporary DataFrame with country IDs
-        # country_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
-
-        # # Use c accessor to get country names
-        # return country_df.c.name.to_frame(name="country_name")
         self._build_entity_metadata_cache()
         if not with_id:
             return (
@@ -2256,7 +2246,6 @@ class CMDataset(_CDataset):
             )
 
     def get_year(self) -> pd.DataFrame:
-        # return self._get_time_attr("year").to_frame(name="year")
         self._build_entity_metadata_cache()
         return (
             self._entity_metadata_cache["year_id"]

@@ -165,25 +165,6 @@ class TestStaticMethods:
         
         assert found_root == project_root
         
-    # def test_find_project_root_not_found(self, tmp_path):
-    #     """Test behavior when marker not found - traverses to filesystem root"""
-    #     # Create directory without .gitignore marker
-    #     subdir = tmp_path / "no_marker"
-    #     subdir.mkdir()
-        
-    #     # When marker is not found, implementation traverses up to filesystem root
-    #     result = ModelPathManager.find_project_root(
-    #         current_path=subdir,
-    #         marker=".gitignore"
-    #     )
-        
-    #     # Should return a valid Path (filesystem root or parent path)
-    #     assert isinstance(result, Path)
-    #     assert result.exists()
-        
-    #     # Result should be either filesystem root or an ancestor of subdir
-    #     assert result == Path("/") or subdir.is_relative_to(result)
-            
     def test_is_path_valid(self, tmp_path):
         """Test path validation"""
         # Create actual file
