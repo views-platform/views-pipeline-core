@@ -14,11 +14,8 @@ import pyarrow.parquet as pq
 
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.exceptions import PipelineException
-from views_pipeline_core.files.utils import (
-    generate_evaluation_file_name,
-    generate_output_file_name,
-    save_dataframe,
-)
+from views_pipeline_core.files.utils import save_dataframe
+from views_pipeline_core.managers.prediction.file_namer import PredictionFileNamer
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +73,10 @@ class PredictionIOManager:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
-            predictions_name = generate_output_file_name(
-                "predictions",
-                run_type,
-                timestamp,
-                sequence_number,
-                file_extension=PipelineConfig.dataframe_format,
+            namer = PredictionFileNamer(
+                run_type, timestamp, PipelineConfig.dataframe_format,
             )
+            predictions_name = namer.prediction_name(sequence_number)
 
             if isinstance(df_predictions, pa.Table):
                 pq.write_table(df_predictions, path_generated / predictions_name)
@@ -173,18 +167,12 @@ class PredictionIOManager:
             path_generated = Path(path_generated)
             path_generated.mkdir(parents=True, exist_ok=True)
 
-            eval_step_path = generate_evaluation_file_name(
-                "step", target_identifier, run_type, timestamp,
-                PipelineConfig.dataframe_format,
+            namer = PredictionFileNamer(
+                run_type, timestamp, PipelineConfig.dataframe_format,
             )
-            eval_ts_path = generate_evaluation_file_name(
-                "ts", target_identifier, run_type, timestamp,
-                PipelineConfig.dataframe_format,
-            )
-            eval_month_path = generate_evaluation_file_name(
-                "month", target_identifier, run_type, timestamp,
-                PipelineConfig.dataframe_format,
-            )
+            eval_step_path = namer.evaluation_name("step", target_identifier)
+            eval_ts_path = namer.evaluation_name("ts", target_identifier)
+            eval_month_path = namer.evaluation_name("month", target_identifier)
 
             save_dataframe(df_month_wise_evaluation, path_generated / eval_month_path)
             save_dataframe(df_time_series_wise_evaluation, path_generated / eval_ts_path)

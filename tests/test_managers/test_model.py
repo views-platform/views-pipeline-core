@@ -741,7 +741,7 @@ class TestSaveMethods:
 
         with patch('pathlib.Path.mkdir'):
             with patch('views_pipeline_core.managers.prediction.io.save_dataframe') as mock_save:
-                with patch('views_pipeline_core.managers.prediction.io.generate_output_file_name', return_value="predictions.parquet"):
+                with patch('views_pipeline_core.managers.prediction.file_namer.generate_output_file_name', return_value="predictions.parquet"):
                     manager._save_predictions(df, mock_model_path.data_generated)
 
                     mock_save.assert_called_once()

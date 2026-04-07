@@ -34,7 +34,7 @@ The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHE
 
 - **`save_predictions(df_predictions, path_generated, run_type, timestamp, ...)`**:
   - Creates the output directory if it does not exist (`mkdir(parents=True, exist_ok=True)`).
-  - Generates a filename via `generate_output_file_name()` using the run type, timestamp, optional sequence number, and `PipelineConfig.dataframe_format`.
+  - Generates a filename via `PredictionFileNamer` using the run type, timestamp, optional sequence number, and `PipelineConfig.dataframe_format`.
   - Dispatches to `pyarrow.parquet.write_table` for `pa.Table` inputs or `save_dataframe` for `pd.DataFrame` inputs.
   - Optionally uploads to the prediction store (if `use_prediction_store=True`).
   - Sends a WandB alert on success (unless `send_alert=False`).
