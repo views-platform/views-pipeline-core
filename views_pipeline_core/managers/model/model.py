@@ -1006,6 +1006,8 @@ class ForecastingModelManager(ModelManager):
         # Store args FIRST before using them
         self._args = args
 
+        # Layer 1: structural pre-condition — match execute_single_run() contract
+        self._assert_partition_config_accessible(args.run_type)
         CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
 
         # Construct ViewsDataLoader now that config is validated
