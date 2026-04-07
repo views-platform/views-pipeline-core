@@ -114,3 +114,75 @@ class LocalParquetSaver:
         pq.write_table(table, dest)
         logger.info("LocalParquetSaver: saved %s (%d rows, %d samples)",
                     dest, prediction.n_rows, prediction.sample_count)
+
+
+class AppwriteSaver:
+    """Uploads parquet file to Appwrite cloud storage for views-faoapi.
+
+    Wraps ``DatastoreModule.upload_data()``.  Graceful degradation: logs
+    errors but does not raise, so an Appwrite outage never blocks the
+    pipeline.
+    """
+
+    def __init__(self, datastore, model_name: str, target: str):
+        self._datastore = datastore
+        self._model_name = model_name
+        self._target = target
+
+    def save(
+        self,
+        prediction: PredictionFrame,
+        path: Path,
+        metadata: PredictionMetadata,
+    ) -> None:
+        try:
+            self._datastore.upload_data(
+                file=path / metadata.filename,
+                filename=metadata.filename,
+                loa=metadata.level,
+                name=self._model_name,
+                targets=[metadata.target],
+                category="forecast",
+                description="",
+                type=self._target,
+            )
+            logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
+        except Exception as e:
+            logger.error(
+                "Error uploading predictions to datastore: %s", e, exc_info=True,
+            )
+
+
+class ViewsForecastsSaver:
+    """Uploads predictions to the views-forecasts central store.
+
+    Converts ``PredictionFrame`` → ``pd.DataFrame`` via
+    ``PredictionFrameConverter``, then calls the ``df.forecasts`` pandas
+    extension provided by the external ``views-forecasts`` package.
+
+    This saver resolves the ``NotImplementedError`` that blocks the
+    current upload path for PredictionFrame-based forecasts.
+    """
+
+    def __init__(
+        self,
+        pred_store_name: str,
+        model_name: str,
+        converter: PredictionFrameConverter | None = None,
+    ):
+        self._pred_store_name = pred_store_name
+        self._model_name = model_name
+        self._converter = converter or PredictionFrameConverter()
+
+    def save(
+        self,
+        prediction: PredictionFrame,
+        path: Path,
+        metadata: PredictionMetadata,
+    ) -> None:
+        df = self._converter.to_prediction_df(
+            prediction, metadata.target, metadata.level,
+        )
+        name = f"{self._model_name}_{Path(metadata.filename).stem}"
+        df.forecasts.set_run(self._pred_store_name)
+        df.forecasts.to_store(name=name, overwrite=True)

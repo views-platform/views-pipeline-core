@@ -1,15 +1,27 @@
-"""Tests for PredictionSaver implementations — NpzSaver and LocalParquetSaver."""
+"""Tests for PredictionSaver implementations."""
+import logging
+import sys
+from dataclasses import FrozenInstanceError
+from unittest.mock import MagicMock
+
 import numpy as np
 import pandas as pd
 import pytest
-from dataclasses import FrozenInstanceError
 
-from views_pipeline_core.data.prediction_frame import PredictionFrame
-from views_pipeline_core.managers.prediction.savers import (
+# Mock views_forecasts before importing savers (it uses PredictionFrameConverter
+# which doesn't itself import views_forecasts, but the extension must exist for
+# ViewsForecastsSaver's df.forecasts calls in tests).
+sys.modules.setdefault("views_forecasts", MagicMock())
+sys.modules.setdefault("views_forecasts.extensions", MagicMock())
+
+from views_pipeline_core.data.prediction_frame import PredictionFrame  # noqa: E402
+from views_pipeline_core.managers.prediction.savers import (  # noqa: E402
+    AppwriteSaver,
     LocalParquetSaver,
     NpzSaver,
     PredictionMetadata,
     PredictionSaver,
+    ViewsForecastsSaver,
 )
 
 
@@ -182,3 +194,112 @@ class TestLocalParquetSaver:
 
         df = pd.read_parquet(tmp_path / meta.filename)
         assert "country_id" in df.columns
+
+
+# ── AppwriteSaver ──────────────────────────────────────────────────────────
+
+
+class TestAppwriteSaver:
+    def test_is_prediction_saver(self):
+        """Protocol conformance."""
+        saver = AppwriteSaver(MagicMock(), "model", "target")
+        assert isinstance(saver, PredictionSaver)
+
+    def test_calls_upload_data_with_correct_args(
+        self, tmp_path, sample_pf, sample_metadata,
+    ):
+        """Verify DatastoreModule.upload_data() is called with right params."""
+        mock_datastore = MagicMock()
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        saver.save(sample_pf, tmp_path, sample_metadata)
+
+        mock_datastore.upload_data.assert_called_once_with(
+            file=tmp_path / sample_metadata.filename,
+            filename=sample_metadata.filename,
+            loa="pgm",
+            name="test_model",
+            targets=["ged_sb"],
+            category="forecast",
+            description="",
+            type="ged_sb",
+        )
+
+    def test_graceful_degradation(self, tmp_path, sample_pf, sample_metadata):
+        """Appwrite failure must NOT raise."""
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.side_effect = ConnectionError("offline")
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        # Should NOT raise
+        saver.save(sample_pf, tmp_path, sample_metadata)
+
+    def test_logs_success(self, tmp_path, sample_pf, sample_metadata, caplog):
+        """Successful upload logs info message."""
+        mock_datastore = MagicMock()
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        with caplog.at_level(logging.INFO):
+            saver.save(sample_pf, tmp_path, sample_metadata)
+        assert "successfully" in caplog.text.lower()
+
+    def test_logs_error_on_failure(self, tmp_path, sample_pf, sample_metadata, caplog):
+        """Failed upload logs error with exception details."""
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.side_effect = RuntimeError("boom")
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        with caplog.at_level(logging.ERROR):
+            saver.save(sample_pf, tmp_path, sample_metadata)
+        assert "boom" in caplog.text
+
+
+# ── ViewsForecastsSaver ────────────────────────────────────────────────────
+
+
+class TestViewsForecastsSaver:
+    def test_is_prediction_saver(self):
+        """Protocol conformance."""
+        saver = ViewsForecastsSaver("v010200", "model")
+        assert isinstance(saver, PredictionSaver)
+
+    def test_calls_forecasts_extension(self, tmp_path, sample_pf, sample_metadata):
+        """Verify set_run and to_store are called."""
+        mock_converter = MagicMock()
+        mock_df = MagicMock()
+        mock_converter.to_prediction_df.return_value = mock_df
+
+        saver = ViewsForecastsSaver(
+            "v010200_2026_03", "test_model", converter=mock_converter,
+        )
+        saver.save(sample_pf, tmp_path, sample_metadata)
+
+        mock_converter.to_prediction_df.assert_called_once_with(
+            sample_pf, "ged_sb", "pgm",
+        )
+        mock_df.forecasts.set_run.assert_called_once_with("v010200_2026_03")
+        mock_df.forecasts.to_store.assert_called_once()
+
+    def test_name_format(self, tmp_path, sample_pf, sample_metadata):
+        """Name passed to to_store must be model_name + filename stem."""
+        mock_converter = MagicMock()
+        mock_df = MagicMock()
+        mock_converter.to_prediction_df.return_value = mock_df
+
+        saver = ViewsForecastsSaver("v010200", "test_model", converter=mock_converter)
+        saver.save(sample_pf, tmp_path, sample_metadata)
+
+        call_kwargs = mock_df.forecasts.to_store.call_args
+        expected_name = "test_model_predictions_calibration_20260407"
+        assert call_kwargs[1]["name"] == expected_name
+
+    def test_failure_propagates(self, tmp_path, sample_pf, sample_metadata):
+        """views-forecasts failure MUST propagate (it's the primary store)."""
+        mock_converter = MagicMock()
+        mock_df = MagicMock()
+        mock_df.forecasts.to_store.side_effect = RuntimeError("store down")
+        mock_converter.to_prediction_df.return_value = mock_df
+
+        saver = ViewsForecastsSaver("v010200", "model", converter=mock_converter)
+        with pytest.raises(RuntimeError, match="store down"):
+            saver.save(sample_pf, tmp_path, sample_metadata)
