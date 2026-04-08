@@ -4,7 +4,7 @@
 **Status:** Active
 **Owner:** Orchestration Core
 **Last reviewed:** 2026-04-08
-**Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-032 (Sniffer Pattern)
+**Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern)
 
 ---
 

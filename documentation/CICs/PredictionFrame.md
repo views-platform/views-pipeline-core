@@ -86,7 +86,7 @@ layers, without coupling either side to Pandas.
 - **Created by**: `ModelManager` subclasses via `_forecast_model_artifact()`,
   `_evaluate_model_artifact()`, or `_evaluate_sweep()` when
   `configs["prediction_format"] == "prediction_frame"` (ADR-042).
-- **Consumed by**: `PandasAdapter.from_prediction_frame()` /
+- **Consumed by**: `EvaluationAdapter.from_prediction_frame()` /
   `from_prediction_frames()` (converts to `EvaluationFrame` for evaluation)
   and by the `ModelManager` persistence shim (converts to DataFrame for storage
   during the migration window).
@@ -110,7 +110,7 @@ pf = PredictionFrame(
 )
 
 # Consumed by the adapter
-ef = PandasAdapter.from_prediction_frames(
+ef = EvaluationAdapter.from_prediction_frames(
     actual=df_actual,
     predictions=[pf],
     target="ged_sb",

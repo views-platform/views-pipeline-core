@@ -32,7 +32,7 @@ This creates three compounding problems:
 `PredictionFrame` (defined in `views_pipeline_core/data/prediction_frame.py`) was
 designed to solve all three: a minimal, framework-agnostic container with a dense
 `(N, S)` NumPy array, explicit `time` / `unit` identifiers, and self-validating
-construction. The infrastructure to consume it already exists in `PandasAdapter`
+construction. The infrastructure to consume it already exists in `EvaluationAdapter`
 (`from_prediction_frame()`) and is covered by tests.
 
 The transition must be **incremental and reversible**. `views_evaluation` and
@@ -63,7 +63,7 @@ inference methods using the **Strangler Fig pattern**:
    then **sweep**. Each path is migrated independently.
 
 4. **Mandatory parity audit.** For every execution on the PF path, the
-   `PandasAdapter` produces an `EvaluationFrame` from the PredictionFrame
+   `EvaluationAdapter` produces an `EvaluationFrame` from the PredictionFrame
    (`from_prediction_frames()`). The parity bridge (`_pf_to_legacy_dfs()`)
    converts the same PredictionFrame to list-in-cell DataFrames, produces a
    second `EvaluationFrame` via the legacy path (`from_dataframes()`), and
@@ -81,7 +81,7 @@ inference methods using the **Strangler Fig pattern**:
 |-----------|------|
 | `SUPPORTED_PREDICTION_FORMATS` constant | `core_config_sniffer.py` |
 | `prediction_format` in `MANDATORY_KEYS` | `core_config_sniffer.py` |
-| `PandasAdapter.from_prediction_frames()` | `adapter.py` |
+| `EvaluationAdapter.from_prediction_frames()` | `adapter.py` |
 | `_pf_to_legacy_dfs()` parity-bridge | `adapter.py` |
 | `ModelManager._audit_parity_ef()` | `model.py` |
 | Dispatch in forecast and eval paths | `model.py` |

@@ -1,3 +1,6 @@
+# HISTORICAL: This audit script was run once (2026-04) to produce AUDIT_REPORT.md.
+# It is not part of CI, not maintained, and may break as the codebase evolves.
+# For ongoing validation, see the pytest test suite and documentation/validate_docs.sh.
 
 import os
 import sys

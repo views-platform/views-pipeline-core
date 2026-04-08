@@ -18,12 +18,12 @@ Effective logging is essential for maintaining data integrity, monitoring model 
 3. **Align with MLOps Best Practices**: This strategy follows MLOps standards for consistent error handling, observability, scalability, and storage management, preparing the pipeline for scalable deployment and future monitoring enhancements.
 
 For additional information, see also: 
-- [054_log_file_for_generated_data.md](054_log_file_for_generated_data.md) 
-- [052_log_files_for_input_data.md](052_log_files_for_input_data.md) 
-- [053_log_files_for_offline_evaluation.md](053_log_files_for_offline_evaluation.md) 
-- [054_log_files_for_online_evaluation.md](054_log_files_for_online_evaluation.md) 
-- [055_log_files_for_model_training.md](055_log_files_for_model_training.md) 
-- [056_log_files_realtime_alerts.md](056_log_files_realtime_alerts.md) 
+- [018_log_file_for_generated_data.md](018_log_file_for_generated_data.md) 
+- [035_log_files_for_input_data.md](035_log_files_for_input_data.md) 
+- [026_log_files_for_offline_evaluation.md](026_log_files_for_offline_evaluation.md) 
+- [027_log_files_for_online_evaluation.md](027_log_files_for_online_evaluation.md) 
+- [028_log_files_for_model_training.md](028_log_files_for_model_training.md) 
+- [029_log_files_and_realtime_alerts.md](029_log_files_and_realtime_alerts.md) 
 
 ## Decision
 

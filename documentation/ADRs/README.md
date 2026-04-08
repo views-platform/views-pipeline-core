@@ -50,7 +50,7 @@ Domain decisions specific to `views-pipeline-core`.
 | [028](028_log_files_for_model_training.md) | Log Files for Model Training | Proposed |
 | [029](029_log_files_and_realtime_alerts.md) | Log Files and Realtime Alerts | Proposed |
 | [031](031_model_catalogs.md) | Model Catalogs | Proposed |
-| [034](034_log%20_level_standards.md) | Log Level Standards | Proposed |
+| [034](034_log_level_standards.md) | Log Level Standards | Proposed |
 | [035](035_log_files_for_input_data.md) | Log Files for Input Data | Proposed |
 | [036](036_ensemble_reconciliation.md) | Ensemble Reconciliation | Proposed |
 | [037](037_ingester_emergency_solution.md) | Ingester Emergency Solution | Proposed |

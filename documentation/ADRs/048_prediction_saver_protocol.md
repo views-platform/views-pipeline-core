@@ -76,7 +76,7 @@ deduplication.
   (`PredictionStoreConfig`).
 
 **`ViewsForecastsSaver`** converts `PredictionFrame` to `pd.DataFrame` via
-`PandasAdapter`, then persists through the `views-forecasts` pandas extension.
+`EvaluationAdapter`, then persists through the `views-forecasts` pandas extension.
 
 - **Use case:** Ensemble aggregation in the `views-forecasts` store.
 - **Properties:** PF-to-DF conversion is encapsulated inside the saver; callers

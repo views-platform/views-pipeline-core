@@ -24,7 +24,7 @@ For related ADRs on the generation of different log files and other general logg
 
 - [029_log_files_and_realtime_alerts](/documentation/ADRs/029_log_files_and_realtime_alerts.md)
 
-- [034_log _level_standards](/documentation/ADRs/034_log _level_standards.md)
+- [034_log_level_standards](/documentation/ADRs/034_log_level_standards.md)
 
 - [035_log_files_for_input_data](/documentation/ADRs/035_log_files_for_input_data.md)
 

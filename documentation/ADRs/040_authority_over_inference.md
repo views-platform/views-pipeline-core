@@ -73,5 +73,5 @@ explicit structural auditing at every trust boundary.
 - Improves debuggability: we can inspect the `EvaluationFrame` and see exactly what the system *thinks* it is evaluating.
 
 ### Negative
-- Requires more metadata in the `EvaluationFrame` and `PandasAdapter`.
+- Requires more metadata in the `EvaluationFrame` and `EvaluationAdapter`.
 - Some "convenient" hacks are disallowed.

@@ -276,7 +276,7 @@ Core responsibility:  load raw actuals → call hook → slice by targets → co
 Model responsibility: manufacture any derived columns the model invented
 ```
 
-See **ADR-029** (`documentation/ADRs/029_model_actuals_preparation_hook.md`) for the full architectural rationale and alternatives considered.
+See **ADR-038** (`documentation/ADRs/038_model_actuals_preparation_hook.md`) for the full architectural rationale and alternatives considered.
 
 ---
 

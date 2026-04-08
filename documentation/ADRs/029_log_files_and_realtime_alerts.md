@@ -30,7 +30,7 @@ For related ADRs on the generation of different log files and other general logg
 
 [028_log_files_for_model_training](/documentation/ADRs/028_log_files_for_model_training.md)
 
-[034_log _level_standards](/documentation/ADRs/034_log _level_standards.md)
+[034_log_level_standards](/documentation/ADRs/034_log_level_standards.md)
 
 [035_log_files_for_input_data](/documentation/ADRs/035_log_files_for_input_data.md)
 

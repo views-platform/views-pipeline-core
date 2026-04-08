@@ -158,7 +158,7 @@ The pipeline transforms raw geo‑temporal data into validated, reconciled, and 
 | [ReportingStage](./views_pipeline_core/managers/reporting/stage.py) | Forecast + evaluation HTML report generation |
 | [ForecastingStage](./views_pipeline_core/managers/forecasting/stage.py) | Post-processing, validation, and persistence of forecast predictions |
 | [TrainingStage](./views_pipeline_core/managers/training/stage.py) | Training log creation and WandB alerts |
-| [PredictionIOManager](./views_pipeline_core/managers/prediction_io/stage.py) | Save/load predictions, evaluations, and evaluation tables |
+| [PredictionIOManager](./views_pipeline_core/managers/prediction/io.py) | Save/load predictions, evaluations, and evaluation tables |
 | [EnsemblePathManager](./views_pipeline_core/managers/ensemble/README.md) | Paths for multi-model ensemble |
 | [EnsembleManager](./views_pipeline_core/managers/ensemble/README.md) | Aggregation + optional reconciliation |
 | [ExtractorPathManager](./views_pipeline_core/managers/extractor/README.md) | External raw data ingestion paths |
@@ -184,7 +184,7 @@ Each stage receives an immutable frozen context object and is independently unit
 | [logging](./views_pipeline_core/modules/logging/README.md) | Central logging configuration injection |
 | [statistics](./views_pipeline_core/modules/statistics/README.md) | Forecast reconciliation math (proportional scaling) |
 | [wandb](./views_pipeline_core/modules/wandb/README.md) | Alerts, artifact logging, run lifecycle |
-| [model validation](./views_pipeline_core/modules/validation/model/README.md) | Structural & logical integrity checks |
+| [model validation](./views_pipeline_core/modules/validation/README.md) | Structural & logical integrity checks (sniffer pattern, ADR-041) |
 | [ensemble validation](./views_pipeline_core/modules/validation/ensemble/README.md) | Structural & logical integrity checks |
 
 ---
