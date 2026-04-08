@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-03-03
+**Last reviewed:** 2026-04-08
 **Related ADRs:** ADR-003 (Authority of Declarations), ADR-009 (Boundary Contracts), ADR-042 (PredictionFrame Adoption)
 
 ---
@@ -39,8 +39,7 @@ layers, without coupling either side to Pandas.
 - **Identifier completeness**: Guarantees that `identifiers` contains at minimum
   `{"time", "unit"}`, and that every identifier array has exactly `N` entries.
 - **No NaN in identifiers**: Guarantees that no identifier array contains NaN.
-- **Pure transport**: Acts as a dumb, read-only container. No math, no
-  transformation, no side effects.
+- **Minimal operations**: Primarily a read-only container. Supports `collapse()` for sample aggregation and `save()`/`load()` for numpy-native persistence. No DataFrame/Arrow conversion (that is `PredictionFrameConverter`'s job).
 
 ---
 
@@ -66,7 +65,9 @@ layers, without coupling either side to Pandas.
   - `n_rows` — `y_pred.shape[0]`
   - `sample_count` — `y_pred.shape[1]`
   - `identifier_keys` — `set(identifiers.keys())`
-- No mutations, no side effects.
+- **`collapse(method="arithmetic_mean")`**: Returns a new `PredictionFrame` with `y_pred` reduced to shape `(N, 1)` by aggregating across the sample axis. Supported methods listed in class constant `SUPPORTED_AGGREGATE_METHODS` (currently `{"arithmetic_mean"}`). Raises `ValueError` for unsupported methods.
+- **`save(path)`**: Persists to disk as two files: `{path}/y_pred.npy` (numpy binary) and `{path}/identifiers.npz` (compressed numpy archive). Creates the directory if it does not exist.
+- **`load(path, mmap_mode=None)`** (classmethod): Reconstructs a `PredictionFrame` from the two-file format written by `save()`. Optional `mmap_mode` (e.g., `"r"`) enables memory-mapped loading for large arrays.
 - `__repr__` returns a summary string for logging.
 
 ---

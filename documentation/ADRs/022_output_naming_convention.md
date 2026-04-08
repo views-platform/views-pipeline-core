@@ -4,7 +4,7 @@
 | ADR Info            | Details                  |
 |---------------------|--------------------------|
 | Subject             | Output Naming Convention |
-| ADR Number          | 058                      |
+| ADR Number          | 022                      |
 | Status              | Accepted                 |
 | Author              | Xiaolong                 |
 | Date                | 11.09.2024               |

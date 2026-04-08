@@ -2,8 +2,8 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-04-01
-**Related ADRs:** ADR-001 (Ontology), ADR-004 (Evolution), ADR-008 (Observability)
+**Last reviewed:** 2026-04-08
+**Related ADRs:** ADR-001 (Ontology), ADR-004 (Evolution), ADR-008 (Observability), ADR-048 (PredictionSaver Protocol)
 
 ---
 
@@ -103,12 +103,25 @@ The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHE
 
 ## 7. Boundaries and Interactions
 
-- **Upstream**: Called by `ForecastingModelManager` (the orchestrator) after predictions or evaluations are computed.
+- **Upstream**: Called by `ForecastingModelManager` (the orchestrator) and `ForecastingStage` after predictions or evaluations are computed.
+- **`PredictionFileNamer`**: Generates canonical filenames for predictions and evaluations. Extracted from this class in Phase 6 Task 1.
 - **`PredictionFrameConverter`**: Produces the `pd.DataFrame` or `pa.Table` that this manager persists.
 - **`PipelineConfig`**: Provides `dataframe_format` for filename generation.
-- **`generate_output_file_name` / `generate_evaluation_file_name`**: Utility functions from `views_pipeline_core.files.utils` for consistent filename construction.
-- **`save_dataframe`**: Utility function that handles format-specific DataFrame serialisation.
+- **`save_dataframe`**: Utility function from `files/utils.py` that handles format-specific DataFrame serialisation.
 - **WandB**: External dependency injected as `wandb_module`. The `wandb` package is also imported directly inside `save_evaluations` for `wandb.Table`.
+
+### PredictionSaver Protocol (Phase 6, ADR-048)
+
+Phase 6 extracted format-specific persistence into composable saver classes implementing the `PredictionSaver` Protocol. These savers live alongside `PredictionIOManager` in `managers/prediction/savers.py` and accept `PredictionFrame` directly (not DataFrame/Arrow).
+
+| Saver | Track | Format | Failure mode |
+|-------|-------|--------|-------------|
+| `NpzSaver` | A (internal) | `.npy` + `.npz` (numpy binary) | Raises on I/O error |
+| `LocalParquetSaver` | B (delivery) | Parquet via Arrow zero-copy | Raises on I/O error |
+| `AppwriteSaver` | Cloud | Delegates to `DatastoreModule.upload_data()` | Graceful: logs error, does not raise |
+| `ViewsForecastsSaver` | Store | Converts PF→DF, calls `df.forecasts.to_store()` | Raises (primary external store) |
+
+Task 5 will compose these savers into `save_predictions()`, replacing the current inline persistence logic.
 
 ---
 
@@ -193,7 +206,13 @@ Key gap: No integration test for the Arrow Table (`pa.Table`) path through `save
 
 - Extracted from `ForecastingModelManager` in commit `017c85a` to achieve single-responsibility I/O.
 - The Arrow Table path (`pa.Table` dispatch in `save_predictions`) was added alongside `PredictionFrameConverter.to_arrow_table` for the zero-copy parquet write path.
-- Prediction store upload for Arrow Tables is explicitly blocked with `NotImplementedError` pending upstream support in `views-forecasts`.
+- Prediction store upload for Arrow Tables is explicitly blocked with `NotImplementedError` pending upstream support in `views-forecasts`. The new `ViewsForecastsSaver` (Phase 6 Task 4) resolves this by converting `PredictionFrame` → `pd.DataFrame` internally.
+- **Phase 6 extractions (2026-04-07):**
+  - Task 1: `PredictionFileNamer` extracted for filename generation (SRP).
+  - Task 2: `NpzSaver` and `LocalParquetSaver` created as `PredictionSaver` Protocol implementations.
+  - Task 3: `PredictionStoreConfig` created for fail-loud env var validation (fixes C-11).
+  - Task 4: `AppwriteSaver` and `ViewsForecastsSaver` created as cloud/store savers.
+  - Task 5 (pending): Compose savers into `save_predictions()`, replacing inline persistence.
 
 ---
 

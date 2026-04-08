@@ -3,7 +3,7 @@
 | ADR Info            | Details                             |
 |---------------------|-------------------------------------|
 | Subject             | Model-Specific Input Data Querysets |
-| ADR Number          | 051                                 |
+| ADR Number          | 015                                 |
 | Status              | Proposed                            |
 | Author              | Jim                                 |
 | Date                | 27.02.2025                          |

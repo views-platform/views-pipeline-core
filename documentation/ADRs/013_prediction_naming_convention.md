@@ -4,7 +4,7 @@
 | ADR Info            | Details                      |
 |---------------------|------------------------------|
 | Subject             | Prediction Naming Convention |
-| ADR Number          | 058                          |
+| ADR Number          | 013                          |
 | Status              | Accepted                     |
 | Author              | Xiaolong                     |
 | Date                | 11.09.2024                   |
@@ -18,14 +18,14 @@ This is particularly important for managing prediction versions, tracking when p
 ### When run type is calibration or validation
 The prediction naming convention for using a single model will follow this structure:
 ```
-predictions_<run_type>_<timestamp>_<series_sequence_number>.pkl
+predictions_<run_type>_<timestamp>_<series_sequence_number>.parquet
 ```
 - timestamp: The timestamp when the model was trained **(not when the prediction was generated)**. The format is`YYYYMMDD_HHMMSS`.
 - series_sequence_number: When run type is calibration or validation, it produces a list of predictions, each of which is predicted _n_ step head (_n_ ranging from 0 to the maximum forecast step). So the sequence has the same range as steps.
 
 The prediction naming convention for using an ensemble model will follow this structure:
 ```
-predictions_<run_type>_<timestamp>_<series_sequence_number>.pkl
+predictions_<run_type>_<timestamp>_<series_sequence_number>.parquet
 ```
 - model_name: The name of the model used for the ensemble prediction.
 - timestamp: The timestamp when **the prediction was generated**. The format is`YYYYMMDD_HHMMSS`.
@@ -34,13 +34,13 @@ predictions_<run_type>_<timestamp>_<series_sequence_number>.pkl
 ### When run type is forecasting
 The prediction naming convention for using a single model will follow this structure:
 ```
-predictions_<run_type>_<timestamp>.pkl
+predictions_<run_type>_<timestamp>.parquet
 ```
 - timestamp: The timestamp when the model was trained **(not when the prediction was generated)**. The format is`YYYYMMDD_HHMMSS`.
 
 The prediction naming convention for using an ensemble model will follow this structure:
 ```
-predictions_<run_type>_<timestamp>.pkl
+predictions_<run_type>_<timestamp>.parquet
 ```
 - model_name: The name of the model used for the ensemble prediction.
 - timestamp: The timestamp when **the prediction was generated**. The format is`YYYYMMDD_HHMMSS`.
@@ -67,5 +67,11 @@ The decision to use this naming convention ensures that:
 - This structure is easy to parse by both humans and automated systems, improving workflow integration and automation.
 
 ### Considerations
-- **Timestamp Format**: Using `YYYYMMDD_HHMMSS aligns with standard formats but could introduce issues in systems operating across different time zones.
-- **Model timstamp vs. Prediction timestamp**: The decision hasn't been made yet on whether the prediction timestamp should be the time the prediction was generated or the time the model was trained. This will be discussed further.
+- **Timestamp Format**: Using `YYYYMMDD_HHMMSS` aligns with standard formats but could introduce issues in systems operating across different time zones.
+- **Model timestamp vs. Prediction timestamp**: The timestamp is the model training time, not prediction generation time. This was decided and implemented.
+
+### Implementation Notes (2026-04-08)
+
+- **Canonical implementation**: `PredictionFileNamer` (in `managers/prediction/file_namer.py`) delegates to `generate_output_file_name()` in `files/utils.py`.
+- **File format migration**: The original ADR specified `.pkl` (pickle). The codebase has migrated to `.parquet` as the default format, controlled by `PipelineConfig.dataframe_format`. This ADR has been updated to reflect the current format.
+- **Sequence number formatting**: Zero-padded to 2 digits (e.g., `_03` not `_3`).

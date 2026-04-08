@@ -3,7 +3,7 @@
 | ADR Info            | Details           |
 |---------------------|-------------------|
 | Subject             | Log Files for Offline Evaluation  |
-| ADR Number          | 053   |
+| ADR Number          | 026   |
 | Status              | Proposed   |
 | Author              |   |
 | Date                | [Insert Date (DD.MM.YYYY)]     |

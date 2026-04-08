@@ -4,7 +4,7 @@
 | ADR Info            | Details                           |
 |---------------------|-----------------------------------|
 | Subject             | Common Querysets for Model Pipelines |
-| ADR Number          | 056                               |
+| ADR Number          | 020                               |
 | Status              | Accepted                          |
 | Author              | Simon, Jim, Borbála               |
 | Date                | 16.09.2024                        |

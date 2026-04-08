@@ -3,7 +3,7 @@
 | ADR Info            | Details           |
 |---------------------|-------------------|
 | Subject             | Local Data Storage  |
-| ADR Number          | 055   |
+| ADR Number          | 010   |
 | Status              | Proposed   |
 | Author              | Xiaolong   |
 | Date                | 28.02.2025     |

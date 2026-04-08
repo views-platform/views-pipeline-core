@@ -3,7 +3,7 @@
 | ADR Info            | Details           |
 |---------------------|-------------------|
 | Subject             | Logging Levels Configuration  |
-| ADR Number          | 052   |
+| ADR Number          | 034   |
 | Status              | Accepted  |
 | Author              | Simon   |
 | Date                | 30.10.2024.     |

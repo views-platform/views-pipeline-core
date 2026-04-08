@@ -61,6 +61,7 @@ Layer 7: Templates and Package Management
 - `data/handlers.py` (Layer 1) imports `modules/statistics/PosteriorDistributionAnalyzer` (Layer 3) for MAP computation. This is a topology violation.
 - `configs/pipeline.py` (Layer 1) lazily imports `managers/package/PackageManager` (Layer 7) for version fetching. This uses lazy import to avoid circular dependency but violates the spirit of the rule.
 - `ForecastingModelManager` (Layer 6) directly calls sniffer methods (Layer 2) — this is acceptable as orchestrators coordinate all layers.
+- `modules/dataloaders/dataloaders.py` (Layer 3) imports `ModelPathManager` from `managers.model` (Layer 6) via backward-compat re-export. ADR-045 E6 relocated `ModelPathManager` to `data/model_path.py` (Layer 1); the import path in dataloaders should be updated to use the canonical location. See risk register C-43.
 
 ## Rationale
 

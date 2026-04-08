@@ -3,7 +3,7 @@
 | ADR Info            | Details                                      |
 |---------------------|----------------------------------------------|
 | Subject             | Naming Convention for Models in VIEWS Pipeline |
-| ADR Number          | 057                                          |
+| ADR Number          | 012                                          |
 | Status              | Accepted                                     |
 | Author              | Mihai, Sara, Simon                           |
 | Date                | 29.07.2024                                   |

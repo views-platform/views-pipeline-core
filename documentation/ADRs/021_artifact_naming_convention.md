@@ -4,7 +4,7 @@
 | ADR Info            | Details                    |
 |---------------------|----------------------------|
 | Subject             | Artifact Naming Convention |
-| ADR Number          | 057                        |
+| ADR Number          | 021                        |
 | Status              | Accepted                   |
 | Author              | Xiaolong                   |
 | Date                | 11.09.2024                 |

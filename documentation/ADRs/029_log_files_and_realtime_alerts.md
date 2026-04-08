@@ -3,7 +3,7 @@
 | ADR Info            | Details                   |
 |---------------------|---------------------------|
 | Subject             | Log files and real-time alerts |
-| ADR Number          | 056                       |
+| ADR Number          | 029                       |
 | Status              | Approved                  |
 | Author              | Marina                    |
 | Date                | 01.11.2024                |

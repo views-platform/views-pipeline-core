@@ -5,7 +5,7 @@
 | ADR Info            | Details           |
 |---------------------|-------------------|
 | Subject             | Create Model Catalog  |
-| ADR Number          | 058  |
+| ADR Number          | 031  |
 | Status              | Accepted   |
 | Author              | Borbála   |
 | Date                | 29.10.2024.     |

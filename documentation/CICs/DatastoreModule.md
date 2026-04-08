@@ -28,7 +28,7 @@ Provides a high-level interface for uploading, downloading, searching, and manag
 - **`FileMetadata`**: Validates all metadata fields at construction time. Enforces type safety (`TypeError`) and valid `category` values (`"forecast"` or `"historical"`, `ValueError`). The `to_dict()` method omits `description` if it is `None` or empty.
 - **`upload_data()`**: Uploads a file (`Path` or `str`) with validated metadata to the configured Appwrite bucket. Auto-creates the bucket on `storage_bucket_not_found` error code and retries the upload. Returns `OperationResult`.
 - **`get_predictions_by_metadata()`**: Searches metadata documents with caller-supplied filters, automatically merging `model_path.model_name` as the `"name"` filter. Returns results sorted by `$createdAt` descending. Returns empty list on search failure.
-- **`download_prediction()`**: Downloads a file by ID with optional caching (`use_cache`, `validate_cache`). Supports saving to disk (`save_path`) or returning bytes in-memory.
+- **`download_prediction()`**: Downloads a file by ID with optional caching (`use_cache`, `validate_cache`, `save_path`). The `validate_cache` parameter (default `True`) controls whether cached files are checked against their TTL before reuse. Supports saving to disk (`save_path`) or returning bytes in-memory.
 - **`download_latest_file()`**: Convenience method combining `get_latest_file_id()` and `download_prediction()`. Raises `FileNotFoundError` if no files match.
 - **`get_file_metadata()`**: Retrieves metadata for a single file ID. Returns `OperationResult` with code `"FOUND"` or `"NOT_FOUND"`.
 - **`update_prediction_metadata()`**: Delegates metadata updates to `metadata_manager.update_file_metadata()`.

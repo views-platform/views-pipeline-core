@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-04-01
+**Last reviewed:** 2026-04-08
 **Related ADRs:** ADR-001 (Ontology), ADR-004 (Evolution), ADR-006 (Intent Contracts), ADR-008 (Observability), ADR-040 (Authority), ADR-041 (Sniffer Pattern)
 
 ---
@@ -79,6 +79,11 @@ configuration to `ConfigurationManager`.
   with `"train"` and `"test"` sub-tuples for non-forecasting runs.
 - Assumes that subclass implementations of `_evaluate_model_artifact` return
   exactly `MAX_SHIFT_COUNT + 1` (13) sequences for `"standard"` evaluation.
+- When `use_prediction_store=True`, `PredictionStoreConfig.from_environment()`
+  is called at construction to validate all 9 required Appwrite env vars.
+  This fails loud with `ConfigurationException` if any are missing — before
+  any compute is invested. The config is then converted to `AppwriteConfig`
+  via `to_appwrite_config()` and used to construct `DatastoreModule`.
 - The `prediction_format` config key determines which code path is taken:
   `"dataframe"` (legacy `List[pd.DataFrame]`) or `"prediction_frame"`
   (`Dict[str, List[PredictionFrame]]`).

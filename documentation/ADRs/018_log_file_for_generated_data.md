@@ -4,7 +4,7 @@
 | ADR Info            | Details                     |
 |---------------------|-----------------------------|
 | Subject             | Log File for Generated Data |
-| ADR Number          | 054                         |
+| ADR Number          | 018                         |
 | Status              | Accepted                    |
 | Author              | Xiaolong                    |
 | Date                | 09.09.2024                  |

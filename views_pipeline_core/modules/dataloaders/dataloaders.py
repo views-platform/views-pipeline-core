@@ -9,7 +9,7 @@ from views_pipeline_core.files.utils import create_data_fetch_log_file
 from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.managers.model import ModelPathManager
+from views_pipeline_core.data.model_path import ModelPathManager
 from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer, _PARTITION_TRAIN, _PARTITION_TEST
 from ingester3.ViewsMonth import ViewsMonth
 

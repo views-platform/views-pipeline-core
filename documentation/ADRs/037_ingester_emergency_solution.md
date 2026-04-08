@@ -3,7 +3,7 @@
 | ADR Info            | Details           |
 |---------------------|-------------------|
 | Subject             | Data Ingestion  |
-| ADR Number          | 055   |
+| ADR Number          | 037   |
 | Status              | proposed   |
 | Author              | Sonja Haeffner   |
 | Date                | 22. July 2025     |

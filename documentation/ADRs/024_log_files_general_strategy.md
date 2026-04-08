@@ -3,7 +3,7 @@
 | ADR Info            | Details                      |
 |---------------------|------------------------------|
 | Subject             | Log Files General Strategy   |
-| ADR Number          | 051                          |
+| ADR Number          | 024                          |
 | Status              | Accepted                     |
 | Author              | Simon                        |
 | Date                | 28.10.2024                   |

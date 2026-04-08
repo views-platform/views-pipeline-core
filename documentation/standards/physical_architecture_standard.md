@@ -22,7 +22,7 @@ This project does not fully follow the 1-class-1-file rule. Known multi-class fi
 
 | File | Classes | Rationale |
 |------|---------|-----------|
-| `managers/model/model.py` | `ModelPathManager`, `ModelManager`, `ForecastingModelManager` | Inheritance hierarchy; 3210 LOC — decomposition planned (ADR-004) |
+| `managers/model/model.py` | `ModelManager`, `ForecastingModelManager` | Inheritance hierarchy; ~1960 LOC after ADR-045 E1-E6 extractions. `ModelPathManager` relocated to `data/model_path.py` (E6). |
 | `data/handlers.py` | `_ViewsDataset`, `CMDataset`, `PGMDataset`, `CYDataset`, `PGYDataset`, `_CDataset`, `_PGDataset` | Dataset hierarchy — base + level-specific subclasses |
 | `modules/statistics/statistics.py` | `PosteriorDistributionAnalyzer`, `ForecastReconciler` | Shared mathematical domain |
 | `modules/appwrite/file.py` | `AppWriteFileModule`, `AppwriteMetadataHandler`, `CacheManager`, `AuthManager`, etc. | Appwrite integration cluster |
@@ -37,16 +37,20 @@ Files must be located in directories that match their **functional category** (A
 
 | Directory | Category | Contents |
 |-----------|----------|----------|
-| `managers/model/` | Orchestrators + Path Managers | Pipeline lifecycle coordination |
+| `managers/model/` | Orchestrators + Path Managers | Pipeline lifecycle coordination (~1960 LOC after ADR-045 extractions) |
 | `managers/ensemble/` | Orchestrators + Path Managers | Ensemble pipeline orchestration |
 | `managers/extractor/` | Orchestrators + Path Managers | Data extraction (abstract) |
 | `managers/postprocessor/` | Orchestrators + Path Managers | Post-processing (abstract) |
+| `managers/forecasting/` | Pipeline Stages (ADR-045 E4) | Forecast post-processing, type enforcement, PF→DF conversion |
+| `managers/evaluation/` | Pipeline Stages (ADR-045 E2) | Evaluation orchestration, actuals loading, metric computation |
+| `managers/training/` | Pipeline Stages (ADR-045 E5) | Training post-processing, log creation, alerts |
+| `managers/reporting/` | Pipeline Stages (ADR-045 E3) | HTML report generation via templates |
 | `managers/configuration/` | Configuration | Multi-source config merge |
-| `managers/prediction/` | Adapters + Persistence | Prediction I/O and conversion |
+| `managers/prediction/` | Adapters + Persistence | Prediction I/O, savers, PredictionFrameConverter |
 | `managers/package/` | Package Management | Poetry package scaffolding |
 | `data/` | Data Representations | PredictionFrame, _ViewsDataset hierarchy |
 | `modules/validation/` | Validators (Sniffers) | Structural auditing |
-| `modules/dataloaders/` | Aggregation | Ensemble prediction pooling |
+| `modules/dataloaders/` | Data Loading | VIEWSER data fetching, partition splitting, drift detection |
 | `modules/reconciliation/` | Aggregation | Hierarchical forecast reconciliation |
 | `modules/statistics/` | Analysis | MAP, HDI, posterior distributions |
 | `modules/transformations/` | Transformations | Data transforms with undo |
@@ -57,7 +61,7 @@ Files must be located in directories that match their **functional category** (A
 | `modules/logging/` | Integration | Logging configuration |
 | `modules/appwrite/` | Persistence | Appwrite cloud storage |
 | `modules/datastore/` | Persistence | Appwrite high-level interface |
-| `configs/` | Configuration | PipelineConfig singleton, drift detection |
+| `configs/` | Configuration | PipelineConfig singleton, drift detection, PredictionStoreConfig |
 | `cli/` | CLI | Argument parsing and validation |
 | `exceptions/` | Exceptions | Custom error hierarchy |
 | `templates/` | Package Management | Code generation templates |

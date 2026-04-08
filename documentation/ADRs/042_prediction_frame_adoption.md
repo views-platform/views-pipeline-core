@@ -85,6 +85,12 @@ inference methods using the **Strangler Fig pattern**:
 | `_pf_to_legacy_dfs()` parity-bridge | `adapter.py` |
 | `ModelManager._audit_parity_ef()` | `model.py` |
 | Dispatch in forecast and eval paths | `model.py` |
+| `PredictionSaver` Protocol + savers (Phase 6) | `managers/prediction/savers.py` |
+| `NpzSaver` (Track A: numpy binary) | `managers/prediction/savers.py` |
+| `LocalParquetSaver` (Track B: Arrow parquet) | `managers/prediction/savers.py` |
+| `AppwriteSaver` (cloud upload, graceful degradation) | `managers/prediction/savers.py` |
+| `ViewsForecastsSaver` (PF→DF→views-forecasts store) | `managers/prediction/savers.py` |
+| `PredictionStoreConfig` (fail-loud env validation) | `configs/prediction_store.py` |
 
 ### Abstract method contract extension
 

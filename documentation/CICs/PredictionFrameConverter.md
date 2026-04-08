@@ -79,6 +79,7 @@ All failures are loud. No silent fallbacks.
 
 - **Upstream**: Receives `PredictionFrame` objects from the model inference path (via `ForecastingModelManager`).
 - **Downstream**: Produced DataFrames are consumed by `PredictionIOManager` for disk persistence. Produced Arrow tables are written directly via `pyarrow.parquet.write_table`.
+- **`ViewsForecastsSaver`**: Calls `to_prediction_df()` internally to convert `PredictionFrame` → `pd.DataFrame` before uploading to the views-forecasts central store (Phase 6 Task 4).
 - **`AggregationManager`**: Reads the `pred_{target}` list-in-cell parquet files produced by this converter's output chain.
 - **`EvaluationAdapter`**: `to_legacy_dfs` output feeds into `EvaluationAdapter.from_dataframes()` during the parity bridge period.
 

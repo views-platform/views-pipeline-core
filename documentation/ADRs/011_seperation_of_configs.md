@@ -3,7 +3,7 @@
 |ADR Info| Details|
 |--------------|-----------|
 | Subject      | Config File Structure|
-| ADR Number   | 002       |
+| ADR Number   | 011       |
 | Status       | Accepted  |
 | Author       | Simon     |
 | Date         | 29.07.2024|

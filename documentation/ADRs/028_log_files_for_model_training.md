@@ -4,7 +4,7 @@
 | ADR Info            | Details           |
 |---------------------|-------------------|
 | Subject             | Log Files for Model Training  |
-| ADR Number          | 055   |
+| ADR Number          | 028   |
 | Status              | Proposed   |
 | Author              | [Insert Author (Name)]   |
 | Date                | [Insert Date (DD.MM.YYYY)]     |
