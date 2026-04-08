@@ -110,9 +110,10 @@ class PredictionIOManager:
         """Upload predictions to views-forecasts store and Appwrite datastore."""
         if isinstance(df_predictions, pa.Table):
             raise NotImplementedError(
-                "Prediction store upload is not yet supported for Arrow Tables "
-                "(PredictionFrame evaluation path). Save as parquet only, or "
-                "disable prediction_store for this model."
+                "Prediction store upload via PredictionIOManager is not supported "
+                "for Arrow Tables. The PF forecasting path uses composed savers "
+                "(ViewsForecastsSaver, AppwriteSaver) which handle this directly. "
+                "This guard protects the legacy DF path only."
             )
 
         name = f"{self._model_path.model_name}_{predictions_name.split('.')[0]}"

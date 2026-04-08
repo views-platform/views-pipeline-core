@@ -150,6 +150,7 @@ class ForecastingStage:
                 timestamp=context.configs.get("timestamp", ""),
                 level=context.configs.get("level"),
                 targets=context.configs.get("targets"),
+                send_alert=False,
             )
 
     def _process_df_path(self, predictions, context: ForecastingContext) -> None:
@@ -177,4 +178,5 @@ class ForecastingStage:
             timestamp=context.configs.get("timestamp", ""),
             level=context.configs.get("level"),
             targets=context.configs.get("targets"),
+            send_alert=False,
         )
