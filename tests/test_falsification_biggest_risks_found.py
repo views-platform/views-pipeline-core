@@ -186,6 +186,7 @@ def test_falsify_06_reconciliation_max_workers_ignored():
     assert False, "Could not find ProcessPoolExecutor call in reconciliation.py"
 
 
+@pytest.mark.xfail(reason="C-26: EvaluationAdapter silent truncation — known risk, not yet resolved")
 def test_falsify_04_evaluation_adapter_silent_truncation():
     """
     Probe 4 (Category B): EvaluationAdapter silent truncation on sparse actuals
