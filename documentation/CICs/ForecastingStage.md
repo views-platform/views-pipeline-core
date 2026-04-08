@@ -39,10 +39,15 @@ implementation for the forecasting path.
   `ValueError`. Mismatched return types are never silently coerced.
 - Guarantees that on the DF path, `CorePredictionSniffer(level=configs["level"]).sniff_predictions()`
   is called before persistence, validating MultiIndex structure and prediction columns.
-- Guarantees that on the PF path, `PredictionFrameConverter.to_prediction_df()` and
-  `audit_prediction_structure()` are called for each target before persistence.
-- Guarantees that predictions are saved via `PredictionIOManager.save_predictions()`
-  with `run_type`, `timestamp`, `level`, and `targets` metadata.
+- Guarantees that on the PF path with savers (Phase 6 Task 5), each target's
+  `PredictionFrame` is passed directly to every saver in the composed chain via
+  `_save_via_savers()`. No DataFrame conversion occurs for local persistence.
+- Guarantees that on the PF path without savers (legacy fallback),
+  `PredictionFrameConverter.to_prediction_df()` and `audit_prediction_structure()`
+  are called for each target before persistence via `_save_via_io_manager()`.
+- Guarantees that on the DF path, predictions are saved via
+  `PredictionIOManager.save_predictions()` with `run_type`, `timestamp`, `level`,
+  and `targets` metadata.
 - Guarantees that an execution log entry is created via `handle_single_log_creation()`
   after successful processing.
 - Guarantees that a WandB completion alert is sent after processing.
@@ -52,8 +57,9 @@ implementation for the forecasting path.
 ## 4. Inputs and Assumptions
 
 - `wandb_module` -- `WandBModule` instance for alerts (no lifecycle management).
-- `io_manager` -- `PredictionIOManager` instance for prediction persistence.
+- `io_manager` -- `PredictionIOManager` instance for prediction persistence (DF path + legacy PF fallback).
 - `wandb_notifications: bool` -- gate for WandB alerts.
+- `savers: Optional[List[PredictionSaver]]` -- composed saver chain for PF path (Phase 6 Task 5). When provided, the PF path bypasses `io_manager` and delegates to savers directly. Constructed by `ForecastingModelManager.__init__()` with `[LocalParquetSaver]` + conditionally `ViewsForecastsSaver` + `AppwriteSaver`.
 - `process_and_save_forecast()` arguments:
   - `predictions` -- one of:
     - `pd.DataFrame` (DF path): with `pred_{target}` columns.

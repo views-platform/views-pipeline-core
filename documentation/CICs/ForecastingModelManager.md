@@ -262,6 +262,11 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
 - `TrainingStage` was extracted (ADR-045 E5) from
   `_execute_model_training()`. The facade calls the abstract
   `_train_model_artifact()` then delegates log creation and alerts.
+- Phase 6 Task 5: `__init__()` now constructs a saver chain
+  (`[LocalParquetSaver]` + conditionally `ViewsForecastsSaver` +
+  `AppwriteSaver`) and passes it to `ForecastingStage(savers=...)`.
+  The PF forecasting path now persists via savers directly, bypassing
+  DataFrame conversion for local disk writes (ADR-048).
 - `ModelPathManager` was relocated (ADR-045 E6) from
   `managers/model/model.py` to `data/model_path.py`. Re-export shim
   in `managers/model/model.py` maintains all existing import paths.

@@ -47,10 +47,12 @@ class ForecastingStage:
       - io_manager: PredictionIOManager — prediction persistence
     """
 
-    def __init__(self, wandb_module, io_manager, wandb_notifications: bool = False):
+    def __init__(self, wandb_module, io_manager, wandb_notifications: bool = False,
+                 savers=None):
         self._wandb_module = wandb_module
         self._io = io_manager
         self._wandb_notifications = wandb_notifications
+        self._savers = savers or []
 
     def process_and_save_forecast(self, predictions, context: ForecastingContext) -> None:
         """Validate, convert (if PF), and persist forecast predictions.
@@ -94,10 +96,6 @@ class ForecastingStage:
 
     def _process_pf_path(self, predictions, context: ForecastingContext) -> None:
         """PF path: type enforcement, conversion, and per-target persistence."""
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
-            PredictionFrameConverter,
-        )
-
         # ADR-042 type enforcement guard (fail-loud)
         if not isinstance(predictions, dict):
             raise ValueError(
@@ -106,6 +104,40 @@ class ForecastingStage:
                 f"{type(predictions).__name__}, expected "
                 f"Dict[str, PredictionFrame]. Model contract violation."
             )
+
+        if self._savers:
+            self._save_via_savers(predictions, context)
+        else:
+            self._save_via_io_manager(predictions, context)
+
+    def _save_via_savers(self, predictions, context: ForecastingContext) -> None:
+        """Persist each target's PredictionFrame through the composed saver chain."""
+        from views_pipeline_core.configs.pipeline import PipelineConfig
+        from views_pipeline_core.managers.prediction.file_namer import PredictionFileNamer
+        from views_pipeline_core.managers.prediction.savers import PredictionMetadata
+
+        namer = PredictionFileNamer(
+            context.run_type,
+            context.configs.get("timestamp", ""),
+            PipelineConfig.dataframe_format,
+        )
+
+        for target, pf in predictions.items():
+            metadata = PredictionMetadata(
+                model_name=context.model_path.model_name,
+                level=context.configs["level"],
+                target=target,
+                run_type=context.run_type,
+                filename=namer.prediction_name(),
+            )
+            for saver in self._savers:
+                saver.save(pf, context.model_path.data_generated, metadata)
+
+    def _save_via_io_manager(self, predictions, context: ForecastingContext) -> None:
+        """Legacy PF path: convert to DataFrame and delegate to io_manager."""
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
+        )
 
         converter = PredictionFrameConverter()
         for target, pf in predictions.items():

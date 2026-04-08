@@ -557,11 +557,27 @@ class ForecastingModelManager(ModelManager):
         )
 
         from views_pipeline_core.managers.forecasting.stage import ForecastingStage
+        from views_pipeline_core.managers.prediction.savers import (
+            AppwriteSaver,
+            LocalParquetSaver,
+            ViewsForecastsSaver,
+        )
+
+        savers = [LocalParquetSaver()]
+        if self._use_prediction_store:
+            savers.append(
+                ViewsForecastsSaver(self._pred_store_name, self._model_path.model_name)
+            )
+            if self._datastore is not None:
+                savers.append(
+                    AppwriteSaver(self._datastore, self._model_path.model_name, self._model_path.target)
+                )
 
         self._forecasting_stage = ForecastingStage(
             wandb_module=self._wandb_module,
             io_manager=self._io,
             wandb_notifications=self._wandb_notifications,
+            savers=savers,
         )
 
         from views_pipeline_core.managers.training.stage import TrainingStage

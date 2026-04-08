@@ -177,6 +177,108 @@ class TestPFPath:
             stage.process_and_save_forecast(_make_pred_df(), ctx)
 
 
+# ── PF path with savers (Phase 6 Task 5) ─────────────────────────────────
+
+
+class TestPFPathWithSavers:
+    """Verify PredictionFrame path uses composed savers when provided."""
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    def test_savers_called_per_target(self, mock_log):
+        """Each saver must be called once per target."""
+        saver_a = MagicMock()
+        saver_b = MagicMock()
+        stage = ForecastingStage(
+            wandb_module=MagicMock(),
+            io_manager=MagicMock(),
+            wandb_notifications=False,
+            savers=[saver_a, saver_b],
+        )
+        ctx = _make_context(prediction_format="prediction_frame")
+        predictions = {"lr_sb": MagicMock(), "lr_ns": MagicMock()}
+
+        stage.process_and_save_forecast(predictions, ctx)
+
+        assert saver_a.save.call_count == 2
+        assert saver_b.save.call_count == 2
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    def test_savers_receive_prediction_frame_directly(self, mock_log):
+        """Savers must receive the original PredictionFrame, not a DataFrame."""
+        saver = MagicMock()
+        stage = ForecastingStage(
+            wandb_module=MagicMock(),
+            io_manager=MagicMock(),
+            wandb_notifications=False,
+            savers=[saver],
+        )
+        ctx = _make_context(prediction_format="prediction_frame")
+        mock_pf = MagicMock()
+        predictions = {"lr_sb": mock_pf}
+
+        stage.process_and_save_forecast(predictions, ctx)
+
+        call_args = saver.save.call_args
+        assert call_args[0][0] is mock_pf  # first positional arg is the PF
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    def test_savers_receive_correct_metadata(self, mock_log):
+        """PredictionMetadata must carry target, level, model_name, run_type."""
+        from views_pipeline_core.managers.prediction.savers import PredictionMetadata
+
+        saver = MagicMock()
+        stage = ForecastingStage(
+            wandb_module=MagicMock(),
+            io_manager=MagicMock(),
+            wandb_notifications=False,
+            savers=[saver],
+        )
+        ctx = _make_context(prediction_format="prediction_frame")
+        predictions = {"lr_sb": MagicMock()}
+
+        stage.process_and_save_forecast(predictions, ctx)
+
+        metadata = saver.save.call_args[0][2]
+        assert isinstance(metadata, PredictionMetadata)
+        assert metadata.target == "lr_sb"
+        assert metadata.level == "cm"
+        assert metadata.model_name == "test_model"
+        assert metadata.run_type == "forecasting"
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    def test_io_manager_not_called_when_savers_present(self, mock_log):
+        """When savers are provided, io_manager.save_predictions must NOT be called."""
+        saver = MagicMock()
+        stage = ForecastingStage(
+            wandb_module=MagicMock(),
+            io_manager=MagicMock(),
+            wandb_notifications=False,
+            savers=[saver],
+        )
+        ctx = _make_context(prediction_format="prediction_frame")
+        predictions = {"lr_sb": MagicMock()}
+
+        stage.process_and_save_forecast(predictions, ctx)
+
+        stage._io.save_predictions.assert_not_called()
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    @patch(
+        "views_pipeline_core.managers.prediction.prediction_frame_converter"
+        ".PredictionFrameConverter"
+    )
+    def test_no_savers_falls_back_to_io_manager(self, mock_converter_cls, mock_log):
+        """Without savers, PF path must use the legacy io_manager path."""
+        stage = _make_stage()  # no savers
+        ctx = _make_context(prediction_format="prediction_frame")
+        mock_converter_cls.return_value.to_prediction_df.return_value = _make_pred_df()
+        predictions = {"lr_sb": MagicMock()}
+
+        stage.process_and_save_forecast(predictions, ctx)
+
+        stage._io.save_predictions.assert_called_once()
+
+
 # ── Cross-cutting tests ────────────────────────────────────────────────────
 
 
