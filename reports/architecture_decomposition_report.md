@@ -116,7 +116,7 @@ The pattern for each extraction is consistent:
 | ReportingStage | `views_pipeline_core/managers/reporting/stage.py` |
 | ForecastingStage | `views_pipeline_core/managers/forecasting/stage.py` |
 | TrainingStage | `views_pipeline_core/managers/training/stage.py` |
-| PredictionIOManager | `views_pipeline_core/managers/prediction_io/stage.py` |
+| PredictionIOManager | `views_pipeline_core/managers/prediction/io.py` |
 | Shared types | `views_pipeline_core/types.py` (`BaseStageContext`, `ModelPathProtocol`) |
 | Architecture decision | `documentation/ADRs/045_pipeline_stage_architecture.md` |
 | Risk register | `reports/technical_risk_register.md` |
