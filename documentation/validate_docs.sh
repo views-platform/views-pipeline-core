@@ -48,7 +48,7 @@ if [ -f "CICs/README.md" ]; then
             echo "  ERROR: CIC contract listed but missing: CICs/$contract"
             errors=$((errors + 1))
         fi
-    done < <(grep -E '^- `[A-Z].*\.md`' CICs/README.md 2>/dev/null | grep -v '>' || true)
+    done < <(grep -E '^- `[^`]+\.md`' CICs/README.md 2>/dev/null | grep -v '>' || true)
 fi
 
 # 3a. Cross-ADR reference integrity — verify ADR-NNN text references resolve to files
@@ -56,34 +56,35 @@ echo "--- Checking cross-ADR references ---"
 while IFS= read -r ref; do
     [[ -z "$ref" ]] && continue
     file=$(echo "$ref" | cut -d: -f1)
-    adr_num=$(echo "$ref" | grep -oP 'ADR-\K0[0-9]{2}' | head -1)
+    adr_tag=$(echo "$ref" | grep -oE 'ADR-0[0-9][0-9]' | head -1)
+    adr_num=${adr_tag#ADR-}
     if [ -n "$adr_num" ]; then
         match_count=$(find ADRs -name "${adr_num}_*.md" 2>/dev/null | wc -l)
         if [ "$match_count" -eq 0 ]; then
-            echo "  ERROR: $file references ADR-${adr_num} but no matching file found in ADRs/"
+            echo "  ERROR: $file references ${adr_tag} but no matching file found in ADRs/"
             errors=$((errors + 1))
         fi
     fi
-done < <(grep -rnP 'ADR-0[0-9]{2}' --include='*.md' . 2>/dev/null || true)
+done < <(grep -rnE 'ADR-0[0-9][0-9]' --include='*.md' . 2>/dev/null || true)
 
 # 3b. Verify ADR file path references (e.g., ADRs/042_foo.md) resolve to real files
 echo "--- Checking ADR file path references ---"
 while IFS= read -r ref; do
     [[ -z "$ref" ]] && continue
     file=$(echo "$ref" | cut -d: -f1)
-    adr_path=$(echo "$ref" | grep -oP 'ADRs/[0-9][0-9a-z_ ]+\.md' | head -1)
+    adr_path=$(echo "$ref" | grep -oE 'ADRs/[0-9][0-9a-z_ ]+\.md' | head -1)
     if [ -n "$adr_path" ] && [ ! -f "$adr_path" ]; then
         echo "  ERROR: $file references $adr_path but file does not exist"
         errors=$((errors + 1))
     fi
-done < <(grep -rnP 'ADRs/[0-9][0-9a-z_ ]+\.md' --include='*.md' . 2>/dev/null || true)
+done < <(grep -rnE 'ADRs/[0-9][0-9a-z_ ]+\.md' --include='*.md' . 2>/dev/null || true)
 
 # 4. Check that referenced protocol files exist
 echo "--- Checking protocol file references ---"
 while IFS= read -r ref; do
     [[ -z "$ref" ]] && continue
     file=$(echo "$ref" | cut -d: -f1)
-    proto=$(echo "$ref" | grep -oP 'contributor_protocols/[a-z_]+\.md' | head -1)
+    proto=$(echo "$ref" | grep -oE 'contributor_protocols/[a-z_]+\.md' | head -1)
     if [ -n "$proto" ] && [ ! -f "$proto" ]; then
         echo "  ERROR: $file references $proto but file does not exist"
         errors=$((errors + 1))
