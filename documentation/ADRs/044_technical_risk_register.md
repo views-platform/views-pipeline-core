@@ -74,4 +74,4 @@ A centralized risk register prevents technical risks from being "discovered" rep
 - [ADR-004: Rules for Evolution and Stability](004_rules_for_evolution_and_stability.md)
 
 ---
-*End of ADR-010.*
+*End of ADR-044.*

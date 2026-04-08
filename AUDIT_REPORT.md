@@ -10,10 +10,10 @@ This audit analyzes the logic robustness of the conflict forecasting pipeline co
 | G3 | Green | PASS | exp(ln(x+1))-1 == x verified. |
 | G4 | Green | PASS | Code contains 'for target in self.configs["targets"]' loop. |
 | G5 | Green | PASS | Long evaluation correctly maps to 37 sequences (36 shifts + 1 base). |
-| B1 | Beige | PASS | Manager forwards full metrics list to EvaluationManager without type filtering. |
-| B2 | Beige | PASS | No logic found that restricts metrics list to hardcoded defaults before calling EvaluationManager. |
+| B1 | Beige | PASS | Manager forwards full metrics list to NativeEvaluator without type filtering. |
+| B2 | Beige | PASS | No logic found that restricts metrics list to hardcoded defaults before calling NativeEvaluator. |
 | B3 | Beige | PASS | Prevents duplicate transformation via prefix check. |
-| B4 | Beige | PASS | Source code verified to check 'if self.configs.get("metrics")' before calling EvaluationManager. |
+| B4 | Beige | PASS | Source code verified to check 'if self.configs.get("metrics")' before calling NativeEvaluator. |
 | B5 | Beige | PASS | ensure_float64 correctly casts integer columns. |
 | R1 | Red | PASS | Non-standard target name 'fatalities_total' accepted without crash (C-02 mitigated) |
 | R2 | Red | PASS | Ensemble evaluation hardcoded to use models[0] for actuals (Line 2698). |

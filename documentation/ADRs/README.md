@@ -61,6 +61,12 @@ Domain decisions specific to `views-pipeline-core`.
 | [042](042_prediction_frame_adoption.md) | Prediction Frame Adoption | Accepted |
 | [043](043_priogrid_entity_id_naming.md) | PRIO-GRID Entity ID Naming | Accepted |
 | [044](044_technical_risk_register.md) | Technical Risk Register | Accepted |
+| [045](045_pipeline_stage_architecture.md) | Pipeline Stage Architecture | Accepted |
+| [046](046_appwrite_storage_integration.md) | Appwrite as Secondary Cloud Storage | Accepted |
+| [047](047_three_destination_persistence.md) | Three-Destination Persistence Model | Accepted |
+| [048](048_prediction_saver_protocol.md) | PredictionSaver Protocol | Accepted |
+| [049](049_rolling_origin_evaluation.md) | Rolling-Origin Evaluation Protocol | Accepted |
+| [050](050_wandb_cross_cutting_integration.md) | WandB Cross-Cutting Integration | Accepted |
 
 ---
 
@@ -82,11 +88,10 @@ Domain decisions specific to `views-pipeline-core`.
 
 ## Suggested Future ADRs
 
-- **ADR-044:** Cross-repo contract formalization (JSON Schema for model config)
-- **ADR-045:** Prediction store migration strategy
-- **ADR-046:** Ensemble aggregation method selection criteria
-- **ADR-047:** Deprecation of legacy DataFrame prediction path
-- **ADR-048:** ForecastingModelManager decomposition plan
+- Cross-repo contract formalization (JSON Schema for model config)
+- Domain Layer establishment (ADR for S-08 governance)
+- Deprecation of legacy DataFrame prediction path (Strangler Fig completion)
+- Ensemble aggregation method selection criteria
 
 ---
 

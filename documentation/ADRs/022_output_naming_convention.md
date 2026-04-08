@@ -50,7 +50,7 @@ eval_<run_type>_<conflict_type>_<evaluation_schema>_<timestamp>.pkl
 The decision to use this naming convention ensures that:
 
 - Each file name is unique and informative, allowing easy identification of the model, data version, and time of creation without needing to open the file.
-- Including the timestamp makes it easy to log files for generated data (see ADR-054).
+- Including the timestamp makes it easy to log files for generated data (see ADR-018).
 - This structure is easy to parse by both humans and automated systems, improving workflow integration and automation.
 
 ### Considerations

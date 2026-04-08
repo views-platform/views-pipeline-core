@@ -12,7 +12,7 @@
 
 Until recently, all VIEWS models shared an implicit assumption: every target variable listed in `config["targets"]` exists as a column in the viewser database. The evaluation loop in `ForecastingModelManager._evaluate_prediction_dataframe` reflected this assumption by loading the raw actuals parquet directly and immediately slicing it by target names.
 
-This assumption breaks as the model ecosystem diversifies. HydraNet (ADR-055, Symmetric Feature Lifecycle) introduced *manufactured targets* — binary classification signals (e.g. `by_sb_best`, `by_ns_best`, `by_os_best`) derived from raw count columns (`ged_sb`, `ged_ns`, `ged_os`) via a threshold operation. These derived signals are manufactured in the model repo at training time; they have never been written to the shared database, and we explicitly do not want them to be.
+This assumption breaks as the model ecosystem diversifies. HydraNet (Symmetric Feature Lifecycle, defined in the HydraNet model repo) introduced *manufactured targets* — binary classification signals (e.g. `by_sb_best`, `by_ns_best`, `by_os_best`) derived from raw count columns (`ged_sb`, `ged_ns`, `ged_os`) via a threshold operation. These derived signals are manufactured in the model repo at training time; they have never been written to the shared database, and we explicitly do not want them to be.
 
 The broader architectural direction is clear: transformations, feature engineering, and derivations belong in individual model repos, not in the shared database. The database stores canonical raw inputs only. As models grow more bespoke this gap will widen — more models will define targets that require on-the-fly computation from raw actuals before evaluation can proceed.
 

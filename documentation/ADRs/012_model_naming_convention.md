@@ -29,7 +29,7 @@ This decision establishes a standardized naming convention for models in the VIE
 ## Rationale
 The rationale behind this decision is to promote consistency and ease of identification across the VIEWS pipeline. A standardized naming convention ensures models can be managed and referenced efficiently, especially as their number increases.
 
-Using highly descriptive names like algorithm_queryset_target_date would become cumbersome and unwieldy, particularly since some models are only distinguished by their hyperparameters. Therefore, detailed information about each model should be documented in the model's README and the appropriate configuration files (see documentation/ADRs/056_separation_of_configs.md for more info).
+Using highly descriptive names like algorithm_queryset_target_date would become cumbersome and unwieldy, particularly since some models are only distinguished by their hyperparameters. Therefore, detailed information about each model should be documented in the model's README and the appropriate configuration files (see documentation/ADRs/011_seperation_of_configs.md for more info).
 
 ### Considerations
 - Potential challenges include ensuring that all team members adhere to the new naming convention.

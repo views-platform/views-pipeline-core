@@ -62,7 +62,7 @@ predictions_<run_type>_<timestamp>.parquet
 The decision to use this naming convention ensures that:
 
 - Each file name is unique and informative, allowing easy identification of time of creation without needing to open the file.
-- Including the timestamp makes it easy to log files for generated data (see ADR-054).
+- Including the timestamp makes it easy to log files for generated data (see ADR-018).
 - Including the timestamp also helps distinguish between multiple runs of the same model, ensuring that no prediction is accidentally overwritten.
 - This structure is easy to parse by both humans and automated systems, improving workflow integration and automation.
 

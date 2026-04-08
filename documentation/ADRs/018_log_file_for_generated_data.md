@@ -16,19 +16,19 @@ This is critical to ensure the reliability and reproducibility of model outputs 
 
 For related ADRs on the generation of different log files and other general logging standards/routines, please see the ADRs below:  [NOTE: new relevant ADRs links should be added]
 
-- [052_input_drift_detection_logging](/documentation/ADRs/052_input_drift_detection_logging.md)
+- [025_input_drift_detection_logging](/documentation/ADRs/025_input_drift_detection_logging.md)
 
-- [053_log_files_for_offline_evaluation](/documentation/ADRs/053_log_files_for_offline_evaluation.md)
+- [026_log_files_for_offline_evaluation](/documentation/ADRs/026_log_files_for_offline_evaluation.md)
 
-- [054_log_files_for_online_evaluation](/documentation/ADRs/054_log_files_for_online_evaluation.md)
+- [027_log_files_for_online_evaluation](/documentation/ADRs/027_log_files_for_online_evaluation.md)
 
-- [055_log_files_for_model_training](/documentation/ADRs/055_log_files_for_model_training.md)
+- [028_log_files_for_model_training](/documentation/ADRs/028_log_files_for_model_training.md)
 
-- [056_log_files_and_realtime_alerts](/documentation/ADRs/056_log_files_and_realtime_alerts.md)
+- [029_log_files_and_realtime_alerts](/documentation/ADRs/029_log_files_and_realtime_alerts.md)
 
-- [052_log_level_standards](/documentation/ADRs/052_log_level_standards.md)
+- [034_log _level_standards](/documentation/ADRs/034_log _level_standards.md)
 
-- [053_log_files_for_input_data](/documentation/ADRs/053_log_files_for_input_data.md)
+- [035_log_files_for_input_data](/documentation/ADRs/035_log_files_for_input_data.md)
 
 
 ## Decision

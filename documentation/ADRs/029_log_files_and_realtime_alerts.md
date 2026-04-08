@@ -20,19 +20,19 @@ For related ADRs on the generation of different log files and other general logg
 
 [NOTE: new relevant ADRs links should be added]
 
-[054_log_file_for_generated_data](/documentation/ADRs/054_log_file_for_generated_data.md)
+[018_log_file_for_generated_data](/documentation/ADRs/018_log_file_for_generated_data.md)
 
-[052_input_drift_detection_logging](/documentation/ADRs/052_input_drift_detection_logging.md)
+[025_input_drift_detection_logging](/documentation/ADRs/025_input_drift_detection_logging.md)
 
-[053_log_files_for_offline_evaluation](/documentation/ADRs/053_log_files_for_offline_evaluation.md)
+[026_log_files_for_offline_evaluation](/documentation/ADRs/026_log_files_for_offline_evaluation.md)
 
-[054_log_files_for_online_evaluation](/documentation/ADRs/054_log_files_for_online_evaluation.md)
+[027_log_files_for_online_evaluation](/documentation/ADRs/027_log_files_for_online_evaluation.md)
 
-[055_log_files_for_model_training](/documentation/ADRs/055_log_files_for_model_training.md)
+[028_log_files_for_model_training](/documentation/ADRs/028_log_files_for_model_training.md)
 
-[052_log_level_standards](/documentation/ADRs/052_log_level_standards.md)
+[034_log _level_standards](/documentation/ADRs/034_log _level_standards.md)
 
-[053_log_files_for_input_data](/documentation/ADRs/053_log_files_for_input_data.md)
+[035_log_files_for_input_data](/documentation/ADRs/035_log_files_for_input_data.md)
 
 ## Decision
 We will implement a real-time alert and notification system that distributes alerts through designated channels — Slack, Email, Prefect, and Weights & Biases (W&B). To ensure clear communication and streamlined response, dedicated Slack channels will be set up for different log levels, with critical alerts (e.g., ERROR and CRITICAL) prioritized to prevent bottlenecks in high-stakes processes. Alerts will also be targeted to specific audiences, including Infrastructure teams, Model Development & Deployment (MD&D) teams, Outreach teams, and individuals responsible for monthly runs.
