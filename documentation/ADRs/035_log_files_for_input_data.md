@@ -5,9 +5,9 @@
 |---------------------|-------------------|
 | Subject             | Log Files for Input Data  |
 | ADR Number          | 035   |
-| Status              | [Insert Status (proposed, accepted, rejected, deprecated)]   |
-| Author              | [Insert Author (Name)]   |
-| Date                | [Insert Date (DD.MM.YYYY)]     |
+| Status              | Proposed   |
+| Author              | Simon   |
+| Date                | 03.04.2026     |
 
 ## Context
 *Describe the issue that necessitated the decision, including any factors considered during the decision-making process. This should provide a clear understanding of the challenges or opportunities addressed by the ADR.*

@@ -6,7 +6,7 @@
 | ADR Number          | 016   |
 | Status              | Proposed   |
 | Author              | Simon  |
-| Date                | [Insert Date (DD.MM.YYYY)]     |
+| Date                | 03.04.2026     |
 
 ## Context
 *Describe the issue that necessitated the decision, including any factors considered during the decision-making process. This should provide a clear understanding of the challenges or opportunities addressed by the ADR.*
