@@ -37,15 +37,10 @@ class PostprocessorPathManager(ModelPathManager):
 
     def _initialize_postprocessor_specific_directories(self) -> None:
         """Initialize postprocessor-specific directories."""
-        # self.docs = self._build_absolute_directory(Path("docs"))
         self.data_raw = self._build_absolute_directory(Path("data/raw"))
 
     def _initialize_postprocessor_specific_scripts(self) -> None:
         """Initialize and append postprocessor-specific script paths."""
-        # self.scripts += [
-        #     self._build_absolute_directory(Path("configs/config_postprocessor.py")),
-        #     self._build_absolute_directory(Path("app.py")),
-        # ]
         self.queryset_path = self._build_absolute_directory(
             Path("configs/config_queryset.py")
         )

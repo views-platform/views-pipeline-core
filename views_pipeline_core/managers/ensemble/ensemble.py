@@ -299,8 +299,6 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             List[pd.DataFrame]: Aggregated evaluation predictions.
         """
-        # dfs = []
-        # dfs_agg = []
         eval_results: Dict[str, List[pd.DataFrame]] = {}
 
         for model_name in tqdm.tqdm(self.configs["models"], desc="Evaluating ensemble"):

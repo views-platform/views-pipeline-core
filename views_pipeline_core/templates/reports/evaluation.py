@@ -181,7 +181,6 @@ class EvaluationReportTemplate:
             logger.warning(
                 f"Unknown level '{metadata_dict.get('level', None)}'. No baseline models added."
             )
-        # models = set(models).union(self.baseline_models)
         logger.info(f"Models to search for: {models}")
         verified_partition_dict = None
         verified_level = metadata_dict.get("level", None)
@@ -225,8 +224,6 @@ class EvaluationReportTemplate:
                     raise ValueError(
                         f"Partition metadata mismatch between models: Offending model: {model_name}"
                     )
-            # report_manager.add_heading("Data Partitions", level=2)
-            # report_manager.add_table(verified_partition_dict)
 
             # Add ensemble metrics
             report_manager.add_heading("Model Metrics", level=2)

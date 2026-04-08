@@ -165,16 +165,6 @@ class MappingModule:
         )
         world = gpd.read_file(path)
 
-        # Ensure ADM0_A3 column exists and is properly formatted
-        # if 'ADM0_A3' not in world.columns:
-        #     # Try to find the ISO code column with a different name
-        #     iso_cols = [col for col in world.columns if 'iso' in col.lower() or 'a3' in col.lower()]
-        #     if iso_cols:
-        #         world = world.rename(columns={iso_cols[0]: 'ADM0_A3'})
-        #     else:
-        #         # If no ISO code column found, create one from the index
-        #         world['ADM0_A3'] = world.index.astype(str)
-
         return world
 
     def __get_priogrid_shapefile(self):
@@ -300,9 +290,6 @@ class MappingModule:
 
         if isinstance(self._dataset, _CDataset):
             _dataframe = self.__add_isoab(dataframe=_dataframe)
-
-            # _dataframe['isoab'] = _dataframe['isoab'].str.upper()
-            # self._world['ADM0_A3'] = self._world['ADM0_A3'].str.upper()
 
             # Include all country attributes in the merge
             _dataframe = _dataframe.merge(

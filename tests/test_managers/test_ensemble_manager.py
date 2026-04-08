@@ -558,7 +558,7 @@ class TestTrainEnsemble:
 class TestEvaluateEnsemble:
     """Tests for _evaluate_ensemble method."""
     
-    @pytest.mark.skip(reason="Source code has bug at line 321: 'for i in range(len(n_outputs))' where n_outputs is already an int")
+    @pytest.mark.skip(reason="Source code bug: 'for i in range(len(n_outputs))' where n_outputs is already an int")
     def test_evaluate_ensemble_calls_evaluate_model_artifact(self, manager, sample_dataframes_list):
         """Test evaluation calls _evaluate_model_artifact for each model."""
         configs = {

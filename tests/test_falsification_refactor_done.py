@@ -17,7 +17,7 @@ from pathlib import Path
 #   "_assert_partition_config_accessible() is called as a Layer 1
 #    structural pre-condition check before CoreConfigSniffer runs."
 #
-# execute_single_run() has it (line 946). execute_sweep_run() does not.
+# execute_single_run() has it. execute_sweep_run() does not.
 
 sys.modules["wandb"] = MagicMock()
 sys.modules["views_evaluation"] = MagicMock()

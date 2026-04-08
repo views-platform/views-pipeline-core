@@ -1080,7 +1080,6 @@ class _ViewsDataset:
             tuple(entity_ids) if entity_ids is not None else None,
         )
         if key in self._split_tensor_cache:
-            # print(f"Using cached split data for {key}")
             return self._split_tensor_cache[key]
         else:
             # Get subset if specified
