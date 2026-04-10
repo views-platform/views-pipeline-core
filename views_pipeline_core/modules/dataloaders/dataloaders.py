@@ -1,6 +1,5 @@
 import os
-from typing import Dict
-import numpy as np
+from typing import Dict, Optional
 import pandas as pd
 import logging
 from pathlib import Path
@@ -10,18 +9,14 @@ from views_pipeline_core.files.utils import create_data_fetch_log_file
 from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.managers.model import ModelPathManager
+from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer, _PARTITION_TRAIN, _PARTITION_TEST
 from ingester3.ViewsMonth import ViewsMonth
 
-# import views_transformation_library as vtl
 import views_transformation_library.views_2 as views2
-# import views_transformation_library.splag4d as splag4d
 import views_transformation_library.missing as missing
 from viewser import Queryset
 import traceback
-# import views_transformation_library.splag_country as splag_country
-# import views_transformation_library.spatial_tree as spatial_tree
-# import views_transformation_library.spacetime_distance as spacetime_distance
 from dotenv import load_dotenv
 from typing import Tuple, List, Any
 import ast
@@ -579,9 +574,6 @@ class UpdateViewser:
             for transformation in transformations:
                 name = transformation["name"]
 
-                # args = list(map(int, transformation.get("arguments", [])))
-                # args = [smart_cast(arg) for arg in transformation.get("arguments", [])]
-                # args = transformation.get("arguments", [])
                 args = [
                     self._smart_cast(arg) for arg in transformation.get("arguments", [])
                 ]
@@ -886,7 +878,7 @@ class ViewsDataLoader:
                 f".env file found but could not be loaded: {dotenv_path}"
             )
 
-        # months_to_update = PipelineConfig().months_to_update #read from .env
+        # months_to_update = PipelineConfig.months_to_update #read from .env
         months_to_update_str = os.getenv("month_to_update")
         if not months_to_update_str or months_to_update_str == "":
             raise ValueError("Could not find months to update in the .env file. Add the line: month_to_update=[123, 124, 125]")
@@ -1115,12 +1107,12 @@ class ViewsDataLoader:
             - Override only applies to forecasting partition
             - Logs warning when override is used
         """
-        month_first = self.partition_dict["train"][0]
+        month_first = self.partition_dict[_PARTITION_TRAIN][0]
 
         if self.partition == "forecasting":
-            month_last = self.partition_dict["train"][1]
+            month_last = self.partition_dict[_PARTITION_TRAIN][1]
         elif self.partition in ["calibration", "validation"]:
-            month_last = self.partition_dict["test"][1]
+            month_last = self.partition_dict[_PARTITION_TEST][1]
         else:
             raise ValueError(
                 'partition should be either "calibration", "validation" or "forecasting"'
@@ -1133,74 +1125,6 @@ class ViewsDataLoader:
 
         return month_first, month_last
 
-    def _validate_df_partition(
-        self, df: pd.DataFrame
-    ) -> bool:
-        """
-        Validate DataFrame temporal alignment with partition.
-
-        Checks that DataFrame's month range exactly matches the expected
-        range from partition configuration, ensuring data completeness.
-
-        Internal Use:
-            Called by get_data() when validate=True.
-
-        Args:
-            df: DataFrame to validate.
-                Must have 'month_id' in index or columns
-
-        Returns:
-            True if month range matches partition, False otherwise
-
-        Validation Logic:
-            For calibration/validation:
-                - first_expected = partition['train'][0]
-                - last_expected = partition['test'][1]
-
-            For forecasting:
-                - first_expected = partition['train'][0]
-                - last_expected = partition['train'][1] or override_month
-
-        Example:
-            >>> loader.partition = 'calibration'
-            >>> loader.partition_dict = {
-            ...     'train': (121, 396),
-            ...     'test': (397, 444)
-            ... }
-            >>> # Valid DataFrame
-            >>> is_valid = loader._validate_df_partition(df)
-            >>> print(is_valid)
-            True
-            >>>
-            >>> # Invalid DataFrame (wrong range)
-            >>> is_valid = loader._validate_df_partition(df_wrong)
-            ERROR: Dataframe time units do not match partition time units...
-            >>> print(is_valid)
-            False
-
-        Note:
-            - Checks min and max month_id in DataFrame
-            - Logs detailed error if validation fails
-            - Override_month respected for forecasting
-        """
-        if "month_id" in df.columns:
-            df_time_units = df["month_id"].values
-        else:
-            df_time_units = df.index.get_level_values("month_id").values
-        # partitioner_dict = get_partitioner_dict(partition)
-        if self.partition in ["calibration", "validation"]:
-            first_month = self.partition_dict["train"][0]
-            last_month = self.partition_dict["test"][1]
-        else:
-            first_month = self.partition_dict["train"][0]
-            last_month = self.partition_dict["train"][1]
-            if self.override_month is not None:
-                last_month = self.override_month
-        if [np.min(df_time_units), np.max(df_time_units)] != [first_month, last_month]:
-            logger.error(f"Dataframe time units do not match partition time units. Got {np.min(df_time_units)}, {np.max(df_time_units)} but expected {first_month}, {last_month}.")
-            return False
-        else:
-            return True
 
     # @staticmethod
     # def filter_dataframe_by_month_range(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -1225,6 +1149,7 @@ class ViewsDataLoader:
         use_saved: bool,
         validate: bool = True,
         override_month: int = None,
+        level: Optional[str] = None,
     ) -> tuple[pd.DataFrame, list]:
         """
         Fetch or load model data for specified partition.
@@ -1354,23 +1279,19 @@ class ViewsDataLoader:
             save_dataframe(df, path_viewser_df)
             
         if validate:
-            if self._validate_df_partition(df=df):
-                return df, alerts
-            else:
-                raise RuntimeError(
-                    f"file {path_viewser_df.name} incompatible with partition {self.partition}"
-                )
+            CoreDataSniffer(
+                partition_dict=self.partition_dict,
+                partition=self.partition,
+                level=level,
+                override_month=self.override_month,
+            ).sniff_loaded_data(df)
+            return df, alerts
         logger.debug(f"DataFrame shape: {df.shape if df is not None else 'None'}")
         for ialert, alert in enumerate(
             str(alerts).strip("[").strip("]").split("Input")
         ):
             if "offender" in alert:
                 logger.warning({f"{partition} data alert {ialert}": str(alert)})
-
-        # df = df.reset_index()
-        # if "priogrid_gid" in df.columns():
-        #     df = df.rename(columns={"priogrid_gid": "priogrid_id"})
-        #     df = df.set_index(["month_id", "priogrid_id"])
 
         return df, alerts
     

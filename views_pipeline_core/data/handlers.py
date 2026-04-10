@@ -41,7 +41,7 @@ class _ViewsDataset:
         ValueError: If the source is not a pandas DataFrame, string, or Path object.
         """
         self.__preprocess_input_dataframe = True
-        from views_pipeline_core.managers.model import ModelPathManager
+        from views_pipeline_core.data.model_path import ModelPathManager
 
         self.broadcast_features = broadcast_features
         if isinstance(source, pd.DataFrame):
@@ -88,7 +88,9 @@ class _ViewsDataset:
     ) -> None:
         if not isinstance(dataframe, pd.DataFrame) or dataframe.empty:
             raise ValueError("Dataframe is empty or not a valid DataFrame")
-        # This is a hack and should be removed in the future when Viewser is updated to get rid of priogrid_gid.
+        # ADR-034: Rename boundary. VIEWSER delivers priogrid_gid (UCDP source);
+        # all downstream pipeline code uses priogrid_id (matches country_id/month_id).
+        # Remove this rename when VIEWSER is updated to emit priogrid_id natively.
         if dataframe.index.names[1] == "priogrid_gid":
             logger.warning(
                 "_PGDataset index 1 is 'priogrid_gid', renaming to 'priogrid_id'"
@@ -125,15 +127,16 @@ class _ViewsDataset:
             self.sample_size = self._validate_prediction_structure()
         else:
             self.targets = targets
-            self.features = self.get_features()
-            if self.targets is not None:
-                missing_vars = set(self.targets) - set(self.dataframe.columns)
-                if missing_vars:
-                    raise ValueError(f"Missing targets: {missing_vars}")
-            else:
+            if self.targets is None:
                 raise ValueError(
                     "Targets must be specified for non-prediction dataframes. Example usage: ViewsDataset(dataframe, targets=['ln_sb_best'])"
                 )
+            
+            self.features = self.get_features()
+            
+            missing_vars = set(self.targets) - set(self.dataframe.columns)
+            if missing_vars:
+                raise ValueError(f"Missing targets: {missing_vars}")
 
             if self.broadcast_features:
                 self._validate_feature_samples()
@@ -341,8 +344,6 @@ class _ViewsDataset:
         Returns:
             List[str]: A list of column names from the dataframe that start with 'pred_'.
         """
-        # if self.targets:
-        #     raise ValueError("Cannot identify prediction variables when dependent variables are specified")
         return [col for col in self.dataframe.columns if col.startswith("pred_")]
 
     def get_features(self) -> List[str]:
@@ -382,7 +383,9 @@ class _ViewsDataset:
         """
         if self.is_prediction:
             if not hasattr(self, "_prediction_tensor_cache"):
-                self._prediction_tensor_cache = self._prediction_to_tensor()
+                tensor = self._prediction_to_tensor()
+                self._check_tensor_nan(tensor)
+                self._prediction_tensor_cache = tensor
             return self._prediction_tensor_cache
         else:
             if not self.broadcast_features:
@@ -390,9 +393,9 @@ class _ViewsDataset:
                     "Tensor operations are disabled when broadcast_features=False"
                 )
             if not hasattr(self, "_features_tensor_cache"):
-                self._features_tensor_cache = self._features_to_tensor(
-                    include_targets=True
-                )
+                tensor = self._features_to_tensor(include_targets=True)
+                self._check_tensor_nan(tensor)
+                self._features_tensor_cache = tensor
             if include_targets:
                 return self._features_tensor_cache
             else:
@@ -401,6 +404,18 @@ class _ViewsDataset:
                     self.dataframe.columns.get_loc(var) for var in self.features
                 ]
                 return self._features_tensor_cache[:, :, :, feature_indices]
+
+    @staticmethod
+    def _check_tensor_nan(tensor: np.ndarray) -> None:
+        """Raise if tensor contains NaN. Fail Loud and Proud (ADR-008)."""
+        nan_mask = np.isnan(tensor)
+        if nan_mask.any():
+            # Report which feature indices contain NaN
+            nan_features = np.unique(np.where(nan_mask)[-1]).tolist()
+            raise ValueError(
+                f"Tensor contains NaN values in feature indices {nan_features}. "
+                "Upstream data must be cleaned before tensor conversion."
+            )
 
     def _features_to_tensor(self, include_targets: bool = True) -> np.ndarray:
         """
@@ -1065,7 +1080,6 @@ class _ViewsDataset:
             tuple(entity_ids) if entity_ids is not None else None,
         )
         if key in self._split_tensor_cache:
-            # print(f"Using cached split data for {key}")
             return self._split_tensor_cache[key]
         else:
             # Get subset if specified
@@ -1958,14 +1972,6 @@ class _PGDataset(_ViewsDataset):
 
     def get_name(self, with_id: bool = False) -> pd.DataFrame:
         """Get country names for each priogrid"""
-        # # Get country IDs from priogrids
-        # country_ids = self._get_entity_attr("c_id")
-
-        # # Create temporary DataFrame with country IDs
-        # country_df = pd.DataFrame({"c_id": country_ids}, index=self.dataframe.index)
-
-        # # Use c accessor to get country names
-        # return country_df.c.name.to_frame(name="country_name")
         self._build_entity_metadata_cache()
         if not with_id:
             return (
@@ -1982,7 +1988,10 @@ class _PGDataset(_ViewsDataset):
             return combined.to_frame(name="name")
 
     def get_region(self) -> pd.DataFrame:
-        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        """Get continent using GW code ranges (Gleditsch & Ward system).
+
+        Public API — geographic classification utility for reporting and spatial filtering.
+        """
         self._build_entity_metadata_cache()
         gwcode = self._entity_metadata_cache["gwcode"].reindex(self.dataframe.index)
 
@@ -2179,8 +2188,11 @@ class _CDataset(_ViewsDataset):
             }
         )
 
-    def get_region(self) -> pd.DataFrame:
-        """Get combined region information"""
+    def get_region_flags(self) -> pd.DataFrame:
+        """Get boolean region flags (in_africa, in_me).
+
+        Public API — geographic classification utility for reporting and spatial filtering.
+        """
         self._build_entity_metadata_cache()
         return pd.DataFrame(
             {
@@ -2194,7 +2206,10 @@ class _CDataset(_ViewsDataset):
         )
 
     def get_region(self) -> pd.DataFrame:
-        """Get continent using GW code ranges and regional flags. VERY EXPERIMENTAL"""
+        """Get continent using GW code ranges (Gleditsch & Ward system).
+
+        Public API — geographic classification utility for reporting and spatial filtering.
+        """
         self._build_entity_metadata_cache()
         gwcode = self._entity_metadata_cache["gwcode"].reindex(self.dataframe.index)
 
@@ -2230,7 +2245,6 @@ class CMDataset(_CDataset):
             )
 
     def get_year(self) -> pd.DataFrame:
-        # return self._get_time_attr("year").to_frame(name="year")
         self._build_entity_metadata_cache()
         return (
             self._entity_metadata_cache["year_id"]

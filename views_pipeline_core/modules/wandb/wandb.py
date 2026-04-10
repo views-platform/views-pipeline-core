@@ -116,7 +116,10 @@ class WandBModule:
             - Numeric values are tracked over time
         """
         if self._active_run:
-            wandb.log(metrics)
+            try:
+                wandb.log(metrics)
+            except Exception as e:
+                logger.error(f"Failed to log metrics to WandB: {e}")
 
     def log_evaluation_results(
         self,
@@ -336,7 +339,10 @@ class WandBModule:
             - More flexible than log_metrics() but less type-safe
             - See WandB docs for supported data types
         """
-        wandb.log(data)
+        try:
+            wandb.log(data)
+        except Exception as e:
+            logger.error(f"Failed to log data to WandB: {e}")
 
     @staticmethod
     def login() -> None:

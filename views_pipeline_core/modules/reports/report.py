@@ -810,7 +810,7 @@ class ReportModule:
             footer_html = f"""
             <footer class="report-footer mt-12 py-8 border-t border-surface-variant/30 text-center">
                 <div class="footer-text text-lg font-medium text-on-surface">{self.footer}</div>
-                <div class="footer-timestamp text-sm text-on-surface-variant mt-2">Generated on {timestamp} | views-pipeline-core v{PipelineConfig().current_version}</div>
+                <div class="footer-timestamp text-sm text-on-surface-variant mt-2">Generated on {timestamp} | views-pipeline-core v{PipelineConfig.current_version}</div>
             </footer>
             """
 

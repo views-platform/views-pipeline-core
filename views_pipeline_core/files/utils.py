@@ -219,10 +219,6 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     
     try:
         logger.debug(f"Saving the DataFrame to {save_path} in {file_extension} format")
-        # if file_extension == ".csv":
-        #     dataframe.to_csv(save_path, index=True)
-        # elif file_extension == ".xlsx":
-        #     dataframe.to_excel(save_path)
         if file_extension == ".parquet":
             dataframe.to_parquet(save_path)
         elif file_extension == ".pkl":
@@ -232,6 +228,25 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     except Exception as e:
         logger.exception(f"Error saving the DataFrame to {save_path}: {e}")
         raise
+
+def save_arrow_parquet(table, path: Union[str, Path]) -> None:
+    """
+    Write a pa.Table to parquet without Python object intermediary (Fix A).
+
+    Unlike save_dataframe(), this function accepts a pyarrow Table directly,
+    preserving the Arrow-native List<float32> column type and avoiding the
+    Python-list materialisation that occurs in pd.DataFrame.to_parquet().
+
+    Args:
+        table: pyarrow.Table to write.
+        path:  Destination path (parent directories are created if needed).
+    """
+    import pyarrow.parquet as pq
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, path)
+
 
 def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     """
@@ -259,8 +274,6 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
         logger.debug(f"Reading the DataFrame from {file_path} in {file_extension} format")
         if file_extension == ".csv":
             return pd.read_csv(file_path)
-        # elif file_extension == ".xlsx":
-        #     return pd.read_excel(file_path)
         if file_extension == ".parquet":
             return pd.read_parquet(file_path)
         elif file_extension == ".pkl":
@@ -307,7 +320,6 @@ def generate_output_file_name(
     Returns:
         str: The generated prediction file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
     if sequence_number is not None:
         return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}{file_extension}"
     else:
@@ -334,28 +346,25 @@ def generate_evaluation_file_name(
     Returns:
         str: The generated prediction file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
     return f"eval_{run_type}_{target_identifier}_{evaluation_type}_{timestamp}{file_extension}"
 
 
 def generate_evaluation_report_name(
     run_type: str,
-    conflict_type: str,
+    target_identifier: str,
     timestamp: str,
     file_extension: str,
 ) -> str:
     """
-    Generates an evaluation file name based on the run type, evaluation type, and timestamp.
+    Generates an evaluation report file name.
 
     Args:
-        evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
-        conflict_type (str): The type of conflict (e.g., sb, os, ns).
         run_type (str): The type of run (e.g., calibration, validation).
+        target_identifier (str): The target variable identifier (e.g., ged_sb_dep, water_scarcity).
         timestamp (str): The timestamp of the generated file.
-        file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
+        file_extension (str): The file extension (e.g., .parquet, .pkl).
 
     Returns:
-        str: The generated prediction file name.
+        str: The generated evaluation report file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
-    return f"eval_{run_type}_{conflict_type}_{timestamp}{file_extension}"
+    return f"eval_{run_type}_{target_identifier}_{timestamp}{file_extension}"

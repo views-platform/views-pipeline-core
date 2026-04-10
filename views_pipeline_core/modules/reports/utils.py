@@ -189,18 +189,3 @@ def filter_metrics_by_eval_type_and_metrics(evaluation_dict: dict, eval_type: st
     logger.debug(f"Filtered metrics DataFrame:\n{metric_dataframe}")
     
     return metric_dataframe
-
-
-# def filter_metrics_from_dict(evaluation_dict: dict, metric: str, conflict_code: str, model_name: str = None) -> pd.DataFrame:
-#     result = {}
-#     for key in evaluation_dict.keys():
-#         tokens = re.split(r'[_/\-]', key.lower())
-#         if metric.lower() in tokens and conflict_code.lower() in tokens:
-#                 result[key] = evaluation_dict[key]
-#     if model_name:
-#         # Insert 'Model Name' as the first item in the result dict
-#         result = {'Model Name': model_name, **result}
-#         result = pd.DataFrame([result], columns=result.keys()).set_index('Model Name')
-#     else:
-#         result = pd.DataFrame([result], columns=result.keys())
-#     return result

@@ -1,2 +1,2 @@
-from .distributions import PlotDistribution
-from .historical import HistoricalLineGraph
+from .distributions import PlotDistribution as PlotDistribution
+from .historical import HistoricalLineGraph as HistoricalLineGraph

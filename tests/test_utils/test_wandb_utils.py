@@ -148,7 +148,7 @@ class TestCalculateMeanEvaluationMetrics:
 
 
 class TestLogWandbLogDict:
-    @patch('views_pipeline_core.modules.wandb.utils.wandb.log')
+    @patch('views_pipeline_core.modules.wandb.utils._safe_wandb_log')
     def test_logs_all_evaluations(self, mock_log):
         step_wise = {'step01': EvaluationMetrics(mse=0.1)}
         month_wise = {'month501': EvaluationMetrics(mae=0.2)}
@@ -158,7 +158,7 @@ class TestLogWandbLogDict:
         
         assert mock_log.call_count > 0
 
-    @patch('views_pipeline_core.modules.wandb.utils.wandb.log')
+    @patch('views_pipeline_core.modules.wandb.utils._safe_wandb_log')
     def test_logs_mean_metrics(self, mock_log):
         step_wise = {
             'step01': EvaluationMetrics(mse=0.1),

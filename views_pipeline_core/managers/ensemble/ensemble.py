@@ -200,10 +200,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
 
             except Exception:
-                # logger.error(
-                #     f"{self._model_path.target.title()} training: {e}",
-                #     exc_info=True,
-                # )
+                logger.error(f"Ensemble training failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Training failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -241,7 +238,7 @@ class EnsembleManager(ForecastingModelManager):
                 )
 
             except Exception:
-                # logger.error(f"Error evaluating model: {e}", exc_info=True)
+                logger.error(f"Ensemble evaluation failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Evaluation failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -273,10 +270,7 @@ class EnsembleManager(ForecastingModelManager):
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
             except Exception:
-                # logger.error(
-                #     f"Error forecasting {self._model_path.target}: {e}",
-                #     exc_info=True,
-                # )
+                logger.error(f"Ensemble forecasting failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Forecasting failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -305,13 +299,10 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             List[pd.DataFrame]: Aggregated evaluation predictions.
         """
-        # dfs = []
-        # dfs_agg = []
         eval_results: Dict[str, List[pd.DataFrame]] = {}
 
         for model_name in tqdm.tqdm(self.configs["models"], desc="Evaluating ensemble"):
             tqdm.tqdm.write(f"Current model: {model_name}")
-            # dfs.append(self._evaluate_model_artifact(model_name))
             eval_results[model_name] = self._evaluate_model_artifact(model_name)
 
         n_outputs = len(next(iter(eval_results.values())))
@@ -319,7 +310,6 @@ class EnsembleManager(ForecastingModelManager):
 
         tqdm.tqdm.write("Aggregating metrics...")
         for i in range(n_outputs):
-            # model_dfs_i = {model_name: dfs[i] for model_name, dfs in eval_results.items()}
             model_dfs_i = {}
             for model_name, dfs in eval_results.items():
                 if i >= len(dfs):
@@ -336,7 +326,6 @@ class EnsembleManager(ForecastingModelManager):
             )
 
             aggregated_outputs.append(df_agg)
-            # dfs_agg.append(df_agg)
 
         return aggregated_outputs
 
@@ -348,7 +337,6 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             pd.DataFrame: The aggregated (and possibly reconciled) forecast DataFrame.
         """
-        # dfs = []
         model_dfs: Dict[str, pd.DataFrame] = {}
 
         for model_name in tqdm.tqdm(
@@ -357,7 +345,6 @@ class EnsembleManager(ForecastingModelManager):
             tqdm.tqdm.write(f"Current model: {model_name}")
             df = self._forecast_model_artifact(model_name)
             model_dfs[model_name] = df
-            # dfs.append(self._forecast_model_artifact(model_name))
 
         df_prediction = self._get_aggregated_df(
             df_to_aggregate=model_dfs, aggregation=self.configs["aggregation"]
@@ -514,7 +501,16 @@ class EnsembleManager(ForecastingModelManager):
         try:
             shell_command = model_args.to_shell_command(model_path)
             logger.info(f"Executing shell command: {' '.join(shell_command)}")
-            subprocess.run(shell_command, check=True)
+            subprocess.run(shell_command, check=True, timeout=7200)
+        except subprocess.TimeoutExpired:
+            logger.error(
+                f"Shell command timed out for model {model_name} after 7200s",
+            )
+            raise PipelineException(
+                f"Shell command timed out for model {model_name} after 7200s. "
+                "Consider increasing the timeout or investigating the model script.",
+                wandb_module=self._wandb_module,
+            )
         except Exception as e:
             logger.error(
                 f"Error during shell command execution for model {model_name}: {e}",
@@ -573,7 +569,7 @@ class EnsembleManager(ForecastingModelManager):
             )
             file_path = (
                 path_generated
-                / f"predictions_{run_type}_{ts}{seq_suffix}{PipelineConfig().dataframe_format}"
+                / f"predictions_{run_type}_{ts}{seq_suffix}{PipelineConfig.dataframe_format}"
             )
             if file_path.exists():
                 pred = read_dataframe(file_path)
@@ -753,54 +749,6 @@ class EnsembleManager(ForecastingModelManager):
                 f"Could not find latest C dataset for {cm_model} locally: {e}"
             )
             return None
-
-    @staticmethod
-    def _get_aggregated_df_old(
-        df_to_aggregate: List[pd.DataFrame], aggregation: str
-    ) -> pd.DataFrame:
-        """
-        Aggregates DataFrames using mean or median aggregation.
-        Handles single-element lists by converting to scalars.
-
-        Args:
-            df_to_aggregate (List[pd.DataFrame]): List of DataFrames to aggregate.
-            aggregation (str): Aggregation method ('mean' or 'median').
-
-        Returns:
-            pd.DataFrame: Aggregated DataFrame.
-        """
-        processed_dfs = []
-
-        for df in df_to_aggregate:
-            df_processed = df.copy()
-
-            for col in df_processed.columns:
-
-                def process_element(elem):
-                    if isinstance(elem, list):
-                        if len(elem) == 1:
-                            return elem[0]
-                        elif len(elem) == 0:
-                            return None
-                        else:
-                            raise ValueError(
-                                f"Aggregating distributions is not supported. "
-                                f"Found list with {len(elem)} values in column '{col}'."
-                            )
-                    return elem
-
-                df_processed[col] = df_processed[col].apply(process_element)
-
-            processed_dfs.append(df_processed)
-
-        concatenated = pd.concat(processed_dfs)
-
-        if aggregation == "mean":
-            return concatenated.groupby(level=[0, 1]).mean()
-        elif aggregation == "median":
-            return concatenated.groupby(level=[0, 1]).median()
-        else:
-            raise ValueError(f"Invalid aggregation method: {aggregation}")
 
     def _get_aggregated_df(
         self,

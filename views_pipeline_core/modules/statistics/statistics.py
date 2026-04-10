@@ -276,13 +276,7 @@ class PosteriorDistributionAnalyzer:
                 )
 
             adjusted.append((new_low, new_high))
-            
-        # idek man
-        # if len(adjusted) > 1:
-        #     self._compute_summary()
-        #     # logger.debug(f"Adjusted HDIs: {adjusted}")
-        # else:
-        #     return adjusted
+
         return adjusted
 
 
@@ -605,36 +599,6 @@ class ForecastReconciler:
 
         adjusted_values.clamp_(min=0)
         return adjusted_values.squeeze(0) if is_point_forecast else adjusted_values
-
-        # adjusted_values = adjusted_values.clone().detach().requires_grad_(True)
-
-        # # Optimizer (L-BFGS)
-        # optimizer = torch.optim.LBFGS(
-        #     [adjusted_values], lr=lr, max_iter=max_iters, tolerance_grad=tol
-        # )
-
-        # def closure():
-        #     optimizer.zero_grad()
-        #     loss = torch.sum((adjusted_values - nonzero_values) ** 2)
-        #     loss.backward()
-        #     return loss
-
-        # optimizer.step(closure)
-
-        # # Projection Step: Enforce sum constraint
-        # with torch.no_grad():
-        #     sum_adjusted = adjusted_values.sum(dim=1, keepdim=True)
-        #     scaling_factors = country_forecast.view(-1, 1) / (sum_adjusted + 1e-8)
-        #     adjusted_values *= scaling_factors
-        #     adjusted_values.clamp_(min=0)
-
-        # # Preserve zero values
-        # final_adjusted = grid_forecast.clone()
-        # final_adjusted[mask_nonzero] = adjusted_values[mask_nonzero].detach()
-
-        # # Convert back to original shape if it was a point forecast
-        # return final_adjusted.squeeze(0) if is_point_forecast else final_adjusted
-
 
     def run_tests(self):
         """

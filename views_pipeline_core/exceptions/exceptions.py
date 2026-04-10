@@ -1,6 +1,11 @@
+from __future__ import annotations
+
 import wandb
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from views_pipeline_core.modules.wandb import WandBModule
 
 logger = logging.getLogger(__name__)
 

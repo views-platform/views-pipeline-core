@@ -10,6 +10,14 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _safe_wandb_log(data: dict) -> None:
+    """Log to WandB with error suppression. Never crash the pipeline for a logging failure."""
+    try:
+        wandb.log(data)
+    except Exception as e:
+        logger.error(f"Failed to log to WandB: {e}")
+
+
 def add_wandb_metrics():
     """
     Defines the WandB metrics for step-wise, month-wise, and time-series-wise evaluation.
@@ -57,14 +65,16 @@ def generate_wandb_step_wise_log_dict(
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
         dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
-            where the keys are steps and values are `EvaluationMetrics` instances.
+            where the keys are steps and values are `EvaluationMetrics` instances or plain dicts.
         step (str): The specific time step (month forecasted) for which metrics are logged (e.g., 'step01').
         target_identifier (str): The target identifier for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and step.
     """
-    for key, value in asdict(dict_of_eval_dicts[step]).items():
+    entry = dict_of_eval_dicts[step]
+    items = entry.items() if isinstance(entry, dict) else asdict(entry).items()
+    for key, value in items:
         if value is not None:
             log_dict[f"step-wise/{target_identifier}/{key}"] = value
 
@@ -83,14 +93,16 @@ def generate_wandb_month_wise_log_dict(
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
         dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
-            where the keys are months and values are `EvaluationMetrics` instances.
+            where the keys are months and values are `EvaluationMetrics` instances or plain dicts.
         month (str): The specific month for which metrics are logged (e.g., 'month501').
         target_identifier (str): The target identifier for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and month.
     """
-    for key, value in asdict(dict_of_eval_dicts[month]).items():
+    entry = dict_of_eval_dicts[month]
+    items = entry.items() if isinstance(entry, dict) else asdict(entry).items()
+    for key, value in items:
         if value is not None:
             log_dict[f"month-wise/{target_identifier}/{key}"] = value
 
@@ -109,14 +121,16 @@ def generate_wandb_time_series_wise_log_dict(
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
         dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
-            where the keys are time series and values are `EvaluationMetrics` instances.
+            where the keys are time series and values are `EvaluationMetrics` instances or plain dicts.
         time_series (str): The specific time series for which metrics are logged (e.g., 'ts01').
         target_identifier (str): The target identifier for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and time series
     """
-    for key, value in asdict(dict_of_eval_dicts[time_series]).items():
+    entry = dict_of_eval_dicts[time_series]
+    items = entry.items() if isinstance(entry, dict) else asdict(entry).items()
+    for key, value in items:
         if value is not None:
             log_dict[f"time-series-wise/{target_identifier}/{key}"] = value
 
@@ -129,7 +143,7 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
 
     Args:
         evaluation_dict (dict): A dictionary of evaluation metrics,
-            where the keys are time steps, months, or time series, and values are `EvaluationMetrics` instances.
+            where the keys are time steps, months, or time series, and values are `EvaluationMetrics` instances or plain dicts.
 
     Returns:
         dict: A dictionary of mean evaluation metrics for the input dictionary.
@@ -137,14 +151,20 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
     if not evaluation_dict:
         return {}
     mean_dict = {}
-    first_item = next(iter(evaluation_dict.values()))
-    metric_names = vars(first_item).keys()
+    # Collect the union of all metric keys across all items so that metrics
+    # present in later items but absent from the first are not silently dropped.
+    metric_names: set = set()
+    for item in evaluation_dict.values():
+        metric_names.update(item.keys() if isinstance(item, dict) else vars(item).keys())
 
     # Compute the mean for each metric, skipping metrics with None values
     for key in metric_names:
         valid_values = [
             value
-            for value in (vars(item).get(key) for item in evaluation_dict.values())
+            for value in (
+                (item.get(key) if isinstance(item, dict) else vars(item).get(key))
+                for item in evaluation_dict.values()
+            )
             if value is not None
         ]
         if valid_values:
@@ -178,7 +198,7 @@ def log_wandb_log_dict(
         step_wise_log_dict = generate_wandb_step_wise_log_dict(
             log_dict, step_wise_evaluation, step, target_identifier
         )
-        wandb.log(step_wise_log_dict)
+        _safe_wandb_log(step_wise_log_dict)
 
     for month in month_wise_evaluation.keys():
         m = int(re.search(r"\d+", month).group())
@@ -187,7 +207,7 @@ def log_wandb_log_dict(
         month_wise_log_dict = generate_wandb_month_wise_log_dict(
             log_dict, month_wise_evaluation, month, target_identifier
         )
-        wandb.log(month_wise_log_dict)
+        _safe_wandb_log(month_wise_log_dict)
 
     for time_series in time_series_wise_evaluation.keys():
         ts = int(re.search(r"\d+", time_series).group())
@@ -196,7 +216,7 @@ def log_wandb_log_dict(
         ts_wise_log_dict = generate_wandb_time_series_wise_log_dict(
             log_dict, time_series_wise_evaluation, time_series, target_identifier
         )
-        wandb.log(ts_wise_log_dict)
+        _safe_wandb_log(ts_wise_log_dict)
 
     # Calculate and log the mean evaluation metrics
     mean_step_wise = calculate_mean_evaluation_metrics(step_wise_evaluation)
@@ -206,13 +226,13 @@ def log_wandb_log_dict(
     )
 
     for key, value in mean_step_wise.items():
-        wandb.log({f"step-wise/{target_identifier}/{key}_mean": value})
+        _safe_wandb_log({f"step-wise/{target_identifier}/{key}_mean": value})
 
     for key, value in mean_month_wise.items():
-        wandb.log({f"month-wise/{target_identifier}/{key}_mean": value})
+        _safe_wandb_log({f"month-wise/{target_identifier}/{key}_mean": value})
 
     for key, value in mean_time_series_wise.items():
-        wandb.log({f"time-series-wise/{target_identifier}/{key}_mean": value})
+        _safe_wandb_log({f"time-series-wise/{target_identifier}/{key}_mean": value})
         
 
 def wandb_alert(
@@ -282,10 +302,6 @@ def format_evaluation_dict(evaluation_dict):
             key = key[1:]
 
         if key == "timestamp":
-            # try:
-            #     formatted_dict[key] = timestamp_to_date(float(value))
-            # except (ValueError, TypeError):
-            #     formatted_dict[key] = value
             continue
         elif key == "runtime":
             # convert seconds to hours, minutes, and seconds

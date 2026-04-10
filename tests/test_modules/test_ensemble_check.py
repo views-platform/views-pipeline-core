@@ -6,7 +6,8 @@ from views_pipeline_core.modules.validation.ensemble.check import (
     validate_model_conditions,
     validate_ensemble_model_deployment_status,
     validate_partition_config,
-    validate_ensemble_model
+    validate_ensemble_model,
+    validate_ensemble_raw_data_alignment,
 )
 
 
@@ -252,7 +253,7 @@ class TestValidateEnsembleModelDeploymentStatus:
         result = validate_ensemble_model_deployment_status(
             Path("/test/path/generated"),
             "forecasting",
-            "Deprecated"
+            "deprecated"
         )
 
         assert result is False
@@ -262,7 +263,7 @@ class TestValidateEnsembleModelDeploymentStatus:
         """Test failure when constituent model is deprecated."""
         log_data = {
             "Single Model Name": "deprecated_model",
-            "Deployment Status": "Deprecated"
+            "Deployment Status": "deprecated"
         }
         mock_read_log.return_value = log_data
 
@@ -538,5 +539,45 @@ class TestValidateEnsembleModel:
 
         with pytest.raises(SystemExit) as exc_info:
             validate_ensemble_model(mock_config)
-        
+
         assert exc_info.value.code == 1
+
+
+class TestValidateEnsembleRawDataAlignment:
+    """C-03: Validate that all ensemble models share consistent raw data files."""
+
+    def test_empty_model_list_passes(self):
+        """Empty model list has nothing to compare — should pass."""
+        assert validate_ensemble_raw_data_alignment([], "calibration") is True
+
+    def test_single_model_passes(self):
+        """Single model has nothing to compare against — should pass."""
+        with patch(
+            "views_pipeline_core.managers.model.ModelPathManager"
+        ) as MockMPM:
+            mock_path = Mock()
+            mock_path.data_raw = Path("/project/models/model_a/data/raw")
+            MockMPM.return_value = mock_path
+
+            assert validate_ensemble_raw_data_alignment(["model_a"], "calibration") is True
+
+    def test_models_with_different_file_sizes_warn(self):
+        """Models with different raw data file sizes should return False."""
+        with patch(
+            "views_pipeline_core.managers.model.ModelPathManager"
+        ) as MockMPM:
+            mock_a = Mock()
+            mock_a.data_raw = Path("/tmp/test_a/data/raw")
+            mock_b = Mock()
+            mock_b.data_raw = Path("/tmp/test_b/data/raw")
+            MockMPM.side_effect = [mock_a, mock_b]
+
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.stat") as mock_stat:
+                    # Different sizes = different data
+                    mock_stat.side_effect = [Mock(st_size=1000), Mock(st_size=2000)]
+                    result = validate_ensemble_raw_data_alignment(
+                        ["model_a", "model_b"], "calibration"
+                    )
+
+            assert result is False

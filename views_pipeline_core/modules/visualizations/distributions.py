@@ -84,10 +84,6 @@ class PlotDistribution:
             label="Distribution",
         )
 
-        # sns.histplot(valid_samples, bins=bins, kde=plot_kde, ax=ax,
-        #             color='#3498DB', alpha=0.6, edgecolor='none',
-        #             label='Distribution', bins=50)
-
         if colors is None:
             colors = sns.color_palette("colorblind", 1)
 

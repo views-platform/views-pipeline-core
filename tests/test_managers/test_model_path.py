@@ -165,25 +165,6 @@ class TestStaticMethods:
         
         assert found_root == project_root
         
-    # def test_find_project_root_not_found(self, tmp_path):
-    #     """Test behavior when marker not found - traverses to filesystem root"""
-    #     # Create directory without .gitignore marker
-    #     subdir = tmp_path / "no_marker"
-    #     subdir.mkdir()
-        
-    #     # When marker is not found, implementation traverses up to filesystem root
-    #     result = ModelPathManager.find_project_root(
-    #         current_path=subdir,
-    #         marker=".gitignore"
-    #     )
-        
-    #     # Should return a valid Path (filesystem root or parent path)
-    #     assert isinstance(result, Path)
-    #     assert result.exists()
-        
-    #     # Result should be either filesystem root or an ancestor of subdir
-    #     assert result == Path("/") or subdir.is_relative_to(result)
-            
     def test_is_path_valid(self, tmp_path):
         """Test path validation"""
         # Create actual file
@@ -466,18 +447,6 @@ class TestDataFileMethods:
         assert len(paths) == 2
         assert "20241106" in str(paths[0])
         
-    def test_get_eval_file_paths(self, mock_project_root):
-        """Test getting evaluation file paths"""
-        manager = ModelPathManager("purple_alien", validate=True)
-        
-        # Create eval files
-        (manager.data_generated / "eval_calibration_sb_20241105.parquet").touch()
-        (manager.data_generated / "eval_calibration_os_20241105.parquet").touch()
-        
-        paths = manager._get_eval_file_paths("calibration", "sb")
-        
-        assert len(paths) == 1
-        assert "sb" in str(paths[0])
 
 
 # ============================================================================

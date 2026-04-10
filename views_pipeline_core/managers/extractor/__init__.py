@@ -1,1 +1,1 @@
-from .extractor import ExtractorManager, ExtractorPathManager
+from .extractor import ExtractorManager as ExtractorManager, ExtractorPathManager as ExtractorPathManager

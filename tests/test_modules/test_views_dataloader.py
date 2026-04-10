@@ -51,7 +51,7 @@ def sample_dataframe():
     
     index = pd.MultiIndex.from_product(
         [month_ids, pg_ids],
-        names=["month_id", "priogrid_id"]
+        names=["month_id", "priogrid_gid"]
     )
     
     data = {
@@ -250,55 +250,6 @@ class TestGetMonthRange:
         assert last == 520
 
 
-# ============================================================================
-# Test _validate_df_partition
-# ============================================================================
-
-class TestValidateDfPartition:
-    def test_valid_calibration_df(self, data_loader, sample_dataframe):
-        """Test validation of valid calibration DataFrame"""
-        data_loader.partition = "calibration"
-        data_loader.partition_dict = {
-            "train": (121, 396),
-            "test": (397, 444)
-        }
-        
-        # Create df with correct range
-        df = sample_dataframe.copy()
-        
-        is_valid = data_loader._validate_df_partition(df)
-        assert is_valid
-        
-    def test_invalid_month_range(self, data_loader):
-        """Test validation fails with wrong month range"""
-        data_loader.partition = "calibration"
-        data_loader.partition_dict = {
-            "train": (121, 396),
-            "test": (397, 444)
-        }
-        
-        # Create df with wrong range
-        index = pd.MultiIndex.from_product(
-            [range(100, 200), [1000, 1001]],
-            names=["month_id", "priogrid_id"]
-        )
-        df = pd.DataFrame({"feature": np.random.randn(200)}, index=index)
-        
-        is_valid = data_loader._validate_df_partition(df)
-        assert not is_valid
-        
-    def test_validation_with_override(self, data_loader, sample_dataframe):
-        """Test validation with override month"""
-        data_loader.partition = "forecasting"
-        data_loader.partition_dict = {
-            "train": (121, 529),
-            "test": (530, 565)
-        }
-        data_loader.override_month = 444  # Match sample df
-        
-        is_valid = data_loader._validate_df_partition(sample_dataframe)
-        assert is_valid
-
 
 # ============================================================================
 # Test _fetch_data_from_viewser
@@ -351,111 +302,6 @@ class TestFetchDataFromViewser:
         
         with pytest.raises(RuntimeError, match="Could not find queryset"):
             data_loader._fetch_data_from_viewser(self_test=False)
-
-
-# ============================================================================
-# Test get_data (main interface)
-# ============================================================================
-
-# class TestGetData:
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.parse_args")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.read_dataframe")
-#     def test_get_data_use_saved(self, mock_read_df, mock_parse_args, data_loader, sample_dataframe, tmp_path):
-#         """Test loading saved data"""
-#         # Setup parse_args mock to avoid SystemExit
-#         mock_args = MagicMock()
-#         mock_args.update_viewser = False
-#         mock_parse_args.return_value = mock_args
-        
-#         # Setup data loader
-#         data_loader._path_raw = tmp_path
-#         saved_file = tmp_path / "calibration_viewser_df.parquet"
-#         saved_file.touch()
-        
-#         mock_read_df.return_value = sample_dataframe
-        
-#         # Execute - should load from file, not call viewser
-#         df, alerts = data_loader.get_data(
-#             self_test=False,
-#             partition="calibration",
-#             use_saved=True,
-#             validate=False
-#         )
-        
-#         # Verify
-#         assert df is not None
-#         mock_read_df.assert_called_once()
-#         # Verify viewser was NOT called (use_saved=True with existing file)
-#         data_loader._model_path.get_queryset.assert_not_called()
-        
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.save_dataframe")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.create_data_fetch_log_file")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.parse_args")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64")
-#     def test_get_data_fetch_new(
-#         self, 
-#         mock_ensure_float,
-#         mock_parse_args,
-#         mock_create_log,
-#         mock_save_df,
-#         data_loader,
-#         sample_dataframe,
-#         sample_queryset,
-#         tmp_path
-#     ):
-#         """Test fetching new data"""
-#         # Setup
-#         data_loader._path_raw = tmp_path
-#         data_loader._model_path.get_queryset.return_value = sample_queryset
-        
-#         mock_args = MagicMock()
-#         mock_args.update_viewser = False
-#         mock_parse_args.return_value = mock_args
-#         mock_ensure_float.return_value = sample_dataframe
-        
-#         # Execute
-#         df, alerts = data_loader.get_data(
-#             self_test=False,
-#             partition="calibration",
-#             use_saved=False,
-#             validate=False
-#         )
-        
-#         # Verify
-#         assert df is not None
-#         mock_save_df.assert_called_once()
-#         mock_create_log.assert_called_once()
-        
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.parse_args")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.read_dataframe")
-#     def test_get_data_validation_failure(self, mock_read_df, mock_parse_args, data_loader, tmp_path):
-#         """Test validation failure raises error"""
-#         # Setup parse_args mock
-#         mock_args = MagicMock()
-#         mock_args.update_viewser = False
-#         mock_parse_args.return_value = mock_args
-        
-#         data_loader._path_raw = tmp_path
-        
-#         # Create invalid dataframe
-#         index = pd.MultiIndex.from_product(
-#             [range(100, 200), [1000]],
-#             names=["month_id", "priogrid_id"]
-#         )
-#         invalid_df = pd.DataFrame({"feature": np.random.randn(100)}, index=index)
-        
-#         # Mock saved file exists
-#         saved_file = tmp_path / "calibration_viewser_df.parquet"
-#         saved_file.touch()
-#         mock_read_df.return_value = invalid_df
-        
-#         with pytest.raises(RuntimeError, match="incompatible with partition"):
-#             data_loader.get_data(
-#                 self_test=False,
-#                 partition="calibration",
-#                 use_saved=True,
-#                 validate=True
-#             )
 
 
 # ============================================================================
