@@ -1,8 +1,8 @@
 # Technical Risk Register
 
-**Last updated:** 2026-04-08
+**Last updated:** 2026-04-11
 **Governing ADR:** ADR-044 (Technical Risk Register)
-**Entry count:** 48 concerns (22 closed) + 8 disagreements
+**Entry count:** 49 concerns (22 closed) + 8 disagreements
 
 ---
 
@@ -72,6 +72,7 @@
 | ID | Original Tier | Description | Resolution | Date |
 |----|--------------|-------------|------------|------|
 | C-02 | 1 → 4 | **Target name fragility.** Originally reported as hard crash on non-standard target names. Code has evolved to accept arbitrary target names: `evaluation/stage.py:93` uses `target_identifier = target` directly. Test `test_B1_non_standard_naming_allowed` proves it. | Dead `_get_eval_file_paths()` method removed; `generate_evaluation_report_name()` param renamed from `conflict_type` to `target_identifier`; misleading docstring fixed. Tech debt cleanup 2026-04-02. | 2026-04-02 |
+| C-49 | 2 | **`ModelPathManager._build_absolute_directory` returned `None` on missing dirs with `validate=True`.** Logged a warning and silently assigned `None` to path attributes (`self.data_raw`, `self.reports`, ...), causing cryptic `TypeError: unsupported operand type(s) for /: 'NoneType' and 'str'` far from the root cause when downstream baseline/stepshifter managers did path arithmetic. Direct violation of the "Fail Loud and Proud" principle. | Option B (Diagnostic) applied: `_build_absolute_directory` now raises `FileNotFoundError` with a descriptive message when a path is missing and `validate=True`, matching the existing `_get_model_dir` pattern. Two permissive tests in `test_model_path.py` replaced with fail-loud assertions; `test_ensemble_path.py` fixture expanded to build a complete ensemble skeleton. 1092 tests green. | 2026-04-11 |
 
 ## Closed Concerns
 

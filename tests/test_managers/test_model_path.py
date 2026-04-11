@@ -482,30 +482,29 @@ class TestInstanceManagement:
 # ============================================================================
 
 class TestEdgeCases:
-    def test_missing_optional_directory(self, mock_project_root, caplog):
-        """Test handling of missing optional directory"""
-        # Remove optional directory
+    def test_missing_directory_raises_with_validate(self, mock_project_root):
+        """With validate=True, a missing directory must fail loudly at construction."""
         notebooks = mock_project_root / "models" / "purple_alien" / "notebooks"
         shutil.rmtree(notebooks)
-        
-        manager = ModelPathManager("purple_alien", validate=True)
-        
-        # Should log warning but not fail - notebooks path exists but returns None
-        assert "does not exist" in caplog.text
-        # In the actual implementation, it sets the path even if it doesn't exist
-        # when validate=True, so we check it's the expected path
-        assert manager.notebooks == mock_project_root / "models" / "purple_alien" / "notebooks" or manager.notebooks is None
-        
-    def test_missing_script(self, mock_project_root):
-        """Test handling of missing script"""
-        # Remove optional script
+
+        with pytest.raises(FileNotFoundError, match="notebooks"):
+            ModelPathManager("purple_alien", validate=True)
+
+    def test_missing_directory_permitted_without_validate(self, mock_project_root):
+        """With validate=False, missing directories are tolerated."""
+        notebooks = mock_project_root / "models" / "purple_alien" / "notebooks"
+        shutil.rmtree(notebooks)
+
+        manager = ModelPathManager("purple_alien", validate=False)
+        assert manager.notebooks == mock_project_root / "models" / "purple_alien" / "notebooks"
+
+    def test_missing_script_raises_with_validate(self, mock_project_root):
+        """With validate=True, a missing script file must fail loudly at construction."""
         script = mock_project_root / "models" / "purple_alien" / "configs" / "config_sweep.py"
         script.unlink()
-        
-        manager = ModelPathManager("purple_alien", validate=True)
-        
-        # Should still initialize but script will be None or name-only
-        assert manager is not None
+
+        with pytest.raises(FileNotFoundError, match="config_sweep.py"):
+            ModelPathManager("purple_alien", validate=True)
         
     def test_process_model_name_from_string(self, mock_project_root):
         """Test processing model name from simple string"""
