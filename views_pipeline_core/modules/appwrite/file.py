@@ -67,7 +67,7 @@ import shutil
 import time
 import logging
 import hashlib
-from views_pipeline_core.managers.model import ModelPathManager
+from views_pipeline_core.data.model_path import ModelPathManager
 from abc import ABC, abstractmethod
 from enum import Enum
 

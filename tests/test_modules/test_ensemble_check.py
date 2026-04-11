@@ -414,7 +414,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_success(
@@ -450,7 +450,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_conditions_fail(
@@ -482,7 +482,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_deployment_fail(
@@ -514,7 +514,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_partition_fail(
@@ -553,7 +553,7 @@ class TestValidateEnsembleRawDataAlignment:
     def test_single_model_passes(self):
         """Single model has nothing to compare against — should pass."""
         with patch(
-            "views_pipeline_core.managers.model.ModelPathManager"
+            "views_pipeline_core.data.model_path.ModelPathManager"
         ) as MockMPM:
             mock_path = Mock()
             mock_path.data_raw = Path("/project/models/model_a/data/raw")
@@ -564,7 +564,7 @@ class TestValidateEnsembleRawDataAlignment:
     def test_models_with_different_file_sizes_warn(self):
         """Models with different raw data file sizes should return False."""
         with patch(
-            "views_pipeline_core.managers.model.ModelPathManager"
+            "views_pipeline_core.data.model_path.ModelPathManager"
         ) as MockMPM:
             mock_a = Mock()
             mock_a.data_raw = Path("/tmp/test_a/data/raw")
