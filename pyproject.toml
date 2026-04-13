@@ -36,6 +36,7 @@ appwrite = ">=13.4.1,<14.0.0"
 
 [tool.pytest.ini_options]
 filterwarnings = ["ignore::DeprecationWarning", "ignore::RuntimeWarning", "ignore::UserWarning"]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["poetry-core"]

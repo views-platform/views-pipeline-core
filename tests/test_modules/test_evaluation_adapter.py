@@ -1,8 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from unittest.mock import MagicMock
-import sys
+from unittest.mock import MagicMock, patch
 
 # 1. Create a dummy EvaluationFrame that behaves like a real object (not a mock)
 class DummyEvaluationFrame:
@@ -12,17 +11,15 @@ class DummyEvaluationFrame:
         self.identifiers = identifiers
         self.metadata = metadata
 
-# 2. Setup mocking BEFORE importing EvaluationAdapter
-# Ensure views_evaluation structure is present so adapter can import from it
-mock_eval = MagicMock()
-mock_eval.evaluation.evaluation_frame.EvaluationFrame = DummyEvaluationFrame
-sys.modules['views_evaluation'] = mock_eval
-sys.modules['views_evaluation.evaluation'] = mock_eval.evaluation
-sys.modules['views_evaluation.evaluation.evaluation_frame'] = mock_eval.evaluation.evaluation_frame
-
-# 3. Now import EvaluationAdapter (it will pick up DummyEvaluationFrame)
 from views_pipeline_core.modules.validation.adapter import EvaluationAdapter  # noqa: E402
 from views_pipeline_core.data.prediction_frame import PredictionFrame  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _patch_evaluation_frame():
+    """Ensure all adapter tests use DummyEvaluationFrame regardless of sys.modules contamination."""
+    with patch('views_pipeline_core.modules.validation.adapter.EvaluationFrame', DummyEvaluationFrame):
+        yield
 
 class TestEvaluationAdapter:
     
