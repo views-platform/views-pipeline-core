@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import uuid
 from views_pipeline_core.data.handlers import (
     _CDataset,
     _PGDataset,
@@ -818,7 +819,7 @@ class MappingModule:
                     full_html=True,
                     include_plotlyjs=True,  # Should work offline
                     default_height=900,
-                    div_id="map-container",
+                    div_id=f"map-container-{uuid.uuid4().hex}",
                 )
                 # Free memory after generating HTML
                 del fig
