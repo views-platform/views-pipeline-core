@@ -21,7 +21,6 @@ pyprojroot="^0.3.0"
 # MUST be reverted to a PyPI version (e.g. views-evaluation="^0.5.0") before
 # this repo's development branch is merged to main.
 views-evaluation = {git = "https://github.com/views-platform/views-evaluation.git", branch = "development"}
-views-forecasts = "^0.5.5"
 views-transformation-library = "^2.7.2"
 geopandas = "^1.0.1"
 seaborn = "^0.13.2"
