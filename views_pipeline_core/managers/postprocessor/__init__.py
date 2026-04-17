@@ -1,1 +1,3 @@
 from .postprocessor import PostprocessorManager as PostprocessorManager, PostprocessorPathManager as PostprocessorPathManager
+from .registry import register_postprocessor, POSTPROCESSOR_CATALOG
+from .base import BasePostprocessor

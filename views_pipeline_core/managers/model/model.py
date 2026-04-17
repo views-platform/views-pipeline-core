@@ -1341,7 +1341,7 @@ class ForecastingModelManager(ModelManager):
                         CorePredictionSniffer(level=configs["level"]).sniff_predictions(
                             df, targets=configs["targets"]
                         )
-                        save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
+                        save_predictions_func(df, model_path, idx, send_alert=False)
 
                     with concurrent.futures.ThreadPoolExecutor() as executor:
                         futures = [
@@ -1350,12 +1350,13 @@ class ForecastingModelManager(ModelManager):
                                 df,
                                 i,
                                 self.configs,
-                                self._model_path,
+                                self._model_path.data_generated,
                                 self._save_predictions,
                             )
                             for i, df in enumerate(raw_preds)
                         ]
                         concurrent.futures.wait(futures)
+                    
 
                 self._wandb_module.send_alert(
                     title="Evaluation Predictions Saved",
@@ -1368,6 +1369,11 @@ class ForecastingModelManager(ModelManager):
                     config=self.configs,
                     train=False,
                 )
+
+                postprocessed_preds = [self._postprocess_prediction(raw_pred) for raw_pred in raw_preds]
+                if postprocessed_preds is not None:
+                    for i, df in enumerate(postprocessed_preds):
+                        validate_and_save(df, i, self.configs, self._model_path.data_processed, self._save_predictions)
 
                 has_metrics = self._has_evaluation_metrics()
 
@@ -1444,14 +1450,20 @@ class ForecastingModelManager(ModelManager):
             job_type="forecast",
         ):
             try:
-                predictions = self._forecast_model_artifact(self.args.artifact_name)
+                logger.info(f"Forecasting {self._model_path.target} {self.configs['name']}...")
+                prediction = self._forecast_model_artifact(self.args.artifact_name)
                 context = ForecastingContext(
                     configs=self.configs,
                     model_path=self._model_path,
                     run_type=self.args.run_type,
                     prediction_format=self._prediction_format,
                 )
-                self._forecasting_stage.process_and_save_forecast(predictions, context)
+                self._forecasting_stage.process_and_save_forecast(prediction, context)
+
+                postprocessed_prediction = self._postprocess_prediction(prediction)
+                if postprocessed_prediction is not None:
+                    self._forecasting_stage.process_and_save_forecast(postprocessed_prediction, context, postprocessed=True)
+
             except Exception as e:
                 logger.error(
                     f"Error forecasting {self._model_path.target}: {e}", exc_info=True
@@ -1670,6 +1682,16 @@ class ForecastingModelManager(ModelManager):
             prepare_actuals_df=self.prepare_actuals_df,
         )
         self._evaluation_stage.evaluate(df_predictions, context, ensemble=ensemble)
+    
+    def _postprocess_prediction(self, df_prediction: pd.DataFrame) -> pd.DataFrame:
+        """
+        Postprocess the prediction.
+        """
+        if "postprocessor" in self.configs:
+            from views_pipeline_core.managers.postprocessor.pipeline import PostprocessingPipeline
+            postprocessing_pipeline = PostprocessingPipeline(self.configs)
+            return postprocessing_pipeline.apply(df_prediction)
+        return df_prediction
 
     def _get_evaluation_step_mappings(self, n_sequences: int) -> List[Dict[int, int]]:
         """

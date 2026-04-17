@@ -54,7 +54,7 @@ class ForecastingStage:
         self._wandb_notifications = wandb_notifications
         self._savers = savers or []
 
-    def process_and_save_forecast(self, predictions, context: ForecastingContext) -> None:
+    def process_and_save_forecast(self, predictions, context: ForecastingContext, postprocessed: bool = False) -> None:
         """Validate, convert (if PF), and persist forecast predictions.
 
         Args:
@@ -67,32 +67,33 @@ class ForecastingStage:
             ValueError: If prediction type mismatches declared prediction_format
                 (ADR-042 type enforcement).
         """
-        logger.info(
-            f"Forecasting {context.model_path.target} {context.configs['name']}..."
-        )
+        # logger.info(
+        #     f"Forecasting {context.model_path.target} {context.configs['name']}..."
+        # )
 
         if context.prediction_format == "prediction_frame":
             self._process_pf_path(predictions, context)
         else:
-            self._process_df_path(predictions, context)
+            self._process_df_path(predictions, context, postprocessed)
 
-        # --- Create execution log ---
-        from views_pipeline_core.files.utils import handle_single_log_creation
+        if not postprocessed:
+            # --- Create execution log ---
+            from views_pipeline_core.files.utils import handle_single_log_creation
 
-        handle_single_log_creation(
-            model_path=context.model_path,
-            config=context.configs,
-            train=False,
-        )
+            handle_single_log_creation(
+                model_path=context.model_path,
+                config=context.configs,
+                train=False,
+            )
 
-        # --- Completion alert ---
-        self._wandb_module.send_alert(
-            title=(
-                f"Forecasting for {context.model_path.target} "
-                f"{context.configs['name']} completed successfully."
-            ),
-            notifications_enabled=self._wandb_notifications,
-        )
+            # --- Completion alert ---
+            self._wandb_module.send_alert(
+                title=(
+                    f"Forecasting for {context.model_path.target} "
+                    f"{context.configs['name']} completed successfully."
+                ),
+                notifications_enabled=self._wandb_notifications,
+            )
 
     def _process_pf_path(self, predictions, context: ForecastingContext) -> None:
         """PF path: type enforcement, conversion, and per-target persistence."""
@@ -153,7 +154,7 @@ class ForecastingStage:
                 send_alert=False,
             )
 
-    def _process_df_path(self, predictions, context: ForecastingContext) -> None:
+    def _process_df_path(self, predictions, context: ForecastingContext, postprocessed: bool) -> None:
         """DF path: type enforcement, sniff validation, and persistence."""
         from views_pipeline_core.modules.validation.core_prediction_sniffer import (
             CorePredictionSniffer,
@@ -171,9 +172,11 @@ class ForecastingStage:
             predictions, targets=context.configs["targets"],
         )
 
+        path_to_save = context.model_path.data_generated if not postprocessed else context.model_path.data_processed
+
         self._io.save_predictions(
             predictions,
-            context.model_path.data_generated,
+            path_to_save,
             run_type=context.run_type,
             timestamp=context.configs.get("timestamp", ""),
             level=context.configs.get("level"),
