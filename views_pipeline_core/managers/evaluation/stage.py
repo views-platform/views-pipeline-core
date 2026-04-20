@@ -33,6 +33,7 @@ class EvaluationContext(BaseStageContext):
     partition_dict: Dict[str, Any]
     data_loader: Any  # ViewsDataLoader or None
     prepare_actuals_df: Callable  # (pd.DataFrame) -> pd.DataFrame
+    postprocessed: bool = False
 
 
 class EvaluationStage:
@@ -90,7 +91,9 @@ class EvaluationStage:
 
             for target in targets:
                 logger.info(f"Calculating {task_type} evaluation metrics for {target}")
-                target_identifier = target
+                target_identifier = (
+                    f"{target}_postprocessed" if context.postprocessed else target
+                )
                 actual_slice = df_actual[[target]]
 
                 # --- Build EvaluationFrame (PF or DF path) ---
@@ -113,12 +116,16 @@ class EvaluationStage:
                 )
 
         # --- Summary alert ---
-        import wandb
-        self._wandb_module.send_alert(
-            title=f"Metrics for {context.model_path.model_name}",
-            text=f"{self._io.generate_evaluation_table(wandb.summary._as_dict())}",
-            notifications_enabled=self._wandb_notifications,
-        )
+        # Emit once per run: on postprocessed pass when postprocessor is enabled,
+        # otherwise on the single raw pass.
+        has_postprocessor = bool(context.configs.get("postprocessor", False))
+        if context.postprocessed or not has_postprocessor:
+            import wandb
+            self._wandb_module.send_alert(
+                title=f"Metrics for {context.model_path.model_name}",
+                text=f"{self._io.generate_evaluation_table(wandb.summary._as_dict())}",
+                notifications_enabled=self._wandb_notifications,
+            )
 
     def _load_actuals(self, context: EvaluationContext, ensemble: bool):
         """Load and prepare actuals DataFrame from raw viewser data."""
@@ -213,9 +220,14 @@ class EvaluationStage:
         )
 
         if not context.configs.get("sweep", False):
+            output_path = (
+                context.model_path.data_processed
+                if context.postprocessed
+                else context.model_path.data_generated
+            )
             self._io.save_evaluations(
                 df_step, df_ts, df_month,
-                context.model_path.data_generated,
+                output_path,
                 target_identifier,
                 context.configs.get("run_type", ""),
                 context.configs.get("timestamp", ""),

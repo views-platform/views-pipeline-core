@@ -423,6 +423,7 @@ class TestContextContract:
             "configs", "model_path", "run_type",  # from BaseStageContext
             "prediction_format", "partition_dict",  # evaluation-specific
             "data_loader", "prepare_actuals_df",    # evaluation-specific
+            "postprocessed",
         }
         assert required.issubset(field_names), (
             f"Missing fields: {required - field_names}"

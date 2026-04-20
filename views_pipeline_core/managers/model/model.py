@@ -1370,10 +1370,22 @@ class ForecastingModelManager(ModelManager):
                     train=False,
                 )
 
-                postprocessed_preds = [self._postprocess_prediction(raw_pred) for raw_pred in raw_preds]
-                if postprocessed_preds is not None:
+                postprocessed_preds = None
+                if (
+                    self._prediction_format == "dataframe"
+                    and self.configs.get("postprocessor", False)
+                ):
+                    postprocessed_preds = [
+                        self._postprocess_prediction(raw_pred) for raw_pred in raw_preds
+                    ]
                     for i, df in enumerate(postprocessed_preds):
-                        validate_and_save(df, i, self.configs, self._model_path.data_processed, self._save_predictions)
+                        validate_and_save(
+                            df,
+                            i,
+                            self.configs,
+                            self._model_path.data_processed,
+                            self._save_predictions,
+                        )
 
                 has_metrics = self._has_evaluation_metrics()
 
@@ -1404,6 +1416,12 @@ class ForecastingModelManager(ModelManager):
                         gc.collect()
                     else:
                         self._evaluate_prediction_dataframe(raw_preds, self._eval_type)
+                        if postprocessed_preds is not None:
+                            self._evaluate_prediction_dataframe(
+                                postprocessed_preds,
+                                self._eval_type,
+                                postprocessed=True,
+                            )
                 else:
                     logger.warning("No metrics specified in config")
 
@@ -1642,7 +1660,11 @@ class ForecastingModelManager(ModelManager):
         )
 
     def _evaluate_prediction_dataframe(
-        self, df_predictions, eval_type, ensemble=False
+        self,
+        df_predictions,
+        eval_type,
+        ensemble: bool = False,
+        postprocessed: bool = False,
     ) -> None:
         """
         Calculate evaluation metrics from predictions.
@@ -1680,6 +1702,7 @@ class ForecastingModelManager(ModelManager):
             run_type=self.args.run_type,
             data_loader=getattr(self, '_data_loader', None),
             prepare_actuals_df=self.prepare_actuals_df,
+            postprocessed=postprocessed,
         )
         self._evaluation_stage.evaluate(df_predictions, context, ensemble=ensemble)
     
@@ -1687,11 +1710,10 @@ class ForecastingModelManager(ModelManager):
         """
         Postprocess the prediction.
         """
-        if "postprocessor" in self.configs:
-            from views_pipeline_core.managers.postprocessor.pipeline import PostprocessingPipeline
-            postprocessing_pipeline = PostprocessingPipeline(self.configs)
-            return postprocessing_pipeline.apply(df_prediction)
-        return df_prediction
+        from views_pipeline_core.managers.postprocessor.pipeline import PostprocessingPipeline
+        postprocessing_pipeline = PostprocessingPipeline(self.configs)
+        return postprocessing_pipeline.apply(df_prediction)
+        
 
     def _get_evaluation_step_mappings(self, n_sequences: int) -> List[Dict[int, int]]:
         """
