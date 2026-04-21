@@ -564,6 +564,7 @@ class ModelPathManager:
             if f.is_file()
             and f.stem.startswith(f"{run_type}_model_")
             and f.suffix in common_extensions
+            and len(f.suffixes) == 1
         ]
         return artifact_files
 

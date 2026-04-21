@@ -414,6 +414,35 @@ class TestArtifactMethods:
         assert len(files) == 2
         assert all("calibration" in str(f) for f in files)
 
+    def test_get_artifact_files_excludes_sidecars(self, mock_project_root):
+        """Sidecar files (.pt.config.json, .pt.sha256) must not be treated as artifacts."""
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        for f in manager.artifacts.iterdir():
+            f.unlink()
+
+        (manager.artifacts / "calibration_model_20260421_213555.pt").touch()
+        (manager.artifacts / "calibration_model_20260421_213555.pt.config.json").write_text("{}")
+        (manager.artifacts / "calibration_model_20260421_213555.pt.sha256").write_text("abc123")
+
+        files = manager._get_artifact_files("calibration")
+        assert len(files) == 1
+        assert files[0].name == "calibration_model_20260421_213555.pt"
+
+    def test_get_latest_artifact_ignores_sidecars(self, mock_project_root):
+        """get_latest_model_artifact_path returns .pt, not .pt.config.json."""
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        for f in manager.artifacts.iterdir():
+            f.unlink()
+
+        (manager.artifacts / "calibration_model_20260421_213555.pt").touch()
+        (manager.artifacts / "calibration_model_20260421_213555.pt.config.json").write_text("{}")
+
+        latest = manager.get_latest_model_artifact_path("calibration")
+        assert latest.suffix == ".pt"
+        assert "config" not in latest.name
+
 
 # ============================================================================
 # Test Data File Methods
