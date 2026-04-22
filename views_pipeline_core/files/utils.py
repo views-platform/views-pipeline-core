@@ -155,9 +155,19 @@ def handle_single_log_creation(model_path, config: dict, train: bool) -> None:
         None
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    data_fetch_timestamp = read_log_file(
-        model_path.data_raw / f"{config['run_type']}_data_fetch_log.txt"
-    ).get("Data Fetch Timestamp", None)
+    fetch_log_path = model_path.data_raw / f"{config['run_type']}_data_fetch_log.txt"
+    if fetch_log_path.exists():
+        data_fetch_timestamp = read_log_file(fetch_log_path).get(
+            "Data Fetch Timestamp", None
+        )
+    else:
+        data_fetch_timestamp = None
+        logger.warning(
+            "Data fetch log not found at %s — data may have been loaded from "
+            "cache or fetched via a non-viewser source. Proceeding without "
+            "data fetch timestamp.",
+            fetch_log_path,
+        )
 
     create_log_file(
         path_generated=model_path.data_generated,

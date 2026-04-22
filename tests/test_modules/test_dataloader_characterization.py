@@ -251,16 +251,15 @@ class TestEnsureFloat64Guarantee:
 # Test 5: Dict descriptor crash — characterizes bug C-51
 # ============================================================================
 
-class TestDictDescriptorCrash:
-    """When get_queryset() returns a dict, _fetch_data_from_viewser() crashes
-    with AttributeError because dict has no .publish() method.
-
-    This test characterizes bug C-51. Expected to fail after PR 4 (dispatch fix).
+class TestDictDescriptorDispatch:
+    """After PR 4, dict descriptors route to _fetch_data_from_datafactory
+    instead of crashing. This replaced the C-51 characterization test.
     """
 
-    def test_dict_descriptor_crashes(self, sample_df):
-        """dict.publish() raises AttributeError, caught by generic except and
-        re-raised as RuntimeError. The root cause is AttributeError."""
+    @patch("views_pipeline_core.modules.dataloaders.dataloaders.save_dataframe")
+    @patch("views_pipeline_core.modules.dataloaders.dataloaders.create_data_fetch_log_file")
+    def test_dict_descriptor_dispatches_to_datafactory(self, mock_log, mock_save, sample_df):
+        """Dict descriptor with source='views-datafactory' dispatches to datafactory fetch."""
         mock_path = MagicMock(spec=ModelPathManager)
         mock_path.model_name = "bright_starship"
         mock_path.data_raw = Path("/tmp/test/data/raw")
@@ -281,10 +280,13 @@ class TestDictDescriptorCrash:
         dl.month_first = 121
         dl.month_last = 444
 
-        with pytest.raises(RuntimeError, match="has no attribute 'publish'") as exc_info:
-            dl._fetch_data_from_viewser(self_test=False)
-
-        assert isinstance(exc_info.value.__cause__, AttributeError)
+        with patch.object(dl, "_fetch_data_from_datafactory", return_value=(sample_df, None)) as mock_factory:
+            df, alerts = dl.get_data(
+                self_test=False, partition="calibration",
+                use_saved=False, validate=False,
+            )
+            mock_factory.assert_called_once()
+            assert alerts is None
 
 
 # ============================================================================
@@ -396,15 +398,15 @@ class TestCoreDataSnifferGating:
 # ============================================================================
 
 class TestPostEvalLogReadAssumption:
-    """handle_single_log_creation() unconditionally reads
-    {run_type}_data_fetch_log.txt via read_log_file(). When the file is missing
-    (cached data path), read_log_file raises FileNotFoundError.
+    """After PR 4, handle_single_log_creation() gracefully handles missing
+    fetch logs (data loaded from cache or via non-viewser source).
 
-    This test characterizes the coupling between get_data() (writes the log on
-    fresh fetch only) and handle_single_log_creation() (reads it unconditionally).
+    Previously this crashed with FileNotFoundError (characterization test).
+    Now it proceeds with data_fetch_timestamp=None and logs a warning.
     """
 
-    def test_missing_fetch_log_raises_file_not_found(self, tmp_path):
+    def test_missing_fetch_log_proceeds_with_warning(self, tmp_path, caplog):
+        import logging
         from views_pipeline_core.files.utils import handle_single_log_creation
 
         gen_dir = tmp_path / "generated"
@@ -421,8 +423,10 @@ class TestPostEvalLogReadAssumption:
             "deployment_status": "shadow",
         }
 
-        with pytest.raises(FileNotFoundError):
+        with caplog.at_level(logging.WARNING):
             handle_single_log_creation(mock_path, config, train=False)
+
+        assert "Data fetch log not found" in caplog.text
 
     def test_existing_fetch_log_does_not_raise(self, tmp_path):
         from views_pipeline_core.files.utils import handle_single_log_creation
@@ -456,8 +460,8 @@ class TestPostEvalLogReadAssumption:
 # ============================================================================
 
 class TestGetRawDataFilePathsFilter:
-    """_get_raw_data_file_paths() only finds files named *_viewser_df*.
-    After PR 4, it must also find *_datafactory_df* files."""
+    """_get_raw_data_file_paths() finds both *_viewser_df* and *_datafactory_df* files.
+    Updated in PR 4 to support dual-source dispatch."""
 
     @staticmethod
     def _call_get_raw(tmp_path, run_type):
@@ -473,12 +477,13 @@ class TestGetRawDataFilePathsFilter:
         assert len(paths) == 1
         assert paths[0].name == "calibration_viewser_df.parquet"
 
-    def test_does_not_find_datafactory_df_file(self, tmp_path):
-        """Currently, _datafactory_df files are invisible. PR 4 will fix this."""
+    def test_finds_datafactory_df_file(self, tmp_path):
+        """After PR 4, _datafactory_df files are visible."""
         (tmp_path / "calibration_datafactory_df.parquet").touch()
 
         paths = self._call_get_raw(tmp_path, "calibration")
-        assert len(paths) == 0
+        assert len(paths) == 1
+        assert paths[0].name == "calibration_datafactory_df.parquet"
 
     def test_ignores_unrelated_files(self, tmp_path):
         (tmp_path / "calibration_viewser_df.parquet").touch()
