@@ -1100,6 +1100,97 @@ class ViewsDataLoader:
             f"(with 'source': 'views-datafactory')."
         )
 
+    def _fetch_data_from_datafactory(self, self_test: bool) -> tuple[pd.DataFrame, list]:
+        """Fetch data from views-datafactory using the dict descriptor from get_queryset().
+
+        Counterpart to _fetch_data_from_viewser(). Lazy-imports datafactory_query,
+        renames columns to VIEWSER conventions, derives row/col for priogrid models,
+        fills NaN, and casts to float64. Does NOT support drift detection (C-52).
+
+        Args:
+            self_test: Whether drift detection self-testing was requested.
+                Logged as a warning since datafactory has no drift detection.
+
+        Returns:
+            Tuple of (dataframe, None). Alerts are always None.
+
+        Raises:
+            RuntimeError: If descriptor is invalid or load_dataset() fails.
+            ImportError: If datafactory_query is not installed.
+        """
+        descriptor = self._model_path.get_queryset()
+
+        if descriptor is None or not isinstance(descriptor, dict):
+            raise RuntimeError(
+                f"Expected dict descriptor for datafactory model {self._model_name}, "
+                f"got {type(descriptor).__name__}"
+            )
+
+        logger.info(
+            f"Beginning data fetch from views-datafactory for {self._model_name} "
+            f"(zarr_url={descriptor.get('zarr_url', '?')}, "
+            f"region={descriptor.get('region', '?')}, "
+            f"months={self.month_first}-{self.month_last})"
+        )
+
+        try:
+            from datafactory_query import load_dataset
+        except ImportError as e:
+            raise ImportError(
+                f"datafactory_query is required for model {self._model_name} "
+                f"(source='views-datafactory') but is not installed. "
+                f"Install via: pip install 'views-datafactory @ "
+                f"git+https://github.com/views-platform/views-datafactory.git@development'"
+            ) from e
+
+        try:
+            df = load_dataset(
+                region=descriptor["region"],
+                start=self.month_first,
+                end=self.month_last,
+                features=list(descriptor["features"].keys()),
+                output_format="dataframe",
+                data_dir=descriptor["zarr_url"],
+            )
+        except Exception as e:
+            logger.error(
+                f"Error fetching data from datafactory: {e}", exc_info=True
+            )
+            raise RuntimeError(
+                f"Error fetching data from datafactory for {self._model_name}: {e}"
+            ) from e
+
+        feature_rename = descriptor.get("features", {})
+        if feature_rename:
+            df = df.rename(columns=feature_rename)
+
+        NCOL = 720
+        loa = descriptor.get("loa", "")
+        if loa == "priogrid_month" and "priogrid_gid" in df.index.names:
+            pgids = df.index.get_level_values("priogrid_gid")
+            if "row" not in df.columns:
+                df["row"] = ((pgids - 1) // NCOL + 1).astype(float)
+            if "col" not in df.columns:
+                df["col"] = ((pgids - 1) % NCOL + 1).astype(float)
+
+        df = df.fillna(0.0)
+        df = df.sort_index()
+        df = ensure_float64(df)
+
+        if self_test:
+            logger.warning(
+                f"Drift detection self-test requested for {self._model_name} "
+                f"but is not available for views-datafactory sources. "
+                f"Returning alerts=None. See risk register C-52."
+            )
+
+        logger.info(
+            f"Datafactory fetch complete for {self._model_name}: "
+            f"{len(df)} rows, {len(df.columns)} columns"
+        )
+
+        return df, None
+
     def _get_month_range(self) -> tuple[int, int]:
         """
         Determine month range based on partition type.
