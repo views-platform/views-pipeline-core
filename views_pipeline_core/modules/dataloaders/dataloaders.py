@@ -1064,6 +1064,42 @@ class ViewsDataLoader:
         df = ensure_float64(df)
         return df, alerts
 
+    def _detect_data_source(self) -> str:
+        """Inspect get_queryset() return to determine the data source type.
+
+        Returns:
+            'viewser' or 'datafactory'
+
+        Raises:
+            RuntimeError: If get_queryset() returns None.
+            TypeError: If the return type is not recognized.
+        """
+        queryset = self._model_path.get_queryset()
+
+        if queryset is None:
+            raise RuntimeError(
+                f"Could not find queryset for {self._model_name}"
+            )
+
+        if isinstance(queryset, dict):
+            source = queryset.get("source")
+            if source == "views-datafactory":
+                return "datafactory"
+            raise TypeError(
+                f"Dict queryset for {self._model_name} has unrecognized "
+                f"source='{source}'. Expected 'views-datafactory'."
+            )
+
+        if hasattr(queryset, "publish"):
+            return "viewser"
+
+        raise TypeError(
+            f"Unrecognized queryset type for {self._model_name}: "
+            f"{type(queryset).__name__}. Expected viewser Queryset "
+            f"(with .publish() method) or datafactory dict descriptor "
+            f"(with 'source': 'views-datafactory')."
+        )
+
     def _get_month_range(self) -> tuple[int, int]:
         """
         Determine month range based on partition type.

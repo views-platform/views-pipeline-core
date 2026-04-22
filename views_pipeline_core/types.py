@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 
 # ---------------------------------------------------------------------------
@@ -85,3 +85,38 @@ class BaseStageContext:
     configs: Dict[str, Any]
     model_path: ModelPathProtocol
     run_type: str
+
+
+# ---------------------------------------------------------------------------
+# Data fetch strategy — protocol for pluggable data sources (C-51, C-48)
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class DataFetchStrategy(Protocol):
+    """Strategy for fetching data from a specific source.
+
+    Implementations wrap a concrete data source (viewser, views-datafactory,
+    or future sources) behind a uniform fetch interface. ViewsDataLoader
+    dispatches to the appropriate strategy based on the return type of
+    get_queryset().
+    """
+
+    @property
+    def source_name(self) -> str:
+        """Short identifier used in cache filenames (e.g. 'viewser', 'datafactory')."""
+        ...
+
+    def fetch(
+        self,
+        month_first: int,
+        month_last: int,
+        drift_config_dict: Optional[Dict],
+        self_test: bool,
+    ) -> tuple[Any, Optional[list]]:
+        """Fetch data for the given month range.
+
+        Returns:
+            Tuple of (DataFrame, alerts_or_None). Alerts may be None if the
+            source does not support drift detection.
+        """
+        ...
