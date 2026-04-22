@@ -121,24 +121,37 @@ class EvaluationStage:
         )
 
     def _load_actuals(self, context: EvaluationContext, ensemble: bool):
-        """Load and prepare actuals DataFrame from raw viewser data."""
-        from views_pipeline_core.configs.pipeline import PipelineConfig
+        """Load and prepare actuals DataFrame from raw data."""
         from views_pipeline_core.files.utils import read_dataframe
 
         if not ensemble:
-            df_path = context.model_path._get_raw_data_file_paths(
+            raw_paths = context.model_path._get_raw_data_file_paths(
                 run_type=context.run_type
-            )[0]
+            )
         else:
             from views_pipeline_core.managers.model import ModelPathManager
-            df_path = (
-                ModelPathManager(context.configs["models"][0]).data_raw
-                / f"{context.configs['run_type']}_viewser_df{PipelineConfig.dataframe_format}"
+            mp = ModelPathManager(context.configs["models"][0])
+            raw_paths = mp._get_raw_data_file_paths(
+                run_type=context.configs["run_type"]
             )
 
-        df_viewser = read_dataframe(df_path)
-        logger.info(f"df_viewser read from {df_path}")
-        df_viewser = context.prepare_actuals_df(df_viewser)
+        if not raw_paths:
+            model_label = (
+                f"ensemble constituent model {context.configs['models'][0]}"
+                if ensemble
+                else f"model {context.model_path.model_name}"
+            )
+            logger.error(
+                "No raw data file found for %s (run_type=%s)",
+                model_label,
+                context.run_type,
+            )
+            return None
+        df_path = raw_paths[0]
+
+        df_raw = read_dataframe(df_path)
+        logger.info(f"Raw data read from {df_path}")
+        df_raw = context.prepare_actuals_df(df_raw)
 
         all_targets = (
             context.configs.get("regression_targets", [])
@@ -147,8 +160,8 @@ class EvaluationStage:
         if not all_targets:
             return None
 
-        df_actual = df_viewser[all_targets].copy()
-        del df_viewser
+        df_actual = df_raw[all_targets].copy()
+        del df_raw
         gc.collect()
         return df_actual
 

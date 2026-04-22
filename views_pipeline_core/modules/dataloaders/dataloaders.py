@@ -1203,6 +1203,30 @@ class ViewsDataLoader:
 
         return df, None
 
+    def _fetch_data(self, self_test: bool, source: str) -> tuple[pd.DataFrame, list | None]:
+        """Dispatch to the correct fetch strategy based on detected source.
+
+        Args:
+            self_test: Whether to perform drift detection self-testing.
+            source: Data source identifier ('viewser' or 'datafactory')
+                as returned by _detect_data_source().
+
+        Returns:
+            Tuple of (dataframe, alerts_or_None).
+
+        Raises:
+            ValueError: If source is not recognized.
+        """
+        if source == "viewser":
+            return self._fetch_data_from_viewser(self_test)
+        elif source == "datafactory":
+            return self._fetch_data_from_datafactory(self_test)
+        else:
+            raise ValueError(
+                f"Unknown data source '{source}' for model {self._model_name}. "
+                f"Expected 'viewser' or 'datafactory'."
+            )
+
     def _get_month_range(self) -> tuple[int, int]:
         """
         Determine month range based on partition type.
@@ -1384,38 +1408,40 @@ class ViewsDataLoader:
         if self.month_first is None or self.month_last is None:
             self.month_first, self.month_last = self._get_month_range()
 
-        path_viewser_df = Path(
-            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{PipelineConfig.dataframe_format}")
-        )  
+        source = self._detect_data_source()
+        cache_label = "viewser" if source == "viewser" else "datafactory"
+        path_cached_df = Path(
+            os.path.join(str(self._path_raw), f"{self.partition}_{cache_label}_df{PipelineConfig.dataframe_format}")
+        )
         alerts = None
 
         if use_saved:
-            if path_viewser_df.exists():
+            if path_cached_df.exists():
                 try:
-                    df = read_dataframe(path_viewser_df)
-                    logger.info(f"Reading saved data from {path_viewser_df}")
+                    df = read_dataframe(path_cached_df)
+                    logger.info(f"Reading saved data from {path_cached_df}")
                 except Exception as e:
                     raise RuntimeError(
-                        f"Use of saved data was specified but getting {path_viewser_df} failed with: {e}"
+                        f"Use of saved data was specified but getting {path_cached_df} failed with: {e}"
                     )
             else:
-                logger.info(f"Saved data not found at {path_viewser_df}, fetching from viewser...")
-                df, alerts = self._fetch_data_from_viewser(self_test)
+                logger.info(f"Saved data not found at {path_cached_df}, fetching from {source}...")
+                df, alerts = self._fetch_data(self_test, source)
                 data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 create_data_fetch_log_file(
                     self._path_raw, self.partition, self._model_name, data_fetch_timestamp
                 )
-                logger.info(f"Saving data to {path_viewser_df}")
-                save_dataframe(df, path_viewser_df)
+                logger.info(f"Saving data to {path_cached_df}")
+                save_dataframe(df, path_cached_df)
         else:
-            logger.info("Fetching data from viewser...")
-            df, alerts = self._fetch_data_from_viewser(self_test) 
+            logger.info(f"Fetching data from {source}...")
+            df, alerts = self._fetch_data(self_test, source)
             data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             create_data_fetch_log_file(
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
-            logger.info(f"Saving data to {path_viewser_df}")
-            save_dataframe(df, path_viewser_df)
+            logger.info(f"Saving data to {path_cached_df}")
+            save_dataframe(df, path_cached_df)
             
         if validate:
             CoreDataSniffer(
