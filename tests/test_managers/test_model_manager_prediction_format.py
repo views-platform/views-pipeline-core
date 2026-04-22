@@ -1201,7 +1201,7 @@ class TestOOMMitigation:
     1. skip_predictions_delivery=True skips Track B (to_prediction_df + _save_predictions)
        while keeping Track A (pf.save) intact.
 
-    2. _evaluate_prediction_dataframe() frees df_viewser (actuals, ~6 GB) immediately
+    2. _evaluate_prediction_dataframe() frees df_raw (actuals, ~6 GB) immediately
        after extracting df_actual, before the per-target metrics loop.
     """
 
@@ -1243,19 +1243,19 @@ class TestOOMMitigation:
         manager._save_predictions.assert_not_called()
         mock_save.assert_called()  # Track A must still run
 
-    def test_df_viewser_freed_before_target_loop(self):
+    def test_df_raw_freed_before_target_loop(self):
         """
-        EvaluationStage._load_actuals() must contain 'del df_viewser' to free
+        EvaluationStage._load_actuals() must contain 'del df_raw' to free
         the actuals DataFrame (~6 GB) before the per-target metrics loop.
-        Without this, df_viewser coexists with the EvaluationAdapter allocation
+        Without this, df_raw coexists with the EvaluationAdapter allocation
         across all T iterations.
         """
         import inspect
         from views_pipeline_core.managers.evaluation.stage import EvaluationStage
 
         source = inspect.getsource(EvaluationStage._load_actuals)
-        assert "del df_viewser" in source, (
-            "EvaluationStage._load_actuals() must explicitly 'del df_viewser' after "
+        assert "del df_raw" in source, (
+            "EvaluationStage._load_actuals() must explicitly 'del df_raw' after "
             "extracting df_actual. The actuals DataFrame (~6 GB at pgm scale) must be "
             "freed before the per-target metrics loop to avoid coexisting with the "
             "EvaluationAdapter's y_pred_out pre-allocation."
