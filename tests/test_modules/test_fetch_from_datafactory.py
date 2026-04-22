@@ -93,6 +93,18 @@ class TestFetchFromDatafactory:
         assert alerts is None
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
+    def test_pgm_descriptor_passes_dataframe_format(
+        self, mock_f64, datafactory_loader, sample_factory_df, mock_datafactory_module
+    ):
+        """priogrid_month loa passes output_format='dataframe' to load_dataset()."""
+        mock_datafactory_module.load_dataset = MagicMock(return_value=sample_factory_df)
+
+        datafactory_loader._fetch_data_from_datafactory(self_test=False)
+
+        call_kwargs = mock_datafactory_module.load_dataset.call_args[1]
+        assert call_kwargs["output_format"] == "dataframe"
+
+    @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
     def test_row_col_derived_from_priogrid(
         self, mock_f64, datafactory_loader, sample_factory_df, mock_datafactory_module
     ):
@@ -208,3 +220,40 @@ class TestFetchFromDatafactory:
         df, _ = datafactory_loader._fetch_data_from_datafactory(self_test=False)
         assert "row" not in df.columns
         assert "col" not in df.columns
+
+    @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
+    def test_cm_descriptor_passes_country_month_format(
+        self, mock_f64, datafactory_loader, mock_datafactory_module
+    ):
+        """country_month loa passes output_format='country_month' to load_dataset()."""
+        index = pd.MultiIndex.from_tuples(
+            [(121, 1)], names=["month_id", "country_id"]
+        )
+        cm_df = pd.DataFrame({"ged_sb_best": [1.0]}, index=index)
+
+        datafactory_loader._model_path.get_queryset.return_value = {
+            **SAMPLE_DESCRIPTOR, "loa": "country_month"
+        }
+        mock_datafactory_module.load_dataset = MagicMock(return_value=cm_df)
+
+        datafactory_loader._fetch_data_from_datafactory(self_test=False)
+
+        call_kwargs = mock_datafactory_module.load_dataset.call_args[1]
+        assert call_kwargs["output_format"] == "country_month"
+
+    def test_unsupported_loa_raises(self, datafactory_loader, mock_datafactory_module):
+        """Unsupported loa value raises RuntimeError."""
+        datafactory_loader._model_path.get_queryset.return_value = {
+            **SAMPLE_DESCRIPTOR, "loa": "grid_cell"
+        }
+
+        with pytest.raises(RuntimeError, match="Unsupported loa"):
+            datafactory_loader._fetch_data_from_datafactory(self_test=False)
+
+    def test_missing_loa_raises(self, datafactory_loader):
+        """Descriptor without loa key raises RuntimeError for missing required keys."""
+        descriptor_no_loa = {k: v for k, v in SAMPLE_DESCRIPTOR.items() if k != "loa"}
+        datafactory_loader._model_path.get_queryset.return_value = descriptor_no_loa
+
+        with pytest.raises(RuntimeError, match="missing required keys"):
+            datafactory_loader._fetch_data_from_datafactory(self_test=False)
