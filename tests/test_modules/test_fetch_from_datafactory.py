@@ -14,6 +14,7 @@ import pandas as pd
 import numpy as np
 
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
+from views_pipeline_core.modules.dataloaders.dataloaders import _PRIOGRID_NCOL
 from views_pipeline_core.data.model_path import ModelPathManager
 
 
@@ -67,47 +68,50 @@ def datafactory_loader():
     return loader
 
 
+@pytest.fixture
+def mock_datafactory_module():
+    """Patch sys.modules so `from datafactory_query import load_dataset` resolves."""
+    mock_module = MagicMock()
+    with patch.dict("sys.modules", {"datafactory_query": mock_module}):
+        yield mock_module
+
+
 class TestFetchFromDatafactory:
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
     def test_successful_fetch_renames_columns(
-        self, mock_f64, datafactory_loader, sample_factory_df
+        self, mock_f64, datafactory_loader, sample_factory_df, mock_datafactory_module
     ):
         """Columns renamed from factory names to VIEWSER names per descriptor."""
-        with patch.dict("sys.modules", {"datafactory_query": MagicMock()}):
-            import sys
-            sys.modules["datafactory_query"].load_dataset = MagicMock(return_value=sample_factory_df)
+        mock_datafactory_module.load_dataset = MagicMock(return_value=sample_factory_df)
 
-            df, alerts = datafactory_loader._fetch_data_from_datafactory(self_test=False)
+        df, alerts = datafactory_loader._fetch_data_from_datafactory(self_test=False)
 
-            assert "lr_sb_best" in df.columns
-            assert "lr_ns_best" in df.columns
-            assert "ged_sb_best" not in df.columns
-            assert alerts is None
+        assert "lr_sb_best" in df.columns
+        assert "lr_ns_best" in df.columns
+        assert "ged_sb_best" not in df.columns
+        assert alerts is None
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
     def test_row_col_derived_from_priogrid(
-        self, mock_f64, datafactory_loader, sample_factory_df
+        self, mock_f64, datafactory_loader, sample_factory_df, mock_datafactory_module
     ):
         """row and col columns derived from priogrid_gid for priogrid_month models."""
-        with patch.dict("sys.modules", {"datafactory_query": MagicMock()}):
-            import sys
-            sys.modules["datafactory_query"].load_dataset = MagicMock(return_value=sample_factory_df)
+        mock_datafactory_module.load_dataset = MagicMock(return_value=sample_factory_df)
 
-            df, _ = datafactory_loader._fetch_data_from_datafactory(self_test=False)
+        df, _ = datafactory_loader._fetch_data_from_datafactory(self_test=False)
 
-            assert "row" in df.columns
-            assert "col" in df.columns
-            assert (df["row"] > 0).all()
-            assert (df["col"] > 0).all()
+        assert "row" in df.columns
+        assert "col" in df.columns
+        assert (df["row"] > 0).all()
+        assert (df["col"] > 0).all()
 
-            # Verify formula for pgid=100001: row = (100000)//720 + 1 = 139, col = (100000)%720 + 1 = 641
-            first_row = df.loc[(121, 100001)]
-            assert first_row["row"] == (100001 - 1) // 720 + 1
-            assert first_row["col"] == (100001 - 1) % 720 + 1
+        first_row = df.loc[(121, 100001)]
+        assert first_row["row"] == (100001 - 1) // _PRIOGRID_NCOL + 1
+        assert first_row["col"] == (100001 - 1) % _PRIOGRID_NCOL + 1
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
-    def test_nan_filled(self, mock_f64, datafactory_loader):
+    def test_nan_filled(self, mock_f64, datafactory_loader, mock_datafactory_module):
         """NaN values filled with 0.0."""
         index = pd.MultiIndex.from_tuples(
             [(121, 1000)], names=["month_id", "priogrid_gid"]
@@ -117,63 +121,58 @@ class TestFetchFromDatafactory:
         datafactory_loader._model_path.get_queryset.return_value = {
             **SAMPLE_DESCRIPTOR, "features": {"ged_sb_best": "lr_sb_best"}
         }
+        mock_datafactory_module.load_dataset = MagicMock(return_value=nan_df)
 
-        with patch.dict("sys.modules", {"datafactory_query": MagicMock()}):
-            import sys
-            sys.modules["datafactory_query"].load_dataset = MagicMock(return_value=nan_df)
+        df, _ = datafactory_loader._fetch_data_from_datafactory(self_test=False)
+        assert not df.isna().any().any()
 
-            df, _ = datafactory_loader._fetch_data_from_datafactory(self_test=False)
-            assert not df.isna().any().any()
-
-    def test_ensure_float64_called(self, datafactory_loader, sample_factory_df):
+    def test_ensure_float64_called(
+        self, datafactory_loader, sample_factory_df, mock_datafactory_module
+    ):
         """ensure_float64() is called on the result."""
-        with patch.dict("sys.modules", {"datafactory_query": MagicMock()}):
-            import sys
-            sys.modules["datafactory_query"].load_dataset = MagicMock(return_value=sample_factory_df)
+        mock_datafactory_module.load_dataset = MagicMock(return_value=sample_factory_df)
 
-            with patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64") as mock_f64:
-                mock_f64.return_value = sample_factory_df
-                datafactory_loader._fetch_data_from_datafactory(self_test=False)
-                mock_f64.assert_called_once()
+        with patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64") as mock_f64:
+            mock_f64.return_value = sample_factory_df
+            datafactory_loader._fetch_data_from_datafactory(self_test=False)
+            mock_f64.assert_called_once()
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
-    def test_alerts_always_none(self, mock_f64, datafactory_loader, sample_factory_df):
+    def test_alerts_always_none(
+        self, mock_f64, datafactory_loader, sample_factory_df, mock_datafactory_module
+    ):
         """Datafactory fetch always returns alerts=None (C-52)."""
-        with patch.dict("sys.modules", {"datafactory_query": MagicMock()}):
-            import sys
-            sys.modules["datafactory_query"].load_dataset = MagicMock(return_value=sample_factory_df)
+        mock_datafactory_module.load_dataset = MagicMock(return_value=sample_factory_df)
 
-            _, alerts = datafactory_loader._fetch_data_from_datafactory(self_test=False)
-            assert alerts is None
+        _, alerts = datafactory_loader._fetch_data_from_datafactory(self_test=False)
+        assert alerts is None
 
-            _, alerts = datafactory_loader._fetch_data_from_datafactory(self_test=True)
-            assert alerts is None
+        _, alerts = datafactory_loader._fetch_data_from_datafactory(self_test=True)
+        assert alerts is None
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
     def test_drift_warning_on_self_test(
-        self, mock_f64, datafactory_loader, sample_factory_df, caplog
+        self, mock_f64, datafactory_loader, sample_factory_df, mock_datafactory_module, caplog
     ):
         """Warning logged when drift self-test requested for datafactory source."""
-        with patch.dict("sys.modules", {"datafactory_query": MagicMock()}):
-            import sys
-            sys.modules["datafactory_query"].load_dataset = MagicMock(return_value=sample_factory_df)
+        mock_datafactory_module.load_dataset = MagicMock(return_value=sample_factory_df)
 
-            with caplog.at_level(logging.WARNING):
-                datafactory_loader._fetch_data_from_datafactory(self_test=True)
+        with caplog.at_level(logging.WARNING):
+            datafactory_loader._fetch_data_from_datafactory(self_test=True)
 
-            assert "Drift detection" in caplog.text
-            assert "C-52" in caplog.text
+        assert "Drift detection" in caplog.text
+        assert "C-52" in caplog.text
 
-    def test_fetch_failure_raises_runtime_error(self, datafactory_loader):
+    def test_fetch_failure_raises_runtime_error(
+        self, datafactory_loader, mock_datafactory_module
+    ):
         """load_dataset() failure wrapped in RuntimeError."""
-        with patch.dict("sys.modules", {"datafactory_query": MagicMock()}):
-            import sys
-            sys.modules["datafactory_query"].load_dataset = MagicMock(
-                side_effect=ConnectionError("timeout")
-            )
+        mock_datafactory_module.load_dataset = MagicMock(
+            side_effect=ConnectionError("timeout")
+        )
 
-            with pytest.raises(RuntimeError, match="Error fetching data from datafactory"):
-                datafactory_loader._fetch_data_from_datafactory(self_test=False)
+        with pytest.raises(RuntimeError, match="Error fetching data from datafactory"):
+            datafactory_loader._fetch_data_from_datafactory(self_test=False)
 
     def test_non_dict_descriptor_raises(self, datafactory_loader):
         """get_queryset() returning non-dict raises RuntimeError."""
@@ -192,7 +191,9 @@ class TestFetchFromDatafactory:
             datafactory_loader._fetch_data_from_datafactory(self_test=False)
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
-    def test_country_month_no_row_col(self, mock_f64, datafactory_loader):
+    def test_country_month_no_row_col(
+        self, mock_f64, datafactory_loader, mock_datafactory_module
+    ):
         """country_month models don't get row/col columns."""
         index = pd.MultiIndex.from_tuples(
             [(121, 1)], names=["month_id", "country_id"]
@@ -202,11 +203,8 @@ class TestFetchFromDatafactory:
         datafactory_loader._model_path.get_queryset.return_value = {
             **SAMPLE_DESCRIPTOR, "loa": "country_month"
         }
+        mock_datafactory_module.load_dataset = MagicMock(return_value=cm_df)
 
-        with patch.dict("sys.modules", {"datafactory_query": MagicMock()}):
-            import sys
-            sys.modules["datafactory_query"].load_dataset = MagicMock(return_value=cm_df)
-
-            df, _ = datafactory_loader._fetch_data_from_datafactory(self_test=False)
-            assert "row" not in df.columns
-            assert "col" not in df.columns
+        df, _ = datafactory_loader._fetch_data_from_datafactory(self_test=False)
+        assert "row" not in df.columns
+        assert "col" not in df.columns

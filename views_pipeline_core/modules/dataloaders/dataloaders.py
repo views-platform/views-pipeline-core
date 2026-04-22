@@ -25,6 +25,7 @@ import argparse
 logger = logging.getLogger(__name__)
 
 _PRIOGRID_NCOL = 720
+_DATAFACTORY_REQUIRED_KEYS = {"region", "features", "zarr_url"}
 
 # Ingester dependent imports. Breaks tests on github because no certs
 def _get_splag_country(*args, **kwargs):
@@ -1131,8 +1132,7 @@ class ViewsDataLoader:
                 f"got {type(descriptor).__name__}"
             )
 
-        _required_keys = {"region", "features", "zarr_url"}
-        missing = _required_keys - descriptor.keys()
+        missing = _DATAFACTORY_REQUIRED_KEYS - descriptor.keys()
         if missing:
             raise RuntimeError(
                 f"Datafactory descriptor for {self._model_name} is missing "
