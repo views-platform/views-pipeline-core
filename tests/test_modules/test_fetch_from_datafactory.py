@@ -35,6 +35,7 @@ SAMPLE_DESCRIPTOR = {
 @pytest.fixture
 def sample_factory_df():
     """DataFrame as returned by load_dataset() — factory column names, priogrid index."""
+    rng = np.random.default_rng(42)
     month_ids = list(range(121, 125))
     pg_ids = [100001, 100002, 100003]
     index = pd.MultiIndex.from_product(
@@ -42,10 +43,10 @@ def sample_factory_df():
     )
     return pd.DataFrame(
         {
-            "ged_sb_best": np.random.randn(len(index)),
-            "ged_ns_best": np.random.randn(len(index)),
-            "ged_os_best": np.random.randn(len(index)),
-            "gaul0_code": np.random.randint(1, 100, len(index)).astype(float),
+            "ged_sb_best": rng.standard_normal(len(index)),
+            "ged_ns_best": rng.standard_normal(len(index)),
+            "ged_os_best": rng.standard_normal(len(index)),
+            "gaul0_code": rng.integers(1, 100, len(index)).astype(float),
         },
         index=index,
     )
@@ -179,6 +180,15 @@ class TestFetchFromDatafactory:
         datafactory_loader._model_path.get_queryset.return_value = "not a dict"
 
         with pytest.raises(RuntimeError, match="Expected dict descriptor"):
+            datafactory_loader._fetch_data_from_datafactory(self_test=False)
+
+    def test_missing_required_keys_raises(self, datafactory_loader):
+        """Descriptor missing required keys raises RuntimeError."""
+        datafactory_loader._model_path.get_queryset.return_value = {
+            "name": "test", "source": "views-datafactory",
+        }
+
+        with pytest.raises(RuntimeError, match="missing required keys"):
             datafactory_loader._fetch_data_from_datafactory(self_test=False)
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)

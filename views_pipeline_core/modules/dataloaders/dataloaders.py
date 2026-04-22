@@ -1131,6 +1131,14 @@ class ViewsDataLoader:
                 f"got {type(descriptor).__name__}"
             )
 
+        _required_keys = {"region", "features", "zarr_url"}
+        missing = _required_keys - descriptor.keys()
+        if missing:
+            raise RuntimeError(
+                f"Datafactory descriptor for {self._model_name} is missing "
+                f"required keys: {sorted(missing)}"
+            )
+
         logger.info(
             f"Beginning data fetch from views-datafactory for {self._model_name} "
             f"(zarr_url={descriptor.get('zarr_url', '?')}, "
