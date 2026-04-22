@@ -1203,7 +1203,7 @@ class ViewsDataLoader:
 
         return df, None
 
-    def _fetch_data(self, self_test: bool, source: str) -> tuple[pd.DataFrame, list]:
+    def _fetch_data(self, self_test: bool, source: str) -> tuple[pd.DataFrame, list | None]:
         """Dispatch to the correct fetch strategy based on detected source.
 
         Args:
