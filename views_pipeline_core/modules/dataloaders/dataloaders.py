@@ -25,7 +25,12 @@ import argparse
 logger = logging.getLogger(__name__)
 
 _PRIOGRID_NCOL = 720
-_DATAFACTORY_REQUIRED_KEYS = {"region", "features", "zarr_url"}
+_DATAFACTORY_REQUIRED_KEYS = {"region", "features", "zarr_url", "loa"}
+
+_LOA_TO_OUTPUT_FORMAT = {
+    "priogrid_month": "dataframe",
+    "country_month": "country_month",
+}
 
 # Ingester dependent imports. Breaks tests on github because no certs
 def _get_splag_country(*args, **kwargs):
@@ -1139,10 +1144,19 @@ class ViewsDataLoader:
                 f"required keys: {sorted(missing)}"
             )
 
+        loa = descriptor["loa"]
+        if loa not in _LOA_TO_OUTPUT_FORMAT:
+            raise RuntimeError(
+                f"Unsupported loa '{loa}' in datafactory descriptor for "
+                f"{self._model_name}. Supported: {list(_LOA_TO_OUTPUT_FORMAT)}"
+            )
+        output_format = _LOA_TO_OUTPUT_FORMAT[loa]
+
         logger.info(
             f"Beginning data fetch from views-datafactory for {self._model_name} "
             f"(zarr_url={descriptor.get('zarr_url', '?')}, "
             f"region={descriptor.get('region', '?')}, "
+            f"loa={loa}, output_format={output_format}, "
             f"months={self.month_first}-{self.month_last})"
         )
 
@@ -1162,7 +1176,7 @@ class ViewsDataLoader:
                 start=self.month_first,
                 end=self.month_last,
                 features=list(descriptor["features"].keys()),
-                output_format="dataframe",
+                output_format=output_format,
                 data_dir=descriptor["zarr_url"],
             )
         except Exception as e:
@@ -1177,7 +1191,6 @@ class ViewsDataLoader:
         if feature_rename:
             df = df.rename(columns=feature_rename)
 
-        loa = descriptor.get("loa", "")
         if loa == "priogrid_month" and "priogrid_gid" in df.index.names:
             pgids = df.index.get_level_values("priogrid_gid")
             if "row" not in df.columns:

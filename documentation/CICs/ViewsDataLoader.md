@@ -49,6 +49,10 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
   before returning.
 - Guarantees that when `validate=True` (the default), `CoreDataSniffer.sniff_loaded_data()`
   is called before returning, enforcing MultiIndex layout and month range.
+- Guarantees that `_fetch_data_from_datafactory()` selects the datafactory
+  `output_format` from the descriptor's `loa` field via `_LOA_TO_OUTPUT_FORMAT`,
+  ensuring the returned DataFrame matches the model's declared level of analysis
+  (`priogrid_month` → pgm index, `country_month` → cm index).
 - Guarantees that drift detection is attempted on every fresh viewser fetch; on
   `KeyError` the fetch falls back to non-drift-detected mode with a logged error.
   Drift detection is not available for datafactory sources (C-52 accepted).
@@ -62,7 +66,8 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
 - `model_path: ModelPathManager` -- must have valid `data_raw`, `data_processed`
   directories and a callable `get_queryset()`. The return value of `get_queryset()`
   determines the data source: a viewser `Queryset` object (has `.publish()`) or a
-  dict descriptor (has `source: "views-datafactory"`).
+  dict descriptor with required keys `region`, `features`, `zarr_url`, and `loa`
+  (plus `source: "views-datafactory"` for source detection).
 - `partition_dict: Dict` -- optional at construction; if `None`, defaults are
   generated from `_get_partition_dict()` when `get_data()` is called. Format:
   `{"train": (first_month, last_month), "test": (first_month, last_month)}`.
@@ -98,6 +103,10 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
 - `RuntimeError` if the model's queryset cannot be found (`get_queryset()` returns `None`).
 - `RuntimeError` if `use_saved=True` and loading the cached file fails.
 - `RuntimeError` if viewser fetch fails (after logging the traceback).
+- `RuntimeError` if a datafactory descriptor is missing required keys (`region`,
+  `features`, `zarr_url`, `loa`).
+- `RuntimeError` if a datafactory descriptor's `loa` value is not one of the
+  supported levels (`priogrid_month`, `country_month`).
 - `ValueError` if `_fetch_data()` receives an unrecognized source string.
 - `ValueError` if `partition` is not one of `calibration`, `validation`, `forecasting`.
 - `CoreDataSniffer` raises on MultiIndex or month-range violations when `validate=True`.
