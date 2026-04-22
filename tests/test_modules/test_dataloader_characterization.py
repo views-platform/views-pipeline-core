@@ -459,45 +459,32 @@ class TestGetRawDataFilePathsFilter:
     """_get_raw_data_file_paths() only finds files named *_viewser_df*.
     After PR 4, it must also find *_datafactory_df* files."""
 
-    def test_finds_viewser_df_file(self, tmp_path):
-        from views_pipeline_core.data.model_path import ModelPathManager
-
-        viewser_file = tmp_path / "calibration_viewser_df.parquet"
-        viewser_file.touch()
-
+    @staticmethod
+    def _call_get_raw(tmp_path, run_type):
+        """Call the real _get_raw_data_file_paths with a mock whose data_raw is tmp_path."""
         mock = MagicMock(spec=ModelPathManager)
         mock.data_raw = tmp_path
-        mock._get_raw_data_file_paths = ModelPathManager._get_raw_data_file_paths.__get__(mock)
+        return ModelPathManager._get_raw_data_file_paths(mock, run_type)
 
-        paths = mock._get_raw_data_file_paths("calibration")
+    def test_finds_viewser_df_file(self, tmp_path):
+        (tmp_path / "calibration_viewser_df.parquet").touch()
+
+        paths = self._call_get_raw(tmp_path, "calibration")
         assert len(paths) == 1
         assert paths[0].name == "calibration_viewser_df.parquet"
 
     def test_does_not_find_datafactory_df_file(self, tmp_path):
         """Currently, _datafactory_df files are invisible. PR 4 will fix this."""
-        from views_pipeline_core.data.model_path import ModelPathManager
+        (tmp_path / "calibration_datafactory_df.parquet").touch()
 
-        datafactory_file = tmp_path / "calibration_datafactory_df.parquet"
-        datafactory_file.touch()
-
-        mock = MagicMock(spec=ModelPathManager)
-        mock.data_raw = tmp_path
-        mock._get_raw_data_file_paths = ModelPathManager._get_raw_data_file_paths.__get__(mock)
-
-        paths = mock._get_raw_data_file_paths("calibration")
+        paths = self._call_get_raw(tmp_path, "calibration")
         assert len(paths) == 0
 
     def test_ignores_unrelated_files(self, tmp_path):
-        from views_pipeline_core.data.model_path import ModelPathManager
-
         (tmp_path / "calibration_viewser_df.parquet").touch()
         (tmp_path / "calibration_model_20260422.pt").touch()
         (tmp_path / "calibration_other_thing.parquet").touch()
 
-        mock = MagicMock(spec=ModelPathManager)
-        mock.data_raw = tmp_path
-        mock._get_raw_data_file_paths = ModelPathManager._get_raw_data_file_paths.__get__(mock)
-
-        paths = mock._get_raw_data_file_paths("calibration")
+        paths = self._call_get_raw(tmp_path, "calibration")
         assert len(paths) == 1
         assert paths[0].name == "calibration_viewser_df.parquet"
