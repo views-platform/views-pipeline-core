@@ -24,6 +24,7 @@ import argparse
 
 logger = logging.getLogger(__name__)
 
+_PRIOGRID_NCOL = 720
 
 # Ingester dependent imports. Breaks tests on github because no certs
 def _get_splag_country(*args, **kwargs):
@@ -1100,8 +1101,10 @@ class ViewsDataLoader:
             f"(with 'source': 'views-datafactory')."
         )
 
-    def _fetch_data_from_datafactory(self, self_test: bool) -> tuple[pd.DataFrame, list]:
-        """Fetch data from views-datafactory using the dict descriptor from get_queryset().
+    def _fetch_data_from_datafactory(
+        self, self_test: bool, descriptor: Optional[dict] = None,
+    ) -> tuple[pd.DataFrame, None]:
+        """Fetch data from views-datafactory using a dict descriptor.
 
         Counterpart to _fetch_data_from_viewser(). Lazy-imports datafactory_query,
         renames columns to VIEWSER conventions, derives row/col for priogrid models,
@@ -1110,6 +1113,7 @@ class ViewsDataLoader:
         Args:
             self_test: Whether drift detection self-testing was requested.
                 Logged as a warning since datafactory has no drift detection.
+            descriptor: Pre-fetched dict descriptor. If None, calls get_queryset().
 
         Returns:
             Tuple of (dataframe, None). Alerts are always None.
@@ -1118,7 +1122,8 @@ class ViewsDataLoader:
             RuntimeError: If descriptor is invalid or load_dataset() fails.
             ImportError: If datafactory_query is not installed.
         """
-        descriptor = self._model_path.get_queryset()
+        if descriptor is None:
+            descriptor = self._model_path.get_queryset()
 
         if descriptor is None or not isinstance(descriptor, dict):
             raise RuntimeError(
@@ -1164,14 +1169,13 @@ class ViewsDataLoader:
         if feature_rename:
             df = df.rename(columns=feature_rename)
 
-        NCOL = 720
         loa = descriptor.get("loa", "")
         if loa == "priogrid_month" and "priogrid_gid" in df.index.names:
             pgids = df.index.get_level_values("priogrid_gid")
             if "row" not in df.columns:
-                df["row"] = ((pgids - 1) // NCOL + 1).astype(float)
+                df["row"] = ((pgids - 1) // _PRIOGRID_NCOL + 1).astype(float)
             if "col" not in df.columns:
-                df["col"] = ((pgids - 1) % NCOL + 1).astype(float)
+                df["col"] = ((pgids - 1) % _PRIOGRID_NCOL + 1).astype(float)
 
         df = df.fillna(0.0)
         df = df.sort_index()
