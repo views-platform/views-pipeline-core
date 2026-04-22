@@ -414,6 +414,35 @@ class TestArtifactMethods:
         assert len(files) == 2
         assert all("calibration" in str(f) for f in files)
 
+    def test_get_artifact_files_excludes_sidecars(self, mock_project_root):
+        """Sidecar files (.pt.config.json, .pt.sha256) must not be treated as artifacts."""
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        for f in manager.artifacts.iterdir():
+            f.unlink()
+
+        (manager.artifacts / "calibration_model_20260421_213555.pt").touch()
+        (manager.artifacts / "calibration_model_20260421_213555.pt.config.json").write_text("{}")
+        (manager.artifacts / "calibration_model_20260421_213555.pt.sha256").write_text("abc123")
+
+        files = manager._get_artifact_files("calibration")
+        assert len(files) == 1
+        assert files[0].name == "calibration_model_20260421_213555.pt"
+
+    def test_get_latest_artifact_ignores_sidecars(self, mock_project_root):
+        """get_latest_model_artifact_path returns .pt, not .pt.config.json."""
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        for f in manager.artifacts.iterdir():
+            f.unlink()
+
+        (manager.artifacts / "calibration_model_20260421_213555.pt").touch()
+        (manager.artifacts / "calibration_model_20260421_213555.pt.config.json").write_text("{}")
+
+        latest = manager.get_latest_model_artifact_path("calibration")
+        assert latest.suffix == ".pt"
+        assert "config" not in latest.name
+
 
 # ============================================================================
 # Test Data File Methods
@@ -482,30 +511,29 @@ class TestInstanceManagement:
 # ============================================================================
 
 class TestEdgeCases:
-    def test_missing_optional_directory(self, mock_project_root, caplog):
-        """Test handling of missing optional directory"""
-        # Remove optional directory
+    def test_missing_directory_raises_with_validate(self, mock_project_root):
+        """With validate=True, a missing directory must fail loudly at construction."""
         notebooks = mock_project_root / "models" / "purple_alien" / "notebooks"
         shutil.rmtree(notebooks)
-        
-        manager = ModelPathManager("purple_alien", validate=True)
-        
-        # Should log warning but not fail - notebooks path exists but returns None
-        assert "does not exist" in caplog.text
-        # In the actual implementation, it sets the path even if it doesn't exist
-        # when validate=True, so we check it's the expected path
-        assert manager.notebooks == mock_project_root / "models" / "purple_alien" / "notebooks" or manager.notebooks is None
-        
-    def test_missing_script(self, mock_project_root):
-        """Test handling of missing script"""
-        # Remove optional script
+
+        with pytest.raises(FileNotFoundError, match="notebooks"):
+            ModelPathManager("purple_alien", validate=True)
+
+    def test_missing_directory_permitted_without_validate(self, mock_project_root):
+        """With validate=False, missing directories are tolerated."""
+        notebooks = mock_project_root / "models" / "purple_alien" / "notebooks"
+        shutil.rmtree(notebooks)
+
+        manager = ModelPathManager("purple_alien", validate=False)
+        assert manager.notebooks == mock_project_root / "models" / "purple_alien" / "notebooks"
+
+    def test_missing_script_raises_with_validate(self, mock_project_root):
+        """With validate=True, a missing script file must fail loudly at construction."""
         script = mock_project_root / "models" / "purple_alien" / "configs" / "config_sweep.py"
         script.unlink()
-        
-        manager = ModelPathManager("purple_alien", validate=True)
-        
-        # Should still initialize but script will be None or name-only
-        assert manager is not None
+
+        with pytest.raises(FileNotFoundError, match="config_sweep.py"):
+            ModelPathManager("purple_alien", validate=True)
         
     def test_process_model_name_from_string(self, mock_project_root):
         """Test processing model name from simple string"""

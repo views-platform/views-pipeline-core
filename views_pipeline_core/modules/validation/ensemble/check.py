@@ -175,7 +175,7 @@ def validate_ensemble_raw_data_alignment(model_names, run_type):
     Returns:
         True if all models have consistent raw data, False otherwise
     """
-    from views_pipeline_core.managers.model import ModelPathManager
+    from views_pipeline_core.data.model_path import ModelPathManager
     from views_pipeline_core.configs.pipeline import PipelineConfig
 
     if len(model_names) <= 1:
@@ -235,7 +235,8 @@ def validate_ensemble_model(config):
         - Prevents data leakage between train/test sets
         - Logs error with both partition configs on mismatch
     """
-    from views_pipeline_core.managers.model import ModelManager, ModelPathManager
+    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model import ModelManager
     from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
 
     ensemble_manager = EnsembleManager(EnsemblePathManager(config["name"]))
