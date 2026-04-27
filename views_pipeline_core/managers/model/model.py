@@ -194,6 +194,7 @@ class ModelManager:
         # ViewsDataLoader is constructed lazily via _initialize_data_loader(),
         # called after CoreConfigSniffer.sniff_all() guarantees configs are valid.
         self._data_loader = None
+        self._cached_data_path = None
 
         if use_prediction_store:
             from views_pipeline_core.configs.prediction_store import PredictionStoreConfig
@@ -896,6 +897,19 @@ class ForecastingModelManager(ModelManager):
             )
             self._data_loader = None
 
+    def _get_cached_data_path(self):
+        """Return the path to the cached raw DataFrame for the current partition.
+
+        Engine subclasses call this instead of hardcoding the filename convention.
+        """
+        path = getattr(self, "_cached_data_path", None)
+        if path is None:
+            raise RuntimeError(
+                "No cached data path available — _execute_data_fetching() "
+                "must run before engines access raw data."
+            )
+        return path
+
     def execute_single_run(self, args: ForecastingModelArgs) -> None:
         """
         Execute single pipeline run with given arguments.
@@ -1132,6 +1146,7 @@ class ForecastingModelManager(ModelManager):
                     override_month=self.args.override_timestep,
                     level=self.configs["level"],
                 )
+                self._cached_data_path = self._data_loader.cached_data_path
 
                 self._wandb_module.send_alert(
                     title=f"Queryset Fetch Complete ({str(self.args.run_type)})",

@@ -748,9 +748,14 @@ class ViewsDataLoader:
         self.override_month = None
         self.month_first, self.month_last = None, None
         self.steps = steps
+        self._cached_data_path = None
 
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+    @property
+    def cached_data_path(self) -> Optional[Path]:
+        return self._cached_data_path
 
     def _get_partition_dict(self, steps) -> Dict:
         """
@@ -1426,6 +1431,7 @@ class ViewsDataLoader:
         path_cached_df = Path(
             os.path.join(str(self._path_raw), f"{self.partition}_{cache_label}_df{PipelineConfig.dataframe_format}")
         )
+        self._cached_data_path = path_cached_df
         alerts = None
 
         if use_saved:
