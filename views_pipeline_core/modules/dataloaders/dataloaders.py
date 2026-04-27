@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import logging
 from pathlib import Path
@@ -18,7 +18,6 @@ import views_transformation_library.missing as missing
 from viewser import Queryset
 import traceback
 from dotenv import load_dotenv
-from typing import Tuple, List, Any
 import ast
 import argparse
 
@@ -748,9 +747,14 @@ class ViewsDataLoader:
         self.override_month = None
         self.month_first, self.month_last = None, None
         self.steps = steps
+        self._cached_data_path = None
 
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+    @property
+    def cached_data_path(self) -> Optional[Path]:
+        return self._cached_data_path
 
     def _get_partition_dict(self, steps) -> Dict:
         """
@@ -828,7 +832,6 @@ class ViewsDataLoader:
                 raise ValueError(
                     'partition should be either "calibration", "validation" or "forecasting"'
                 )
-        pass
 
     def _get_viewser_update_config(self, queryset_base: Queryset) -> tuple[int, str]:
         """
@@ -1426,6 +1429,7 @@ class ViewsDataLoader:
         path_cached_df = Path(
             os.path.join(str(self._path_raw), f"{self.partition}_{cache_label}_df{PipelineConfig.dataframe_format}")
         )
+        self._cached_data_path = path_cached_df
         alerts = None
 
         if use_saved:
