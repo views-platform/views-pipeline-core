@@ -58,6 +58,10 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
   Drift detection is not available for datafactory sources (C-52 accepted).
 - Guarantees that `month_first` and `month_last` are computed from the partition
   dict before any fetch occurs.
+- Guarantees that `cached_data_path` (read-only property) returns the `Path` to
+  the cache file constructed during `get_data()`, or `None` before `get_data()`
+  has been called. Engine repos use this via `ForecastingModelManager._get_cached_data_path()`
+  instead of hardcoding the filename convention.
 
 ---
 
@@ -94,7 +98,8 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
   - Creates a timestamped fetch log via `create_data_fetch_log_file()`.
   - Logs drift alerts as warnings (viewser path only).
   - Sets instance state: `self.partition`, `self.partition_dict`, `self.month_first`,
-    `self.month_last`, `self.drift_config_dict`, `self.override_month`.
+    `self.month_last`, `self.drift_config_dict`, `self.override_month`,
+    `self._cached_data_path` (exposed as `cached_data_path` property).
 
 ---
 

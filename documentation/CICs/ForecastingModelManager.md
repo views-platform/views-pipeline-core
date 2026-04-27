@@ -62,6 +62,10 @@ configuration to `ConfigurationManager`.
   exception types (`ModelTrainingException`, `ModelEvaluationException`,
   `ModelForecastingException`, `DataFetchException`) and propagated with
   WandB alerts.
+- Guarantees that `_get_cached_data_path()` returns the `Path` to the cached
+  raw DataFrame produced by the most recent `_execute_data_fetching()` call.
+  Raises `RuntimeError` if fetching has not yet occurred. Engine subclasses
+  call this instead of hardcoding the cache filename convention.
 
 ---
 

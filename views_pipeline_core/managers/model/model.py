@@ -902,7 +902,7 @@ class ForecastingModelManager(ModelManager):
 
         Engine subclasses call this instead of hardcoding the filename convention.
         """
-        path = getattr(self, "_cached_data_path", None)
+        path = self._cached_data_path
         if path is None:
             raise RuntimeError(
                 "No cached data path available — _execute_data_fetching() "
