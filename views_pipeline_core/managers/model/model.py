@@ -31,9 +31,6 @@ logger = logging.getLogger(__name__)
 # inverted dependencies).  Re-exported here for backward compatibility.
 from views_pipeline_core.data.model_path import ModelPathManager  # noqa: F401, E402
 
-# NOTE: ModelPathManager class (formerly ~850 LOC in this file) has been
-# relocated to views_pipeline_core/data/model_path.py per ADR-045 E6.
-# The import above re-exports it so all existing import paths work.
 
 # ============================================================ Model Manager ============================================================
 
