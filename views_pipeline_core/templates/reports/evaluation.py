@@ -41,8 +41,6 @@ class EvaluationReportTemplate:
         self.model_path = model_path
         self.run_type = run_type
         self.eval_types = ["time-series-wise"] # "step-wise", "month-wise"
-        self.cm_baseline_models = ["zero_cmbaseline", "locf_cmbaseline", "average_cmbaseline"]
-        self.pgm_baseline_models = ["zero_pgmbaseline", "locf_pgmbaseline", "average_pgmbaseline"]
         self.views_models_url = "https://github.com/views-platform/views-models"
 
     def generate(self, wandb_run: "wandb.apis.public.runs.Run", target: str) -> Path:
@@ -66,24 +64,19 @@ class EvaluationReportTemplate:
         """Generate an evaluation report based on the evaluation DataFrame."""
         evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
-        
-        # Combine all metrics from all key tiers for prioritization
-        all_available_metrics = list(set(
-            metadata_dict.get("regression_point_metrics", []) +
-            metadata_dict.get("regression_sample_metrics", []) +
-            metadata_dict.get("classification_point_metrics", []) +
-            metadata_dict.get("classification_sample_metrics", []) +
-            metadata_dict.get("regression_metrics", []) +
-            metadata_dict.get("classification_metrics", []) +
-            metadata_dict.get("metrics", [])
+
+        # Read metrics directly from the pipeline config (not from the WandB run config).
+        metrics = list(dict.fromkeys(
+            self.config.get("regression_point_metrics", []) +
+            self.config.get("regression_sample_metrics", []) +
+            self.config.get("classification_point_metrics", []) +
+            self.config.get("classification_sample_metrics", []) +
+            self.config.get("regression_metrics", []) +
+            self.config.get("classification_metrics", []) +
+            self.config.get("metrics", [])
         ))
-        
-        priority_metrics = ["MSLE", "MSE", "y_hat_bar", "AP", "AUC", "Brier", "accuracy", "f1"]
-        metrics = [m for m in priority_metrics if any(am.lower() == m.lower() for am in all_available_metrics)]
-        
-        # If no priority metrics found, use all available
         if not metrics:
-            metrics = all_available_metrics
+            logger.warning("No metrics found in config. Report metric tables will be empty.")
 
         report_manager = ReportModule()
         report_manager.add_heading(
@@ -173,14 +166,17 @@ class EvaluationReportTemplate:
             "models", []
         )  # will only be populated for ensemble runs
         # models.append(self.model_path.model_name)
-        if metadata_dict.get("level", None) == "cm":
-            models = list(set(models).union(self.cm_baseline_models))
-        elif metadata_dict.get("level", None) == "pgm":
-            models = list(set(models).union(self.pgm_baseline_models))
-        else:
-            logger.warning(
-                f"Unknown level '{metadata_dict.get('level', None)}'. No baseline models added."
-            )
+
+        # Collect baseline model names from all tier-specific keys in the pipeline config.
+        baseline_models = list(dict.fromkeys(
+            self.config.get("regression_point_baselines", []) +
+            self.config.get("regression_sample_baselines", []) +
+            self.config.get("classification_point_baselines", []) +
+            self.config.get("classification_sample_baselines", [])
+        ))
+        if not baseline_models:
+            logger.warning("No baseline models found in config. Baseline rows will be absent from the report.")
+        models = list(set(models).union(baseline_models))
         logger.info(f"Models to search for: {models}")
         verified_partition_dict = None
         verified_level = metadata_dict.get("level", None)
@@ -263,11 +259,21 @@ class EvaluationReportTemplate:
                         )
 
                 if full_metric_dataframe is not None and not full_metric_dataframe.empty:
-                    # Sort by metric name
-                    target_metric_to_sort = search_for_item_name(
-                        searchspace=full_metric_dataframe.columns.tolist(),
-                        keywords=["MSLE"] if "MSLE" in metrics else list(metrics)[0],
-                    )
+                    # Sort by MSLE (point), then CRPS (probabilistic), then first available metric.
+                    _cols = full_metric_dataframe.columns.tolist()
+                    _sort_candidates = ["MSLE", "CRPS"]
+                    target_metric_to_sort = None
+                    for _candidate in _sort_candidates:
+                        if _candidate in metrics:
+                            target_metric_to_sort = search_for_item_name(
+                                searchspace=_cols, keywords=[_candidate]
+                            )
+                        if target_metric_to_sort:
+                            break
+                    if not target_metric_to_sort and metrics:
+                        target_metric_to_sort = search_for_item_name(
+                            searchspace=_cols, keywords=[list(metrics)[0]]
+                        )
                     full_metric_dataframe = full_metric_dataframe.sort_values(
                         by=target_metric_to_sort, ascending=True
                     )
