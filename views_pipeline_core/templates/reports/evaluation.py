@@ -274,9 +274,10 @@ class EvaluationReportTemplate:
                         target_metric_to_sort = search_for_item_name(
                             searchspace=_cols, keywords=[list(metrics)[0]]
                         )
-                    full_metric_dataframe = full_metric_dataframe.sort_values(
-                        by=target_metric_to_sort, ascending=True
-                    )
+                    if target_metric_to_sort:
+                        full_metric_dataframe = full_metric_dataframe.sort_values(
+                            by=target_metric_to_sort, ascending=True
+                        )
                     report_manager.add_table(
                         data=full_metric_dataframe,
                         header=f"{eval_type.replace('-', ' ').title()}",
