@@ -204,7 +204,7 @@ class EvaluationReportTemplate:
                 partition_metadata_dict = {
                     k: v
                     for k, v in temp_metadata_dict.items()
-                    if k.lower() in {"calibration", "validation", "forecasting"}
+                    if k.lower() == self.run_type.lower()
                 }
                 if verified_level is None:
                     verified_level = temp_metadata_dict.get("level", None)
