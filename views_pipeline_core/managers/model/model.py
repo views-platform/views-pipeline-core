@@ -1317,6 +1317,7 @@ class ForecastingModelManager(ModelManager):
                                 self._save_predictions(
                                     table, self._model_path.data_generated, origin_idx,
                                     send_alert=False,
+                                    target_identifier=target,
                                 )
                                 del table
                             del pf
@@ -1626,8 +1627,9 @@ class ForecastingModelManager(ModelManager):
         self,
         df_predictions,
         path_generated: Union[str, Path],
-        sequence_number: int = None,
+        sequence_number: Optional[int] = None,
         send_alert: bool = True,
+        target_identifier: Optional[str] = None,
     ) -> None:
         """Delegate to PredictionIOManager. Signature preserved for EnsembleManager compat."""
         self._io.save_predictions(
@@ -1638,6 +1640,7 @@ class ForecastingModelManager(ModelManager):
             level=self.configs.get("level"),
             targets=self.configs.get("targets"),
             sequence_number=sequence_number,
+            target_identifier=target_identifier,
             send_alert=send_alert,
         )
 

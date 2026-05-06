@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, mock_open
-from views_pipeline_core.files.utils import read_log_file, create_data_fetch_log_file, create_specific_log_file, save_dataframe
+from views_pipeline_core.files.utils import read_log_file, create_data_fetch_log_file, create_specific_log_file, save_dataframe, generate_output_file_name
 import pandas as pd
 
 def test_read_log_file():
@@ -116,4 +116,45 @@ def test_save_dataframe_invalid_extension(tmp_path, sample_dataframe):
     save_path = tmp_path / "test.txt"
     with pytest.raises(ValueError, match="A valid file extension must be provided.E.g. .pkl or .parquet"):
         save_dataframe(sample_dataframe, save_path)
+
+
+class TestGenerateOutputFileNameTarget:
+    """Cycle 1 RED: target_identifier support in generate_output_file_name."""
+
+    def test_without_target_unchanged(self):
+        result = generate_output_file_name(
+            "predictions", "forecasting", "20260407", None, ".parquet",
+        )
+        assert result == "predictions_forecasting_20260407.parquet"
+
+    def test_without_target_with_seq_unchanged(self):
+        result = generate_output_file_name(
+            "predictions", "calibration", "20260407", 3, ".parquet",
+        )
+        assert result == "predictions_calibration_20260407_03.parquet"
+
+    def test_with_target_without_seq(self):
+        result = generate_output_file_name(
+            "predictions", "forecasting", "20260407", None, ".parquet",
+            target_identifier="ged_sb_best",
+        )
+        assert result == "predictions_forecasting_20260407_ged_sb_best.parquet"
+
+    def test_with_target_with_seq(self):
+        result = generate_output_file_name(
+            "predictions", "calibration", "20260407", 3, ".parquet",
+            target_identifier="ged_sb_best",
+        )
+        assert result == "predictions_calibration_20260407_ged_sb_best_03.parquet"
+
+    def test_two_targets_different_filenames(self):
+        name_a = generate_output_file_name(
+            "predictions", "forecasting", "20260407", None, ".parquet",
+            target_identifier="ged_sb_best",
+        )
+        name_b = generate_output_file_name(
+            "predictions", "forecasting", "20260407", None, ".parquet",
+            target_identifier="acled_sb_count",
+        )
+        assert name_a != name_b
 

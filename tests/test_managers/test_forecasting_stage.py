@@ -168,6 +168,27 @@ class TestPFPath:
         assert stage._io.save_predictions.call_count == 2
 
     @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    @patch(
+        "views_pipeline_core.managers.prediction.prediction_frame_converter"
+        ".PredictionFrameConverter"
+    )
+    def test_io_manager_receives_target_identifier_per_target(
+        self, mock_converter_cls, mock_log,
+    ):
+        """io_manager path must pass unique target_identifier per target."""
+        stage = _make_stage()
+        ctx = _make_context(prediction_format="prediction_frame")
+        mock_converter_cls.return_value.to_prediction_df.return_value = _make_pred_df()
+        predictions = {"ged_sb": MagicMock(), "acled_sb": MagicMock()}
+
+        stage.process_and_save_forecast(predictions, ctx)
+
+        calls = stage._io.save_predictions.call_args_list
+        target_ids = [call.kwargs.get("target_identifier") for call in calls]
+        assert None not in target_ids, "target_identifier must be passed"
+        assert len(set(target_ids)) == 2, f"target_identifiers not unique: {target_ids}"
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
     def test_pf_path_type_enforcement_rejects_non_dict(self, mock_log):
         """PF path: non-dict return must raise ValueError (ADR-042)."""
         stage = _make_stage()
@@ -244,6 +265,24 @@ class TestPFPathWithSavers:
         assert metadata.level == "cm"
         assert metadata.model_name == "test_model"
         assert metadata.run_type == "forecasting"
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    def test_savers_receive_unique_filenames_per_target(self, mock_log):
+        """Each target's metadata.filename must be unique — otherwise files overwrite."""
+        saver = MagicMock()
+        stage = ForecastingStage(
+            wandb_module=MagicMock(),
+            io_manager=MagicMock(),
+            wandb_notifications=False,
+            savers=[saver],
+        )
+        ctx = _make_context(prediction_format="prediction_frame")
+        predictions = {"ged_sb": MagicMock(), "acled_sb": MagicMock()}
+
+        stage.process_and_save_forecast(predictions, ctx)
+
+        filenames = [call.args[2].filename for call in saver.save.call_args_list]
+        assert len(set(filenames)) == 2, f"Filenames not unique: {filenames}"
 
     @patch("views_pipeline_core.files.utils.handle_single_log_creation")
     def test_io_manager_not_called_when_savers_present(self, mock_log):
