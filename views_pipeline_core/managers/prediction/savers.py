@@ -181,7 +181,7 @@ class ViewsForecastsSaver:
         metadata: PredictionMetadata,
     ) -> None:
         df = self._converter.to_prediction_df(
-            prediction, metadata.target, metadata.level,
+            prediction, metadata.target,
         )
         name = f"{self._model_name}_{Path(metadata.filename).stem}"
         df.forecasts.set_run(self._pred_store_name)

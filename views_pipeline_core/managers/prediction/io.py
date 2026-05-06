@@ -52,6 +52,7 @@ class PredictionIOManager:
         level: Optional[str] = None,
         targets: Optional[list] = None,
         sequence_number: Optional[int] = None,
+        target_identifier: Optional[str] = None,
         send_alert: bool = True,
     ) -> None:
         """Save predictions to disk and optionally to prediction store.
@@ -64,6 +65,9 @@ class PredictionIOManager:
             level: Spatial level ("pgm" or "cm") for prediction store metadata.
             targets: List of target column names for prediction store metadata.
             sequence_number: Sequence number for evaluation runs. None for forecasting.
+            target_identifier: Target name for multi-target models (e.g., "ged_sb_best").
+                When provided, included in the filename to prevent collisions
+                across targets. Required for any path that saves per-target.
             send_alert: Whether to send a WandB alert.
 
         Raises:
@@ -76,7 +80,7 @@ class PredictionIOManager:
             namer = PredictionFileNamer(
                 run_type, timestamp, PipelineConfig.dataframe_format,
             )
-            predictions_name = namer.prediction_name(sequence_number)
+            predictions_name = namer.prediction_name(sequence_number, target_identifier=target_identifier)
 
             if isinstance(df_predictions, pa.Table):
                 pq.write_table(df_predictions, path_generated / predictions_name)

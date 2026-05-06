@@ -25,11 +25,16 @@ class PredictionFileNamer:
         self._timestamp = timestamp
         self._file_extension = file_extension
 
-    def prediction_name(self, sequence_number: Optional[int] = None) -> str:
+    def prediction_name(
+        self,
+        sequence_number: Optional[int] = None,
+        target_identifier: Optional[str] = None,
+    ) -> str:
         """Generate a prediction output filename.
 
         Args:
             sequence_number: Rolling-origin sequence index. None for forecasting.
+            target_identifier: Target name for multi-target models.
 
         Returns:
             Filename like ``predictions_calibration_20260407_03.parquet``.
@@ -40,6 +45,7 @@ class PredictionFileNamer:
             self._timestamp,
             sequence_number,
             self._file_extension,
+            target_identifier=target_identifier,
         )
 
     def evaluation_name(
