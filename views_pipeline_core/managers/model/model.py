@@ -618,9 +618,34 @@ class ModelPathManager:
         Returns:
             Sorted list of raw data file paths (newest first)
         """
+        expected_stem = f"{run_type}_viewser_df"
         paths = [
             f
             for f in self.data_raw.iterdir()
+            if f.is_file()
+            and f.stem == expected_stem
+            and f.suffix == PipelineConfig().dataframe_format
+        ]
+        return sorted(paths, reverse=True)
+    
+    def _get_processed_data_file_paths(self, run_type: str) -> List[Path]:
+        """
+        Get processed data file paths for run type.
+
+        Retrieves processed dataframes for specified run type.
+
+        Internal Use:
+            Used by data loading methods.
+
+        Args:
+            run_type: Run type
+
+        Returns:
+            Sorted list of processed data file paths (newest first)
+        """
+        paths = [
+            f
+            for f in self.data_processed.iterdir()
             if f.is_file()
             and f.stem.startswith(f"{run_type}_viewser_df")
             and f.suffix == PipelineConfig().dataframe_format
