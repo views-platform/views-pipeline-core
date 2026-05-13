@@ -394,9 +394,7 @@ class EvaluationReportTemplate:
         report_manager.add_heading("Prediction Samples", level=2)
         report_manager.add_markdown(
             "Historical vs. predicted values for the **first**, **middle**, and "
-            "**last** rolling-origin sequences (dynamically selected from all "
-            f"{n} sequence{'s' if n != 1 else ''} on disk). "
-            "The dashed vertical line marks the forecast origin."
+            "**last** rolling-origin sequences"
         )
 
         pred_col = f"pred_{target_identifier}"
