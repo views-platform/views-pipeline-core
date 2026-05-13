@@ -289,3 +289,128 @@ class EvaluationReportTemplate:
         except Exception as e:
             logger.error(f"Error generating ensemble report: {e}", exc_info=True)
             raise
+
+        # Prediction sample graphs — non-fatal: a failure here does not
+        # invalidate the metrics tables already written above.
+        try:
+            self._add_prediction_sample_graphs(report_manager, target_identifier)
+        except Exception as e:
+            logger.warning(
+                f"Could not generate prediction sample graphs: {e}", exc_info=True
+            )
+
+    def _add_prediction_sample_graphs(
+        self,
+        report_manager: "ReportModule",
+        target_identifier: str,
+    ) -> None:
+        """Add historical vs. predicted line graphs for first, middle, and last
+        rolling-origin sequences of the most recent prediction run.
+
+        Sequence indices are computed dynamically from however many sequence
+        files exist on disk — no fixed numbers assumed.
+        """
+        import re
+        from views_pipeline_core.files.utils import read_dataframe
+        from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+        from views_pipeline_core.modules.visualizations import HistoricalLineGraph
+
+        # ── 1. Collect all sequenced prediction files ─────────────────
+        all_pred_paths = self.model_path._get_generated_predictions_data_file_paths(
+            self.run_type
+        )
+        if not all_pred_paths:
+            logger.warning("No prediction files found — skipping prediction sample graphs.")
+            return
+
+        # Filenames: predictions_{run_type}_{YYYYMMDD}_{seq:02d}.parquet
+        # Sequence files have a 2+-digit numeric suffix after the timestamp.
+        seq_pattern = re.compile(r"^predictions_[^_]+(?:_[^_]+)*_(\d{8})_(\d+)$")
+        seq_files: list[tuple[str, int, "Path"]] = []
+        for path in all_pred_paths:
+            m = seq_pattern.match(path.stem)
+            if m:
+                seq_files.append((m.group(1), int(m.group(2)), path))
+
+        if not seq_files:
+            logger.warning(
+                "No sequenced prediction files found — skipping prediction sample graphs."
+            )
+            return
+
+        # ── 2. Isolate the latest timestamp group ─────────────────────
+        latest_ts = max(ts for ts, _, _ in seq_files)
+        latest_files = sorted(
+            [(seq, p) for ts, seq, p in seq_files if ts == latest_ts],
+            key=lambda x: x[0],
+        )
+        n = len(latest_files)
+
+        # ── 3. Pick first, middle, last (deduplicated) ────────────────
+        indices = sorted({0, n // 2, n - 1})
+        selected = [latest_files[i] for i in indices]
+
+        # ── 4. Load historical data ────────────────────────────────────
+        raw_paths = self.model_path._get_raw_data_file_paths(self.run_type)
+        if not raw_paths:
+            logger.warning("No raw data files found — skipping prediction sample graphs.")
+            return
+        historical_df = read_dataframe(raw_paths[0])
+
+        if target_identifier not in historical_df.columns:
+            logger.warning(
+                f"Target '{target_identifier}' not found in historical data — "
+                "skipping prediction sample graphs."
+            )
+            return
+
+        # ── 5. Resolve dataset class from config level ────────────────
+        dataset_cls_map = {"cm": CMDataset, "pgm": PGMDataset}
+        level = self.config.get("level", "cm")
+        dataset_cls = dataset_cls_map.get(level)
+        if dataset_cls is None:
+            logger.warning(
+                f"Unknown level '{level}' for prediction sample graphs — skipping."
+            )
+            return
+
+        historical_dataset = dataset_cls(historical_df, targets=[target_identifier])
+
+        # ── 6. Render one graph per selected sequence ─────────────────
+        report_manager.add_heading("Prediction Samples", level=2)
+        report_manager.add_markdown(
+            "Historical vs. predicted values for the **first**, **middle**, and "
+            "**last** rolling-origin sequences (dynamically selected from all "
+            f"{n} sequence{'s' if n != 1 else ''} on disk). "
+            "The dashed vertical line marks the forecast origin."
+        )
+
+        pred_col = f"pred_{target_identifier}"
+        for seq_num, pred_path in selected:
+            try:
+                pred_df = read_dataframe(pred_path)
+                if pred_col not in pred_df.columns:
+                    logger.warning(
+                        f"Column '{pred_col}' not in {pred_path.name} — skipping sequence {seq_num}."
+                    )
+                    continue
+                forecast_dataset = dataset_cls(pred_df)
+                graph = HistoricalLineGraph(
+                    historical_dataset=historical_dataset,
+                    forecast_dataset=forecast_dataset,
+                )
+                report_manager.add_heading(f"Sequence {seq_num}", level=3)
+                report_manager.add_html(
+                    html=graph.plot_predictions_vs_historical(
+                        targets=[target_identifier],
+                        as_html=True,
+                        alpha=0.9,
+                    ),
+                    height=700,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Could not render graph for sequence {seq_num} "
+                    f"({pred_path.name}): {e}",
+                    exc_info=True,
+                )
