@@ -352,7 +352,20 @@ class EvaluationReportTemplate:
         selected = [latest_files[i] for i in indices]
 
         # ── 4. Load historical data ────────────────────────────────────
-        raw_paths = self.model_path._get_raw_data_file_paths(self.run_type)
+        # EnsemblePathManager has no data_raw; use the first constituent model instead.
+        if self.model_path.target == "ensemble":
+            from views_pipeline_core.data.model_path import ModelPathManager
+            constituent_models = self.config.get("models", [])
+            if not constituent_models:
+                logger.warning(
+                    "Ensemble config has no 'models' list — skipping prediction sample graphs."
+                )
+                return
+            data_path_manager = ModelPathManager(constituent_models[0])
+        else:
+            data_path_manager = self.model_path
+
+        raw_paths = data_path_manager._get_raw_data_file_paths(self.run_type)
         if not raw_paths:
             logger.warning("No raw data files found — skipping prediction sample graphs.")
             return
