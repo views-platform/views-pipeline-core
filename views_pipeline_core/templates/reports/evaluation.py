@@ -323,9 +323,10 @@ class EvaluationReportTemplate:
             logger.warning("No prediction files found — skipping prediction sample graphs.")
             return
 
-        # Filenames: predictions_{run_type}_{YYYYMMDD}_{seq:02d}.parquet
-        # Sequence files have a 2+-digit numeric suffix after the timestamp.
-        seq_pattern = re.compile(r"^predictions_[^_]+(?:_[^_]+)*_(\d{8})_(\d+)$")
+        # Filenames: predictions_{run_type}_{YYYYMMDD}_{HHMMSS}_{seq:02d}.parquet
+        # The timestamp is two underscore-separated parts (date + time).
+        # Sequence number is the final numeric segment.
+        seq_pattern = re.compile(r"^predictions_[^_]+_(\d{8}_\d{6})_(\d+)$")
         seq_files: list[tuple[str, int, "Path"]] = []
         for path in all_pred_paths:
             m = seq_pattern.match(path.stem)
