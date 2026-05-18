@@ -132,12 +132,13 @@ def test_B4_scalar_gate_with_nans(mock_deps):
     mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False, "steps": list(range(1, 37))}
     df_pred = pd.DataFrame({"pred_t1_sb": [np.nan, np.nan]}, index=pd.MultiIndex.from_tuples([(101,1), (101,2)], names=['m','e']))
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0,0]}, index=df_pred.index)):
-        mock_wandb.summary._as_dict.return_value = {}
-        
-        mock_eval_inst = mock_eval_cls.return_value
-        mock_eval_inst.evaluate.return_value = _make_mock_report()
-        
-        mgr._evaluate_prediction_dataframe(df_pred, "standard")
+        with patch('views_pipeline_core.modules.validation.adapter.EvaluationFrame'):
+            mock_wandb.summary._as_dict.return_value = {}
+            
+            mock_eval_inst = mock_eval_cls.return_value
+            mock_eval_inst.evaluate.return_value = _make_mock_report()
+            
+            mgr._evaluate_prediction_dataframe(df_pred, "standard")
 
 def test_G6_non_standard_target_names(mock_deps):
     """Verify that targets without conflict codes (sb/os/ns) are now accepted."""

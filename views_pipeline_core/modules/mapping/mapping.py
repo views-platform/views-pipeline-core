@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import uuid
 from views_pipeline_core.data.handlers import (
     _CDataset,
     _PGDataset,
@@ -472,9 +473,13 @@ class MappingModule:
         else:
             raise ValueError("Invalid dataset type. Must be a _PGDataset or _CDataset.")
 
+        # Log-scale z for color; original values stored in customdata for hover display
+        z_data_color = np.log1p(np.clip(z_data, 0, None)).astype(np.float32)
+
         # Prepare base customdata (fixed properties)
+        # customdata layout: [loc, *hover_cols, time, original_z]
         base_customdata = []
-        for loc in all_locations:
+        for loc_idx, loc in enumerate(all_locations):
             row_data = [loc]  # Add location ID as first element
             # Add all hover columns (excluding target)
             for attr in hover_columns:
@@ -483,30 +488,38 @@ class MappingModule:
                 else:
                     row_data.append(None)
             row_data.append(all_times[0])  # Add time
+            row_data.append(round(float(z_data[loc_idx, 0]), 2))  # original value for hover
             base_customdata.append(row_data)
 
-        # Create hovertemplate
+        # Create hovertemplate — show original (non-log) value via customdata
         hover_attrs = "<br>".join(
             [
                 f"<b>{attr}</b>: %{{customdata[{i+1}]}}"
                 for i, attr in enumerate(hover_columns)
             ]
         )
+        _orig_z_idx = len(hover_columns) + 2
         hovertemplate = (
             f"<b>{location_label}</b>: %{{customdata[0]}}<br>"
             + hover_attrs
-            + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+            + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{customdata[{_orig_z_idx}]}}<extra></extra>"
         )
 
-        # Calculate global color range
-        z_min, z_max = np.nanquantile(z_data, [0.5, 0.95])
+        # Calculate global color range on log-scaled data
+        z_min, z_max = np.nanquantile(z_data_color, [0.5, 0.95])
+
+        # Build colorbar ticks: original-scale labels at log-spaced positions
+        _orig_max = float(np.nanquantile(z_data, 0.999))
+        _tick_candidates = [0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000]
+        _tick_orig = [v for v in _tick_candidates if v <= _orig_max * 1.1] or [0, max(1, int(_orig_max))]
+        _tick_log = [float(np.log1p(v)) for v in _tick_orig]
 
         # Create figure with graph objects for better control
         fig = go.Figure(
             data=go.Choropleth(
                 geojson=self._base_geojson,
                 locations=all_locations,
-                z=z_data[:, 0],  # First time step
+                z=z_data_color[:, 0],  # First time step (log-scaled for color)
                 featureidkey=self._featureidkey,
                 customdata=base_customdata,
                 hovertemplate=hovertemplate,
@@ -518,9 +531,9 @@ class MappingModule:
         # Prepare frames with time-specific data
         frames = []
         for i, time in enumerate(all_times[1:], start=1):
-            # Prepare customdata for this frame
+            # Prepare customdata for this frame — same layout: [loc, *hover_cols, time, original_z]
             frame_customdata = []
-            for loc in all_locations:
+            for loc_idx, loc in enumerate(all_locations):
                 row_data = [loc]  # Add location ID as first element
                 # Add all hover columns
                 for attr in hover_columns:
@@ -529,6 +542,7 @@ class MappingModule:
                     else:
                         row_data.append(None)
                 row_data.append(time)  # Add time
+                row_data.append(round(float(z_data[loc_idx, i]), 2))  # original value for hover
                 frame_customdata.append(row_data)
 
             frame_hover_attrs = "<br>".join(
@@ -540,14 +554,14 @@ class MappingModule:
             frame_hovertemplate = (
                 f"<b>{location_label}</b>: %{{customdata[0]}}<br>"
                 + frame_hover_attrs
-                + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{z}}<extra></extra>"
+                + f"<br>{self._time_id}: %{{customdata[{len(hover_columns)+1}]}}<br>{target}: %{{customdata[{_orig_z_idx}]}}<extra></extra>"
             )
 
             frames.append(
                 go.Frame(
                     data=[
                         go.Choropleth(
-                            z=z_data[:, i],
+                            z=z_data_color[:, i],  # log-scaled for color
                             customdata=frame_customdata,
                             hovertemplate=frame_hovertemplate,
                         )
@@ -637,7 +651,15 @@ class MappingModule:
             height=900,
             autosize=True,
             margin={"r": 20, "t": 60, "l": 20, "b": 60},  # Increased padding
-            coloraxis=dict(colorscale="OrRd", cmin=z_min, cmax=z_max),
+            coloraxis=dict(
+                colorscale="OrRd",
+                cmin=z_min,
+                cmax=z_max,
+                colorbar=dict(
+                    tickvals=_tick_log,
+                    ticktext=[str(v) for v in _tick_orig],
+                ),
+            ),
             annotations=[
                 dict(
                     x=0.5,
@@ -664,7 +686,7 @@ class MappingModule:
         )
 
         # Free memory
-        del pivot_df, z_data, fixed_props, base_customdata
+        del pivot_df, z_data, z_data_color, fixed_props, base_customdata
         gc.collect()
 
         return fig
@@ -704,10 +726,16 @@ class MappingModule:
             - Edge color: #404040 (dark gray)
             - Alpha: 0.9 for slight transparency
         """
+        from matplotlib.colors import FuncNorm
+
         if target not in mapping_dataframe.columns:
             raise ValueError(f"Target column '{target}' not found")
         if mapping_dataframe[target].isnull().all():
             raise ValueError(f"No valid values for target '{target}'")
+
+        _vmin = max(float(mapping_dataframe[target].quantile(0.5)), 0.0)
+        _vmax = float(mapping_dataframe[target].quantile(0.95))
+        _log_norm = FuncNorm((np.log1p, np.expm1), vmin=_vmin, vmax=_vmax)
 
         fig, ax = plt.subplots(1, 1, figsize=(15, 10))
         mapping_dataframe.boundary.plot(ax=ax, linewidth=0.3, color="black")
@@ -717,8 +745,7 @@ class MappingModule:
             ax=ax,
             legend=True,
             cmap="OrRd",
-            vmin=mapping_dataframe[target].quantile(0.5),
-            vmax=mapping_dataframe[target].quantile(0.95),
+            norm=_log_norm,
             linewidth=0.1,
             edgecolor="#404040",
             alpha=0.9,
@@ -728,12 +755,11 @@ class MappingModule:
         plt.xlabel("Longitude", fontsize=12)
         plt.ylabel("Latitude", fontsize=12)
 
+        _vmin_full = max(float(self._mapping_dataframe[target].min()), 0.0)
+        _vmax_full = float(self._mapping_dataframe[target].max())
         sm = plt.cm.ScalarMappable(
             cmap="OrRd",
-            norm=plt.Normalize(
-                vmin=self._mapping_dataframe[target].min(),
-                vmax=self._mapping_dataframe[target].max(),
-            ),
+            norm=FuncNorm((np.log1p, np.expm1), vmin=_vmin_full, vmax=_vmax_full),
         )
         sm._A = []
 
@@ -818,7 +844,7 @@ class MappingModule:
                     full_html=True,
                     include_plotlyjs=True,  # Should work offline
                     default_height=900,
-                    div_id="map-container",
+                    div_id=f"map-container-{uuid.uuid4().hex}",
                 )
                 # Free memory after generating HTML
                 del fig
