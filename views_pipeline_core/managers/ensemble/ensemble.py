@@ -597,7 +597,19 @@ class EnsembleManager(ForecastingModelManager):
                     f"No prediction files found for {model_name} after generation",
                     wandb_module=self._wandb_module
                 )
-            latest_prediction_file = prediction_files[0]
+            # prediction_files is sorted newest-first; pick the file matching this
+            # specific sequence suffix to avoid loading _12 when _00 was requested.
+            if sequence_number is not None:
+                seq_suffix = f"_{str(sequence_number).zfill(2)}"
+                matching = [f for f in prediction_files if f.stem.endswith(seq_suffix)]
+                if not matching:
+                    raise PipelineException(
+                        f"No prediction file for sequence {sequence_number} found for {model_name} after generation",
+                        wandb_module=self._wandb_module
+                    )
+                latest_prediction_file = matching[0]
+            else:
+                latest_prediction_file = prediction_files[0]
             logger.info(f"Loading newly generated prediction from {latest_prediction_file}")
             return read_dataframe(latest_prediction_file)
 
