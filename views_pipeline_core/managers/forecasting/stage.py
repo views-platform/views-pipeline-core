@@ -128,7 +128,7 @@ class ForecastingStage:
                 level=context.configs["level"],
                 target=target,
                 run_type=context.run_type,
-                filename=namer.prediction_name(),
+                filename=namer.prediction_name(target_identifier=target),
             )
             for saver in self._savers:
                 saver.save(pf, context.model_path.data_generated, metadata)
@@ -150,6 +150,7 @@ class ForecastingStage:
                 timestamp=context.configs.get("timestamp", ""),
                 level=context.configs.get("level"),
                 targets=context.configs.get("targets"),
+                target_identifier=target,
                 send_alert=False,
             )
 

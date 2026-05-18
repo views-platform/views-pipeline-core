@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import logging
 from pathlib import Path
@@ -18,12 +18,18 @@ import views_transformation_library.missing as missing
 from viewser import Queryset
 import traceback
 from dotenv import load_dotenv
-from typing import Tuple, List, Any
 import ast
 import argparse
 
 logger = logging.getLogger(__name__)
 
+_PRIOGRID_NCOL = 720
+_DATAFACTORY_REQUIRED_KEYS = {"region", "features", "zarr_url", "loa"}
+
+_LOA_TO_OUTPUT_FORMAT = {
+    "priogrid_month": "dataframe",
+    "country_month": "country_month",
+}
 
 # Ingester dependent imports. Breaks tests on github because no certs
 def _get_splag_country(*args, **kwargs):
@@ -741,9 +747,14 @@ class ViewsDataLoader:
         self.override_month = None
         self.month_first, self.month_last = None, None
         self.steps = steps
+        self._cached_data_path = None
 
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+    @property
+    def cached_data_path(self) -> Optional[Path]:
+        return self._cached_data_path
 
     def _get_partition_dict(self, steps) -> Dict:
         """
@@ -821,7 +832,6 @@ class ViewsDataLoader:
                 raise ValueError(
                     'partition should be either "calibration", "validation" or "forecasting"'
                 )
-        pass
 
     def _get_viewser_update_config(self, queryset_base: Queryset) -> tuple[int, str]:
         """
@@ -1064,6 +1074,175 @@ class ViewsDataLoader:
         df = ensure_float64(df)
         return df, alerts
 
+    def _detect_data_source(self) -> str:
+        """Inspect get_queryset() return to determine the data source type.
+
+        Returns:
+            'viewser' or 'datafactory'
+
+        Raises:
+            RuntimeError: If get_queryset() returns None.
+            TypeError: If the return type is not recognized.
+        """
+        queryset = self._model_path.get_queryset()
+
+        if queryset is None:
+            raise RuntimeError(
+                f"Could not find queryset for {self._model_name}"
+            )
+
+        if isinstance(queryset, dict):
+            source = queryset.get("source")
+            if source == "views-datafactory":
+                return "datafactory"
+            raise TypeError(
+                f"Dict queryset for {self._model_name} has unrecognized "
+                f"source='{source}'. Expected 'views-datafactory'."
+            )
+
+        if hasattr(queryset, "publish"):
+            return "viewser"
+
+        raise TypeError(
+            f"Unrecognized queryset type for {self._model_name}: "
+            f"{type(queryset).__name__}. Expected viewser Queryset "
+            f"(with .publish() method) or datafactory dict descriptor "
+            f"(with 'source': 'views-datafactory')."
+        )
+
+    def _fetch_data_from_datafactory(
+        self, self_test: bool, descriptor: Optional[dict] = None,
+    ) -> tuple[pd.DataFrame, None]:
+        """Fetch data from views-datafactory using a dict descriptor.
+
+        Counterpart to _fetch_data_from_viewser(). Lazy-imports datafactory_query,
+        renames columns to VIEWSER conventions, derives row/col for priogrid models,
+        fills NaN, and casts to float64. Does NOT support drift detection (C-52).
+
+        Args:
+            self_test: Whether drift detection self-testing was requested.
+                Logged as a warning since datafactory has no drift detection.
+            descriptor: Pre-fetched dict descriptor. If None, calls get_queryset().
+
+        Returns:
+            Tuple of (dataframe, None). Alerts are always None.
+
+        Raises:
+            RuntimeError: If descriptor is invalid or load_dataset() fails.
+            ImportError: If datafactory_query is not installed.
+        """
+        if descriptor is None:
+            descriptor = self._model_path.get_queryset()
+
+        if descriptor is None or not isinstance(descriptor, dict):
+            raise RuntimeError(
+                f"Expected dict descriptor for datafactory model {self._model_name}, "
+                f"got {type(descriptor).__name__}"
+            )
+
+        missing = _DATAFACTORY_REQUIRED_KEYS - descriptor.keys()
+        if missing:
+            raise RuntimeError(
+                f"Datafactory descriptor for {self._model_name} is missing "
+                f"required keys: {sorted(missing)}"
+            )
+
+        loa = descriptor["loa"]
+        if loa not in _LOA_TO_OUTPUT_FORMAT:
+            raise RuntimeError(
+                f"Unsupported loa '{loa}' in datafactory descriptor for "
+                f"{self._model_name}. Supported: {list(_LOA_TO_OUTPUT_FORMAT)}"
+            )
+        output_format = _LOA_TO_OUTPUT_FORMAT[loa]
+
+        logger.info(
+            f"Beginning data fetch from views-datafactory for {self._model_name} "
+            f"(zarr_url={descriptor.get('zarr_url', '?')}, "
+            f"region={descriptor.get('region', '?')}, "
+            f"loa={loa}, output_format={output_format}, "
+            f"months={self.month_first}-{self.month_last})"
+        )
+
+        try:
+            from datafactory_query import load_dataset
+        except ImportError as e:
+            raise ImportError(
+                f"datafactory_query is required for model {self._model_name} "
+                f"(source='views-datafactory') but is not installed. "
+                f"Install via: pip install 'views-datafactory @ "
+                f"git+https://github.com/views-platform/views-datafactory.git@development'"
+            ) from e
+
+        try:
+            df = load_dataset(
+                region=descriptor["region"],
+                start=self.month_first,
+                end=self.month_last,
+                features=list(descriptor["features"].keys()),
+                output_format=output_format,
+                data_dir=descriptor["zarr_url"],
+            )
+        except Exception as e:
+            logger.error(
+                f"Error fetching data from datafactory: {e}", exc_info=True
+            )
+            raise RuntimeError(
+                f"Error fetching data from datafactory for {self._model_name}: {e}"
+            ) from e
+
+        feature_rename = descriptor.get("features", {})
+        if feature_rename:
+            df = df.rename(columns=feature_rename)
+
+        if loa == "priogrid_month" and "priogrid_gid" in df.index.names:
+            pgids = df.index.get_level_values("priogrid_gid")
+            if "row" not in df.columns:
+                df["row"] = ((pgids - 1) // _PRIOGRID_NCOL + 1).astype(float)
+            if "col" not in df.columns:
+                df["col"] = ((pgids - 1) % _PRIOGRID_NCOL + 1).astype(float)
+
+        df = df.fillna(0.0)
+        df = df.sort_index()
+        df = ensure_float64(df)
+
+        if self_test:
+            logger.warning(
+                f"Drift detection self-test requested for {self._model_name} "
+                f"but is not available for views-datafactory sources. "
+                f"Returning alerts=None. See risk register C-52."
+            )
+
+        logger.info(
+            f"Datafactory fetch complete for {self._model_name}: "
+            f"{len(df)} rows, {len(df.columns)} columns"
+        )
+
+        return df, None
+
+    def _fetch_data(self, self_test: bool, source: str) -> tuple[pd.DataFrame, list | None]:
+        """Dispatch to the correct fetch strategy based on detected source.
+
+        Args:
+            self_test: Whether to perform drift detection self-testing.
+            source: Data source identifier ('viewser' or 'datafactory')
+                as returned by _detect_data_source().
+
+        Returns:
+            Tuple of (dataframe, alerts_or_None).
+
+        Raises:
+            ValueError: If source is not recognized.
+        """
+        if source == "viewser":
+            return self._fetch_data_from_viewser(self_test)
+        elif source == "datafactory":
+            return self._fetch_data_from_datafactory(self_test)
+        else:
+            raise ValueError(
+                f"Unknown data source '{source}' for model {self._model_name}. "
+                f"Expected 'viewser' or 'datafactory'."
+            )
+
     def _get_month_range(self) -> tuple[int, int]:
         """
         Determine month range based on partition type.
@@ -1245,38 +1424,41 @@ class ViewsDataLoader:
         if self.month_first is None or self.month_last is None:
             self.month_first, self.month_last = self._get_month_range()
 
-        path_viewser_df = Path(
-            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{PipelineConfig.dataframe_format}")
-        )  
+        source = self._detect_data_source()
+        cache_label = "viewser" if source == "viewser" else "datafactory"
+        path_cached_df = Path(
+            os.path.join(str(self._path_raw), f"{self.partition}_{cache_label}_df{PipelineConfig.dataframe_format}")
+        )
+        self._cached_data_path = path_cached_df
         alerts = None
 
         if use_saved:
-            if path_viewser_df.exists():
+            if path_cached_df.exists():
                 try:
-                    df = read_dataframe(path_viewser_df)
-                    logger.info(f"Reading saved data from {path_viewser_df}")
+                    df = read_dataframe(path_cached_df)
+                    logger.info(f"Reading saved data from {path_cached_df}")
                 except Exception as e:
                     raise RuntimeError(
-                        f"Use of saved data was specified but getting {path_viewser_df} failed with: {e}"
+                        f"Use of saved data was specified but getting {path_cached_df} failed with: {e}"
                     )
             else:
-                logger.info(f"Saved data not found at {path_viewser_df}, fetching from viewser...")
-                df, alerts = self._fetch_data_from_viewser(self_test)
+                logger.info(f"Saved data not found at {path_cached_df}, fetching from {source}...")
+                df, alerts = self._fetch_data(self_test, source)
                 data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 create_data_fetch_log_file(
                     self._path_raw, self.partition, self._model_name, data_fetch_timestamp
                 )
-                logger.info(f"Saving data to {path_viewser_df}")
-                save_dataframe(df, path_viewser_df)
+                logger.info(f"Saving data to {path_cached_df}")
+                save_dataframe(df, path_cached_df)
         else:
-            logger.info("Fetching data from viewser...")
-            df, alerts = self._fetch_data_from_viewser(self_test) 
+            logger.info(f"Fetching data from {source}...")
+            df, alerts = self._fetch_data(self_test, source)
             data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             create_data_fetch_log_file(
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
-            logger.info(f"Saving data to {path_viewser_df}")
-            save_dataframe(df, path_viewser_df)
+            logger.info(f"Saving data to {path_cached_df}")
+            save_dataframe(df, path_cached_df)
             
         if validate:
             CoreDataSniffer(

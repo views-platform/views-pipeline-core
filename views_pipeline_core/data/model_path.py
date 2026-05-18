@@ -564,6 +564,7 @@ class ModelPathManager:
             if f.is_file()
             and f.stem.startswith(f"{run_type}_model_")
             and f.suffix in common_extensions
+            and len(f.suffixes) == 1
         ]
         return artifact_files
 
@@ -586,7 +587,8 @@ class ModelPathManager:
             f
             for f in self.data_raw.iterdir()
             if f.is_file()
-            and f.stem.startswith(f"{run_type}_viewser_df")
+            and (f.stem.startswith(f"{run_type}_viewser_df")
+                 or f.stem.startswith(f"{run_type}_datafactory_df"))
             and f.suffix == PipelineConfig.dataframe_format
         ]
         return sorted(paths, reverse=True)
@@ -748,15 +750,24 @@ class ModelPathManager:
             directory: Relative directory path
 
         Returns:
-            Absolute directory path, or None if doesn't exist (validate=True)
+            Absolute path under `self.model_dir`.
+
+        Raises:
+            FileNotFoundError: If the path does not exist and `validate=True`.
+                Fail-loud behavior prevents `None` values from being assigned
+                to path attributes and crashing later with a cryptic
+                ``TypeError: unsupported operand type(s) for /: 'NoneType' and 'str'``
+                deep in downstream managers. Set `validate=False` to disable.
         """
         directory = self.model_dir / directory
-        if self._validate:
-            if not self._check_if_dir_exists(directory=directory):
-                logger.warning(f"Directory {directory} does not exist. Continuing...")
-                if directory.name.endswith(".py"):
-                    return directory.name
-                return None
+        if self._validate and not self._check_if_dir_exists(directory=directory):
+            error = (
+                f"Expected model path {directory} does not exist. "
+                f"Create it (e.g. via `make_new_model.py`) or construct "
+                f"ModelPathManager with `validate=False`."
+            )
+            logger.error(error)
+            raise FileNotFoundError(error)
         return directory
 
     def view_directories(self) -> None:

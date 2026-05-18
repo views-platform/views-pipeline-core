@@ -414,7 +414,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_success(
@@ -450,7 +450,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_conditions_fail(
@@ -482,7 +482,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_deployment_fail(
@@ -514,7 +514,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_partition_fail(
@@ -553,7 +553,7 @@ class TestValidateEnsembleRawDataAlignment:
     def test_single_model_passes(self):
         """Single model has nothing to compare against — should pass."""
         with patch(
-            "views_pipeline_core.managers.model.ModelPathManager"
+            "views_pipeline_core.data.model_path.ModelPathManager"
         ) as MockMPM:
             mock_path = Mock()
             mock_path.data_raw = Path("/project/models/model_a/data/raw")
@@ -561,23 +561,29 @@ class TestValidateEnsembleRawDataAlignment:
 
             assert validate_ensemble_raw_data_alignment(["model_a"], "calibration") is True
 
-    def test_models_with_different_file_sizes_warn(self):
+    def test_models_with_different_file_sizes_warn(self, tmp_path):
         """Models with different raw data file sizes should return False."""
+        dir_a = tmp_path / "model_a"
+        dir_a.mkdir()
+        file_a = dir_a / "calibration_viewser_df.parquet"
+        file_a.write_bytes(b"x" * 1000)
+
+        dir_b = tmp_path / "model_b"
+        dir_b.mkdir()
+        file_b = dir_b / "calibration_viewser_df.parquet"
+        file_b.write_bytes(b"x" * 2000)
+
         with patch(
-            "views_pipeline_core.managers.model.ModelPathManager"
+            "views_pipeline_core.data.model_path.ModelPathManager"
         ) as MockMPM:
             mock_a = Mock()
-            mock_a.data_raw = Path("/tmp/test_a/data/raw")
+            mock_a._get_raw_data_file_paths.return_value = [file_a]
             mock_b = Mock()
-            mock_b.data_raw = Path("/tmp/test_b/data/raw")
+            mock_b._get_raw_data_file_paths.return_value = [file_b]
             MockMPM.side_effect = [mock_a, mock_b]
 
-            with patch("pathlib.Path.exists", return_value=True):
-                with patch("pathlib.Path.stat") as mock_stat:
-                    # Different sizes = different data
-                    mock_stat.side_effect = [Mock(st_size=1000), Mock(st_size=2000)]
-                    result = validate_ensemble_raw_data_alignment(
-                        ["model_a", "model_b"], "calibration"
-                    )
+            result = validate_ensemble_raw_data_alignment(
+                ["model_a", "model_b"], "calibration"
+            )
 
-            assert result is False
+        assert result is False

@@ -61,7 +61,18 @@ Layer 7: Templates and Package Management
 - `data/handlers.py` (Layer 1) imports `modules/statistics/PosteriorDistributionAnalyzer` (Layer 3) for MAP computation. This is a topology violation.
 - `configs/pipeline.py` (Layer 1) lazily imports `managers/package/PackageManager` (Layer 7) for version fetching. This uses lazy import to avoid circular dependency but violates the spirit of the rule.
 - `ForecastingModelManager` (Layer 6) directly calls sniffer methods (Layer 2) — this is acceptable as orchestrators coordinate all layers.
-- `modules/dataloaders/dataloaders.py` (Layer 3) imports `ModelPathManager` from `managers.model` (Layer 6) via backward-compat re-export. ADR-045 E6 relocated `ModelPathManager` to `data/model_path.py` (Layer 1); the import path in dataloaders should be updated to use the canonical location. See risk register C-43.
+- `modules/validation/ensemble/check.py::validate_ensemble_model` (Layer 2/5) imports `ModelManager` from `managers.model` (Layer 6) and `EnsembleManager`, `EnsemblePathManager` from `managers.ensemble` (Layer 6) to run partition-alignment validation. This is a real L2/L5 → L6 short-cut. It is enforced via a *granular* exemption in `tests/test_boundary_enforcement.py` (only the three named symbols are allowed; any additional manager import still fails the test). Correct fix is moving the function into `managers/ensemble/` with a deprecation shim — tracked as risk C-50 and deferred to a dedicated PR.
+
+### Enforced Boundaries
+
+The layer rules above are enforced by `tests/test_boundary_enforcement.py`, which runs as part of the standard pytest suite in CI (`.github/workflows/run_pytest.yml`). The test uses AST parsing to detect forbidden inter-layer imports and scans:
+
+- `data/` must not import from `managers/` or `modules/` (except `modules.statistics` / `modules.visualizations` for the handlers.py deviation above).
+- `configs/` must not import from `managers/` (except `managers.package` for the pipeline.py deviation above).
+- `files/` must not import from `managers/`.
+- `modules/` must not import from `managers/` (except the granular `check.py` exemption above).
+
+New inter-layer imports beyond this set will fail CI automatically.
 
 ## Rationale
 

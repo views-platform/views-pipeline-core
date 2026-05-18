@@ -31,9 +31,6 @@ logger = logging.getLogger(__name__)
 # inverted dependencies).  Re-exported here for backward compatibility.
 from views_pipeline_core.data.model_path import ModelPathManager  # noqa: F401, E402
 
-# NOTE: ModelPathManager class (formerly ~850 LOC in this file) has been
-# relocated to views_pipeline_core/data/model_path.py per ADR-045 E6.
-# The import above re-exports it so all existing import paths work.
 
 # ============================================================ Model Manager ============================================================
 
@@ -194,6 +191,7 @@ class ModelManager:
         # ViewsDataLoader is constructed lazily via _initialize_data_loader(),
         # called after CoreConfigSniffer.sniff_all() guarantees configs are valid.
         self._data_loader = None
+        self._cached_data_path = None
 
         if use_prediction_store:
             from views_pipeline_core.configs.prediction_store import PredictionStoreConfig
@@ -896,6 +894,19 @@ class ForecastingModelManager(ModelManager):
             )
             self._data_loader = None
 
+    def _get_cached_data_path(self):
+        """Return the path to the cached raw DataFrame for the current partition.
+
+        Engine subclasses call this instead of hardcoding the filename convention.
+        """
+        path = self._cached_data_path
+        if path is None:
+            raise RuntimeError(
+                "No cached data path available — _execute_data_fetching() "
+                "must run before engines access raw data."
+            )
+        return path
+
     def execute_single_run(self, args: ForecastingModelArgs) -> None:
         """
         Execute single pipeline run with given arguments.
@@ -1132,6 +1143,7 @@ class ForecastingModelManager(ModelManager):
                     override_month=self.args.override_timestep,
                     level=self.configs["level"],
                 )
+                self._cached_data_path = self._data_loader.cached_data_path
 
                 self._wandb_module.send_alert(
                     title=f"Queryset Fetch Complete ({str(self.args.run_type)})",
@@ -1305,6 +1317,7 @@ class ForecastingModelManager(ModelManager):
                                 self._save_predictions(
                                     table, self._model_path.data_generated, origin_idx,
                                     send_alert=False,
+                                    target_identifier=target,
                                 )
                                 del table
                             del pf
@@ -1614,8 +1627,9 @@ class ForecastingModelManager(ModelManager):
         self,
         df_predictions,
         path_generated: Union[str, Path],
-        sequence_number: int = None,
+        sequence_number: Optional[int] = None,
         send_alert: bool = True,
+        target_identifier: Optional[str] = None,
     ) -> None:
         """Delegate to PredictionIOManager. Signature preserved for EnsembleManager compat."""
         self._io.save_predictions(
@@ -1626,6 +1640,7 @@ class ForecastingModelManager(ModelManager):
             level=self.configs.get("level"),
             targets=self.configs.get("targets"),
             sequence_number=sequence_number,
+            target_identifier=target_identifier,
             send_alert=send_alert,
         )
 

@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ def create_log_file(path_generated,
     create_specific_log_file(path_generated, run_type, model_name, deployment_status,
                     model_timestamp, data_generation_timestamp, data_fetch_timestamp, model_type)
     if models:
-        from views_pipeline_core.managers.model import ModelPathManager
+        from views_pipeline_core.data.model_path import ModelPathManager
         for m_name in models:
             model_path = ModelPathManager(m_name)
             model_path_generated = model_path.data_generated
@@ -155,9 +155,19 @@ def handle_single_log_creation(model_path, config: dict, train: bool) -> None:
         None
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    data_fetch_timestamp = read_log_file(
-        model_path.data_raw / f"{config['run_type']}_data_fetch_log.txt"
-    ).get("Data Fetch Timestamp", None)
+    fetch_log_path = model_path.data_raw / f"{config['run_type']}_data_fetch_log.txt"
+    if fetch_log_path.exists():
+        data_fetch_timestamp = read_log_file(fetch_log_path).get(
+            "Data Fetch Timestamp", None
+        )
+    else:
+        data_fetch_timestamp = None
+        logger.warning(
+            "Data fetch log not found at %s — data may have been loaded from "
+            "cache or fetched via a non-viewser source. Proceeding without "
+            "data fetch timestamp.",
+            fetch_log_path,
+        )
 
     create_log_file(
         path_generated=model_path.data_generated,
@@ -304,26 +314,30 @@ def generate_output_file_name(
     generated_file_type: str,
     run_type: str,
     timestamp: str,
-    sequence_number: int,
+    sequence_number: Optional[int],
     file_extension: str,
+    target_identifier: Optional[str] = None,
 ) -> str:
     """
     Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
 
     Args:
         generated_file_type (str): The type of generated file (e.g., predictions, output).
-        sequence_number (int): The sequence number.
         run_type (str): The type of run (e.g., calibration, validation).
         timestamp (str): The timestamp of the generated file.
+        sequence_number (int, optional): The sequence number. None for forecasting.
         file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
+        target_identifier (str, optional): Target name for multi-target models (e.g., 'ged_sb_best').
 
     Returns:
         str: The generated prediction file name.
     """
+    parts = [generated_file_type, run_type, timestamp]
+    if target_identifier is not None:
+        parts.append(target_identifier)
     if sequence_number is not None:
-        return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}{file_extension}"
-    else:
-        return f"{generated_file_type}_{run_type}_{timestamp}{file_extension}"
+        parts.append(str(sequence_number).zfill(2))
+    return "_".join(parts) + file_extension
     
 
 def generate_evaluation_file_name(

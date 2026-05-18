@@ -4,7 +4,7 @@ import logging.config
 import yaml
 import importlib.resources
 import os
-from views_pipeline_core.managers.model import ModelPathManager
+from views_pipeline_core.data.model_path import ModelPathManager
 
 
 class LoggingModule:

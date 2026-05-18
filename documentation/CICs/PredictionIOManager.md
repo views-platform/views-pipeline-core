@@ -34,7 +34,7 @@ The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHE
 
 - **`save_predictions(df_predictions, path_generated, run_type, timestamp, ...)`**:
   - Creates the output directory if it does not exist (`mkdir(parents=True, exist_ok=True)`).
-  - Generates a filename via `PredictionFileNamer` using the run type, timestamp, optional sequence number, and `PipelineConfig.dataframe_format`.
+  - Generates a filename via `PredictionFileNamer` using the run type, timestamp, optional sequence number, optional `target_identifier`, and `PipelineConfig.dataframe_format`. When `target_identifier` is provided, it is included in the filename to prevent collisions across targets in multi-target models (ADR-013 amendment 2026-05-06).
   - Dispatches to `pyarrow.parquet.write_table` for `pa.Table` inputs or `save_dataframe` for `pd.DataFrame` inputs.
   - Optionally uploads to the prediction store (if `use_prediction_store=True`).
   - Sends a WandB alert on success (unless `send_alert=False`).
@@ -71,6 +71,7 @@ The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHE
   - `timestamp`: String for filename generation.
   - `level`, `targets`: Optional metadata for prediction store uploads.
   - `sequence_number`: Optional int for evaluation sequence numbering. `None` for forecasting runs.
+  - `target_identifier`: Optional target name for multi-target models (e.g., `"ged_sb_best"`). When provided, included in filename to prevent collisions. Required for any path that saves per-target.
   - `send_alert`: Whether to fire a WandB alert (default `True`).
 
 - Assumes `PipelineConfig.dataframe_format` is set (provides file extension).

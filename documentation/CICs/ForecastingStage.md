@@ -41,10 +41,15 @@ implementation for the forecasting path.
   is called before persistence, validating MultiIndex structure and prediction columns.
 - Guarantees that on the PF path with savers (Phase 6 Task 5), each target's
   `PredictionFrame` is passed directly to every saver in the composed chain via
-  `_save_via_savers()`. No DataFrame conversion occurs for local persistence.
+  `_save_via_savers()`. Each target's `PredictionMetadata.filename` includes the
+  target name via `target_identifier`, producing a unique filename per target to
+  prevent file collisions in multi-target models (ADR-013 amendment 2026-05-06).
+  No DataFrame conversion occurs for local persistence.
 - Guarantees that on the PF path without savers (legacy fallback),
   `PredictionFrameConverter.to_prediction_df()` and `audit_prediction_structure()`
   are called for each target before persistence via `_save_via_io_manager()`.
+  Each call to `save_predictions()` passes `target_identifier` to produce a
+  unique filename per target.
 - Guarantees that on the DF path, predictions are saved via
   `PredictionIOManager.save_predictions()` with `run_type`, `timestamp`, `level`,
   and `targets` metadata.

@@ -257,6 +257,28 @@ class TestAppwriteSaver:
 # ── ViewsForecastsSaver ────────────────────────────────────────────────────
 
 
+class TestViewsForecastsSaverArgCount:
+    def test_to_prediction_df_called_with_two_args(
+        self, tmp_path, sample_pf, sample_metadata,
+    ):
+        """to_prediction_df accepts (pf, target) — not (pf, target, level)."""
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
+        )
+        real_converter = PredictionFrameConverter()
+        spy_converter = MagicMock(wraps=real_converter)
+        mock_df = MagicMock()
+        spy_converter.to_prediction_df.return_value = mock_df
+
+        saver = ViewsForecastsSaver("v010200", "test_model", converter=spy_converter)
+        saver.save(sample_pf, tmp_path, sample_metadata)
+
+        call_args = spy_converter.to_prediction_df.call_args
+        assert len(call_args.args) == 2, (
+            f"to_prediction_df called with {len(call_args.args)} args, expected 2"
+        )
+
+
 class TestViewsForecastsSaver:
     def test_is_prediction_saver(self):
         """Protocol conformance."""
@@ -275,7 +297,7 @@ class TestViewsForecastsSaver:
         saver.save(sample_pf, tmp_path, sample_metadata)
 
         mock_converter.to_prediction_df.assert_called_once_with(
-            sample_pf, "ged_sb", "pgm",
+            sample_pf, "ged_sb",
         )
         mock_df.forecasts.set_run.assert_called_once_with("v010200_2026_03")
         mock_df.forecasts.to_store.assert_called_once()

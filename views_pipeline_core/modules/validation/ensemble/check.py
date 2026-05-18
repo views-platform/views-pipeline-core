@@ -175,20 +175,19 @@ def validate_ensemble_raw_data_alignment(model_names, run_type):
     Returns:
         True if all models have consistent raw data, False otherwise
     """
-    from views_pipeline_core.managers.model import ModelPathManager
-    from views_pipeline_core.configs.pipeline import PipelineConfig
+    from views_pipeline_core.data.model_path import ModelPathManager
 
     if len(model_names) <= 1:
         return True
 
-    filename = f"{run_type}_viewser_df{PipelineConfig.dataframe_format}"
     sizes = {}
     for name in model_names:
-        path = ModelPathManager(name).data_raw / filename
-        if not path.exists():
-            logger.warning(f"Raw data file missing for model {name}: {path}")
+        mp = ModelPathManager(name)
+        raw_paths = mp._get_raw_data_file_paths(run_type)
+        if not raw_paths:
+            logger.warning("Raw data file missing for model %s", name)
             continue
-        sizes[name] = path.stat().st_size
+        sizes[name] = raw_paths[0].stat().st_size
 
     if not sizes:
         return True
@@ -196,9 +195,11 @@ def validate_ensemble_raw_data_alignment(model_names, run_type):
     unique_sizes = set(sizes.values())
     if len(unique_sizes) > 1:
         logger.warning(
-            f"Ensemble raw data inconsistency: models have different file sizes "
-            f"for {filename}. This may indicate different querysets. "
-            f"Sizes: {sizes}"
+            "Ensemble raw data inconsistency: models have different file sizes "
+            "for run_type=%s. This may indicate different querysets. "
+            "Sizes: %s",
+            run_type,
+            sizes,
         )
         return False
 
@@ -235,7 +236,8 @@ def validate_ensemble_model(config):
         - Prevents data leakage between train/test sets
         - Logs error with both partition configs on mismatch
     """
-    from views_pipeline_core.managers.model import ModelManager, ModelPathManager
+    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model import ModelManager
     from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
 
     ensemble_manager = EnsembleManager(EnsemblePathManager(config["name"]))

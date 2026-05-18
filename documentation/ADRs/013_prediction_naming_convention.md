@@ -70,8 +70,27 @@ The decision to use this naming convention ensures that:
 - **Timestamp Format**: Using `YYYYMMDD_HHMMSS` aligns with standard formats but could introduce issues in systems operating across different time zones.
 - **Model timestamp vs. Prediction timestamp**: The timestamp is the model training time, not prediction generation time. This was decided and implemented.
 
-### Implementation Notes (2026-04-08)
+### Multi-target models (amendment 2026-05-06)
+
+When a model produces predictions for multiple targets, the filename must include the
+target identifier to prevent file collisions:
+
+**Calibration / Validation:**
+```
+predictions_<run_type>_<timestamp>_<target_identifier>_<series_sequence_number>.parquet
+```
+
+**Forecasting:**
+```
+predictions_<run_type>_<timestamp>_<target_identifier>.parquet
+```
+
+Single-target models and ensemble models omit the target identifier, preserving backward
+compatibility with the original format above.
+
+### Implementation Notes (2026-04-08, amended 2026-05-06)
 
 - **Canonical implementation**: `PredictionFileNamer` (in `managers/prediction/file_namer.py`) delegates to `generate_output_file_name()` in `files/utils.py`.
 - **File format migration**: The original ADR specified `.pkl` (pickle). The codebase has migrated to `.parquet` as the default format, controlled by `PipelineConfig.dataframe_format`. This ADR has been updated to reflect the current format.
 - **Sequence number formatting**: Zero-padded to 2 digits (e.g., `_03` not `_3`).
+- **Target identifier**: `generate_output_file_name()` accepts an optional `target_identifier` parameter (default `None`). When `None`, the filename format is unchanged from the original ADR.

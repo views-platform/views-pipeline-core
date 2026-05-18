@@ -20,6 +20,31 @@ def temp_dir(tmp_path):
     ensembles_dir.mkdir()
     ensemble_dir = ensembles_dir / "test_ensemble"
     ensemble_dir.mkdir()
+
+    for sub in (
+        "artifacts",
+        "configs",
+        "data",
+        "data/generated",
+        "data/processed",
+        "data/raw",
+        "reports",
+        "notebooks",
+    ):
+        (ensemble_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    for script in (
+        "configs/config_deployment.py",
+        "configs/config_hyperparameters.py",
+        "configs/config_meta.py",
+        "configs/config_partitions.py",
+        "configs/config_queryset.py",
+        "configs/config_sweep.py",
+        "main.py",
+        "README.md",
+    ):
+        (ensemble_dir / script).touch()
+
     return project_root, ensemble_dir
 
 def test_initialization_with_valid_name(temp_dir):
