@@ -8,7 +8,6 @@ import logging
 from dataclasses import dataclass
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset, _ViewsDataset
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -30,8 +29,8 @@ def _arrow_series_to_numpy(series: pl.Series, n: int, s: int) -> np.ndarray:
     Returns:
         numpy.ndarray of shape (n, s), dtype float32.
     """
-    arrow_col = series.to_arrow()   # LargeListArray or ListArray
-    flat = arrow_col.flatten()      # Float32Array of length n * s
+    arrow_col = series.to_arrow()  # LargeListArray or ListArray
+    flat = arrow_col.flatten()  # Float32Array of length n * s
     return flat.to_numpy(zero_copy_only=False).reshape(n, s)
 
 
@@ -42,9 +41,9 @@ class _ModelSpec:
     weight: Optional[float] = None
 
 
-class AggregationManager:
+class AggregationModule:
     """
-    New aggregation manager that can aggregate distributions and point forecasts for
+    New aggregation module that can aggregate distributions and point forecasts for
     ensemble forecasting.
 
     Supports weighted aggregation of both point predictions and distribution samples
@@ -381,7 +380,7 @@ class AggregationManager:
         if weights is None:
             weights = [1.0 / self.n_models] * self.n_models
 
-        # infer sample size from manager state
+        # infer sample size from modules state
         if self.sample_size is None:
             raise ValueError(
                 "self.sample_size is not set. Make sure you added at least one "
@@ -462,7 +461,7 @@ class AggregationManager:
         if weights is None:
             weights = [1.0 / self.n_models] * self.n_models
 
-        # infer sample size from manager state
+        # infer sample size from module state
         if self.sample_size is None:
             raise ValueError(
                 "self.sample_size is not set. Make sure you added at least one "
@@ -754,7 +753,7 @@ class AggregationManager:
                     f"Index column '{col}' must be integer, got {df[col].dtype}"
                 )
 
-        for col in (self.target_cols or []):
+        for col in self.target_cols or []:
             if not isinstance(df[col].dtype, pl.datatypes.List):
                 raise TypeError(
                     f"Target column '{col}' must be List, got {df[col].dtype}"
