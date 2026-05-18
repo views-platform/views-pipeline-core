@@ -130,7 +130,7 @@ This class is not directly instantiated; extend it to implement concrete trainin
 | `_save_model_artifact(run_type)` | Publish latest artifact to WandB. |
 
 ### Metrics Handling
-Uses `EvaluationManager` (external module) to compute:
+Uses `NativeEvaluator` (external module) to compute:
 - Step-wise metrics (per horizon)
 - Time-series metrics (per sequence)
 - Month-wise metrics (temporal slices)
@@ -222,6 +222,61 @@ manager.execute_single_run(args)
 - Override training to plug in custom ML framework (e.g. PyTorch, XGBoost).
 - Customize prediction saving (e.g. add probabilistic sample columns).
 - Extend reporting templates to include custom uncertainty visualizations.
+- Override `prepare_actuals_df` to manufacture derived targets for evaluation (see Section 2.4 below).
+
+---
+
+## 2.4 Extension Point: `prepare_actuals_df`
+
+### What it is
+
+`prepare_actuals_df(df: pd.DataFrame) -> pd.DataFrame` is a **Template Method hook** on `ModelManager`. It is called during evaluation immediately after the raw actuals are loaded from the viewser parquet file and before they are sliced by the model's target column names.
+
+By default it is a **no-op** — it returns the DataFrame unchanged. All existing models inherit this silently and are completely unaffected.
+
+### When to override it
+
+Override this method in your model manager whenever your model defines **derived targets** — targets that do not exist as columns in the viewser database but are computed from raw columns at model time.
+
+Common cases:
+- **Binary classification signals** derived from count columns (e.g. `by_sb_best = (ged_sb > 0).astype(int)`)
+- **Scaled or normalised targets** computed from raw values
+- **Interaction terms or composite signals** that are model-specific and should not live in shared storage
+
+### The contract
+
+| | Requirement |
+|---|---|
+| **Input** | The raw actuals `pd.DataFrame` as loaded from disk. Contains whatever columns the queryset produced. |
+| **Output** | A `pd.DataFrame` that contains **at minimum** every column listed in `self.configs["targets"]`. |
+| **Side effects** | None expected. Treat the input as read-only; return a new or extended DataFrame. |
+| **Called** | Once per evaluation partition (e.g. once for `calibration`, once for `validation`). |
+
+### How to implement it
+
+```python
+# In your model manager (in the model repo, not in views-pipeline-core)
+class HydraNetManager(ForecastingModelManager):
+
+    def prepare_actuals_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Manufacture derived classification targets from raw actuals."""
+        return DataFetcher.apply_blueprint(df, self.configs)
+```
+
+The manufacturing logic (`apply_blueprint`) lives entirely in the model repo alongside the training code that creates the same signals — the definition is co-located with its use. The core remains completely agnostic about what derivation, if any, takes place.
+
+### Why this pattern
+
+The VIEWS pipeline is moving towards model-specific feature engineering: transformations, derivations, and scaling belong in individual model repos, not in the shared database. The database stores canonical raw inputs only.
+
+The hook enforces this cleanly:
+
+```
+Core responsibility:  load raw actuals → call hook → slice by targets → compute metrics
+Model responsibility: manufacture any derived columns the model invented
+```
+
+See **ADR-038** (`documentation/ADRs/038_model_actuals_preparation_hook.md`) for the full architectural rationale and alternatives considered.
 
 ---
 
@@ -261,7 +316,7 @@ manager.execute_single_run(args)
 - Data ingestion: `ViewsDataLoader`
 - Validation: `validate_prediction_dataframe`
 - Transformation handling: `DatasetTransformationModule`
-- Metrics: `EvaluationManager` (external dependency from `views-evaluation`)
+- Metrics: `NativeEvaluator` (external dependency from `views-evaluation`)
 - Alerting & artifacts: `WandBModule`
 - ADR coverage: evaluation scope, artifact naming, reporting templates (internal repo docs)
 ---

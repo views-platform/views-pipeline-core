@@ -32,7 +32,7 @@ def generate(script_path: Path) -> bool:
         - Ensure that the `requirements.txt` file is present in the same directory as the generated shell script.
         - The generated shell script is designed to be executed in a zsh shell.
     """
-    code = f"""#!/bin/zsh
+    code = """#!/bin/zsh
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   if ! grep -q 'export LDFLAGS="-L/opt/homebrew/opt/libomp/lib"' ~/.zshrc; then
@@ -76,11 +76,4 @@ echo "Running $script_path/main.py "
 python $script_path/main.py "$@"
 """
     
-    # try:
-    #   with open(script_path, "w", encoding="utf-8") as script_file:
-    #       script_file.write(code)
-    #       return True
-    # except IOError as e:
-    #     print(f"An error occurred while writing to {script_path}: {e}")
-    #     return False
     return save_shell_script(script_path, code)

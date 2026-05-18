@@ -1,1 +1,1 @@
-from .transformations import DatasetTransformationModule
+from .transformations import DatasetTransformationModule as DatasetTransformationModule

@@ -1,5 +1,6 @@
 from typing import Dict, List
 from pathlib import Path
+import logging
 import wandb
 import pandas as pd
 from views_pipeline_core.managers.model import ModelPathManager, ForecastingModelManager
@@ -10,8 +11,6 @@ from views_pipeline_core.modules.wandb import (
     timestamp_to_date,
 )
 from views_pipeline_core.modules.reports import (
-    get_conflict_type_from_feature_name,
-    # filter_metrics_from_dict,
     search_for_item_name,
     filter_metrics_by_eval_type_and_metrics,
 )
@@ -20,7 +19,6 @@ from views_pipeline_core.files.utils import (
 )
 from views_pipeline_core.modules.reports import ReportModule
 from views_pipeline_core.configs.pipeline import PipelineConfig
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +41,6 @@ class EvaluationReportTemplate:
         self.model_path = model_path
         self.run_type = run_type
         self.eval_types = ["time-series-wise"] # "step-wise", "month-wise"
-        self.cm_baseline_models = ["zero_cmbaseline", "locf_cmbaseline", "average_cmbaseline"]
-        self.pgm_baseline_models = ["zero_pgmbaseline", "locf_pgmbaseline", "average_pgmbaseline"]
         self.views_models_url = "https://github.com/views-platform/views-models"
 
     def generate(self, wandb_run: "wandb.apis.public.runs.Run", target: str) -> Path:
@@ -68,9 +64,19 @@ class EvaluationReportTemplate:
         """Generate an evaluation report based on the evaluation DataFrame."""
         evaluation_dict = format_evaluation_dict(dict(wandb_run.summary))
         metadata_dict = format_metadata_dict(dict(wandb_run.config))
-        conflict_code, type_of_conflict = get_conflict_type_from_feature_name(target)
-        priority_metrics = ["MSLE", "MSE", "y_hat_bar"]
-        metrics = list(set(metadata_dict.get("metrics", [])).intersection(priority_metrics))
+
+        # Read metrics directly from the pipeline config (not from the WandB run config).
+        metrics = list(dict.fromkeys(
+            self.config.get("regression_point_metrics", []) +
+            self.config.get("regression_sample_metrics", []) +
+            self.config.get("classification_point_metrics", []) +
+            self.config.get("classification_sample_metrics", []) +
+            self.config.get("regression_metrics", []) +
+            self.config.get("classification_metrics", []) +
+            self.config.get("metrics", [])
+        ))
+        if not metrics:
+            logger.warning("No metrics found in config. Report metric tables will be empty.")
 
         report_manager = ReportModule()
         report_manager.add_heading(
@@ -89,13 +95,11 @@ class EvaluationReportTemplate:
             markdown_text += (
                 f"**Constituent Models**: {metadata_dict.get('models', None)}  \n"
             )
-        markdown_text += f"**Pipeline Version**: {PipelineConfig().current_version}"
+        markdown_text += f"**Pipeline Version**: {PipelineConfig.current_version}"
         report_manager.add_markdown(markdown_text=markdown_text)
 
         task_definition_md = (
-            f"- **Target Variable**: {target}"
-            + (f" ({type_of_conflict.title()})" if type_of_conflict else "")
-            + "\n"
+            f"- **Target Variable**: {target}\n"
             f"- **Spatiotemporal Resolution**: {metadata_dict.get('level', 'N/A')}\n"
             f"- **Evaluation Scheme**: `Rolling-Origin Holdout`\n"
             f"    - **Minimum forecast lead time**: {metadata_dict.get('steps', [None, None])[0]}\n"
@@ -110,25 +114,10 @@ class EvaluationReportTemplate:
         report_manager.add_heading("Task Description", level=2)
         report_manager.add_markdown(markdown_text=task_definition_md)
 
-        # Evaluation scheme description
-        # eval_scheme_md = (
-        #     f"This evaluation scheme uses a **fixed-origin**, **expanding context window** with a **rolling-origin**, **fixed-length target window** strategy.\n"
-        #     f"A single **frozen trained model artifact** — trained once on data spanning a **fixed-origin**, **fixed-length training period** — is used throughout.\n"
-        #     f"    - The model is trained once on historical data ending at a defined cutoff date, then saved as a **frozen model artifact** (not retrained).\n"
-        #     f"    - The model generates forecasts for a **fixed forecast horizon** of {len(metadata_dict.get('steps', [*range(1, 36 + 1, 1)]))} temporal units, beginning immediately after the context window ends.\n"
-        #     f"    - At each of the {ForecastingModelManager._resolve_evaluation_sequence_number(str(metadata_dict.get('eval_type', 'standard')).lower())} evaluation iterations, the context window is expanded by one additional temporal unit of input data, always starting from the original origin and ending at a new cutoff.\n"
-        #     f"    - The **target window** — a fixed-length, out-of-sample segment of the **target feature** — shifts forward by one temporal unit at each iteration, beginning immediately after the context window ends.\n"
-        #     f"    - The frozen model artifact is re-applied at each iteration using the updated context window, while the model parameters remain unchanged.\n"
-        #     f"    - **Forecast performance** is assessed by comparing the model's predictions to the ground-truth values observed in each corresponding target window of the **holdout set**.\n"
-        #     f"    - This strategy evaluates the **stability and robustness** of a fixed model under operational conditions, where retraining is deferred and forecasts are updated as new input data becomes available.\n"
-        # )
-        # report_manager.add_heading("Evaluation Scheme Description", level=2)
-        # report_manager.add_markdown(markdown_text=eval_scheme_md)
-
         # Model-specific report content
         if self.model_path.target in ("model", "ensemble"):
             self._add_report_content(
-                report_manager, metadata_dict, evaluation_dict, conflict_code, metrics
+                report_manager, metadata_dict, evaluation_dict, target, metrics
             )
         else:
             raise ValueError(
@@ -138,7 +127,7 @@ class EvaluationReportTemplate:
         # Generate report path
         report_path = (
             self.model_path.reports
-            / f"report_{generate_model_file_name(run_type=self.run_type, file_extension='')}_{conflict_code}.html"
+            / f"report_{generate_model_file_name(run_type=self.run_type, file_extension='')}_{target}.html"
         )
         report_manager.export_as_html(report_path)
         logger.info(f"Exported report to {report_path}")
@@ -149,7 +138,7 @@ class EvaluationReportTemplate:
         report_manager: ReportModule,
         metadata_dict: Dict,
         evaluation_dict: Dict,
-        conflict_code: str,
+        target_identifier: str,
         metrics: List[str],
     ) -> None:
         """
@@ -166,7 +155,7 @@ class EvaluationReportTemplate:
             report_manager (ReportModule): The report manager instance used to add content to the report.
             metadata_dict (Dict): Metadata dictionary for the ensemble run.
             evaluation_dict (Dict): Evaluation results dictionary for the ensemble run.
-            conflict_code (str): Code used to resolve metric conflicts.
+            target_identifier (str): Identifier for the target variable.
             metrics (List[str]): List of metric names to include in the report.
 
         Raises:
@@ -177,15 +166,17 @@ class EvaluationReportTemplate:
             "models", []
         )  # will only be populated for ensemble runs
         # models.append(self.model_path.model_name)
-        if metadata_dict.get("level", None) == "cm":
-            models = list(set(models).union(self.cm_baseline_models))
-        elif metadata_dict.get("level", None) == "pgm":
-            models = list(set(models).union(self.pgm_baseline_models))
-        else:
-            logger.warning(
-                f"Unknown level '{metadata_dict.get('level', None)}'. No baseline models added."
-            )
-        # models = set(models).union(self.baseline_models)
+
+        # Collect baseline model names from all tier-specific keys in the pipeline config.
+        baseline_models = list(dict.fromkeys(
+            self.config.get("regression_point_baselines", []) +
+            self.config.get("regression_sample_baselines", []) +
+            self.config.get("classification_point_baselines", []) +
+            self.config.get("classification_sample_baselines", [])
+        ))
+        if not baseline_models:
+            logger.warning("No baseline models found in config. Baseline rows will be absent from the report.")
+        models = list(set(models).union(baseline_models))
         logger.info(f"Models to search for: {models}")
         verified_partition_dict = None
         verified_level = metadata_dict.get("level", None)
@@ -213,7 +204,7 @@ class EvaluationReportTemplate:
                 partition_metadata_dict = {
                     k: v
                     for k, v in temp_metadata_dict.items()
-                    if k.lower() in {"calibration", "validation", "forecasting"}
+                    if k.lower() == self.run_type.lower()
                 }
                 if verified_level is None:
                     verified_level = temp_metadata_dict.get("level", None)
@@ -225,12 +216,10 @@ class EvaluationReportTemplate:
                 if verified_partition_dict is None:
                     verified_partition_dict = partition_metadata_dict
                 elif verified_partition_dict != partition_metadata_dict:
-                    print(verified_partition_dict, partition_metadata_dict)
+                    logger.error("Partition metadata mismatch: %s vs %s", verified_partition_dict, partition_metadata_dict)
                     raise ValueError(
                         f"Partition metadata mismatch between models: Offending model: {model_name}"
                     )
-            # report_manager.add_heading("Data Partitions", level=2)
-            # report_manager.add_table(verified_partition_dict)
 
             # Add ensemble metrics
             report_manager.add_heading("Model Metrics", level=2)
@@ -243,7 +232,7 @@ class EvaluationReportTemplate:
                     evaluation_dict=evaluation_dict,
                     eval_type=eval_type,
                     metrics=metrics,
-                    conflict_code=conflict_code,
+                    target_identifier=target_identifier,
                     model_name=metadata_dict.get("name", None),
                     keywords=["mean"],
                 )
@@ -258,7 +247,7 @@ class EvaluationReportTemplate:
                         evaluation_dict=temp_evaluation_dict,
                         eval_type=eval_type,
                         metrics=metrics,
-                        conflict_code=conflict_code,
+                        target_identifier=target_identifier,
                         model_name=temp_metadata_dict.get("name", None),
                         keywords=["mean"],
                     )
@@ -270,14 +259,25 @@ class EvaluationReportTemplate:
                         )
 
                 if full_metric_dataframe is not None and not full_metric_dataframe.empty:
-                    # Sort by metric name
-                    target_metric_to_sort = search_for_item_name(
-                        searchspace=full_metric_dataframe.columns.tolist(),
-                        keywords=["MSLE"] if "MSLE" in metrics else list(metrics)[0],
-                    )
-                    full_metric_dataframe = full_metric_dataframe.sort_values(
-                        by=target_metric_to_sort, ascending=True
-                    )
+                    # Sort by MSLE (point), then CRPS (probabilistic), then first available metric.
+                    _cols = full_metric_dataframe.columns.tolist()
+                    _sort_candidates = ["MSLE", "CRPS"]
+                    target_metric_to_sort = None
+                    for _candidate in _sort_candidates:
+                        if _candidate in metrics:
+                            target_metric_to_sort = search_for_item_name(
+                                searchspace=_cols, keywords=[_candidate]
+                            )
+                        if target_metric_to_sort:
+                            break
+                    if not target_metric_to_sort and metrics:
+                        target_metric_to_sort = search_for_item_name(
+                            searchspace=_cols, keywords=[list(metrics)[0]]
+                        )
+                    if target_metric_to_sort:
+                        full_metric_dataframe = full_metric_dataframe.sort_values(
+                            by=target_metric_to_sort, ascending=True
+                        )
                     report_manager.add_table(
                         data=full_metric_dataframe,
                         header=f"{eval_type.replace('-', ' ').title()}",
@@ -289,3 +289,140 @@ class EvaluationReportTemplate:
         except Exception as e:
             logger.error(f"Error generating ensemble report: {e}", exc_info=True)
             raise
+
+        # Prediction sample graphs — non-fatal: a failure here does not
+        # invalidate the metrics tables already written above.
+        try:
+            self._add_prediction_sample_graphs(report_manager, target_identifier)
+        except Exception as e:
+            logger.warning(
+                f"Could not generate prediction sample graphs: {e}", exc_info=True
+            )
+
+    def _add_prediction_sample_graphs(
+        self,
+        report_manager: "ReportModule",
+        target_identifier: str,
+    ) -> None:
+        """Add historical vs. predicted line graphs for first, middle, and last
+        rolling-origin sequences of the most recent prediction run.
+
+        Sequence indices are computed dynamically from however many sequence
+        files exist on disk — no fixed numbers assumed.
+        """
+        import re
+        from views_pipeline_core.files.utils import read_dataframe
+        from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+        from views_pipeline_core.modules.visualizations import HistoricalLineGraph
+
+        # ── 1. Collect all sequenced prediction files ─────────────────
+        all_pred_paths = self.model_path._get_generated_predictions_data_file_paths(
+            self.run_type
+        )
+        if not all_pred_paths:
+            logger.warning("No prediction files found — skipping prediction sample graphs.")
+            return
+
+        # Filenames: predictions_{run_type}_{YYYYMMDD}_{HHMMSS}_{seq:02d}.parquet
+        # The timestamp is two underscore-separated parts (date + time).
+        # Sequence number is the final numeric segment.
+        seq_pattern = re.compile(r"^predictions_[^_]+_(\d{8}_\d{6})_(\d+)$")
+        seq_files: list[tuple[str, int, "Path"]] = []
+        for path in all_pred_paths:
+            m = seq_pattern.match(path.stem)
+            if m:
+                seq_files.append((m.group(1), int(m.group(2)), path))
+
+        if not seq_files:
+            logger.warning(
+                "No sequenced prediction files found — skipping prediction sample graphs."
+            )
+            return
+
+        # ── 2. Isolate the latest timestamp group ─────────────────────
+        latest_ts = max(ts for ts, _, _ in seq_files)
+        latest_files = sorted(
+            [(seq, p) for ts, seq, p in seq_files if ts == latest_ts],
+            key=lambda x: x[0],
+        )
+        n = len(latest_files)
+
+        # ── 3. Pick first, middle, last (deduplicated) ────────────────
+        indices = sorted({0, n // 2, n - 1})
+        selected = [latest_files[i] for i in indices]
+
+        # ── 4. Load historical data ────────────────────────────────────
+        # EnsemblePathManager has no data_raw; use the first constituent model instead.
+        if self.model_path.target == "ensemble":
+            from views_pipeline_core.data.model_path import ModelPathManager
+            constituent_models = self.config.get("models", [])
+            if not constituent_models:
+                logger.warning(
+                    "Ensemble config has no 'models' list — skipping prediction sample graphs."
+                )
+                return
+            data_path_manager = ModelPathManager(constituent_models[0])
+        else:
+            data_path_manager = self.model_path
+
+        raw_paths = data_path_manager._get_raw_data_file_paths(self.run_type)
+        if not raw_paths:
+            logger.warning("No raw data files found — skipping prediction sample graphs.")
+            return
+        historical_df = read_dataframe(raw_paths[0])
+
+        if target_identifier not in historical_df.columns:
+            logger.warning(
+                f"Target '{target_identifier}' not found in historical data — "
+                "skipping prediction sample graphs."
+            )
+            return
+
+        # ── 5. Resolve dataset class from config level ────────────────
+        dataset_cls_map = {"cm": CMDataset, "pgm": PGMDataset}
+        level = self.config.get("level", "cm")
+        dataset_cls = dataset_cls_map.get(level)
+        if dataset_cls is None:
+            logger.warning(
+                f"Unknown level '{level}' for prediction sample graphs — skipping."
+            )
+            return
+
+        historical_dataset = dataset_cls(historical_df, targets=[target_identifier])
+
+        # ── 6. Render one graph per selected sequence ─────────────────
+        report_manager.add_heading("Prediction Samples", level=2)
+        report_manager.add_markdown(
+            "Historical vs. predicted values for the **first**, **middle**, and "
+            "**last** rolling-origin sequences"
+        )
+
+        pred_col = f"pred_{target_identifier}"
+        for seq_num, pred_path in selected:
+            try:
+                pred_df = read_dataframe(pred_path)
+                if pred_col not in pred_df.columns:
+                    logger.warning(
+                        f"Column '{pred_col}' not in {pred_path.name} — skipping sequence {seq_num}."
+                    )
+                    continue
+                forecast_dataset = dataset_cls(pred_df)
+                graph = HistoricalLineGraph(
+                    historical_dataset=historical_dataset,
+                    forecast_dataset=forecast_dataset,
+                )
+                report_manager.add_heading(f"Sequence {seq_num}", level=3)
+                report_manager.add_html(
+                    html=graph.plot_predictions_vs_historical(
+                        targets=[target_identifier],
+                        as_html=True,
+                        alpha=0.9,
+                    ),
+                    height=700,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Could not render graph for sequence {seq_num} "
+                    f"({pred_path.name}): {e}",
+                    exc_info=True,
+                )

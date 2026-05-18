@@ -1,1 +1,1 @@
-from .ensemble import EnsembleManager, EnsemblePathManager
+from .ensemble import EnsembleManager as EnsembleManager, EnsemblePathManager as EnsemblePathManager

@@ -1,12 +1,13 @@
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from pathlib import Path
 from datetime import datetime
 from views_pipeline_core.modules.validation.ensemble.check import (
     validate_model_conditions,
     validate_ensemble_model_deployment_status,
     validate_partition_config,
-    validate_ensemble_model
+    validate_ensemble_model,
+    validate_ensemble_raw_data_alignment,
 )
 
 
@@ -252,7 +253,7 @@ class TestValidateEnsembleModelDeploymentStatus:
         result = validate_ensemble_model_deployment_status(
             Path("/test/path/generated"),
             "forecasting",
-            "Deprecated"
+            "deprecated"
         )
 
         assert result is False
@@ -262,7 +263,7 @@ class TestValidateEnsembleModelDeploymentStatus:
         """Test failure when constituent model is deprecated."""
         log_data = {
             "Single Model Name": "deprecated_model",
-            "Deployment Status": "Deprecated"
+            "Deployment Status": "deprecated"
         }
         mock_read_log.return_value = log_data
 
@@ -413,7 +414,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_success(
@@ -449,7 +450,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_conditions_fail(
@@ -481,7 +482,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_deployment_fail(
@@ -513,7 +514,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.managers.model.ModelPathManager')
+    @patch('views_pipeline_core.data.model_path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_partition_fail(
@@ -538,5 +539,51 @@ class TestValidateEnsembleModel:
 
         with pytest.raises(SystemExit) as exc_info:
             validate_ensemble_model(mock_config)
-        
+
         assert exc_info.value.code == 1
+
+
+class TestValidateEnsembleRawDataAlignment:
+    """C-03: Validate that all ensemble models share consistent raw data files."""
+
+    def test_empty_model_list_passes(self):
+        """Empty model list has nothing to compare — should pass."""
+        assert validate_ensemble_raw_data_alignment([], "calibration") is True
+
+    def test_single_model_passes(self):
+        """Single model has nothing to compare against — should pass."""
+        with patch(
+            "views_pipeline_core.data.model_path.ModelPathManager"
+        ) as MockMPM:
+            mock_path = Mock()
+            mock_path.data_raw = Path("/project/models/model_a/data/raw")
+            MockMPM.return_value = mock_path
+
+            assert validate_ensemble_raw_data_alignment(["model_a"], "calibration") is True
+
+    def test_models_with_different_file_sizes_warn(self, tmp_path):
+        """Models with different raw data file sizes should return False."""
+        dir_a = tmp_path / "model_a"
+        dir_a.mkdir()
+        file_a = dir_a / "calibration_viewser_df.parquet"
+        file_a.write_bytes(b"x" * 1000)
+
+        dir_b = tmp_path / "model_b"
+        dir_b.mkdir()
+        file_b = dir_b / "calibration_viewser_df.parquet"
+        file_b.write_bytes(b"x" * 2000)
+
+        with patch(
+            "views_pipeline_core.data.model_path.ModelPathManager"
+        ) as MockMPM:
+            mock_a = Mock()
+            mock_a._get_raw_data_file_paths.return_value = [file_a]
+            mock_b = Mock()
+            mock_b._get_raw_data_file_paths.return_value = [file_b]
+            MockMPM.side_effect = [mock_a, mock_b]
+
+            result = validate_ensemble_raw_data_alignment(
+                ["model_a", "model_b"], "calibration"
+            )
+
+        assert result is False

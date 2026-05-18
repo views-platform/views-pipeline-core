@@ -1,18 +1,13 @@
 import pytest
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
 import pandas as pd
-from datetime import datetime
 
 from views_pipeline_core.managers.model import ModelManager, ForecastingModelManager
 from views_pipeline_core.managers import ModelPathManager
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.exceptions import (
-    ModelTrainingException,
-    ModelEvaluationException,
-    ModelForecastingException,
     DataFetchException,
-    PipelineException,
 )
 
 
@@ -67,17 +62,23 @@ def mock_configs():
         "deployment": {
             "name": "purple_alien",
             "environment": "development",
-            "deployment_status": "production",  # Add required field
+            "deployment_status": "shadow",
         },
         "hyperparameters": {
             "algorithm": "random_forest",
             "n_estimators": 100,
-            "steps": [1, 2, 3],
+            "steps": list(range(1, 37)),
+            "time_steps": 36,
+            "rolling_origin_stride": 1,
+            "regression_targets": ["target_a"],
+            "classification_targets": [],
+            "regression_point_metrics": ["MSE"],
         },
         "meta": {
             "description": "Test model",
-            "targets": ["ged_sb"],
-            "metrics": ["mse", "mae"],
+            "level": "pgm",
+            "creator": "test",
+            "prediction_format": "dataframe",
         },
         "partition": {
             "calibration": {
@@ -133,7 +134,7 @@ class TestModelManagerInit:
                 script.replace("config_", "").replace(".py", "")
             )
             
-            with patch('views_pipeline_core.modules.wandb.WandBModule') as mock_wandb_cls:
+            with patch('views_pipeline_core.modules.wandb.WandBModule'):
                 with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
                     with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
                         with patch('views_pipeline_core.modules.logging.LoggingModule'):  # Mock LoggingModule
@@ -171,7 +172,7 @@ class TestModelManagerInit:
 class TestModelManagerConfigLoading:
     def test_load_config_success(self, mock_model_path, mock_configs):
         """Test successful config loading."""
-        with patch('importlib.util.spec_from_file_location') as mock_spec:
+        with patch('importlib.util.spec_from_file_location'):
             with patch('importlib.util.module_from_spec') as mock_module:
                 # Setup mock module with config method
                 mock_config_module = MagicMock()
@@ -266,35 +267,15 @@ class TestForecastingModelManagerInit:
 
 
 class TestForecastingModelManagerStatic:
-    def test_get_conflict_type_sb(self):
-        """Test extracting state-based conflict type."""
-        conflict = ForecastingModelManager._get_conflict_type("ged_best_sb")
-        assert conflict == "sb"
-        
-    def test_get_conflict_type_os(self):
-        """Test extracting one-sided conflict type."""
-        conflict = ForecastingModelManager._get_conflict_type("ln_ged_os")
-        assert conflict == "os"
-        
-    def test_get_conflict_type_ns(self):
-        """Test extracting non-state conflict type."""
-        conflict = ForecastingModelManager._get_conflict_type("ged_ns_tlag_1")
-        assert conflict == "ns"
-        
-    def test_get_conflict_type_invalid_raises(self):
-        """Test invalid target raises ValueError."""
-        with pytest.raises(ValueError, match="Conflict type not found"):
-            ForecastingModelManager._get_conflict_type("invalid_target")
-            
     def test_resolve_evaluation_sequence_standard(self):
-        """Test standard evaluation sequence count."""
+        """Standard evaluation: MAX_SHIFT_COUNT + 1 = 13 sequences."""
         n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
-        assert n == 12
-        
+        assert n == 13  # base origin + 12 shifts
+
     def test_resolve_evaluation_sequence_long(self):
-        """Test long evaluation sequence count."""
+        """Long evaluation: 3 * MAX_SHIFT_COUNT + 1 = 37 sequences."""
         n = ForecastingModelManager._resolve_evaluation_sequence_number("long")
-        assert n == 36
+        assert n == 37  # base origin + 36 shifts
         
     def test_resolve_evaluation_sequence_complete(self):
         """Test complete evaluation returns None."""
@@ -305,6 +286,120 @@ class TestForecastingModelManagerStatic:
         """Test invalid eval type raises error."""
         with pytest.raises(ValueError, match="Invalid evaluation type"):
             ForecastingModelManager._resolve_evaluation_sequence_number("invalid")
+
+
+# ============================================================================
+# Test _get_evaluation_step_mappings (rolling-origin fix, ADR-031)
+# ============================================================================
+
+class TestGetEvaluationStepMappings:
+    @pytest.fixture
+    def manager(self, mock_model_path):
+        """Create a minimally configured manager for method-level tests."""
+        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+            with patch('views_pipeline_core.modules.wandb.WandBModule'):
+                with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
+                    with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
+                        with patch('views_pipeline_core.modules.logging.LoggingModule'):
+                            m = ForecastingModelManager(model_path=mock_model_path)
+                            m.configs = {'steps': [1, 2, 3]}
+                            # Correct nested structure for strict validation
+                            m._partition_dict = {
+                                'calibration': {'train': (100, 200), 'test': (201, 203)}
+                            }
+                            m._args = ForecastingModelArgs(run_type='calibration', train=True)
+                            return m
+
+    def test_returns_one_dict_per_sequence(self, manager):
+        """List length equals n_sequences."""
+        result = manager._get_evaluation_step_mappings(n_sequences=3)
+        assert len(result) == 3
+
+    def test_first_sequence_anchored_at_base_origin(self, manager):
+        """Sequence 0 maps base_origin+s → s for all steps."""
+        result = manager._get_evaluation_step_mappings(n_sequences=1)
+        # base_origin = partition_dict['test'][0] - 1 = 201 - 1 = 200, steps = [1,2,3]
+        assert result[0] == {201: 1, 202: 2, 203: 3}
+
+    def test_each_sequence_shifts_by_one_month(self, manager):
+        """Sequence i is anchored at base_origin + i."""
+        result = manager._get_evaluation_step_mappings(n_sequences=3)
+        assert result[0] == {201: 1, 202: 2, 203: 3}   # origin 200
+        assert result[1] == {202: 1, 203: 2, 204: 3}   # origin 201
+        assert result[2] == {203: 1, 204: 2, 205: 3}   # origin 202
+
+    def test_no_shared_month_id_maps_to_same_step_across_sequences(self, manager):
+        """Month 202 appears in seq 0 (step 2) and seq 1 (step 1): different steps."""
+        result = manager._get_evaluation_step_mappings(n_sequences=2)
+        assert result[0][202] == 2
+        assert result[1][202] == 1
+
+    def test_forecasting_run_type_uses_data_loader_origin(self, manager):
+        """For forecasting, base_origin comes from _data_loader.month_last."""
+        manager._args = ForecastingModelArgs(run_type='forecasting', train=True)
+        mock_loader = Mock()
+        mock_loader.month_last = 500
+        manager._data_loader = mock_loader
+        manager.configs = {'steps': [1, 2]}
+
+        result = manager._get_evaluation_step_mappings(n_sequences=1)
+        assert result[0] == {501: 1, 502: 2}
+
+    def test_missing_partition_raises_keyerror(self, manager):
+        """When partition dict is missing required run_type, raise KeyError."""
+        manager._partition_dict = {}
+        manager._args = ForecastingModelArgs(run_type='calibration', train=True)
+        manager.configs = {'steps': [1, 2]}
+
+        with pytest.raises(KeyError, match="Partition configuration for run_type 'calibration' not found"):
+            manager._get_evaluation_step_mappings(n_sequences=1)
+
+
+# ============================================================================
+# Test _assert_partition_config_accessible (Layer 1 structural assertion)
+# ============================================================================
+
+class TestAssertPartitionConfigAccessible:
+    @pytest.fixture
+    def manager(self, mock_model_path):
+        """Create a minimally configured manager for method-level tests."""
+        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+            with patch('views_pipeline_core.modules.wandb.WandBModule'):
+                with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
+                    with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
+                        with patch('views_pipeline_core.modules.logging.LoggingModule'):
+                            m = ForecastingModelManager(model_path=mock_model_path)
+                            m._partition_dict = {
+                                'calibration': {'train': (100, 200), 'test': (201, 203)}
+                            }
+                            return m
+
+    def test_valid_partition_passes(self, manager):
+        """Well-formed partition with test key passes silently."""
+        manager._assert_partition_config_accessible('calibration')  # no error
+
+    def test_missing_run_type_raises_keyerror(self, manager):
+        """run_type not in partition_dict raises KeyError immediately."""
+        manager._partition_dict = {}
+        with pytest.raises(KeyError, match="missing for run_type"):
+            manager._assert_partition_config_accessible('calibration')
+
+    def test_missing_test_key_raises_keyerror(self, manager):
+        """Partition present but 'test' key absent raises KeyError."""
+        manager._partition_dict = {'calibration': {'train': (100, 200)}}
+        with pytest.raises(KeyError, match="no 'test' key"):
+            manager._assert_partition_config_accessible('calibration')
+
+    def test_empty_test_value_raises_indexerror(self, manager):
+        """Empty test sequence (test[0] inaccessible) raises IndexError."""
+        manager._partition_dict = {'calibration': {'train': (100, 200), 'test': []}}
+        with pytest.raises(IndexError, match="at least one element"):
+            manager._assert_partition_config_accessible('calibration')
+
+    def test_forecasting_skips_partition_check(self, manager):
+        """Forecasting run_type bypasses partition check (uses data_loader instead)."""
+        manager._partition_dict = {}  # no partition at all
+        manager._assert_partition_config_accessible('forecasting')  # no error
 
 
 # ============================================================================
@@ -370,8 +465,15 @@ class TestExecuteSingleRun:
                                 model_path=mock_model_path,
                                 wandb_notifications=False  # Disable notifications
                             )
+                            # Layer 1 pre-condition: provide a structurally valid partition
+                            # so tests that call execute_single_run(calibration) don't fail
+                            # the structural check before reaching the code under test.
+                            # test_len = 248-201+1 = 48 = time_steps(36) + MAX_SHIFT_COUNT(12)
+                            manager._partition_dict = {
+                                'calibration': {'train': (100, 200), 'test': (201, 248)}
+                            }
                             return manager
-    
+
     def test_execute_single_run_invalid_args_raises(self, manager):
         """Test execute_single_run with invalid args raises ValueError."""
         with pytest.raises(ValueError, match="must be an instance of ForecastingModelArgs"):
@@ -381,8 +483,8 @@ class TestExecuteSingleRun:
         """Test execute_single_run sets args property."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        # Mock wandb.login during execution
-        with patch('wandb.login'):
+        # Mock the entire wandb module and manager's internal login
+        with patch.object(manager._wandb_module, 'login'):
             with patch.object(manager, '_execute_data_fetching'):
                 with patch.object(manager, '_execute_model_tasks'):
                     manager.execute_single_run(args)
@@ -393,7 +495,7 @@ class TestExecuteSingleRun:
         """Test execute_single_run updates configuration."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch('wandb.login'):
+        with patch.object(manager._wandb_module, 'login'):
             with patch.object(manager, '_execute_data_fetching'):
                 with patch.object(manager, '_execute_model_tasks'):
                     manager.execute_single_run(args)
@@ -405,7 +507,7 @@ class TestExecuteSingleRun:
         """Test execute_single_run calls data fetching."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch('wandb.login'):
+        with patch.object(manager._wandb_module, 'login'):
             with patch.object(manager, '_execute_data_fetching') as mock_fetch:
                 with patch.object(manager, '_execute_model_tasks'):
                     manager.execute_single_run(args)
@@ -416,7 +518,7 @@ class TestExecuteSingleRun:
         """Test execute_single_run calls model tasks."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
         
-        with patch('wandb.login'):
+        with patch.object(manager._wandb_module, 'login'):
             with patch.object(manager, '_execute_data_fetching'):
                 with patch.object(manager, '_execute_model_tasks') as mock_tasks:
                     manager.execute_single_run(args)
@@ -634,26 +736,17 @@ class TestSaveMethods:
                         return manager
     
     def test_save_predictions(self, manager, mock_model_path):
-        """Test saving predictions."""
+        """Test saving predictions delegates to PredictionIOManager."""
         df = pd.DataFrame({"pred_ged_sb": [1, 2, 3]})
-        
-        # Mock Path.mkdir to avoid filesystem operations
+
         with patch('pathlib.Path.mkdir'):
-            # Patch the correct import path
-            with patch('views_pipeline_core.files.utils.save_dataframe') as mock_save:
-                with patch('views_pipeline_core.files.utils.generate_output_file_name', return_value="predictions.parquet"):
+            with patch('views_pipeline_core.managers.prediction.io.save_dataframe') as mock_save:
+                with patch('views_pipeline_core.managers.prediction.file_namer.generate_output_file_name', return_value="predictions.parquet"):
                     manager._save_predictions(df, mock_model_path.data_generated)
-                    
-                    # Verify save was called
+
                     mock_save.assert_called_once()
-                    # Verify alert was sent
                     manager._wandb_module.send_alert.assert_called()
                 
-    def test_save_model_artifact(self, manager, mock_model_path):
-        """Test saving model artifact to WandB."""
-        manager._save_model_artifact("calibration")
-        
-        manager._wandb_module.log_artifact.assert_called_once()
 
 
 
@@ -697,10 +790,15 @@ class TestIntegration:
                                 
                                 # Now create the manager - it will use the mocked WandBModule
                                 manager = TestManager(model_path=mock_model_path)
-                                
+                                # Layer 1 pre-condition: provide a structurally valid partition
+                                # test_len = 248-201+1 = 48 = time_steps(36) + MAX_SHIFT_COUNT(12)
+                                manager._partition_dict = {
+                                    'calibration': {'train': (100, 200), 'test': (201, 248)}
+                                }
+
                                 # Verify the mock was set up correctly
                                 assert manager._wandb_module == mock_wandb_instance
-                                
+
                                 args = ForecastingModelArgs(run_type="calibration", train=True)
                                 
                                 with patch.object(manager, '_execute_data_fetching'):

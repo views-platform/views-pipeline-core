@@ -16,7 +16,7 @@ def generate(script_path: Path) -> bool:
         bool: True if the file was successfully created, False otherwise.
     """
 
-    code = f"""# ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+    code = """# ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 # :: PLEASE DO NOT DELETE THIS FILE OR ANY OF ITS CONTENTS WITHOUT PERMISSION FROM THE MD&D TEAM  ::                                                           
 # ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 

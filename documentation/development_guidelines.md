@@ -235,12 +235,13 @@ import pandas as pd
 import numpy as np
 
 
-class EvaluationManager:
-    """Calculate and organize evaluation metrics."""
+class EvaluationAdapter:
+    """Adapt predictions and actuals into EvaluationFrame for NativeEvaluator."""
     
-    def __init__(self, metrics: List[str]):
+    @classmethod
+    def from_dataframes(cls, actual, predictions, target, step_mapping):
         """
-        Initialize evaluation manager.
+        Build an EvaluationFrame from DataFrames.
         
         Args:
             metrics: List of metric names to calculate
@@ -940,7 +941,7 @@ from views_pipeline_core.managers.path import ModelPathManager
 # Module layer
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
 from views_pipeline_core.modules.wandb import WandBModule
-from views_pipeline_core.modules.evaluation import EvaluationManager
+from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
 
 # Data layer
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
@@ -1320,4 +1321,34 @@ configs/models/{model_name}/
 ├── config_meta.py                # Metadata & description
 └── config_queryset.py            # Data fetching specification
 ```
+
+### Tier 3: Explicit Intent (Best Practice)
+
+As of February 2026, all new models MUST use **Tier 3 Explicit Keys**. The pipeline no longer guesses if a target is for regression or classification.
+
+#### 1. Targets (Mandatory)
+Models must declare targets using task-specific keys. The pipeline will hard-stop if no valid target key is found.
+
+*   **Regression:** `regression_targets: ["target_name"]`
+*   **Classification:** `classification_targets: ["target_name"]`
+
+#### 2. Metrics (Optional but Recommended)
+Metrics must be split by task type AND by evaluation goal (Point vs Sample).
+
+*   **Point Metrics:** Evaluate the "center" of the prediction (e.g., MSE, MAE, AP).
+*   **Sample Metrics:** Evaluate the distribution/uncertainty (e.g., CRPS, Coverage).
+
+| Task Type | Point Metrics | Sample Metrics |
+| :--- | :--- | :--- |
+| **Regression** | `regression_point_metrics` | `regression_sample_metrics` |
+| **Classification** | `classification_point_metrics` | `classification_sample_metrics` |
+
+#### 3. Legacy Migration
+Legacy keys are supported for backward compatibility but are considered **DEPRECATED**:
+*   `targets` $\rightarrow$ Mapped to `regression_targets`
+*   `metrics` $\rightarrow$ Mapped to `regression_point_metrics`
+*   `regression_metrics` $\rightarrow$ Mapped to `regression_point_metrics`
+*   `classification_metrics` $\rightarrow$ Mapped to `classification_point_metrics`
+
+Mixing legacy and explicit keys in the same configuration is **forbidden** and will raise a `Configuration Conflict` error.
 

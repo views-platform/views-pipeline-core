@@ -123,7 +123,7 @@ class DatasetTransformationModule:
         # Track column name changes: {original_name: current_name}
         self.column_mapping = {col: col for col in self.dataframe.columns}
         
-        logger.info(f"TransformationModule initialized successfully")
+        logger.info("TransformationModule initialized successfully")
         logger.info(f"Temporal index: {self._temporal_index}, Spatial index: {self._spatial_index}")
         logger.info(f"DataFrame shape: {self.dataframe.shape}")
         logger.info(f"Number of columns: {len(self.dataframe.columns)}")
@@ -1220,7 +1220,7 @@ class DatasetTransformationModule:
                 new_col_name = self._add_transform_prefix(temp_name, "lr")
                 
                 logger.info(f"Undoing ln transformation: '{col_name}' -> '{new_col_name}'")
-                logger.debug(f"  Applying: exp(x) - 1")
+                logger.debug("  Applying: exp(x) - 1")
                 
                 self.dataframe = self.dataframe.with_columns(
                     pl.col(col_name).map_elements(
@@ -1265,9 +1265,9 @@ class DatasetTransformationModule:
         logger.info(f"Cleared transformation history ({history_count} entries)")
         
         logger.info("=" * 80)
-        logger.info(f"✓ undo_all_transformations completed successfully!")
+        logger.info("✓ undo_all_transformations completed successfully!")
         logger.info(f"  Total transformations undone: {undone_count}")
-        logger.info(f"  All columns are now in lr_ (linear/raw) state")
+        logger.info("  All columns are now in lr_ (linear/raw) state")
         logger.info("=" * 80)
 
     def undo_transformations(self, column_names: List[str]) -> None:
@@ -1355,7 +1355,7 @@ class DatasetTransformationModule:
                 
                 logger.info(f"Detected ln transformation: '{column}'")
                 logger.info(f"Undoing ln transformation: '{column}' -> '{new_col_name}'")
-                logger.debug(f"  Applying: exp(x) - 1")
+                logger.debug("  Applying: exp(x) - 1")
                 
                 self.dataframe = self.dataframe.with_columns(
                     pl.col(column).map_elements(
@@ -1425,7 +1425,7 @@ class DatasetTransformationModule:
             skipped_count += 1
         
         logger.info("=" * 80)
-        logger.info(f"✓ undo_transformations completed!")
+        logger.info("✓ undo_transformations completed!")
         logger.info(f"  Total transformations undone: {undone_count}")
         logger.info(f"  Columns skipped (lr_ or no transform): {skipped_count}")
         logger.info(f"  Columns not found: {not_found_count}")

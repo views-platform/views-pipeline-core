@@ -7,7 +7,6 @@ from views_pipeline_core.data.handlers import (
     CMDataset,
     PGMDataset,
     _CDataset,
-    _PGDataset,
 )
 from views_pipeline_core.modules.reports import ReportModule
 from views_pipeline_core.modules.mapping import MappingModule

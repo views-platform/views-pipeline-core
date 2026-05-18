@@ -2,7 +2,6 @@ from typing import Dict, Optional, Any
 from pathlib import Path
 import wandb
 import logging
-from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
 
@@ -117,14 +116,17 @@ class WandBModule:
             - Numeric values are tracked over time
         """
         if self._active_run:
-            wandb.log(metrics)
+            try:
+                wandb.log(metrics)
+            except Exception as e:
+                logger.error(f"Failed to log metrics to WandB: {e}")
 
     def log_evaluation_results(
         self,
         step_wise: Dict,
         month_wise: Dict,
         time_series_wise: Dict,
-        conflict_type: str,
+        target_identifier: str,
     ) -> None:
         """
         Log structured evaluation results across multiple aggregation levels.
@@ -139,14 +141,14 @@ class WandBModule:
                 {'2024-01': {'mse': 0.02}, '2024-02': {...}, ...}
             time_series_wise: Metrics per time series:
                 {'country_001': {'mse': 0.03}, 'country_002': {...}, ...}
-            conflict_type: Type of conflict being evaluated: 'sb' | 'ns'
+            target_identifier: Identifier of target being evaluated (e.g., target name)
 
         Example:
             >>> wandb_module.log_evaluation_results(
             ...     step_wise={1: {'mse': 0.01}, 2: {'mse': 0.02}},
             ...     month_wise={'2024-01': {'mae': 0.05}},
             ...     time_series_wise={'ts_001': {'r2': 0.85}},
-            ...     conflict_type='sb'
+            ...     target_identifier='ged_sb_best'
             ... )
 
         Note:
@@ -159,7 +161,7 @@ class WandBModule:
             step_wise,
             time_series_wise,
             month_wise,
-            conflict_type,
+            target_identifier,
         )
 
     @staticmethod
@@ -337,7 +339,10 @@ class WandBModule:
             - More flexible than log_metrics() but less type-safe
             - See WandB docs for supported data types
         """
-        wandb.log(data)
+        try:
+            wandb.log(data)
+        except Exception as e:
+            logger.error(f"Failed to log data to WandB: {e}")
 
     @staticmethod
     def login() -> None:

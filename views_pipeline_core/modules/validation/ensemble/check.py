@@ -2,6 +2,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 from views_pipeline_core.files.utils import read_log_file
+from views_pipeline_core.modules.validation.core_config_sniffer import DEPRECATED_STATUS
 
 logger = logging.getLogger(__name__)
 
@@ -132,11 +133,11 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     single_model_dp_status = log_data["Deployment Status"]
 
     # More check conditions can be added here
-    if ensemble_deployment_status == 'Deprecated':
-        logger.error(f"Deployment status is deprecated. Exiting.")
+    if ensemble_deployment_status == DEPRECATED_STATUS:
+        logger.error("Deployment status is deprecated. Exiting.")
         return False
-    
-    if single_model_dp_status == 'Deprecated':
+
+    if single_model_dp_status == DEPRECATED_STATUS:
         logger.error(f"Model {model_name} deployment status is deprecated. Exiting.")
         return False
 
@@ -158,6 +159,52 @@ def validate_partition_config(ensemble_manager, model_manager, run_type):
         logger.error(f"Ensemble partition config {ensemble_partition_config} does not match model partition config {model_partition_config}. Exiting.")
         return False
     return True
+
+def validate_ensemble_raw_data_alignment(model_names, run_type):
+    """
+    Validate that all ensemble models have consistent raw data files.
+
+    Compares file sizes of the raw viewser parquet across all models.
+    Different sizes indicate different querysets, which means models[0]
+    is not a reliable source for actuals (C-03).
+
+    Args:
+        model_names: List of model name strings in the ensemble
+        run_type: 'calibration' | 'validation' | 'forecasting'
+
+    Returns:
+        True if all models have consistent raw data, False otherwise
+    """
+    from views_pipeline_core.data.model_path import ModelPathManager
+
+    if len(model_names) <= 1:
+        return True
+
+    sizes = {}
+    for name in model_names:
+        mp = ModelPathManager(name)
+        raw_paths = mp._get_raw_data_file_paths(run_type)
+        if not raw_paths:
+            logger.warning("Raw data file missing for model %s", name)
+            continue
+        sizes[name] = raw_paths[0].stat().st_size
+
+    if not sizes:
+        return True
+
+    unique_sizes = set(sizes.values())
+    if len(unique_sizes) > 1:
+        logger.warning(
+            "Ensemble raw data inconsistency: models have different file sizes "
+            "for run_type=%s. This may indicate different querysets. "
+            "Sizes: %s",
+            run_type,
+            sizes,
+        )
+        return False
+
+    return True
+
 
 def validate_ensemble_model(config):
     """
@@ -189,7 +236,8 @@ def validate_ensemble_model(config):
         - Prevents data leakage between train/test sets
         - Logs error with both partition configs on mismatch
     """
-    from views_pipeline_core.managers.model import ModelManager, ModelPathManager
+    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model import ModelManager
     from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
 
     ensemble_manager = EnsembleManager(EnsemblePathManager(config["name"]))

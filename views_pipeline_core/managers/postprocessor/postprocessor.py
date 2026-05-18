@@ -1,19 +1,14 @@
-import wandb
-from typing import Union
-from pathlib import Path
-
 import logging
 from abc import abstractmethod
-from views_pipeline_core.managers.model import ModelManager, ModelPathManager
-from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
-
-logger = logging.getLogger(__name__)
-
-from views_pipeline_core.cli.utils import parse_args, validate_arguments
-import logging
-from abc import abstractmethod
-from views_pipeline_core.exceptions import PipelineException
 from argparse import Namespace
+from pathlib import Path
+from typing import Union
+
+import wandb
+
+from views_pipeline_core.exceptions import PipelineException
+from views_pipeline_core.managers.model import ModelManager, ModelPathManager
+
 logger = logging.getLogger(__name__)
 
 # ============================================================ Postprocessor Path Manager ============================================================
@@ -42,15 +37,10 @@ class PostprocessorPathManager(ModelPathManager):
 
     def _initialize_postprocessor_specific_directories(self) -> None:
         """Initialize postprocessor-specific directories."""
-        # self.docs = self._build_absolute_directory(Path("docs"))
         self.data_raw = self._build_absolute_directory(Path("data/raw"))
 
     def _initialize_postprocessor_specific_scripts(self) -> None:
         """Initialize and append postprocessor-specific script paths."""
-        # self.scripts += [
-        #     self._build_absolute_directory(Path("configs/config_postprocessor.py")),
-        #     self._build_absolute_directory(Path("app.py")),
-        # ]
         self.queryset_path = self._build_absolute_directory(
             Path("configs/config_queryset.py")
         )
@@ -112,7 +102,7 @@ class PostprocessorManager(ModelManager):
         with wandb.init(
             project=f"{self.configs['name']}_postprocessor",
             entity=self._entity,
-            job_type=f"postprocessor_run",
+            job_type="postprocessor_run",
         ):
             try:
                 # self._execute_ensemble()
@@ -121,7 +111,7 @@ class PostprocessorManager(ModelManager):
                 self._validate()
                 self._save()
                 self._wandb_module.send_alert(
-                    title=f"Postprocessor Run Completed",
+                    title="Postprocessor Run Completed",
                     text=f"Postprocessing run for {self._model_path.model_name} complete.",
                     notifications_enabled=self._wandb_notifications,
                 )

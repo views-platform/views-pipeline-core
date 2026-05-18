@@ -16,9 +16,15 @@ from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.modules.reconciliation.reconciliation import ReconciliationModule
+from views_pipeline_core.modules.reconciliation.reconciliation import (
+    ReconciliationModule,
+)
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
 from views_pipeline_core.exceptions import PipelineException
+from views_pipeline_core.modules.ensemble_aggregator.aggregator import (
+    AggregationManager,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -183,9 +189,7 @@ class EnsembleManager(ForecastingModelManager):
         Uses self.args and self.configs.
         """
         with self._wandb_module.initialize_run(
-            project=self._project, 
-            config=self.configs, 
-            job_type="train"
+            project=self._project, config=self.configs, job_type="train"
         ):
             try:
                 logger.info(f"Training model {self.configs['name']}...")
@@ -195,11 +199,8 @@ class EnsembleManager(ForecastingModelManager):
                     title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
-            except Exception as e:
-                # logger.error(
-                #     f"{self._model_path.target.title()} training: {e}",
-                #     exc_info=True,
-                # )
+            except Exception:
+                logger.error(f"Ensemble training failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Training failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -222,8 +223,7 @@ class EnsembleManager(ForecastingModelManager):
                 df_predictions = self._evaluate_ensemble()
 
                 handle_ensemble_log_creation(
-                    model_path=self._model_path, 
-                    config=self.configs
+                    model_path=self._model_path, config=self.configs
                 )
 
                 for i, df in enumerate(df_predictions):
@@ -237,8 +237,8 @@ class EnsembleManager(ForecastingModelManager):
                     title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
-            except Exception as e:
-                # logger.error(f"Error evaluating model: {e}", exc_info=True)
+            except Exception:
+                logger.error(f"Ensemble evaluation failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Evaluation failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -263,18 +263,14 @@ class EnsembleManager(ForecastingModelManager):
                 self._wandb_module.send_alert(
                     title=f"Forecasting for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
-                
+
                 handle_ensemble_log_creation(
-                    model_path=self._model_path, 
-                    config=self.configs
+                    model_path=self._model_path, config=self.configs
                 )
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
-            except Exception as e:
-                # logger.error(
-                #     f"Error forecasting {self._model_path.target}: {e}",
-                #     exc_info=True,
-                # )
+            except Exception:
+                logger.error(f"Ensemble forecasting failed: {traceback.format_exc()}")
                 raise PipelineException(
                     f"Forecasting failed: {traceback.format_exc()}",
                     wandb_module=self._wandb_module,
@@ -303,22 +299,35 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             List[pd.DataFrame]: Aggregated evaluation predictions.
         """
-        dfs = []
-        dfs_agg = []
+        eval_results: Dict[str, List[pd.DataFrame]] = {}
 
         for model_name in tqdm.tqdm(self.configs["models"], desc="Evaluating ensemble"):
             tqdm.tqdm.write(f"Current model: {model_name}")
-            dfs.append(self._evaluate_model_artifact(model_name))
+            eval_results[model_name] = self._evaluate_model_artifact(model_name)
 
-        tqdm.tqdm.write(f"Aggregating metrics...")
-        for i in range(len(dfs[0])):
-            df_to_aggregate = [df[i] for df in dfs]
+        n_outputs = len(next(iter(eval_results.values())))
+        aggregated_outputs: List[pd.DataFrame] = []
+
+        tqdm.tqdm.write("Aggregating metrics...")
+        for i in range(n_outputs):
+            model_dfs_i = {}
+            for model_name, dfs in eval_results.items():
+                if i >= len(dfs):
+                    raise ValueError(
+                        f"Model '{model_name}' returned only {len(dfs)} outputs, "
+                        f"but at least {i+1} are required for ensemble aggregation. "
+                        f"All models must return the same number of outputs."
+                    )
+                model_dfs_i[model_name] = dfs[i]
+
             df_agg = self._get_aggregated_df(
-                df_to_aggregate, self.configs["aggregation"]
+                df_to_aggregate=model_dfs_i,
+                aggregation=self.configs["aggregation"],
             )
-            dfs_agg.append(df_agg)
 
-        return dfs_agg
+            aggregated_outputs.append(df_agg)
+
+        return aggregated_outputs
 
     def _forecast_ensemble(self) -> pd.DataFrame:
         """
@@ -328,13 +337,18 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             pd.DataFrame: The aggregated (and possibly reconciled) forecast DataFrame.
         """
-        dfs = []
+        model_dfs: Dict[str, pd.DataFrame] = {}
 
-        for model_name in tqdm.tqdm(self.configs["models"], desc="Forecasting ensemble"):
+        for model_name in tqdm.tqdm(
+            self.configs["models"], desc="Forecasting ensemble"
+        ):
             tqdm.tqdm.write(f"Current model: {model_name}")
-            dfs.append(self._forecast_model_artifact(model_name))
+            df = self._forecast_model_artifact(model_name)
+            model_dfs[model_name] = df
 
-        df_prediction = self._get_aggregated_df(dfs, self.configs["aggregation"])
+        df_prediction = self._get_aggregated_df(
+            df_to_aggregate=model_dfs, aggregation=self.configs["aggregation"]
+        )
         df_prediction = _ViewsDataset(source=df_prediction).dataframe
 
         # Apply reconciliation if configured
@@ -364,7 +378,7 @@ class EnsembleManager(ForecastingModelManager):
 
         model_path = ModelPathManager(model_name)
         model_args = self._create_model_args(train=True)
-        
+
         self._execute_shell_script(model_path, model_name, model_args)
 
     def _evaluate_model_artifact(self, model_name: str) -> List[pd.DataFrame]:
@@ -393,14 +407,14 @@ class EnsembleManager(ForecastingModelManager):
         ):
             name = f"{model_name}_predictions_{run_type}_{ts}_{str(sequence_number).zfill(2)}"
             pred = self._load_or_generate_prediction(
-                model_path, 
-                model_name, 
-                name, 
-                path_generated, 
-                run_type, 
-                ts, 
+                model_path,
+                model_name,
+                name,
+                path_generated,
+                run_type,
+                ts,
                 sequence_number,
-                evaluate=True
+                evaluate=True,
             )
             preds.append(pred)
 
@@ -428,13 +442,7 @@ class EnsembleManager(ForecastingModelManager):
         name = f"{model_name}_predictions_{run_type}_{ts}"
 
         return self._load_or_generate_prediction(
-            model_path, 
-            model_name, 
-            name, 
-            path_generated, 
-            run_type, 
-            ts,
-            forecast=True
+            model_path, model_name, name, path_generated, run_type, ts, forecast=True
         )
 
     # ============================================================
@@ -442,10 +450,7 @@ class EnsembleManager(ForecastingModelManager):
     # ============================================================
 
     def _create_model_args(
-        self, 
-        train: bool = False, 
-        evaluate: bool = False, 
-        forecast: bool = False
+        self, train: bool = False, evaluate: bool = False, forecast: bool = False
     ) -> ForecastingModelArgs:
         """
         Create a ForecastingModelArgs instance with current settings.
@@ -457,13 +462,15 @@ class EnsembleManager(ForecastingModelManager):
 
         Returns:
             ForecastingModelArgs: Configured args instance.
-        
+
         Note:
             If train, the saved flag is set to the value of the saved flag in the args.
             Check cli validation "if --train or --sweep is not set, you should use --saved flag".
         """
         saved = self.args.saved if train else True
-        use_prediction_store = True if forecast and self._use_prediction_store else False
+        use_prediction_store = (
+            True if forecast and self._use_prediction_store else False
+        )
         return ForecastingModelArgs(
             run_type=self.args.run_type,
             train=train,
@@ -494,14 +501,25 @@ class EnsembleManager(ForecastingModelManager):
         try:
             shell_command = model_args.to_shell_command(model_path)
             logger.info(f"Executing shell command: {' '.join(shell_command)}")
-            subprocess.run(shell_command, check=True)
+            subprocess.run(shell_command, check=True, timeout=7200)
+        except subprocess.TimeoutExpired:
+            logger.error(
+                f"Shell command timed out for model {model_name} after 7200s",
+            )
+            raise PipelineException(
+                f"Shell command timed out for model {model_name} after 7200s. "
+                "Consider increasing the timeout or investigating the model script.",
+                wandb_module=self._wandb_module,
+            )
         except Exception as e:
             logger.error(
                 f"Error during shell command execution for model {model_name}: {e}",
                 exc_info=True,
             )
-            raise PipelineException(f"Error during shell command execution for model {model_name}: {e}", 
-                                    wandb_module=self._wandb_module)
+            raise PipelineException(
+                f"Error during shell command execution for model {model_name}: {e}",
+                wandb_module=self._wandb_module,
+            )
 
     def _load_or_generate_prediction(
         self,
@@ -539,15 +557,19 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 logger.info(f"Loading existing prediction {name} from prediction store")
                 return pred
-            except Exception as e:
+            except Exception:
                 logger.info(
                     f"No existing {run_type} predictions found. Generating new predictions..."
                 )
         else:
-            seq_suffix = f"_{str(sequence_number).zfill(2)}" if sequence_number is not None else ""
+            seq_suffix = (
+                f"_{str(sequence_number).zfill(2)}"
+                if sequence_number is not None
+                else ""
+            )
             file_path = (
                 path_generated
-                / f"predictions_{run_type}_{ts}{seq_suffix}{PipelineConfig().dataframe_format}"
+                / f"predictions_{run_type}_{ts}{seq_suffix}{PipelineConfig.dataframe_format}"
             )
             if file_path.exists():
                 pred = read_dataframe(file_path)
@@ -564,9 +586,20 @@ class EnsembleManager(ForecastingModelManager):
 
         # Load the newly generated prediction
         if self._use_prediction_store:
-            return pd.DataFrame.forecasts.read_store(run=self._pred_store_name, name=name)
+            return pd.DataFrame.forecasts.read_store(
+                run=self._pred_store_name, name=name
+            )
         else:
-            return read_dataframe(file_path)
+            # Get the latest prediction file (shell script generates with new timestamp)
+            prediction_files = model_path._get_generated_predictions_data_file_paths(run_type)
+            if not prediction_files:
+                raise PipelineException(
+                    f"No prediction files found for {model_name} after generation",
+                    wandb_module=self._wandb_module
+                )
+            latest_prediction_file = prediction_files[0]
+            logger.info(f"Loading newly generated prediction from {latest_prediction_file}")
+            return read_dataframe(latest_prediction_file)
 
     def _apply_reconciliation(self, df_prediction: pd.DataFrame) -> pd.DataFrame:
         """
@@ -578,12 +611,12 @@ class EnsembleManager(ForecastingModelManager):
         Returns:
             pd.DataFrame: Reconciled or original predictions.
         """
-        
+
         reconciliation_type = self.configs.get("reconciliation", None)
-        
+
         if reconciliation_type == "pgm_cm_point":
             reconciled_pg = self.__reconcile_pg_with_c(pg_dataframe=df_prediction)
-            
+
             if reconciled_pg is not None:
                 logger.info(
                     f"Reconciliation complete for {self._model_path.target}. "
@@ -597,19 +630,21 @@ class EnsembleManager(ForecastingModelManager):
             else:
                 self._wandb_module.send_alert(
                     title=f"{self._model_path.target.title()} Reconciliation Error",
-                    text=f"Reconciliation returned None. Predictions not reconciled.",
+                    text="Reconciliation returned None. Predictions not reconciled.",
                     level=wandb.AlertLevel.WARNING,
                 )
-                logger.warning("Reconciliation returned None. Predictions not reconciled.")
+                logger.warning(
+                    "Reconciliation returned None. Predictions not reconciled."
+                )
         else:
-            logger.info("No valid reconciliation type specified. Returning predictions without reconciliation.")
-        
+            logger.info(
+                "No valid reconciliation type specified. Returning predictions without reconciliation."
+            )
+
         return df_prediction
 
     def __reconcile_pg_with_c(
-        self, 
-        pg_dataframe: pd.DataFrame = None, 
-        c_dataframe: pd.DataFrame = None
+        self, pg_dataframe: pd.DataFrame = None, c_dataframe: pd.DataFrame = None
     ) -> Optional[pd.DataFrame]:
         """
         Reconciles the PG dataset with the C dataset using a specified reconciliation model.
@@ -643,20 +678,19 @@ class EnsembleManager(ForecastingModelManager):
         )
 
         if latest_pg_dataset is None:
-            logger.error("Could not find latest PG dataset. Reconciliation cannot proceed.")
+            logger.error(
+                "Could not find latest PG dataset. Reconciliation cannot proceed."
+            )
             return None
 
         # Perform reconciliation
         reconciliation_manager = ReconciliationModule(
-            c_dataset=latest_c_dataset, 
-            pg_dataset=latest_pg_dataset
+            c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset
         )
         return reconciliation_manager.reconcile(lr=0.01, max_iters=500, tol=1e-6)
 
     def _load_c_dataset(
-        self, 
-        cm_model: str, 
-        c_dataframe: Optional[pd.DataFrame]
+        self, cm_model: str, c_dataframe: Optional[pd.DataFrame]
     ) -> Optional[_CDataset]:
         """
         Load C dataset from prediction store, local path, or provided DataFrame.
@@ -676,16 +710,18 @@ class EnsembleManager(ForecastingModelManager):
             try:
                 from views_forecasts.extensions import ViewsMetadata
 
-                logger.info(f"Fetching latest C dataset for {cm_model} from prediction store")
+                logger.info(
+                    f"Fetching latest C dataset for {cm_model} from prediction store"
+                )
                 run_id = ViewsMetadata().get_run_id_from_name(self._pred_store_name)
                 all_runs = ViewsMetadata().with_name(cm_model).fetch()["name"].to_list()
-                
+
                 reconcile_with_forecasts = [
                     fc for fc in all_runs if cm_model in fc and "forecasting" in fc
                 ]
                 reconcile_with_forecasts.sort()
                 reconcile_with_forecast = reconcile_with_forecasts[-1]
-                
+
                 return _CDataset(
                     source=pd.DataFrame.forecasts.read_store(
                         run=run_id, name=reconcile_with_forecast
@@ -700,9 +736,13 @@ class EnsembleManager(ForecastingModelManager):
         try:
             logger.info(f"Fetching latest C dataset for {cm_model} from local path")
             return _CDataset(
-                source=EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(
+                source=EnsemblePathManager(
+                    cm_model
+                )._get_generated_predictions_data_file_paths(
                     run_type=self.configs["run_type"]
-                )[0]
+                )[
+                    0
+                ]
             )
         except Exception as e:
             logger.warning(
@@ -710,47 +750,73 @@ class EnsembleManager(ForecastingModelManager):
             )
             return None
 
-    @staticmethod
-    def _get_aggregated_df(df_to_aggregate: List[pd.DataFrame], aggregation: str) -> pd.DataFrame:
+    def _get_aggregated_df(
+        self,
+        df_to_aggregate: Dict[str, pd.DataFrame],
+        aggregation: str,
+    ) -> pd.DataFrame:
         """
-        Aggregates DataFrames using mean or median aggregation.
-        Handles single-element lists by converting to scalars.
+        Aggregate model predictions using the AggregationManager.
 
         Args:
-            df_to_aggregate (List[pd.DataFrame]): List of DataFrames to aggregate.
-            aggregation (str): Aggregation method ('mean' or 'median').
+            df_to_aggregate: List of model prediction DataFrames (all with the same index).
+            aggregation:
+                - for *point* predictions: 'mean', 'median', 'min', 'max', or custom name
+                - for *distribution* predictions: 'concat' or 'vincentization'
 
         Returns:
-            pd.DataFrame: Aggregated DataFrame.
+            Aggregated predictions as a pandas DataFrame with the original MultiIndex.
         """
-        processed_dfs = []
-        
-        for df in df_to_aggregate:
-            df_processed = df.copy()
 
-            for col in df_processed.columns:
-                def process_element(elem):
-                    if isinstance(elem, list):
-                        if len(elem) == 1:
-                            return elem[0]
-                        elif len(elem) == 0:
-                            return None
-                        else:
-                            raise ValueError(
-                                f"Aggregating distributions is not supported. "
-                                f"Found list with {len(elem)} values in column '{col}'."
-                            )
-                    return elem
+        if not df_to_aggregate:
+            raise ValueError("df_to_aggregate must contain at least one DataFrame.")
 
-                df_processed[col] = df_processed[col].apply(process_element)
+        # ---- 1) Define index + target columns -----------------------------------
 
-            processed_dfs.append(df_processed)
+        first_df = next(iter(df_to_aggregate.values()))
+        index_cols = list(first_df.index.names)
+        # target_cols = [c for c in first_df.columns if c not in index_cols] ### This is not right, but how to chose target cols?
+        target_cols = ["pred_" + col for col in self.configs.get("targets")]
 
-        concatenated = pd.concat(processed_dfs)
+        # ---- 2) Create AggregationManager ---------------------------------------
+        manager = AggregationManager(
+            index_cols=index_cols,
+            target_cols=target_cols,
+        )
 
-        if aggregation == "mean":
-            return concatenated.groupby(level=[0, 1]).mean()
-        elif aggregation == "median":
-            return concatenated.groupby(level=[0, 1]).median()
-        else:
-            raise ValueError(f"Invalid aggregation method: {aggregation}")
+        # ---- 3) Add each model to the manager -----------------------------------
+        # Read weighting behaviour from config
+        use_weights = self.configs.get("use_weights", False)
+        weights_cfg = self.configs.get("weights", {})  # dict: {model_name: weight}
+
+        for model_name, df in df_to_aggregate.items():
+            weight = weights_cfg.get(model_name)  # may be None
+            manager.add_model(
+                data=df,
+                weight=weight,
+                name=model_name,
+            )
+
+        # ---- 4) Decide how to call aggregate() based on prediction type ---------
+        # AggregationManager infers prediction_type ("point" vs "distribution")
+        # when you call add_model().
+        pred_type = manager.prediction_type
+        if pred_type is None:
+            raise RuntimeError(
+                "AggregationManager.prediction_type is None. "
+                "Make sure at least one model was added with `add_model`."
+            )
+
+        aggregated_pl = manager.aggregate(
+            method=aggregation,
+            use_weights=use_weights,
+        )
+
+        # ---- 5) Convert back to pandas with MultiIndex -------------------------
+        aggregated_pdf = aggregated_pl.to_pandas()
+
+        # AggregationManager returns index columns as normal columns.
+        # To match your previous behaviour, set a MultiIndex again:
+        aggregated_pdf = aggregated_pdf.set_index(index_cols).sort_index()
+
+        return aggregated_pdf

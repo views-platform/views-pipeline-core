@@ -212,6 +212,9 @@ cython_debug/
 .idea/
 .vscode
 
+# graphify output
+graphify-out/
+
 # backup files
 *.bak
 

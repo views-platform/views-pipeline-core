@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
 from views_pipeline_core.modules.statistics import PosteriorDistributionAnalyzer
-import scipy.stats as stats
 
 # Fixtures for test data
 @pytest.fixture
@@ -64,6 +63,14 @@ class Test_ViewsDatasetInitialization:
         with pytest.raises(ValueError) as excinfo:
             _ViewsDataset(sample_features_df, targets=['missing'])
         assert "Missing targets" in str(excinfo.value)
+
+    def test_init_with_none_targets_raises_value_error(self, sample_features_df):
+        """
+        Regression test: initializing with targets=None (and is_prediction=False) 
+        should raise ValueError, not TypeError.
+        """
+        with pytest.raises(ValueError, match="Targets must be specified"):
+            _ViewsDataset(sample_features_df, targets=None)
 
 class TestTensorConversion:
     """Tests for tensor conversion functionality"""
@@ -169,45 +176,6 @@ class TestEdgeCases:
         with pytest.raises(ValueError):
             _ViewsDataset(df)
 
-    # def test_missing_indices(self, sample_features_df):
-    #     """Test handling of missing indices after reindexing"""
-    #     # Initialize with broadcast_features=True
-    #     ds = _ViewsDataset(sample_features_df, 
-    #                     targets=['target'],
-    #                     broadcast_features=True)
-        
-    #     # Get full tensor first
-    #     full_tensor = ds.to_tensor()
-        
-    #     # Remove one time step from original data
-    #     subset_df = sample_features_df.loc[sample_features_df.index.get_level_values(0) != 1]
-    #     ds_subset = _ViewsDataset(subset_df, targets=['target'], broadcast_features=True)
-        
-    #     # Get subset tensor
-    #     subset_tensor = ds_subset.to_tensor()
-        
-    #     # Verify shape maintains original dimensions with NaNs
-    #     assert subset_tensor.shape == full_tensor.shape  # (2, 2, 2, 3)
-        
-    #     # Check NaN filling for missing time step
-    #     assert np.isnan(subset_tensor[0]).all()  # First time step should be all NaNs
-    #     assert not np.isnan(subset_tensor[1]).any()  # Second time step should have data
-
-    # def test_nan_handling(self):
-    #     """Test proper handling of NaN values"""
-    #     index = pd.MultiIndex.from_product([[1], [101]], names=["month_id", "country_id"])
-    #     df = pd.DataFrame({
-    #         'pred_var': [np.array([np.nan, np.nan])]
-    #     }, index=index)
-    #     ds = _ViewsDataset(df)
-        
-    #     map_df = ds.calculate_map()
-    #     hdi_df = ds.calculate_hdi()
-        
-    #     assert not map_df.empty, "MAP DataFrame should not be empty"
-    #     assert np.isnan(map_df.loc[(1, 101), 'pred_var_map'])
-    #     assert np.isnan(hdi_df.loc[(1, 101), 'pred_var_hdi_lower'])
-    #     assert np.isnan(hdi_df.loc[(1, 101), 'pred_var_hdi_upper'])
 
 class TestSubsetting:
     """Tests for data subsetting functionality"""

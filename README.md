@@ -34,6 +34,23 @@
 
 ---
 
+> [!CAUTION]
+> ### 🚨 ATTENTION: MANDATORY EXPLICIT CONFIGURATION (Tier 3)
+> As of February 2026, the pipeline enforces **Explicit Intent Declaration**. Legacy keys (`targets`, `metrics`) are **deprecated** and will trigger large warning banners.
+>
+> **1. Targets are MANDATORY:** You must declare at least one target or the pipeline will hard-stop.
+> **2. Be Explicit:** Use task-specific prefixes (`regression_` or `classification_`).
+> **3. Split Metrics:** Clearly separate Point metrics from Sample-based (Uncertainty) metrics.
+>
+> | Category | **Tier 3: Best Practice** (Explicit) | **Legacy** (Deprecated) |
+> | :--- | :--- | :--- |
+> | **Targets** | `regression_targets`, `classification_targets` | `targets` |
+> | **Metrics** | `regression_point_metrics`<br>`regression_sample_metrics`<br>`classification_point_metrics`<br>`classification_sample_metrics` | `regression_metrics`<br>`classification_metrics`<br>`metrics` |
+>
+> *Misspelled or unrecognized keys (e.g., `regression_target` without the 's') will trigger a hard stop with helpful hints.*
+
+---
+
 ## Table of Contents
 
 1. [Conceptual Overview](#1-conceptual-overview)
@@ -84,11 +101,20 @@ The pipeline transforms raw geo‑temporal data into validated, reconciled, and 
 └───────────────┬──────────────────────────────────┘
                 │  DataFrame (month_id, entity_id)
                 ▼
-      ┌─────────────────────────┐
-      │     Model / Ensemble    │
-      │  Training / Evaluation  │
-      │  Forecasting / Reports  │
-      └────────────┬────────────┘
+      ┌─────────────────────────────────────────┐
+      │   ForecastingModelManager (thin façade)  │
+      │   Routes to independently testable stages│
+      │                                         │
+      │   ┌─────────────┐  ┌──────────────────┐ │
+      │   │TrainingStage│  │ EvaluationStage  │ │
+      │   └─────────────┘  └──────────────────┘ │
+      │   ┌───────────────┐ ┌────────────────┐  │
+      │   │ForecastingStage│ │ReportingStage │  │
+      │   └───────────────┘ └────────────────┘  │
+      │   ┌───────────────────────┐              │
+      │   │  PredictionIOManager  │              │
+      │   └───────────────────────┘              │
+      └────────────┬────────────────────────────┘
                    │ Predictions
                    ▼
          ┌────────────────────────┐
@@ -103,6 +129,8 @@ The pipeline transforms raw geo‑temporal data into validated, reconciled, and 
          └───────────────────────────┘
 ```
 
+> **Architecture note (April 2026):** `ForecastingModelManager` has been decomposed from a 3049-LOC monolith into a ~1960-LOC thin façade that delegates to 5 independently testable stage classes. Each stage receives a frozen context object (immutable dataclass) rather than reaching into the manager's internals. `ModelPathManager` has been relocated from `managers/` to `data/` to fix dependency inversion. All existing import paths continue to work via re-export shims. See [ADR-045](./documentation/ADRs/045_pipeline_stage_architecture.md) for the full design rationale.
+
 ---
 
 ## 3. Core Pipeline Stages
@@ -110,22 +138,27 @@ The pipeline transforms raw geo‑temporal data into validated, reconciled, and 
 | Stage       | Output                          | Key Component                  |
 |-------------|---------------------------------|--------------------------------|
 | Data Fetch  | Partitioned feature/target frame | ViewsDataLoader               |
-| Train       | Artifact (model file)           | ForecastingModelManager / EnsembleManager |
-| Evaluate    | Metrics + eval predictions      | Evaluation logic              |
-| Forecast    | Future horizon predictions      | ForecastingModelManager       |
+| Train       | Artifact (model file)           | TrainingStage (via ForecastingModelManager / EnsembleManager) |
+| Evaluate    | Metrics + eval predictions      | EvaluationStage (via ForecastingModelManager) |
+| Forecast    | Future horizon predictions      | ForecastingStage (via ForecastingModelManager) |
 | Reconcile   | Grid ↔ country consistency      | ReconciliationModule          |
-| Report      | HTML summaries                  | ReportModule + MappingModule  |
+| Report      | HTML summaries                  | ReportingStage (via ForecastingModelManager) |
 | Package     | Poetry-compliant project        | PackageManager                |
 
 ---
 
 ## 4. Managers (Orchestration Layer)
 
-| Manager                        | Purpose                                      |
+| Manager / Stage                | Purpose                                      |
 |--------------------------------|----------------------------------------------|
-| [ModelPathManager](./views_pipeline_core/managers/model/README.md) | Path + artifact resolution for a model |
+| [ModelPathManager](./views_pipeline_core/data/model_path.py) | Path + artifact resolution for a model (canonical location: `data/`) |
 | [ModelManager](./views_pipeline_core/managers/model/README.md)     | Abstract training/evaluation/forecast flow control |
-| [ForecastingModelManager](./views_pipeline_core/managers/model/README.md) | Concrete forecasting implementation scaffold |
+| [ForecastingModelManager](./views_pipeline_core/managers/model/README.md) | Thin façade — routes to pipeline stages below |
+| [EvaluationStage](./views_pipeline_core/managers/evaluation/stage.py) | Metrics orchestration (DF + PF paths, step mappings, evaluator integration) |
+| [ReportingStage](./views_pipeline_core/managers/reporting/stage.py) | Forecast + evaluation HTML report generation |
+| [ForecastingStage](./views_pipeline_core/managers/forecasting/stage.py) | Post-processing, validation, and persistence of forecast predictions |
+| [TrainingStage](./views_pipeline_core/managers/training/stage.py) | Training log creation and WandB alerts |
+| [PredictionIOManager](./views_pipeline_core/managers/prediction/io.py) | Save/load predictions, evaluations, and evaluation tables |
 | [EnsemblePathManager](./views_pipeline_core/managers/ensemble/README.md) | Paths for multi-model ensemble |
 | [EnsembleManager](./views_pipeline_core/managers/ensemble/README.md) | Aggregation + optional reconciliation |
 | [ExtractorPathManager](./views_pipeline_core/managers/extractor/README.md) | External raw data ingestion paths |
@@ -135,7 +168,7 @@ The pipeline transforms raw geo‑temporal data into validated, reconciled, and 
 | [PackageManager](./views_pipeline_core/managers/package/README.md) | Create/validate Poetry packages |
 | [ConfigurationManager](./views_pipeline_core/managers/configuration/README.md) | Merge + validate layered configuration |
 
-Each manager has accompanying documentation in its module directory.
+Each stage receives an immutable frozen context object and is independently unit-testable. See [ADR-045](./documentation/ADRs/045_pipeline_stage_architecture.md) for architecture details.
 
 ---
 
@@ -151,7 +184,7 @@ Each manager has accompanying documentation in its module directory.
 | [logging](./views_pipeline_core/modules/logging/README.md) | Central logging configuration injection |
 | [statistics](./views_pipeline_core/modules/statistics/README.md) | Forecast reconciliation math (proportional scaling) |
 | [wandb](./views_pipeline_core/modules/wandb/README.md) | Alerts, artifact logging, run lifecycle |
-| [model validation](./views_pipeline_core/modules/validation/model/README.md) | Structural & logical integrity checks |
+| [model validation](./views_pipeline_core/modules/validation/README.md) | Structural & logical integrity checks (sniffer pattern, ADR-041) |
 | [ensemble validation](./views_pipeline_core/modules/validation/ensemble/README.md) | Structural & logical integrity checks |
 
 ---

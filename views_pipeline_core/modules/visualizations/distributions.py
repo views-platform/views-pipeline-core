@@ -7,7 +7,6 @@ class PlotDistribution:
 
     def __init__(self, dataset: "views_pipeline_core.data.handlers._ViewsDataset") -> None:
         # Imported here to avoid circular import at module level
-        from views_pipeline_core.data.handlers import _ViewsDataset
         self._dataset = dataset
 
     def plot_maximum_a_posteriori(
@@ -84,10 +83,6 @@ class PlotDistribution:
             edgecolor="none",
             label="Distribution",
         )
-
-        # sns.histplot(valid_samples, bins=bins, kde=plot_kde, ax=ax,
-        #             color='#3498DB', alpha=0.6, edgecolor='none',
-        #             label='Distribution', bins=50)
 
         if colors is None:
             colors = sns.color_palette("colorblind", 1)

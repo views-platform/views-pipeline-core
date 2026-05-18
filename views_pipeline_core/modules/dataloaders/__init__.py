@@ -1,1 +1,1 @@
-from .dataloaders import ViewsDataLoader, UpdateViewser
+from .dataloaders import ViewsDataLoader as ViewsDataLoader, UpdateViewser as UpdateViewser

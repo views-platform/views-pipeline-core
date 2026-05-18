@@ -1,10 +1,42 @@
+"""Datastore module for managing prediction files and metadata via Appwrite.
+
+This module provides a high-level interface for uploading, downloading, searching,
+and managing prediction files stored in Appwrite cloud storage. It handles metadata
+management, file versioning, caching, and bucket operations.
+
+Typical usage example:
+
+    from views_pipeline_core.modules.datastore import DatastoreModule
+    from views_pipeline_core.modules.appwrite import AppwriteConfig
+
+    config = AppwriteConfig(
+        endpoint="https://cloud.appwrite.io/v1",
+        project_id="my_project",
+        credentials="my_api_key",
+        bucket_id="predictions"
+    )
+    datastore = DatastoreModule(config)
+
+    # Upload a prediction file
+    result = datastore.upload_data(
+        file="/path/to/predictions.parquet",
+        filename="model_predictions.parquet",
+        loa="pgm",
+        name="fatalities_model",
+        type="model",
+        targets=["pred_ged_sb"],
+        category="forecast"
+    )
+
+    # Download the latest prediction
+    latest = datastore.download_latest_file(filters={"loa": "pgm"})
+"""
+
 from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
-from views_pipeline_core.managers.model import ModelPathManager
 from views_pipeline_core.modules.appwrite import AppwriteConfig, AppWriteFileModule, OperationResult
 import logging
 import pandas as pd
-import os
 
 import dotenv
 
@@ -13,12 +45,39 @@ dotenv.load_dotenv(dotenv.find_dotenv())
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# APPWRITE_DATASTORE_PROJECT_ID = os.getenv("APPWRITE_DATASTORE_PROJECT_ID")
-# APPWRITE_ENDPOINT = os.getenv("APPWRITE_ENDPOINT")
-# APPWRITE_DATASTORE_API_KEY = os.getenv("APPWRITE_DATASTORE_API_KEY")
-
 
 class FileMetadata:
+    """Metadata container for prediction files with validation.
+
+    This class encapsulates and validates metadata required for prediction files
+    stored in the datastore. It ensures type safety and valid category values
+    before allowing file uploads.
+
+    Attributes:
+        loa: Level of analysis (e.g., 'pgm' for PRIO-GRID-month, 'cm' for country-month).
+        name: Model name or identifier for the prediction.
+        type: Type of model (e.g., 'model', 'postprocessor', 'ensemble').
+        targets: List of target variable names (e.g., ['pred_ged_sb', 'pred_ged_ns']).
+        category: Either 'forecast' or 'historical' to categorize the prediction.
+        description: Optional human-readable description of the prediction file.
+
+    Raises:
+        TypeError: If any argument has an incorrect type.
+        ValueError: If category is not 'forecast' or 'historical'.
+
+    Example:
+        >>> metadata = FileMetadata(
+        ...     loa="pgm",
+        ...     name="fatalities_model_v2",
+        ...     type="model",
+        ...     targets=["pred_ged_sb", "pred_ged_ns", "pred_ged_os"],
+        ...     category="forecast",
+        ...     description="Monthly fatality predictions for PRIO-GRID cells"
+        ... )
+        >>> metadata.to_dict()
+        {'loa': 'pgm', 'name': 'fatalities_model_v2', 'type': 'model', ...}
+    """
+
     def __init__(
         self,
         loa: str,
@@ -28,6 +87,21 @@ class FileMetadata:
         category: str,
         description: Optional[str] = None,
     ):
+        """Initialize FileMetadata with validation.
+
+        Args:
+            loa: Level of analysis identifier (e.g., 'pgm', 'cm').
+            name: Model name or identifier.
+            type: Type of model (e.g., 'model', 'postprocessor', 'ensemble').
+            targets: List of target variable names being predicted.
+            category: Must be either 'forecast' or 'historical'.
+            description: Optional description of the file.
+
+        Raises:
+            TypeError: If loa, name, or type are not strings, if targets is not
+                a list of strings, or if description is not a string/None.
+            ValueError: If category is not 'forecast' or 'historical'.
+        """
         if not isinstance(loa, str):
             raise TypeError("loa must be a string")
         if not isinstance(name, str):
@@ -51,6 +125,21 @@ class FileMetadata:
         self.category = category
 
     def to_dict(self) -> Dict[str, Any]:
+        """Convert metadata to dictionary format for storage.
+
+        Returns:
+            Dict containing all metadata fields. The 'description' field is
+            only included if it has a non-empty value.
+
+        Example:
+            >>> metadata = FileMetadata(
+            ...     loa="pgm", name="model", type="model",
+            ...     targets=["ged_sb"], category="forecast"
+            ... )
+            >>> metadata.to_dict()
+            {'loa': 'pgm', 'name': 'model', 'type': 'model',
+             'targets': ['ged_sb'], 'category': 'forecast'}
+        """
         data = {
             "loa": self.loa,
             "name": self.name,
@@ -64,7 +153,73 @@ class FileMetadata:
 
 
 class DatastoreModule:
+    """High-level interface for managing prediction files in Appwrite storage.
+
+    DatastoreModule provides a simplified API for uploading, downloading, searching,
+    and managing prediction files. It wraps the lower-level AppWriteFileModule and
+    handles metadata management, file versioning, and automatic bucket creation.
+
+    The module supports:
+        - File uploads with automatic metadata extraction and storage
+        - Searching predictions by metadata filters (loa, type, targets, etc.)
+        - Downloading files with intelligent caching
+        - Listing and managing predictions for specific models
+        - Automatic bucket creation when needed
+
+    Attributes:
+        model_path: ModelPathManager instance for path resolution.
+
+    Example:
+        >>> from views_pipeline_core.modules.appwrite import AppwriteConfig
+        >>> config = AppwriteConfig(
+        ...     endpoint="https://cloud.appwrite.io/v1",
+        ...     project_id="views_project",
+        ...     credentials="api_key_here",
+        ...     bucket_id="forecasts",
+        ...     collection_name="Predictions"
+        ... )
+        >>> datastore = DatastoreModule(config)
+        >>>
+        >>> # Upload a prediction file
+        >>> result = datastore.upload_data(
+        ...     file="/data/predictions.parquet",
+        ...     filename="pgm_forecast_202401.parquet",
+        ...     loa="pgm",
+        ...     name="ensemble_model",
+        ...     type="model",
+        ...     targets=["ged_sb"],
+        ...     category="forecast"
+        ... )
+        >>>
+        >>> # Search for predictions
+        >>> predictions = datastore.get_predictions_by_metadata(
+        ...     filters={"loa": "pgm", "category": "forecast"}
+        ... )
+        >>>
+        >>> # Download the latest file
+        >>> download = datastore.download_latest_file(
+        ...     filters={"type": "model"},
+        ...     save_path="/tmp/latest_prediction.parquet"
+        ... )
+    """
+
     def __init__(self, appwrite_file_manager_config: AppwriteConfig):
+        """Initialize DatastoreModule with Appwrite configuration.
+
+        Args:
+            appwrite_file_manager_config: AppwriteConfig instance containing
+                connection settings, authentication credentials, bucket/collection
+                identifiers, and optional path manager.
+
+        Example:
+            >>> config = AppwriteConfig(
+            ...     endpoint="https://cloud.appwrite.io/v1",
+            ...     project_id="my_project",
+            ...     credentials="my_api_key",
+            ...     bucket_id="production_forecasts"
+            ... )
+            >>> datastore = DatastoreModule(config)
+        """
         self.model_path = appwrite_file_manager_config.path_manager
         self.__appwrite_file_manager_config = appwrite_file_manager_config
         self.__appwrite_file_manager = AppWriteFileModule(
@@ -82,51 +237,29 @@ class DatastoreModule:
         category: str,
         description: Optional[str] = None,
     ) -> OperationResult:
-        # if name is None:
-        #     name = self.model_path.model_name
-        # metadata = FileMetadata(
-        #     loa=loa, name=name, type=type, targets=targets, description=description, category=category
-        # ).to_dict()
-        # if isinstance(file, pd.DataFrame):
-        #     raise NotImplementedError(
-        #         "Uploading a DataFrame directly is not implemented."
-        #     )
-        # elif isinstance(file, (Path, str)):
-        #     file_path = str(file)
-        #     upload_result = self.__appwrite_file_manager.upload_file_with_metadata(
-        #         bucket_id=self.__appwrite_file_manager_config.bucket_id,
-        #         filename=filename,
-        #         file_path=file_path,
-        #         metadata=metadata,
-        #         collection_name=self.__appwrite_file_manager_config.collection_name,
-        #         collection_id=self.__appwrite_file_manager_config.collection_id,
-        #     ).to_dict()
-        # else:
-        #     raise TypeError("file must be a Path, str, or pd.DataFrame")
+        """Upload a prediction file with metadata (DEPRECATED).
 
-        # if upload_result.get("code") == "storage_bucket_not_found":
-        #     logger.info(
-        #         f"Bucket '{self.__appwrite_file_manager_config.bucket_id}' not found. Creating it..."
-        #     )
-        #     try:
-        #         self.__appwrite_file_manager.create_bucket(
-        #             bucket_id=self.__appwrite_file_manager_config.bucket_id,
-        #             name=self.__appwrite_file_manager_config.bucket_name,
-        #         )
-        #     except Exception as e:
-        #         logger.error(f"Failed to create bucket: {e}")
-        #         return OperationResult(success=False, error=str(e))
+        .. deprecated::
+            Use :meth:`upload_data` instead. This method is maintained for
+            backward compatibility and simply delegates to upload_data.
 
-        #     upload_result = self.__appwrite_file_manager.upload_file_with_metadata(
-        #         bucket_id=self.__appwrite_file_manager_config.bucket_id,
-        #         file_path=file_path,
-        #         filename=filename,
-        #         metadata=metadata,
-        #         collection_name=self.__appwrite_file_manager_config.collection_name,
-        #         collection_id=self.__appwrite_file_manager_config.collection_id,
-        #     ).to_dict()
-        
-        # return OperationResult(**upload_result)
+        Args:
+            file: Path to the file or DataFrame to upload.
+            filename: Name to give the file in storage.
+            loa: Level of analysis (e.g., 'pgm', 'cm').
+            name: Model name. If None, uses model_path.model_name.
+            type: Type of model (e.g., 'model', 'postprocessor', 'ensemble').
+            targets: List of target variable names.
+            category: Either 'forecast' or 'historical'.
+            description: Optional description of the prediction.
+
+        Returns:
+            OperationResult with success status and uploaded file data.
+
+        Raises:
+            NotImplementedError: If file is a DataFrame (not yet supported).
+            TypeError: If file is not a Path, str, or DataFrame.
+        """
         logger.warning("upload_predictions is deprecated. Use upload_data instead.")
         return self.upload_data(
             file=file,
@@ -139,7 +272,6 @@ class DatastoreModule:
             description=description,
         )
     
-    # Same as upload_predictions but for generic data. Will be refactored later.
     def upload_data(
         self,
         file: Union[Path, str, pd.DataFrame],
@@ -151,6 +283,48 @@ class DatastoreModule:
         category: str,
         description: Optional[str] = None,
     ) -> OperationResult:
+        """Upload a data file with associated metadata to Appwrite storage.
+
+        Uploads a file to the configured Appwrite bucket and stores metadata
+        in the associated database collection. Automatically creates the bucket
+        if it doesn't exist. Handles duplicate detection via file hashing.
+
+        Args:
+            file: Path to the file to upload. Can be a Path object or string.
+                DataFrame uploads are not yet implemented.
+            filename: Name to give the file in storage (e.g., 'predictions.parquet').
+            loa: Level of analysis identifier (e.g., 'pgm' for PRIO-GRID-month).
+            name: Model name or identifier. If None, uses model_path.model_name.
+            type: Type of model (e.g., 'model', 'postprocessor', 'ensemble').
+            targets: List of target variable names being predicted.
+            category: Must be 'forecast' or 'historical'.
+            description: Optional human-readable description.
+
+        Returns:
+            OperationResult with:
+                - success: True if upload succeeded
+                - data: Dictionary containing file_id, document_id, and metadata
+                - code: 'UPLOAD_SUCCESS', 'METADATA_UPDATED', or error code
+                - error: Error message if success is False
+
+        Raises:
+            NotImplementedError: If file is a pandas DataFrame.
+            TypeError: If file is not a Path, str, or DataFrame.
+
+        Example:
+            >>> result = datastore.upload_data(
+            ...     file="/data/output/pgm_predictions.parquet",
+            ...     filename="pgm_forecast_202401.parquet",
+            ...     loa="pgm",
+            ...     name="fatalities_ensemble",
+            ...     type="ensemble",
+            ...     targets=["pred_ged_sb", "pred_ged_ns"],
+            ...     category="forecast",
+            ...     description="January 2024 ensemble predictions"
+            ... )
+            >>> if result.success:
+            ...     print(f"Uploaded with ID: {result.data['file_id']}")
+        """
         if name is None:
             name = self.model_path.model_name
         metadata = FileMetadata(
@@ -256,6 +430,39 @@ class DatastoreModule:
         use_cache: bool = True,
         validate_cache: bool = True,
     ) -> OperationResult:
+        """Download a prediction file by its ID.
+
+        Downloads a file from Appwrite storage with optional caching support.
+        Can return file bytes or save directly to disk.
+
+        Args:
+            file_id: The Appwrite file ID to download.
+            save_path: Optional path where the file should be saved. If None,
+                returns file bytes in the result data.
+            use_cache: Whether to check local cache before downloading.
+                Defaults to True.
+            validate_cache: Whether to validate cache freshness against
+                remote file timestamps. Defaults to True.
+
+        Returns:
+            OperationResult with:
+                - success: True if download succeeded
+                - data: Dict with 'save_path' or 'file_bytes' and 'from_cache' flag
+                - code: 'SAVED_FROM_CACHE', 'RETURNED_FROM_CACHE',
+                       'SAVED_FROM_REMOTE', or 'RETURNED_FROM_REMOTE'
+
+        Example:
+            >>> # Download to memory
+            >>> result = datastore.download_prediction(file_id="abc123")
+            >>> if result.success:
+            ...     file_bytes = result.data['file_bytes']
+            >>>
+            >>> # Download to file
+            >>> result = datastore.download_prediction(
+            ...     file_id="abc123",
+            ...     save_path="/tmp/prediction.parquet"
+            ... )
+        """
         download_result = self.__appwrite_file_manager.download_file(
             bucket_id=self.__appwrite_file_manager_config.bucket_id,
             file_id=file_id,
@@ -266,6 +473,28 @@ class DatastoreModule:
         return download_result
 
     def get_latest_file_id(self, filters: Dict[str, Any]) -> Optional[str]:
+        """Get the file ID of the most recently uploaded prediction matching filters.
+
+        Searches predictions by metadata and returns the file ID of the newest
+        matching file based on creation timestamp.
+
+        Args:
+            filters: Dictionary of metadata fields to filter by.
+                Common filters include 'loa', 'type', 'category', 'targets'.
+
+        Returns:
+            The file ID string of the latest matching file, or None if no
+            files match the given filters.
+
+        Example:
+            >>> file_id = datastore.get_latest_file_id(
+            ...     filters={"loa": "pgm", "category": "forecast"}
+            ... )
+            >>> if file_id:
+            ...     print(f"Latest file: {file_id}")
+            ... else:
+            ...     print("No matching files found")
+        """
         files_list = self.get_predictions_by_metadata(filters=filters)
         if len(files_list) == 0:
             logger.warning(f"No files found matching the given filters: {filters}")
@@ -288,7 +517,42 @@ class DatastoreModule:
         use_cache: bool = True,
         validate_cache: bool = True,
     ) -> OperationResult:
+        """Download the most recently uploaded prediction matching filters.
 
+        Convenience method that combines get_latest_file_id and download_prediction
+        to fetch the newest file matching the given metadata filters.
+
+        Args:
+            filters: Dictionary of metadata fields to filter by. Defaults to
+                empty dict which applies model name filter only.
+            save_path: Optional path where the file should be saved. If None,
+                returns file bytes in the result data.
+            use_cache: Whether to check local cache before downloading.
+                Defaults to True.
+            validate_cache: Whether to validate cache freshness against
+                remote file timestamps. Defaults to True.
+
+        Returns:
+            OperationResult with downloaded file data.
+
+        Raises:
+            FileNotFoundError: If no files match the given filters.
+
+        Example:
+            >>> # Download latest forecast to file
+            >>> result = datastore.download_latest_file(
+            ...     filters={"loa": "pgm", "category": "forecast"},
+            ...     save_path="/tmp/latest_forecast.parquet"
+            ... )
+            >>> if result.success:
+            ...     print(f"Downloaded to: {result.data['save_path']}")
+            >>>
+            >>> # Download latest to memory
+            >>> result = datastore.download_latest_file(
+            ...     filters={"category": "historical"}
+            ... )
+            >>> file_bytes = result.data['file_bytes']
+        """
         latest_file_id = self.get_latest_file_id(filters=filters)
         if latest_file_id is None:
             error_msg = f"No files found matching the given filters: {filters}"

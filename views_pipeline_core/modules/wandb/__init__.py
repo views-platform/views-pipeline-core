@@ -1,2 +1,2 @@
-from .wandb import WandBModule
+from .wandb import WandBModule as WandBModule
 from .utils import *

@@ -4,7 +4,6 @@ import logging
 from abc import abstractmethod
 from argparse import Namespace
 from views_pipeline_core.managers.model import ModelManager, ModelPathManager
-import polars as pl
 from views_pipeline_core.exceptions import PipelineException
 
 
@@ -60,26 +59,29 @@ class ExtractorManager(ModelManager):
         self.data = None
         
     @abstractmethod
-    def _download(self):
+    def _download(self, args: Namespace = None):
         raise NotImplementedError("Subclasses must implement the _download method.")
 
     @abstractmethod
-    def _preprocess(self):
+    def _preprocess(self, args: Namespace = None):
         raise NotImplementedError("Subclasses must implement the _preprocess method.")
 
     @abstractmethod
-    def _save(self):
+    def _save(self, args: Namespace = None):
         raise NotImplementedError("Subclasses must implement the _save method.")
 
-    def run(self):
-        with self._wandb_manager.initialize_run(
-            project=f"{self.configs['name']}_save", entity=self._entity, job_type="save"
+    def run(self, args: Namespace = None):
+        with self._wandb_module.initialize_run(
+            project=f"{self.configs['name']}_save", 
+            config=self.configs,
+            job_type="save"
         ):
             try:
-                self._download()
-                self._preprocess()
-                self._save()
+                self._download(args)
+                self._preprocess(args)
+                self._save(args)
             except Exception as e:
+                logger.error(f"Error occurred while saving to database. Error details: {e}", exc_info=True)
                 raise PipelineException(message=f"Error occurred while saving to database. Error details: {e}", wandb_module=self._wandb_module)
             finally:
                 self._wandb_module.finish_run()

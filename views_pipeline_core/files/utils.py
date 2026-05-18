@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ def create_log_file(path_generated,
     create_specific_log_file(path_generated, run_type, model_name, deployment_status,
                     model_timestamp, data_generation_timestamp, data_fetch_timestamp, model_type)
     if models:
-        from views_pipeline_core.managers.model import ModelPathManager
+        from views_pipeline_core.data.model_path import ModelPathManager
         for m_name in models:
             model_path = ModelPathManager(m_name)
             model_path_generated = model_path.data_generated
@@ -155,9 +155,19 @@ def handle_single_log_creation(model_path, config: dict, train: bool) -> None:
         None
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    data_fetch_timestamp = read_log_file(
-        model_path.data_raw / f"{config['run_type']}_data_fetch_log.txt"
-    ).get("Data Fetch Timestamp", None)
+    fetch_log_path = model_path.data_raw / f"{config['run_type']}_data_fetch_log.txt"
+    if fetch_log_path.exists():
+        data_fetch_timestamp = read_log_file(fetch_log_path).get(
+            "Data Fetch Timestamp", None
+        )
+    else:
+        data_fetch_timestamp = None
+        logger.warning(
+            "Data fetch log not found at %s — data may have been loaded from "
+            "cache or fetched via a non-viewser source. Proceeding without "
+            "data fetch timestamp.",
+            fetch_log_path,
+        )
 
     create_log_file(
         path_generated=model_path.data_generated,
@@ -219,10 +229,6 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     
     try:
         logger.debug(f"Saving the DataFrame to {save_path} in {file_extension} format")
-        # if file_extension == ".csv":
-        #     dataframe.to_csv(save_path, index=True)
-        # elif file_extension == ".xlsx":
-        #     dataframe.to_excel(save_path)
         if file_extension == ".parquet":
             dataframe.to_parquet(save_path)
         elif file_extension == ".pkl":
@@ -232,6 +238,25 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     except Exception as e:
         logger.exception(f"Error saving the DataFrame to {save_path}: {e}")
         raise
+
+def save_arrow_parquet(table, path: Union[str, Path]) -> None:
+    """
+    Write a pa.Table to parquet without Python object intermediary (Fix A).
+
+    Unlike save_dataframe(), this function accepts a pyarrow Table directly,
+    preserving the Arrow-native List<float32> column type and avoiding the
+    Python-list materialisation that occurs in pd.DataFrame.to_parquet().
+
+    Args:
+        table: pyarrow.Table to write.
+        path:  Destination path (parent directories are created if needed).
+    """
+    import pyarrow.parquet as pq
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(table, path)
+
 
 def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     """
@@ -259,8 +284,6 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
         logger.debug(f"Reading the DataFrame from {file_path} in {file_extension} format")
         if file_extension == ".csv":
             return pd.read_csv(file_path)
-        # elif file_extension == ".xlsx":
-        #     return pd.read_excel(file_path)
         if file_extension == ".parquet":
             return pd.read_parquet(file_path)
         elif file_extension == ".pkl":
@@ -291,32 +314,35 @@ def generate_output_file_name(
     generated_file_type: str,
     run_type: str,
     timestamp: str,
-    sequence_number: int,
+    sequence_number: Optional[int],
     file_extension: str,
+    target_identifier: Optional[str] = None,
 ) -> str:
     """
     Generates a prediction file name based on the run type, generated file type, steps, and timestamp.
 
     Args:
         generated_file_type (str): The type of generated file (e.g., predictions, output).
-        sequence_number (int): The sequence number.
         run_type (str): The type of run (e.g., calibration, validation).
         timestamp (str): The timestamp of the generated file.
+        sequence_number (int, optional): The sequence number. None for forecasting.
         file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
+        target_identifier (str, optional): Target name for multi-target models (e.g., 'ged_sb_best').
 
     Returns:
         str: The generated prediction file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
+    parts = [generated_file_type, run_type, timestamp]
+    if target_identifier is not None:
+        parts.append(target_identifier)
     if sequence_number is not None:
-        return f"{generated_file_type}_{run_type}_{timestamp}_{str(sequence_number).zfill(2)}{file_extension}"
-    else:
-        return f"{generated_file_type}_{run_type}_{timestamp}{file_extension}"
+        parts.append(str(sequence_number).zfill(2))
+    return "_".join(parts) + file_extension
     
 
 def generate_evaluation_file_name(
     evaluation_type: str,
-    conflict_type: str,
+    target_identifier: str,
     run_type: str,
     timestamp: str,
     file_extension: str,
@@ -326,7 +352,7 @@ def generate_evaluation_file_name(
 
     Args:
         evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
-        conflict_type (str): The type of conflict (e.g., sb, os, ns).
+        target_identifier (str): The target identifier (e.g., target name 'ged_sb_best').
         run_type (str): The type of run (e.g., calibration, validation).
         timestamp (str): The timestamp of the generated file.
         file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
@@ -334,28 +360,25 @@ def generate_evaluation_file_name(
     Returns:
         str: The generated prediction file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
-    return f"eval_{run_type}_{conflict_type}_{evaluation_type}_{timestamp}{file_extension}"
+    return f"eval_{run_type}_{target_identifier}_{evaluation_type}_{timestamp}{file_extension}"
 
 
 def generate_evaluation_report_name(
     run_type: str,
-    conflict_type: str,
+    target_identifier: str,
     timestamp: str,
     file_extension: str,
 ) -> str:
     """
-    Generates an evaluation file name based on the run type, evaluation type, and timestamp.
+    Generates an evaluation report file name.
 
     Args:
-        evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
-        conflict_type (str): The type of conflict (e.g., sb, os, ns).
         run_type (str): The type of run (e.g., calibration, validation).
+        target_identifier (str): The target variable identifier (e.g., ged_sb_dep, water_scarcity).
         timestamp (str): The timestamp of the generated file.
-        file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
+        file_extension (str): The file extension (e.g., .parquet, .pkl).
 
     Returns:
-        str: The generated prediction file name.
+        str: The generated evaluation report file name.
     """
-    # logger.info(f"sequence_number: {sequence_number}")
-    return f"eval_{run_type}_{conflict_type}_{timestamp}{file_extension}"
+    return f"eval_{run_type}_{target_identifier}_{timestamp}{file_extension}"
