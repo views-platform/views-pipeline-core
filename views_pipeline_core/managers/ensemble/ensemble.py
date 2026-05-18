@@ -21,10 +21,9 @@ from views_pipeline_core.modules.reconciliation.reconciliation import (
 )
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
 from views_pipeline_core.exceptions import PipelineException
-from views_pipeline_core.modules.ensemble_aggregator.aggregator import (
-    AggregationManager,
+from views_pipeline_core.modules.aggregation.aggregator import (
+    AggregationModule,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +304,13 @@ class EnsembleManager(ForecastingModelManager):
             tqdm.tqdm.write(f"Current model: {model_name}")
             eval_results[model_name] = self._evaluate_model_artifact(model_name)
 
+            for j, df in enumerate(eval_results[model_name]):
+                months = df.index.get_level_values("month_id")
+                logger.info(
+                    f"AFTER _evaluate_model_artifact | model={model_name} | "
+                    f"seq={j:02d} | month_id=[{months.min()}, {months.max()}] | n={len(df)}"
+                )
+
         n_outputs = len(next(iter(eval_results.values())))
         aggregated_outputs: List[pd.DataFrame] = []
 
@@ -415,6 +421,14 @@ class EnsembleManager(ForecastingModelManager):
                 ts,
                 sequence_number,
                 evaluate=True,
+            )
+
+            months = pred.index.get_level_values("month_id")
+            logger.info(
+                f"LOADED PRED | model={model_name} | "
+                f"requested_seq={sequence_number:02d} | "
+                f"month_id=[{months.min()}, {months.max()}] | "
+                f"n={len(pred)}"
             )
             preds.append(pred)
 
@@ -571,6 +585,7 @@ class EnsembleManager(ForecastingModelManager):
                 path_generated
                 / f"predictions_{run_type}_{ts}{seq_suffix}{PipelineConfig.dataframe_format}"
             )
+            logger.info(f"REQUESTED FILE PATH: {file_path}")
             if file_path.exists():
                 pred = read_dataframe(file_path)
                 logger.info(f"Loading existing prediction {name} from local file")
@@ -591,11 +606,13 @@ class EnsembleManager(ForecastingModelManager):
             )
         else:
             # Get the latest prediction file (shell script generates with new timestamp)
-            prediction_files = model_path._get_generated_predictions_data_file_paths(run_type)
+            prediction_files = model_path._get_generated_predictions_data_file_paths(
+                run_type
+            )
             if not prediction_files:
                 raise PipelineException(
                     f"No prediction files found for {model_name} after generation",
-                    wandb_module=self._wandb_module
+                    wandb_module=self._wandb_module,
                 )
             # prediction_files is sorted newest-first; pick the file matching this
             # specific sequence suffix to avoid loading _12 when _00 was requested.
@@ -605,12 +622,14 @@ class EnsembleManager(ForecastingModelManager):
                 if not matching:
                     raise PipelineException(
                         f"No prediction file for sequence {sequence_number} found for {model_name} after generation",
-                        wandb_module=self._wandb_module
+                        wandb_module=self._wandb_module,
                     )
                 latest_prediction_file = matching[0]
             else:
                 latest_prediction_file = prediction_files[0]
-            logger.info(f"Loading newly generated prediction from {latest_prediction_file}")
+            logger.info(
+                f"Loading newly generated prediction from {latest_prediction_file}"
+            )
             return read_dataframe(latest_prediction_file)
 
     def _apply_reconciliation(self, df_prediction: pd.DataFrame) -> pd.DataFrame:
@@ -768,7 +787,7 @@ class EnsembleManager(ForecastingModelManager):
         aggregation: str,
     ) -> pd.DataFrame:
         """
-        Aggregate model predictions using the AggregationManager.
+        Aggregate model predictions using the AggregationModule.
 
         Args:
             df_to_aggregate: List of model prediction DataFrames (all with the same index).
@@ -790,8 +809,8 @@ class EnsembleManager(ForecastingModelManager):
         # target_cols = [c for c in first_df.columns if c not in index_cols] ### This is not right, but how to chose target cols?
         target_cols = ["pred_" + col for col in self.configs.get("targets")]
 
-        # ---- 2) Create AggregationManager ---------------------------------------
-        manager = AggregationManager(
+        # ---- 2) Create AggregationModule ---------------------------------------
+        manager = AggregationModule(
             index_cols=index_cols,
             target_cols=target_cols,
         )
@@ -810,12 +829,12 @@ class EnsembleManager(ForecastingModelManager):
             )
 
         # ---- 4) Decide how to call aggregate() based on prediction type ---------
-        # AggregationManager infers prediction_type ("point" vs "distribution")
+        # AggregationModule infers prediction_type ("point" vs "distribution")
         # when you call add_model().
         pred_type = manager.prediction_type
         if pred_type is None:
             raise RuntimeError(
-                "AggregationManager.prediction_type is None. "
+                "AggregationModule.prediction_type is None. "
                 "Make sure at least one model was added with `add_model`."
             )
 
@@ -827,7 +846,7 @@ class EnsembleManager(ForecastingModelManager):
         # ---- 5) Convert back to pandas with MultiIndex -------------------------
         aggregated_pdf = aggregated_pl.to_pandas()
 
-        # AggregationManager returns index columns as normal columns.
+        # AggregationModule returns index columns as normal columns.
         # To match your previous behaviour, set a MultiIndex again:
         aggregated_pdf = aggregated_pdf.set_index(index_cols).sort_index()
 
