@@ -39,7 +39,9 @@ def generate(script_path: Path, model_name: str, model_algorithm: str) -> bool:
         # "queryset": "escwa001_cflong",
         # "level": "pgm",
         # "creator": "Your name here",
-        "metrics": ["RMSLE", "CRPS", "MSE", "MSLE", "y_hat_bar"],
+        "regression_point_metrics": ["RMSLE", "CRPS", "MSE", "MSLE", "y_hat_bar"],
+        "rolling_origin_stride": 1,
+        "prediction_format": "dataframe",
     }}
     return meta_config
 """
