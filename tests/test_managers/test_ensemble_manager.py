@@ -482,11 +482,9 @@ class TestApplyReconciliation:
         manager._wandb_module = mock_wandb_module
         
         with patch.object(manager, '_EnsembleManager__reconcile_pg_with_c', return_value=None):
-            with patch('views_pipeline_core.managers.ensemble.ensemble.wandb') as mock_wandb:
-                mock_wandb.AlertLevel.WARNING = "WARNING"
-                result = manager._apply_reconciliation(sample_dataframe)
-                
-                assert result.equals(sample_dataframe)
+            result = manager._apply_reconciliation(sample_dataframe)
+
+            assert result.equals(sample_dataframe)
 
 
 # ============================================================================
@@ -665,7 +663,7 @@ class TestLoadCDataset:
         
         with patch('views_pipeline_core.managers.ensemble.ensemble.EnsemblePathManager') as MockPath:
             mock_path = MagicMock()
-            mock_path._get_generated_predictions_data_file_paths.side_effect = Exception("Not found")
+            mock_path._get_generated_predictions_data_file_paths.side_effect = FileNotFoundError("Not found")
             MockPath.return_value = mock_path
             
             result = manager._load_c_dataset("cm_model", None)

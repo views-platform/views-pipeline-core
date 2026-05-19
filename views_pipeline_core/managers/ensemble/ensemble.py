@@ -662,7 +662,7 @@ class EnsembleManager(ForecastingModelManager):
                 self._wandb_module.send_alert(
                     title=f"{self._model_path.target.title()} Reconciliation Error",
                     text="Reconciliation returned None. Predictions not reconciled.",
-                    level=wandb.AlertLevel.WARNING,
+                    level=wandb.AlertLevel.WARN,
                 )
                 logger.warning(
                     "Reconciliation returned None. Predictions not reconciled."
@@ -758,7 +758,7 @@ class EnsembleManager(ForecastingModelManager):
                         run=run_id, name=reconcile_with_forecast
                     )
                 )
-            except Exception as e:
+            except (ImportError, KeyError, IndexError, ValueError) as e:
                 logger.warning(
                     f"Could not find latest C dataset for {cm_model} in prediction store: {e}"
                 )
@@ -775,7 +775,7 @@ class EnsembleManager(ForecastingModelManager):
                     0
                 ]
             )
-        except Exception as e:
+        except (IndexError, FileNotFoundError) as e:
             logger.warning(
                 f"Could not find latest C dataset for {cm_model} locally: {e}"
             )
@@ -805,8 +805,13 @@ class EnsembleManager(ForecastingModelManager):
         # ---- 1) Define index + target columns -----------------------------------
 
         first_df = next(iter(df_to_aggregate.values()))
-        index_cols = list(first_df.index.names)
-        # target_cols = [c for c in first_df.columns if c not in index_cols] ### This is not right, but how to chose target cols?
+        # ADR-034: PGMDataset renames priogrid_gid → priogrid_id at the
+        # dataset boundary. Use the post-rename name so downstream joins
+        # and set_index calls match the actual column names.
+        _ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
+        index_cols = [
+            _ENTITY_RENAME.get(c, c) for c in first_df.index.names
+        ]
         target_cols = ["pred_" + col for col in self.configs.get("targets")]
 
         # ---- 2) Create AggregationModule ---------------------------------------

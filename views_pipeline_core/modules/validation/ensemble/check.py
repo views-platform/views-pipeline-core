@@ -251,5 +251,8 @@ def validate_ensemble_model(config):
                 (not validate_ensemble_model_deployment_status(path_generated, config["run_type"], config["deployment_status"])) or
                 (not validate_partition_config(ensemble_manager, model_manager, config["run_type"]))
         ):
-            exit(1)  # Shut down if conditions are not met
+            raise ValueError(
+                f"Ensemble '{config['name']}' failed validation for model '{model_name}'. "
+                f"Check logs for details."
+            )
     logger.info(f"Model {config['name']} meets the required conditions.")

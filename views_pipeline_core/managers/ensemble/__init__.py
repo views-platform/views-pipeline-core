@@ -1,1 +1,2 @@
+from .dataframe_ensemble import DataFrameEnsembleManager as DataFrameEnsembleManager
 from .ensemble import EnsembleManager as EnsembleManager, EnsemblePathManager as EnsemblePathManager

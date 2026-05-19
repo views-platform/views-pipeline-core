@@ -464,7 +464,7 @@ class TestValidateEnsembleModel:
         mock_validate_partition,
         mock_config
     ):
-        """Test ensemble validation exits when model conditions fail."""
+        """Test ensemble validation raises when model conditions fail."""
         mock_validate_conditions.return_value = False
         mock_validate_deployment.return_value = True
         mock_validate_partition.return_value = True
@@ -473,10 +473,8 @@ class TestValidateEnsembleModel:
         mock_model_path.data_generated = Path("/test/model/generated")
         mock_model_path_manager_class.return_value = mock_model_path
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(ValueError, match="failed validation"):
             validate_ensemble_model(mock_config)
-        
-        assert exc_info.value.code == 1
 
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_partition_config')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
@@ -496,7 +494,7 @@ class TestValidateEnsembleModel:
         mock_validate_partition,
         mock_config
     ):
-        """Test ensemble validation exits when deployment status fails."""
+        """Test ensemble validation raises when deployment status fails."""
         mock_validate_conditions.return_value = True
         mock_validate_deployment.return_value = False
         mock_validate_partition.return_value = True
@@ -505,10 +503,8 @@ class TestValidateEnsembleModel:
         mock_model_path.data_generated = Path("/test/model/generated")
         mock_model_path_manager_class.return_value = mock_model_path
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(ValueError, match="failed validation"):
             validate_ensemble_model(mock_config)
-        
-        assert exc_info.value.code == 1
 
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_partition_config')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
@@ -528,7 +524,7 @@ class TestValidateEnsembleModel:
         mock_validate_partition,
         mock_config
     ):
-        """Test ensemble validation exits when partition config fails."""
+        """Test ensemble validation raises when partition config fails."""
         mock_validate_conditions.return_value = True
         mock_validate_deployment.return_value = True
         mock_validate_partition.return_value = False
@@ -537,10 +533,8 @@ class TestValidateEnsembleModel:
         mock_model_path.data_generated = Path("/test/model/generated")
         mock_model_path_manager_class.return_value = mock_model_path
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(ValueError, match="failed validation"):
             validate_ensemble_model(mock_config)
-
-        assert exc_info.value.code == 1
 
 
 class TestValidateEnsembleRawDataAlignment:
