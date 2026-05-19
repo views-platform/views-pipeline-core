@@ -31,7 +31,7 @@ collaborators vs. inheritance chain.
   future `PredictionFrameEnsembleManager`.
 - Does **not** implement model-specific training or inference. Sub-models are
   invoked via shell subprocesses.
-- Does **not** own aggregation logic (`AggregationManager`) or reconciliation
+- Does **not** own aggregation logic (`AggregationModule`) or reconciliation
   logic (`ReconciliationModule`).
 - Does **not** manage WandB run lifecycle inside stages. The `_execute_*` methods
   are the lifecycle boundary; stages contain only business logic.
@@ -50,7 +50,7 @@ collaborators vs. inheritance chain.
   are used via composition (injected at construction), not via inheritance.
 - Guarantees that all sub-models in `configs["models"]` are trained, evaluated,
   or forecasted depending on requested stages.
-- Guarantees that `AggregationManager` pools sub-model predictions using
+- Guarantees that `AggregationModule` pools sub-model predictions using
   `configs["aggregation"]` with optional per-model weights.
 - Guarantees that all sub-models return the same number of evaluation outputs;
   raises `ValueError` if any model returns fewer.
@@ -112,7 +112,7 @@ collaborators vs. inheritance chain.
 | Sub-models return different output counts | `ValueError` in `_evaluate_ensemble()` |
 | No prediction files found after subprocess | `PipelineException` |
 | Aggregation with zero DataFrames | `ValueError` in `_get_aggregated_df()` |
-| `AggregationManager.prediction_type` is `None` | `RuntimeError` |
+| `AggregationModule.prediction_type` is `None` | `RuntimeError` |
 | Reconciliation returns `None` | WandB `WARN` alert; original predictions returned |
 | C dataset not found for reconciliation | `None` from `_load_c_dataset()`; skipped with warning |
 | Training/evaluation/forecasting exception | `PipelineException` with traceback and WandB alert |
@@ -131,7 +131,7 @@ DataFrameEnsembleManager (composition, no inheritance)
     |-- subprocess.run()           (sub-model execution, timeout=7200)
     |-- CoreConfigSniffer          (pre-flight config validation, C-55 fix)
     |-- ConfigurationManager       (config merging and WandB integration)
-    |-- AggregationManager         (prediction pooling)
+    |-- AggregationModule         (prediction pooling)
     |-- ReconciliationModule       (PGM-CM hierarchical reconciliation)
     |-- _PGDataset / _CDataset     (dataset wrappers for reconciliation)
     |
@@ -204,7 +204,7 @@ manager._execute_model_training(ctx)
     BaseStageContext ancestry.
   - `TestCoreConfigSnifferIntegration` -- verifies sniff_all() runs before WandB
     login, and that sniffer failure prevents all execution (C-55 fix).
-  - `TestAggregationDelegation` -- verifies AggregationManager receives correct
+  - `TestAggregationDelegation` -- verifies AggregationModule receives correct
     add_model calls, weight passthrough, and empty-input rejection.
   - `TestEvaluationDelegation` -- verifies EvaluationStage.evaluate() is called
     with `ensemble=True`, `prediction_format="dataframe"`, and `data_loader=None`.

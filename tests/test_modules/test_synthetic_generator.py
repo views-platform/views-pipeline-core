@@ -118,7 +118,7 @@ class TestGenerateSyntheticData:
         df = generate_synthetic_data(vertical_descriptor, month_first=445, month_last=448)
         assert df.index.is_monotonic_increasing
 
-    def test_deterministic_given_seed(self, vertical_descriptor):
+    def test_deterministic_across_calls(self, vertical_descriptor):
         df1 = generate_synthetic_data(vertical_descriptor, month_first=445, month_last=448)
         df2 = generate_synthetic_data(vertical_descriptor, month_first=445, month_last=448)
         pd.testing.assert_frame_equal(df1, df2)

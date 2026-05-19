@@ -723,9 +723,10 @@ class DataFrameEnsembleManager:
                     f"Loading existing prediction {name} from prediction store"
                 )
                 return pred
-            except Exception:
+            except (ImportError, KeyError, IndexError, ValueError, AttributeError, OSError) as e:
                 logger.info(
-                    f"No existing {run_type} predictions found. Generating new predictions..."
+                    f"No existing {run_type} predictions found ({type(e).__name__}). "
+                    f"Generating new predictions..."
                 )
         else:
             seq_suffix = (
