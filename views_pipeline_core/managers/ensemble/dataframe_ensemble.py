@@ -838,12 +838,18 @@ class DataFrameEnsembleManager:
                 return reconciled_pg
             else:
                 self._wandb_module.send_alert(
-                    title="Ensemble Reconciliation Error",
-                    text="Reconciliation returned None. Predictions not reconciled.",
-                    level=wandb.AlertLevel.WARN,
+                    title="Ensemble Reconciliation Failed",
+                    text="Reconciliation configured but failed. Cannot publish unreconciled predictions.",
+                    level=wandb.AlertLevel.ERROR,
                 )
-                logger.warning(
-                    "Reconciliation returned None. Predictions not reconciled."
+                logger.error(
+                    "Reconciliation configured (pgm_cm_point) but failed. "
+                    "Refusing to publish unreconciled predictions as reconciled."
+                )
+                raise PipelineException(
+                    "Reconciliation configured but failed. C dataset could not be loaded "
+                    "or reconciliation computation returned None. Cannot publish "
+                    "unreconciled predictions as reconciled."
                 )
         else:
             logger.info(
@@ -920,7 +926,7 @@ class DataFrameEnsembleManager:
                         run=run_id, name=reconcile_with_forecast
                     )
                 )
-            except (ImportError, KeyError, IndexError, ValueError) as e:
+            except (ImportError, KeyError, IndexError, ValueError, OSError) as e:
                 logger.warning(
                     f"Could not find latest C dataset for {cm_model} "
                     f"in prediction store: {e}"
@@ -937,7 +943,7 @@ class DataFrameEnsembleManager:
                     run_type=ctx.run_type
                 )[0]
             )
-        except (IndexError, FileNotFoundError) as e:
+        except (IndexError, OSError) as e:
             logger.warning(
                 f"Could not find latest C dataset for {cm_model} locally: {e}"
             )

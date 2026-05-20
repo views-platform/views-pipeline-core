@@ -101,8 +101,8 @@ hierarchical PGM-CM consistency.
 | Sub-models return different numbers of outputs | `ValueError` in `_evaluate_ensemble()` |
 | No prediction files found after subprocess | `PipelineException` |
 | Aggregation with zero DataFrames | `ValueError` in `_get_aggregated_df()` |
-| Reconciliation returns `None` | WandB warning alert; original predictions returned unmodified |
-| C dataset not found for reconciliation | `None` returned from `_load_c_dataset()`; reconciliation skipped with warning |
+| Reconciliation returns `None` | `PipelineException` with WandB `ERROR` alert; unreconciled predictions never published |
+| C dataset not found for reconciliation | `None` from `_load_c_dataset()`; `_apply_reconciliation()` raises `PipelineException` |
 | Training/evaluation/forecasting exception | `PipelineException` with full traceback and WandB alert |
 
 All failures are loud. Subprocess failures propagate via `check=True` on

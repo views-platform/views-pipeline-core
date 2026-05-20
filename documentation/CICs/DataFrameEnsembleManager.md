@@ -113,8 +113,8 @@ collaborators vs. inheritance chain.
 | No prediction files found after subprocess | `PipelineException` |
 | Aggregation with zero DataFrames | `ValueError` in `_get_aggregated_df()` |
 | `AggregationModule.prediction_type` is `None` | `RuntimeError` |
-| Reconciliation returns `None` | WandB `WARN` alert; original predictions returned |
-| C dataset not found for reconciliation | `None` from `_load_c_dataset()`; skipped with warning |
+| Reconciliation returns `None` | `PipelineException` with WandB `ERROR` alert; unreconciled predictions never published |
+| C dataset not found for reconciliation | `None` from `_load_c_dataset()`; `_apply_reconciliation()` raises `PipelineException` |
 | Training/evaluation/forecasting exception | `PipelineException` with traceback and WandB alert |
 
 All failures are loud. No silent fallbacks.

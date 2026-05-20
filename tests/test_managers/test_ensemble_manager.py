@@ -532,8 +532,8 @@ class TestApplyReconciliation:
             assert result.equals(reconciled_df)
             mock_wandb_module.send_alert.assert_called()
     
-    def test_reconciliation_returns_original_on_failure(self, manager, sample_dataframe, mock_wandb_module):
-        """Test original DataFrame is returned when reconciliation fails."""
+    def test_reconciliation_raises_on_failure(self, manager, sample_dataframe, mock_wandb_module):
+        """Test PipelineException raised when configured reconciliation fails."""
         self._set_manager_configs(manager, {
             "reconciliation": "pgm_cm_point",
             "reconcile_with": "cm_model",
@@ -541,11 +541,10 @@ class TestApplyReconciliation:
         })
         manager._EnsembleManager__activate_reconciliation = True
         manager._wandb_module = mock_wandb_module
-        
-        with patch.object(manager, '_EnsembleManager__reconcile_pg_with_c', return_value=None):
-            result = manager._apply_reconciliation(sample_dataframe)
 
-            assert result.equals(sample_dataframe)
+        with patch.object(manager, '_EnsembleManager__reconcile_pg_with_c', return_value=None):
+            with pytest.raises(PipelineException, match="Reconciliation configured but failed"):
+                manager._apply_reconciliation(sample_dataframe)
 
 
 # ============================================================================

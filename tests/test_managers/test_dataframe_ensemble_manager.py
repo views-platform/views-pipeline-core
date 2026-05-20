@@ -779,7 +779,7 @@ class TestReconciliation:
 
         pd.testing.assert_frame_equal(result, reconciled_df)
 
-    def test_reconciliation_returns_original_when_reconciler_returns_none(
+    def test_reconciliation_raises_when_reconciler_returns_none(
         self, df_manager, mock_ensemble_path, sample_prediction_df,
     ):
         ctx = EnsembleContext(
@@ -805,6 +805,5 @@ class TestReconciliation:
         )
 
         with patch.object(df_manager, "_reconcile_pg_with_c", return_value=None):
-            result = df_manager._apply_reconciliation(sample_prediction_df, ctx)
-
-        pd.testing.assert_frame_equal(result, sample_prediction_df)
+            with pytest.raises(PipelineException, match="Reconciliation configured but failed"):
+                df_manager._apply_reconciliation(sample_prediction_df, ctx)
