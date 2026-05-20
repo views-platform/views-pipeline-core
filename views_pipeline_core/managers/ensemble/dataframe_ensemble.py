@@ -45,6 +45,9 @@ from .ensemble import EnsemblePathManager
 
 logger = logging.getLogger(__name__)
 
+# ADR-034: priogrid_gid → priogrid_id rename for AggregationModule compatibility
+_ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
+
 
 # ---------------------------------------------------------------------------
 # Frozen context — single source of truth during a run
@@ -259,9 +262,9 @@ class DataFrameEnsembleManager:
         self._args = args
 
         # C-55 fix: CoreConfigSniffer runs before any side effects
-        CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(
-            args.run_type
-        )
+        CoreConfigSniffer(
+            self.configs, self._partition_dict, target=self._ensemble_path.target
+        ).sniff_all(args.run_type)
 
         self._wandb_module.login()
 
@@ -276,6 +279,8 @@ class DataFrameEnsembleManager:
                 validate_ensemble_model(self.configs)
 
             self._execute_model_tasks(ctx)
+        except PipelineException:
+            raise
         except Exception as e:
             logger.error(
                 f"Error during ensemble execution: {e}", exc_info=True
@@ -342,6 +347,8 @@ class DataFrameEnsembleManager:
                 self._wandb_module.send_alert(
                     title=f"Training for ensemble {ctx.configs['name']} completed successfully.",
                 )
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Ensemble training failed: {traceback.format_exc()}"
@@ -379,6 +386,8 @@ class DataFrameEnsembleManager:
                 self._wandb_module.send_alert(
                     title=f"Evaluation for ensemble {ctx.configs['name']} completed successfully.",
                 )
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Ensemble evaluation failed: {traceback.format_exc()}"
@@ -412,6 +421,8 @@ class DataFrameEnsembleManager:
                     run_type=ctx.run_type,
                     timestamp=ctx.timestamp,
                 )
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Ensemble forecasting failed: {traceback.format_exc()}"
@@ -437,6 +448,8 @@ class DataFrameEnsembleManager:
                     entity=self._entity,
                 )
                 self._reporting_stage.generate_forecast_report(reporting_ctx)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Forecast report generation failed: {traceback.format_exc()}"
@@ -462,6 +475,8 @@ class DataFrameEnsembleManager:
                     entity=self._entity,
                 )
                 self._reporting_stage.generate_evaluation_report(reporting_ctx)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Evaluation report generation failed: {traceback.format_exc()}"
@@ -767,7 +782,17 @@ class DataFrameEnsembleManager:
                     f"No prediction files found for {model_name} after generation",
                     wandb_module=self._wandb_module,
                 )
-            latest_prediction_file = prediction_files[0]
+            if sequence_number is not None:
+                seq_suffix = f"_{str(sequence_number).zfill(2)}"
+                matching = [f for f in prediction_files if f.stem.endswith(seq_suffix)]
+                if not matching:
+                    raise PipelineException(
+                        f"No prediction file for sequence {sequence_number} found for {model_name} after generation",
+                        wandb_module=self._wandb_module,
+                    )
+                latest_prediction_file = matching[0]
+            else:
+                latest_prediction_file = prediction_files[0]
             logger.info(
                 f"Loading newly generated prediction from {latest_prediction_file}"
             )
@@ -785,7 +810,9 @@ class DataFrameEnsembleManager:
             )
 
         first_df = next(iter(df_to_aggregate.values()))
-        index_cols = list(first_df.index.names)
+        index_cols = [
+            _ENTITY_RENAME.get(c, c) for c in first_df.index.names
+        ]
         target_cols = ["pred_" + col for col in ctx.targets]
 
         manager = AggregationModule(
@@ -837,11 +864,6 @@ class DataFrameEnsembleManager:
                 )
                 return reconciled_pg
             else:
-                self._wandb_module.send_alert(
-                    title="Ensemble Reconciliation Failed",
-                    text="Reconciliation configured but failed. Cannot publish unreconciled predictions.",
-                    level=wandb.AlertLevel.ERROR,
-                )
                 logger.error(
                     "Reconciliation configured (pgm_cm_point) but failed. "
                     "Refusing to publish unreconciled predictions as reconciled."
@@ -849,7 +871,8 @@ class DataFrameEnsembleManager:
                 raise PipelineException(
                     "Reconciliation configured but failed. C dataset could not be loaded "
                     "or reconciliation computation returned None. Cannot publish "
-                    "unreconciled predictions as reconciled."
+                    "unreconciled predictions as reconciled.",
+                    wandb_module=self._wandb_module,
                 )
         else:
             logger.info(

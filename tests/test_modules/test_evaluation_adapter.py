@@ -476,3 +476,72 @@ class TestParityClosure:
         np.testing.assert_array_equal(ef_pf.identifiers['unit'],   ef_df.identifiers['unit'])
         np.testing.assert_array_equal(ef_pf.identifiers['step'],   ef_df.identifiers['step'])
         np.testing.assert_array_equal(ef_pf.identifiers['origin'], ef_df.identifiers['origin'])
+
+
+# ---------------------------------------------------------------------------
+# C-89: EvaluationAdapter empty-intersection path tests
+# ---------------------------------------------------------------------------
+
+class TestEmptyIntersection:
+    """Verify fail-loud behavior when all sequences have zero overlap with actuals."""
+
+    def test_all_sequences_zero_overlap_raises(self):
+        """When every sequence has zero overlap, raise ValueError (not return empty)."""
+        idx_actual = pd.MultiIndex.from_tuples(
+            [(100, 1), (101, 1)], names=['month_id', 'country_id'],
+        )
+        idx_pred = pd.MultiIndex.from_tuples(
+            [(999, 1), (998, 1)], names=['month_id', 'country_id'],
+        )
+        df_actual = pd.DataFrame({'target': [1.0, 2.0]}, index=idx_actual)
+        df_pred = pd.DataFrame({'pred_target': [0.1, 0.2]}, index=idx_pred)
+
+        with pytest.raises(ValueError, match="need at least one array to concatenate"):
+            EvaluationAdapter.from_dataframes(df_actual, [df_pred, df_pred], 'target')
+
+    def test_partial_overlap_some_sequences_empty(self):
+        """When some sequences overlap and some don't, the overlapping ones survive."""
+        idx_actual = pd.MultiIndex.from_tuples(
+            [(100, 1), (101, 1)], names=['month_id', 'country_id'],
+        )
+        df_actual = pd.DataFrame({'target': [1.0, 2.0]}, index=idx_actual)
+
+        idx_overlap = pd.MultiIndex.from_tuples(
+            [(100, 1)], names=['month_id', 'country_id'],
+        )
+        df_overlap = pd.DataFrame({'pred_target': [1.1]}, index=idx_overlap)
+
+        idx_disjoint = pd.MultiIndex.from_tuples(
+            [(999, 1)], names=['month_id', 'country_id'],
+        )
+        df_disjoint = pd.DataFrame({'pred_target': [0.0]}, index=idx_disjoint)
+
+        ef = EvaluationAdapter.from_dataframes(
+            df_actual, [df_overlap, df_disjoint], 'target',
+        )
+        assert len(ef.y_true) == 1
+        np.testing.assert_array_equal(ef.identifiers['origin'], np.array([0]))
+
+    def test_zero_overlap_warning_logged(self):
+        """A sequence with zero overlap logs a warning before being skipped."""
+        idx_actual = pd.MultiIndex.from_tuples(
+            [(100, 1)], names=['month_id', 'country_id'],
+        )
+        idx_disjoint = pd.MultiIndex.from_tuples(
+            [(999, 1)], names=['month_id', 'country_id'],
+        )
+        idx_overlap = pd.MultiIndex.from_tuples(
+            [(100, 1)], names=['month_id', 'country_id'],
+        )
+        df_actual = pd.DataFrame({'target': [1.0]}, index=idx_actual)
+        df_disjoint = pd.DataFrame({'pred_target': [0.0]}, index=idx_disjoint)
+        df_overlap = pd.DataFrame({'pred_target': [1.1]}, index=idx_overlap)
+
+        import logging
+        with patch.object(logging.getLogger('views_pipeline_core.modules.validation.adapter'),
+                          'warning') as mock_warn:
+            EvaluationAdapter.from_dataframes(
+                df_actual, [df_disjoint, df_overlap], 'target',
+            )
+            mock_warn.assert_called_once()
+            assert "no overlap" in mock_warn.call_args[0][0].lower()

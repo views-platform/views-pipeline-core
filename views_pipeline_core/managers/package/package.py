@@ -180,7 +180,7 @@ class PackageManager:
             )
             raise
 
-        except Exception as e:
+        except (KeyError, TypeError, ValueError) as e:
             logging.error(
                 f"An unexpected error occurred while getting the latest version from GitHub: {type(e).__name__} - {e}",
                 exc_info=True,

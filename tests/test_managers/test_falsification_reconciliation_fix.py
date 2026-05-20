@@ -117,7 +117,7 @@ class TestReconciliationPreFlightValidation:
             "test": [397, 444],
         }
 
-        sniffer = CoreConfigSniffer(config)
+        sniffer = CoreConfigSniffer(config, target="model")
 
         # Should raise ValueError for invalid reconciliation config
         with pytest.raises(ValueError, match="reconcile_with"):

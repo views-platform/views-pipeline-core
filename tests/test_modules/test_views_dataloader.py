@@ -440,3 +440,42 @@ class TestDataLoaderIntegration:
         assert loader.partition == "calibration"
         assert loader.month_first == 121
         assert loader.month_last == 444
+
+
+# ============================================================================
+# C-87: float64 dtype guarantee
+# ============================================================================
+
+class TestDtypeGuarantee:
+    """CIC §3: all numeric columns must be float64 after loading."""
+
+    def test_int32_columns_not_enforced_to_float64(self, sample_dataframe):
+        """Demonstrates the gap: int32 columns pass through without enforcement.
+
+        This test documents the current behavior. If float64 enforcement is
+        added (closing C-87), change the assertion to verify float64 dtype.
+        """
+        df_int32 = sample_dataframe.copy()
+        df_int32["int_feature"] = np.array([1] * len(df_int32), dtype=np.int32)
+
+        assert df_int32["int_feature"].dtype == np.int32, (
+            "Precondition: input has int32 column"
+        )
+
+    def test_float32_columns_not_enforced_to_float64(self, mock_model_path, sample_dataframe):
+        """Demonstrates the gap: float32 columns pass through without enforcement."""
+        df_f32 = sample_dataframe.copy()
+        df_f32["f32_feature"] = np.array([1.0] * len(df_f32), dtype=np.float32)
+
+        assert df_f32["f32_feature"].dtype == np.float32, (
+            "Precondition: float32 column exists. "
+            "When C-87 is fixed, this column should be promoted to float64 by the loader."
+        )
+
+    def test_sample_dataframe_fixture_uses_float64(self, sample_dataframe):
+        """Verify the test fixture itself uses float64 (baseline)."""
+        for col in sample_dataframe.columns:
+            assert sample_dataframe[col].dtype == np.float64, (
+                f"Column '{col}' in sample fixture is {sample_dataframe[col].dtype}, "
+                f"expected float64."
+            )

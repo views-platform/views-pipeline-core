@@ -44,8 +44,13 @@ SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
 # Reconciliation — optional config key; controls hierarchical prediction reconciliation
 SUPPORTED_RECONCILIATION_TYPES = frozenset({"pgm_cm_point"})
 
+# Fallback stride for ensembles (which omit rolling_origin_stride)
+_FALLBACK_STRIDE = 1
+
 # Run-type identifiers
 FORECASTING_RUN_TYPE = "forecasting"   # used in sniff_all() guard
+
+_VALID_TARGETS = frozenset({"model", "ensemble"})
 
 # Metric key names expected in configs
 REGRESSION_METRIC_KEYS     = frozenset({
@@ -60,21 +65,36 @@ CLASSIFICATION_METRIC_KEYS = frozenset({
 
 class CoreConfigSniffer:
     """
-    Validates every contract that views_pipeline_core expects from a model config.
-    Instantiated with the merged config dict and the partition dict; both are
-    available on ModelManager at execute_single_run / execute_sweep_run time.
+    Validates every contract that views_pipeline_core expects from a pipeline
+    unit config (model or ensemble). Instantiated with the merged config dict
+    and the partition dict; both are available on any manager at
+    execute_single_run / execute_sweep_run time.
     """
 
-    MANDATORY_KEYS = [
-        "name", "algorithm", "level", "creator",
-        "steps", "time_steps", "rolling_origin_stride",
+    MANDATORY_KEYS_UNIVERSAL = [
+        "name", "level", "creator",
+        "steps",
         "deployment_status",
-        "prediction_format",
+    ]
+    MANDATORY_KEYS_MODEL = [
+        "algorithm", "time_steps", "prediction_format",
+        "rolling_origin_stride",
     ]
 
-    def __init__(self, configs: Dict[str, Any], partition_dict: Dict | None = None) -> None:
+    def __init__(self, configs: Dict[str, Any], partition_dict: Dict | None = None, *, target: str) -> None:
+        if target not in _VALID_TARGETS:
+            raise ValueError(
+                f"CoreConfigSniffer: target='{target}' is not valid. "
+                f"Supported: {sorted(_VALID_TARGETS)}."
+            )
+        if target == "model" and "models" in configs:
+            raise ValueError(
+                "CoreConfigSniffer: target='model' but config contains 'models' key. "
+                "Use target='ensemble' for ensemble configs."
+            )
         self._c = configs
         self._partition_dict = partition_dict or {}
+        self._is_ensemble = target == "ensemble"
 
     def sniff_all(self, run_type: str) -> None:
         """Run all checks for this run_type. Raises on first violation."""
@@ -93,7 +113,10 @@ class CoreConfigSniffer:
     # ── Checks ────────────────────────────────────────────────────────────────
 
     def _check_mandatory_keys(self) -> None:
-        missing = [k for k in self.MANDATORY_KEYS if k not in self._c]
+        required = list(self.MANDATORY_KEYS_UNIVERSAL)
+        if not self._is_ensemble:
+            required.extend(self.MANDATORY_KEYS_MODEL)
+        missing = [k for k in required if k not in self._c]
         if missing:
             raise KeyError(
                 f"CoreConfigSniffer: Missing mandatory config key(s): {missing}. "
@@ -141,28 +164,45 @@ class CoreConfigSniffer:
                 "classification_targets is empty. Add targets or remove the metric keys."
             )
 
-    def _check_currently_supported_values(self) -> None:
-        time_steps = self._c["time_steps"]
-        steps      = self._c["steps"]
-        stride     = self._c["rolling_origin_stride"]
+    def _resolve_time_steps(self) -> int:
+        """Return the effective time_steps value for validation.
 
+        Models declare time_steps explicitly; ensembles derive it from
+        len(steps). The config dict is never mutated.
+        """
+        steps = self._c["steps"]
+        time_steps = self._c.get("time_steps")
+        if time_steps is None:
+            return len(steps)
+        if not isinstance(time_steps, int):
+            raise TypeError(
+                f"CoreConfigSniffer: time_steps must be int, got {type(time_steps).__name__} "
+                f"({time_steps!r}). Fix in config_hyperparameters.py."
+            )
         if len(steps) != time_steps:
             raise ValueError(
                 f"CoreConfigSniffer: time_steps={time_steps} but len(steps)={len(steps)}. "
                 f"These must be equal. Fix in config_hyperparameters.py."
             )
+        return time_steps
+
+    def _check_currently_supported_values(self) -> None:
+        time_steps = self._resolve_time_steps()
+
         if time_steps not in SUPPORTED_TIME_STEPS:
             raise NotImplementedError(
                 f"CoreConfigSniffer: time_steps={time_steps} is not yet supported. "
                 f"Supported: {SUPPORTED_TIME_STEPS}. "
                 f"Update SUPPORTED_TIME_STEPS in core_config_sniffer.py when ready."
             )
-        if stride not in SUPPORTED_STRIDES:
-            raise NotImplementedError(
-                f"CoreConfigSniffer: rolling_origin_stride={stride} is not yet supported. "
-                f"Supported: {SUPPORTED_STRIDES}. "
-                f"Update SUPPORTED_STRIDES in core_config_sniffer.py when ready."
-            )
+        if not self._is_ensemble:
+            stride = self._c["rolling_origin_stride"]
+            if stride not in SUPPORTED_STRIDES:
+                raise NotImplementedError(
+                    f"CoreConfigSniffer: rolling_origin_stride={stride} is not yet supported. "
+                    f"Supported: {SUPPORTED_STRIDES}. "
+                    f"Update SUPPORTED_STRIDES in core_config_sniffer.py when ready."
+                )
 
     def _check_level(self) -> None:
         level = self._c.get("level")
@@ -189,7 +229,14 @@ class CoreConfigSniffer:
             )
 
     def _check_prediction_format(self) -> None:
-        fmt = self._c["prediction_format"]   # KeyError already raised by _check_mandatory_keys
+        fmt = self._c.get("prediction_format")
+        if fmt is None and self._is_ensemble:
+            return
+        if fmt is None:
+            raise KeyError(
+                "CoreConfigSniffer: 'prediction_format' is required for model configs. "
+                "Add it to config_hyperparameters.py."
+            )
         if fmt not in SUPPORTED_PREDICTION_FORMATS:
             raise ValueError(
                 f"CoreConfigSniffer: prediction_format='{fmt}' is not supported. "
@@ -259,8 +306,8 @@ class CoreConfigSniffer:
         train_end   = partition[_PARTITION_TRAIN][1]
         test_start  = partition[_PARTITION_TEST][0]
         test_end    = partition[_PARTITION_TEST][1]
-        time_steps  = self._c["time_steps"]
-        stride      = self._c["rolling_origin_stride"]
+        time_steps  = self._resolve_time_steps()
+        stride      = self._c.get("rolling_origin_stride", _FALLBACK_STRIDE)
         base_origin = test_start - 1
 
         if test_start <= train_end:

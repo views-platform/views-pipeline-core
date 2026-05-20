@@ -966,7 +966,7 @@ class ForecastingModelManager(ModelManager):
         # Layer 1: structural pre-condition — fail immediately if partition config
         # is inaccessible, before any side effects (WandB login, data fetching, etc.)
         self._assert_partition_config_accessible(args.run_type)
-        CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
+        CoreConfigSniffer(self.configs, self._partition_dict, target=self._model_path.target).sniff_all(args.run_type)
 
         # Construct ViewsDataLoader now that config is validated
         self._initialize_data_loader()
@@ -1030,7 +1030,7 @@ class ForecastingModelManager(ModelManager):
 
         # Layer 1: structural pre-condition — match execute_single_run() contract
         self._assert_partition_config_accessible(args.run_type)
-        CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
+        CoreConfigSniffer(self.configs, self._partition_dict, target=self._model_path.target).sniff_all(args.run_type)
 
         # Construct ViewsDataLoader now that config is validated
         self._initialize_data_loader()
@@ -1601,6 +1601,8 @@ class ForecastingModelManager(ModelManager):
                     entity=self._entity,
                 )
                 self._reporting_stage.generate_forecast_report(context)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Forecast report generation failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -1927,6 +1929,8 @@ class ForecastingModelManager(ModelManager):
                     entity=self._entity,
                 )
                 self._reporting_stage.generate_evaluation_report(context)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Evaluation report generation failed: {traceback.format_exc()}")
                 raise PipelineException(

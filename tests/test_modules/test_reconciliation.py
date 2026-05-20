@@ -9,6 +9,7 @@ class with no tests, enabling safe future modifications.
 """
 from concurrent.futures import Future
 from unittest.mock import MagicMock, patch
+import pytest
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ from views_pipeline_core.modules.reconciliation.reconciliation import (
     ReconciliationModule,
 )
 from views_pipeline_core.modules.statistics.statistics import ForecastReconciler
+from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -275,3 +277,35 @@ class TestReconcileOrchestration:
         assert any("successfully completed" in str(c) for c in alert_calls), (
             f"No completion alert found in WandB calls: {alert_calls}"
         )
+
+
+# ============================================================================
+# C-18 merge: ReconciliationModule constructor validation
+# ============================================================================
+
+class TestReconciliationModuleConstructorValidation:
+    """CIC §3: constructor must reject invalid dataset types."""
+
+    def test_none_c_dataset_raises_type_error(self):
+        """Passing None as c_dataset must raise TypeError."""
+        mock_pg = MagicMock(spec=_PGDataset)
+        with pytest.raises(TypeError, match="_CDataset"):
+            ReconciliationModule(None, mock_pg, wandb_notifications=False)
+
+    def test_none_pg_dataset_raises_type_error(self):
+        """Passing None as pg_dataset must raise TypeError."""
+        mock_c = MagicMock(spec=_CDataset)
+        with pytest.raises(TypeError, match="_PGDataset"):
+            ReconciliationModule(mock_c, None, wandb_notifications=False)
+
+    def test_wrong_type_c_dataset_raises_type_error(self):
+        """Passing a plain dict as c_dataset must raise TypeError."""
+        mock_pg = MagicMock(spec=_PGDataset)
+        with pytest.raises(TypeError, match="_CDataset"):
+            ReconciliationModule({"data": []}, mock_pg, wandb_notifications=False)
+
+    def test_wrong_type_pg_dataset_raises_type_error(self):
+        """Passing a plain string as pg_dataset must raise TypeError."""
+        mock_c = MagicMock(spec=_CDataset)
+        with pytest.raises(TypeError, match="_PGDataset"):
+            ReconciliationModule(mock_c, "not_a_dataset", wandb_notifications=False)

@@ -211,7 +211,7 @@ class TestValidateModelConditions:
     @patch('views_pipeline_core.modules.validation.ensemble.check.read_log_file')
     def test_validate_model_conditions_log_file_error(self, mock_read_log):
         """Test handling of log file read errors."""
-        mock_read_log.side_effect = Exception("File not found")
+        mock_read_log.side_effect = FileNotFoundError("File not found")
 
         result = validate_model_conditions(
             Path("/test/path/generated"),
@@ -312,7 +312,7 @@ class TestValidateEnsembleModelDeploymentStatus:
     @patch('views_pipeline_core.modules.validation.ensemble.check.read_log_file')
     def test_validate_deployment_status_log_file_error(self, mock_read_log):
         """Test handling of log file read errors."""
-        mock_read_log.side_effect = Exception("File not found")
+        mock_read_log.side_effect = FileNotFoundError("File not found")
 
         result = validate_ensemble_model_deployment_status(
             Path("/test/path/generated"),
