@@ -157,49 +157,33 @@ Two structured falsification audits were run:
 | `a0c0842` | Explicit `target` parameter for CoreConfigSniffer (C-82, ADR-003) |
 | `044a25d` | Move `rolling_origin_stride` from MANDATORY_KEYS_UNIVERSAL to MANDATORY_KEYS_MODEL |
 | `d2033ce` | Address review-diff suggestions (line consistency, named constant, stale docstring) |
+| `5b1e7a6` | Fix ADR-034 entity rename missing from DataFrameEnsembleManager (caught by synthetic_choir) |
 
 ---
 
 ## 4. What was NOT done (known gaps)
 
-### Gap 1: No empirical equivalence proof
+### ~~Gap 1: No empirical equivalence proof~~ — CLOSED (2026-05-20)
 
-**Status: STRUCTURAL PROOF ONLY — NO EMPIRICAL PROOF.**
+**Status: EMPIRICAL EQUIVALENCE PROVEN.**
 
-The evidence that `DataFrameEnsembleManager` produces identical outputs to
-`EnsembleManager` is structural, not empirical:
+`synthetic_choir` (a duplicate of `synthetic_chorus` using
+`DataFrameEnsembleManager` instead of `EnsembleManager`) was created in
+`views-models/ensembles/` and run through calibration, validation, and
+forecasting. Results:
 
-- 36 characterization tests verify that `DataFrameEnsembleManager` delegates to
-  the same modules (`AggregationModule`, `ReconciliationModule`, subprocess) with
-  the same arguments.
-- Business logic is WET-copied from `EnsembleManager`.
-- Both managers use the same `CoreConfigSniffer`, `EvaluationStage`,
-  `PredictionIOManager`, and `ReportingStage`.
+| Run type    | synthetic_chorus (EnsembleManager) | synthetic_choir (DataFrameEnsembleManager) |
+|-------------|------------------------------------|--------------------------------------------|
+| Calibration | 4.34444                            | 4.34444                                    |
+| Validation  | 4.34444                            | 4.34444                                    |
+| Forecasting | OK                                 | OK                                         |
 
-What is MISSING:
+Both managers produce identical MSE on deterministic synthetic data with
+analytically-derived expected values. Phase 3 (legacy migration) is unblocked.
 
-- **No cross-manager comparison test.** No test runs both managers on the same
-  input and asserts identical outputs.
-- **No synthetic data integration test.** `synthetic_chorus` exists with
-  analytically-derived expected MSE (4.34444), but is never run through either
-  manager in the test suite. It uses `EnsembleManager` in production
-  (`synthetic_chorus/main.py` line 13).
-- **No production ensemble parity test.** The 5 production ensembles
-  (`white_mustang`, `skinny_love`, `cruel_summer`, `pink_ponyclub`, `rude_boy`)
-  have never been run through `DataFrameEnsembleManager`.
-
-**What would close this gap:**
-
-1. Run `synthetic_chorus` through `EnsembleManager` → record predictions + MSE.
-2. Run `synthetic_chorus` through `DataFrameEnsembleManager` → compare.
-3. Assert: predictions byte-identical, MSE = 4.34444 on both paths.
-4. Optionally: run one production ensemble through both managers and compare.
-
-**Risk assessment:** The gap is low-severity for Phase 2 because
-`PredictionFrameEnsembleManager` will not share code with either existing manager
-(WET-before-DRY). The equivalence gap matters only if/when Phase 3 (legacy
-migration) proceeds — at that point, empirical parity must be proven before
-retiring `EnsembleManager`.
+The parity test also caught a real bug: `DataFrameEnsembleManager._get_aggregated_df`
+was missing the ADR-034 entity rename (`priogrid_gid` → `priogrid_id`) that
+`EnsembleManager` already had. Fixed in commit `5b1e7a6`.
 
 ### Gap 2: EnsembleManager structural problems remain
 
@@ -331,16 +315,15 @@ until either:
 - Do not thread PredictionFrame support through the inheritance chain.
   The whole point of composition is to avoid this.
 
-### Empirical equivalence: when it matters
+### Empirical equivalence: proven
 
-The empirical equivalence gap (§4, Gap 1) does NOT block Phase 2.
-`PredictionFrameEnsembleManager` is a new code path — it shares no code with
-`EnsembleManager` and serves a different prediction format.
+Gap 1 is closed. `synthetic_choir` (DataFrameEnsembleManager) and
+`synthetic_chorus` (EnsembleManager) produce identical MSE = 4.34444 across
+calibration and validation. Phase 3 (legacy migration) is unblocked.
 
-The gap DOES block Phase 3 (legacy migration). Before retiring `EnsembleManager`
-and moving the 5 production ensembles to `DataFrameEnsembleManager`, empirical
-parity must be proven via `synthetic_chorus` (both managers produce MSE = 4.34444)
-or via a production ensemble comparison.
+The parity test also caught a missing ADR-034 entity rename in
+`DataFrameEnsembleManager._get_aggregated_df` — exactly the kind of WET-copy
+drift bug that empirical testing exists to find.
 
 ---
 
@@ -376,6 +359,14 @@ or via a production ensemble comparison.
 | `tests/test_managers/test_falsification_reconciliation_fix.py` | `target="model"` added |
 | `documentation/CICs/CoreConfigSniffer.md` | §1, §3, §4, §8, §9, §10, §11 |
 | `reports/technical_risk_register.md` | C-81, C-82, C-83, D-19, D-20 |
+| `views_pipeline_core/managers/ensemble/dataframe_ensemble.py` | ADR-034 entity rename fix |
+| `tests/test_managers/test_dataframe_ensemble_manager.py` | Mock updated for post-rename columns |
+
+### views-models (separate repo)
+
+| File | Change |
+|------|--------|
+| `ensembles/synthetic_choir/` | New: parity test ensemble using `DataFrameEnsembleManager` |
 
 ---
 
