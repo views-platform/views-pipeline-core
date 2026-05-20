@@ -6,6 +6,8 @@ which orchestrates ensemble forecasting models including training,
 evaluation, forecasting, and reconciliation.
 """
 
+import subprocess as sp
+
 import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
@@ -918,3 +920,118 @@ class TestSubprocessTimeout:
                 "subprocess.run() called without timeout parameter. "
                 "Ensemble sub-model execution can hang indefinitely without a timeout."
             )
+
+    def test_timeout_expired_raises_pipeline_exception(self, manager):
+        """C-07 merge: subprocess timeout produces PipelineException, not raw TimeoutExpired."""
+        model_path = MagicMock(spec=ModelPathManager)
+        model_args = MagicMock(spec=ForecastingModelArgs)
+        model_args.to_shell_command.return_value = ["sleep", "9999"]
+
+        with patch("subprocess.run", side_effect=sp.TimeoutExpired(cmd="sleep", timeout=7200)):
+            with pytest.raises(PipelineException, match="timed out"):
+                manager._execute_shell_script(model_path, "test_model", model_args)
+
+    def test_subprocess_failure_raises_pipeline_exception(self, manager):
+        """C-85: non-zero exit code produces PipelineException with model name."""
+        model_path = MagicMock(spec=ModelPathManager)
+        model_args = MagicMock(spec=ForecastingModelArgs)
+        model_args.to_shell_command.return_value = ["false"]
+
+        with patch("subprocess.run", side_effect=sp.CalledProcessError(1, "false")):
+            with pytest.raises(PipelineException, match="test_model"):
+                manager._execute_shell_script(model_path, "test_model", model_args)
+
+
+# ============================================================================
+# C-84: EnsembleManager output count verification
+# ============================================================================
+
+class TestOutputCount:
+    """CIC §3: _forecast_ensemble() must produce exactly one DataFrame."""
+
+    def test_forecast_ensemble_returns_dataframe(self, manager):
+        """_forecast_ensemble returns a single DataFrame (not a list)."""
+        mock_df = pd.DataFrame(
+            {"pred_ged_sb": [0.1, 0.2]},
+            index=pd.MultiIndex.from_tuples([(1, 100), (1, 101)], names=["month_id", "priogrid_gid"]),
+        )
+
+        with patch.object(manager, "_forecast_model_artifact", return_value=mock_df):
+            with patch.object(manager, "_get_aggregated_df", return_value=mock_df):
+                with patch("views_pipeline_core.managers.ensemble.ensemble._ViewsDataset") as MockVDS:
+                    MockVDS.return_value.dataframe = mock_df
+                    manager.configs = {
+                        "name": "test", "models": ["m1", "m2"],
+                        "aggregation": "mean", "run_type": "forecasting",
+                    }
+                    manager._EnsembleManager__activate_reconciliation = False
+
+                    result = manager._forecast_ensemble()
+
+                    assert isinstance(result, pd.DataFrame)
+
+
+# ============================================================================
+# C-85: EnsembleManager failure modes (CIC §6)
+# ============================================================================
+
+class TestEnsembleFailureModes:
+    """Verify untested CIC §6 failure modes for EnsembleManager."""
+
+    def test_evaluate_output_count_mismatch_raises(self, manager):
+        """CIC §6 mode 3: models returning different output counts raises ValueError."""
+        idx = pd.MultiIndex.from_tuples(
+            [(1, 100), (2, 100)], names=["month_id", "priogrid_gid"],
+        )
+        df = pd.DataFrame({"pred_ged_sb": [0.1, 0.2]}, index=idx)
+
+        manager._config_manager.get_combined_config.return_value = {
+            "name": "test", "models": ["model_a", "model_b"],
+            "aggregation": "mean", "run_type": "calibration",
+        }
+        manager._args = ForecastingModelArgs(
+            run_type="calibration", evaluate=True, saved=True, eval_type="standard",
+        )
+        manager._eval_type = "standard"
+
+        with patch.object(manager, "_evaluate_model_artifact") as mock_eval:
+            mock_eval.side_effect = lambda name: [df, df] if name == "model_a" else [df]
+            with patch.object(manager, "_get_aggregated_df", return_value=df):
+                with pytest.raises(ValueError, match="returned only 1 outputs"):
+                    manager._evaluate_ensemble()
+
+    def test_aggregate_empty_dict_raises(self, manager):
+        """CIC §6 mode 5: aggregation with zero DataFrames raises ValueError."""
+        with pytest.raises(ValueError, match="at least one DataFrame"):
+            manager._get_aggregated_df({}, "mean")
+
+    def test_missing_models_key_in_config_raises(self, manager):
+        """CIC §6 mode 4: config without 'models' key raises KeyError in _forecast_ensemble."""
+        manager._config_manager.get_combined_config.return_value = {
+            "name": "test", "aggregation": "mean",
+        }
+        with pytest.raises(KeyError, match="models"):
+            manager._forecast_ensemble()
+
+    def test_forecast_model_artifact_missing_prediction_raises(self, manager):
+        """CIC §6 mode 3: no prediction files after subprocess raises PipelineException."""
+        manager._config_manager.get_combined_config.return_value = {
+            "name": "test", "models": ["m1"],
+            "aggregation": "mean", "run_type": "forecasting",
+        }
+        manager._args = ForecastingModelArgs(
+            run_type="forecasting", forecast=True, saved=True,
+        )
+        manager._use_prediction_store = False
+
+        mock_model_path = MagicMock(spec=ModelPathManager)
+        mock_model_path.data_generated = Path("/nonexistent/path")
+        mock_model_path.get_latest_model_artifact_path.return_value = Path(
+            "/test/artifacts/forecasting_model_20241105_120000.pt"
+        )
+        mock_model_path._get_generated_predictions_data_file_paths.return_value = []
+
+        with patch("views_pipeline_core.managers.ensemble.ensemble.ModelPathManager", return_value=mock_model_path):
+            with patch.object(manager, "_execute_shell_script"):
+                with pytest.raises(PipelineException, match="No prediction files found"):
+                    manager._forecast_model_artifact("m1")

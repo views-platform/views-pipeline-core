@@ -815,3 +815,93 @@ class TestReconciliation:
         with patch.object(df_manager, "_reconcile_pg_with_c", return_value=None):
             with pytest.raises(PipelineException, match="Reconciliation configured but failed"):
                 df_manager._apply_reconciliation(sample_prediction_df, ctx)
+
+
+# ============================================================================
+# C-88: _ENTITY_RENAME unit test for DataFrameEnsembleManager
+# ============================================================================
+
+class TestEntityRenameDataFrameEnsemble:
+    """ADR-034: priogrid_gid → priogrid_id rename in _get_aggregated_df."""
+
+    def test_index_cols_rename_priogrid_gid_to_priogrid_id(
+        self, df_manager, sample_prediction_df, ensemble_context,
+    ):
+        """When input has priogrid_gid in index, AggregationModule receives priogrid_id."""
+        assert sample_prediction_df.index.names == ["month_id", "priogrid_gid"]
+        df_to_aggregate = {"model_a": sample_prediction_df}
+
+        mock_agg = MagicMock()
+        mock_agg.prediction_type = "point"
+        flat = sample_prediction_df.reset_index().rename(
+            columns={"priogrid_gid": "priogrid_id"},
+        )
+        flat["pred_ged_sb"] = [0.2, 0.3, 0.4, 0.5]
+        mock_pl = MagicMock()
+        mock_pl.to_pandas.return_value = flat
+        mock_agg.aggregate.return_value = mock_pl
+
+        with patch(
+            "views_pipeline_core.managers.ensemble.dataframe_ensemble.AggregationModule",
+            return_value=mock_agg,
+        ) as MockAgg:
+            df_manager._get_aggregated_df(df_to_aggregate, "mean", ensemble_context)
+
+            MockAgg.assert_called_once_with(
+                index_cols=["month_id", "priogrid_id"],
+                target_cols=["pred_ged_sb"],
+            )
+
+    def test_index_cols_preserved_when_already_priogrid_id(
+        self, df_manager, sample_prediction_df, ensemble_context,
+    ):
+        """When input already has priogrid_id, no double-rename occurs."""
+        df = sample_prediction_df.copy()
+        df.index = df.index.set_names(["month_id", "priogrid_id"])
+        df_to_aggregate = {"model_a": df}
+
+        mock_agg = MagicMock()
+        mock_agg.prediction_type = "point"
+        flat = df.reset_index()
+        flat["pred_ged_sb"] = [0.2, 0.3, 0.4, 0.5]
+        mock_pl = MagicMock()
+        mock_pl.to_pandas.return_value = flat
+        mock_agg.aggregate.return_value = mock_pl
+
+        with patch(
+            "views_pipeline_core.managers.ensemble.dataframe_ensemble.AggregationModule",
+            return_value=mock_agg,
+        ) as MockAgg:
+            df_manager._get_aggregated_df(df_to_aggregate, "mean", ensemble_context)
+
+            MockAgg.assert_called_once_with(
+                index_cols=["month_id", "priogrid_id"],
+                target_cols=["pred_ged_sb"],
+            )
+
+    def test_country_id_index_passes_through_unchanged(
+        self, df_manager, ensemble_context,
+    ):
+        """CM-level ensembles have country_id, not priogrid_gid — no rename needed."""
+        idx = pd.MultiIndex.from_tuples(
+            [(1, 100), (1, 101)], names=["month_id", "country_id"],
+        )
+        df = pd.DataFrame({"pred_ged_sb": [0.1, 0.2]}, index=idx)
+
+        mock_agg = MagicMock()
+        mock_agg.prediction_type = "point"
+        flat = df.reset_index()
+        mock_pl = MagicMock()
+        mock_pl.to_pandas.return_value = flat
+        mock_agg.aggregate.return_value = mock_pl
+
+        with patch(
+            "views_pipeline_core.managers.ensemble.dataframe_ensemble.AggregationModule",
+            return_value=mock_agg,
+        ) as MockAgg:
+            df_manager._get_aggregated_df({"model_a": df}, "mean", ensemble_context)
+
+            MockAgg.assert_called_once_with(
+                index_cols=["month_id", "country_id"],
+                target_cols=["pred_ged_sb"],
+            )
