@@ -1035,3 +1035,12 @@ class TestEnsembleFailureModes:
             with patch.object(manager, "_execute_shell_script"):
                 with pytest.raises(PipelineException, match="No prediction files found"):
                     manager._forecast_model_artifact("m1")
+
+    def test_wandb_login_failure_propagates(self, manager, mock_wandb_module):
+        """CIC §6 mode 5: WandB initialization failure propagates loudly."""
+        mock_wandb_module.login.side_effect = RuntimeError("WandB API unreachable")
+        args = ForecastingModelArgs(run_type="calibration", train=True)
+
+        with patch('views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer'):
+            with pytest.raises(RuntimeError, match="WandB API unreachable"):
+                manager.execute_single_run(args)

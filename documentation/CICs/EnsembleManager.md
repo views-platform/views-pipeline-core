@@ -183,8 +183,29 @@ manager.execute_single_run(args)
 
 ## 10. Test Alignment
 
-- `tests/test_managers/test_ensemble_manager.py` -- tests for ensemble
-  initialization, sub-model coordination, aggregation, and reconciliation.
+- Covered by `tests/test_managers/test_ensemble_manager.py` (18 test classes,
+  60+ test methods).
+- **Initialization:** `TestEnsembleManagerInit` — constructor wiring, attribute
+  assignment.
+- **Execution flow:** `TestExecuteSingleRun` — args validation, WandB login,
+  CoreConfigSniffer call, ensemble validation gate. `TestExecuteModelTasks` —
+  stage dispatch based on args flags.
+- **Stage methods:** `TestTrainEnsemble`, `TestEvaluateEnsemble`,
+  `TestForecastEnsemble` — per-stage orchestration.
+  `TestExecuteModelTraining`, `TestExecuteModelEvaluation`,
+  `TestExecuteModelForecasting` — WandB run lifecycle and error wrapping.
+- **Data operations:** `TestCreateModelArgs` — CLI arg conversion for
+  sub-models. `TestEntityRenameInAggregation` — ADR-034 `priogrid_gid` →
+  `priogrid_id` rename. `TestLoadOrGeneratePrediction` — cache-first
+  prediction loading with sequence matching. `TestLoadCDataset` —
+  reconciliation dataset resolution.
+- **Error handling:** `TestSubprocessTimeout` — subprocess failure propagation.
+  `TestOutputCount` — output count verification.
+  `TestEnsembleFailureModes` — missing predictions, empty aggregation, missing
+  config keys, WandB login failure.
+- **Reconciliation:** `TestApplyReconciliation` — reconciliation dispatch and
+  passthrough when unconfigured. `TestExecuteShellScript` — subprocess
+  invocation mechanics.
 
 ---
 

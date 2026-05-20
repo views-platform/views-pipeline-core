@@ -449,27 +449,38 @@ class TestDataLoaderIntegration:
 class TestDtypeGuarantee:
     """CIC §3: all numeric columns must be float64 after loading."""
 
-    def test_int32_columns_not_enforced_to_float64(self, sample_dataframe):
-        """Demonstrates the gap: int32 columns pass through without enforcement.
-
-        This test documents the current behavior. If float64 enforcement is
-        added (closing C-87), change the assertion to verify float64 dtype.
-        """
+    def test_int32_columns_promoted_to_float64(self, data_loader, sample_dataframe, sample_queryset):
+        """int32 columns from upstream are promoted to float64 by the loader."""
         df_int32 = sample_dataframe.copy()
         df_int32["int_feature"] = np.array([1] * len(df_int32), dtype=np.int32)
 
-        assert df_int32["int_feature"].dtype == np.int32, (
-            "Precondition: input has int32 column"
+        mock_publish = sample_queryset.publish.return_value
+        mock_publish.fetch_with_drift_detection.return_value = (df_int32, [])
+        data_loader._model_path.get_queryset.return_value = sample_queryset
+        data_loader.month_first = 121
+        data_loader.month_last = 444
+
+        df, _ = data_loader._fetch_data_from_viewser(self_test=False)
+
+        assert df["int_feature"].dtype == np.float64, (
+            f"int32 column should be promoted to float64, got {df['int_feature'].dtype}"
         )
 
-    def test_float32_columns_not_enforced_to_float64(self, mock_model_path, sample_dataframe):
-        """Demonstrates the gap: float32 columns pass through without enforcement."""
+    def test_float32_columns_promoted_to_float64(self, data_loader, sample_dataframe, sample_queryset):
+        """float32 columns from upstream are promoted to float64 by the loader."""
         df_f32 = sample_dataframe.copy()
         df_f32["f32_feature"] = np.array([1.0] * len(df_f32), dtype=np.float32)
 
-        assert df_f32["f32_feature"].dtype == np.float32, (
-            "Precondition: float32 column exists. "
-            "When C-87 is fixed, this column should be promoted to float64 by the loader."
+        mock_publish = sample_queryset.publish.return_value
+        mock_publish.fetch_with_drift_detection.return_value = (df_f32, [])
+        data_loader._model_path.get_queryset.return_value = sample_queryset
+        data_loader.month_first = 121
+        data_loader.month_last = 444
+
+        df, _ = data_loader._fetch_data_from_viewser(self_test=False)
+
+        assert df["f32_feature"].dtype == np.float64, (
+            f"float32 column should be promoted to float64, got {df['f32_feature'].dtype}"
         )
 
     def test_sample_dataframe_fixture_uses_float64(self, sample_dataframe):
