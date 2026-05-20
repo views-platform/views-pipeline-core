@@ -1041,6 +1041,6 @@ class TestEnsembleFailureModes:
         mock_wandb_module.login.side_effect = RuntimeError("WandB API unreachable")
         args = ForecastingModelArgs(run_type="calibration", train=True)
 
-        with patch('views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer'):
+        with patch("views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer"):
             with pytest.raises(RuntimeError, match="WandB API unreachable"):
                 manager.execute_single_run(args)
