@@ -234,12 +234,12 @@ until either:
 | C-78 | No pre-flight reconciliation config validation |
 | C-82 | Implicit ensemble detection in CoreConfigSniffer |
 
-### New concerns opened
+### New concerns opened and resolved in this PR
 
-| ID | Tier | Title |
-|----|------|-------|
-| C-81 | 4 | Double WandB alerting on ensemble exception paths |
-| C-83 | 4 | `time_steps` accepts float silently (pre-existing) |
+| ID | Tier | Title | Status |
+|----|------|-------|--------|
+| C-81 | 4 | Double WandB alerting on ensemble exception paths | Resolved |
+| C-83 | 4 | `time_steps` accepts float silently (pre-existing) | Resolved |
 
 ### Key disagreements resolved
 

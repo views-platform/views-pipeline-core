@@ -1601,6 +1601,8 @@ class ForecastingModelManager(ModelManager):
                     entity=self._entity,
                 )
                 self._reporting_stage.generate_forecast_report(context)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Forecast report generation failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -1927,6 +1929,8 @@ class ForecastingModelManager(ModelManager):
                     entity=self._entity,
                 )
                 self._reporting_stage.generate_evaluation_report(context)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Evaluation report generation failed: {traceback.format_exc()}")
                 raise PipelineException(
