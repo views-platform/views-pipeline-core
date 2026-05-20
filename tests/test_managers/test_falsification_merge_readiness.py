@@ -56,7 +56,7 @@ class TestCoreConfigSnifferRunsOnAllPaths:
             mgr = EnsembleManager.__new__(EnsembleManager)
             mgr._model_path = MagicMock()
             mgr._model_path.model_name = "test_ensemble"
-            mgr._model_path.target = "ged_sb"
+            mgr._model_path.target = "ensemble"
             mgr._wandb_module = MagicMock()
             mgr._sweep = False
             mgr._use_prediction_store = False

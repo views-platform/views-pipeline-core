@@ -259,9 +259,9 @@ class DataFrameEnsembleManager:
         self._args = args
 
         # C-55 fix: CoreConfigSniffer runs before any side effects
-        CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(
-            args.run_type
-        )
+        CoreConfigSniffer(
+            self.configs, self._partition_dict, target=self._ensemble_path.target
+        ).sniff_all(args.run_type)
 
         self._wandb_module.login()
 
