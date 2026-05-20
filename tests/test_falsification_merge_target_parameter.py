@@ -1,10 +1,10 @@
 """
 Falsification audit: merge readiness for fix/C-55-bridge-and-qa-hardening.
 
-Soft falsification S1: CIC §3 line 40-41 claims ensemble detection uses
+Soft falsification S1: CIC §3 claimed ensemble detection uses
 "presence of a models key" but the implementation uses the explicit target
-parameter. This test documents the actual behavior; the CIC text must be
-updated to match.
+parameter. This test documents the actual behavior and guards against
+regression.
 """
 
 import re

@@ -44,6 +44,9 @@ SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
 # Reconciliation — optional config key; controls hierarchical prediction reconciliation
 SUPPORTED_RECONCILIATION_TYPES = frozenset({"pgm_cm_point"})
 
+# Fallback stride for ensembles (which omit rolling_origin_stride)
+_FALLBACK_STRIDE = 1
+
 # Run-type identifiers
 FORECASTING_RUN_TYPE = "forecasting"   # used in sniff_all() guard
 
@@ -299,7 +302,7 @@ class CoreConfigSniffer:
         test_start  = partition[_PARTITION_TEST][0]
         test_end    = partition[_PARTITION_TEST][1]
         time_steps  = self._resolve_time_steps()
-        stride      = self._c.get("rolling_origin_stride", 1)
+        stride      = self._c.get("rolling_origin_stride", _FALLBACK_STRIDE)
         base_origin = test_start - 1
 
         if test_start <= train_end:
