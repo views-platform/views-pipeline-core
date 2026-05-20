@@ -318,15 +318,23 @@ class TestAggregationDelegation:
     """Verify _get_aggregated_df delegates to AggregationModule identically to EnsembleManager."""
 
     def _make_mock_agg(self, sample_prediction_df):
-        """Build a mock AggregationModule that returns a plausible result."""
+        """Build a mock AggregationModule that returns a plausible result.
+
+        The real AggregationModule applies the ADR-034 rename
+        (priogrid_gid → priogrid_id) inside _load_to_polars, so its
+        aggregate() output uses post-rename column names.
+        """
         mock_agg = MagicMock()
         mock_agg.prediction_type = "point"
         result_df = pd.DataFrame(
             {"pred_ged_sb": [0.2, 0.3, 0.4, 0.5]},
             index=sample_prediction_df.index,
         )
+        flat = result_df.reset_index().rename(
+            columns={"priogrid_gid": "priogrid_id"}
+        )
         mock_pl = MagicMock()
-        mock_pl.to_pandas.return_value = result_df.reset_index()
+        mock_pl.to_pandas.return_value = flat
         mock_agg.aggregate.return_value = mock_pl
         return mock_agg
 

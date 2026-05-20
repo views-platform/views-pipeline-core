@@ -785,7 +785,13 @@ class DataFrameEnsembleManager:
             )
 
         first_df = next(iter(df_to_aggregate.values()))
-        index_cols = list(first_df.index.names)
+        # ADR-034: PGMDataset renames priogrid_gid → priogrid_id at the
+        # dataset boundary. Use the post-rename name so AggregationModule's
+        # schema validation matches the actual column names.
+        _ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
+        index_cols = [
+            _ENTITY_RENAME.get(c, c) for c in first_df.index.names
+        ]
         target_cols = ["pred_" + col for col in ctx.targets]
 
         manager = AggregationModule(
