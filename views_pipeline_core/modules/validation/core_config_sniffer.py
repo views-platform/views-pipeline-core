@@ -70,11 +70,12 @@ class CoreConfigSniffer:
 
     MANDATORY_KEYS_UNIVERSAL = [
         "name", "level", "creator",
-        "steps", "rolling_origin_stride",
+        "steps",
         "deployment_status",
     ]
     MANDATORY_KEYS_MODEL = [
         "algorithm", "time_steps", "prediction_format",
+        "rolling_origin_stride",
     ]
 
     def __init__(self, configs: Dict[str, Any], partition_dict: Dict | None = None, *, target: str) -> None:
@@ -179,7 +180,6 @@ class CoreConfigSniffer:
 
     def _check_currently_supported_values(self) -> None:
         time_steps = self._resolve_time_steps()
-        stride     = self._c["rolling_origin_stride"]
 
         if time_steps not in SUPPORTED_TIME_STEPS:
             raise NotImplementedError(
@@ -187,12 +187,14 @@ class CoreConfigSniffer:
                 f"Supported: {SUPPORTED_TIME_STEPS}. "
                 f"Update SUPPORTED_TIME_STEPS in core_config_sniffer.py when ready."
             )
-        if stride not in SUPPORTED_STRIDES:
-            raise NotImplementedError(
-                f"CoreConfigSniffer: rolling_origin_stride={stride} is not yet supported. "
-                f"Supported: {SUPPORTED_STRIDES}. "
-                f"Update SUPPORTED_STRIDES in core_config_sniffer.py when ready."
-            )
+        if not self._is_ensemble:
+            stride = self._c["rolling_origin_stride"]
+            if stride not in SUPPORTED_STRIDES:
+                raise NotImplementedError(
+                    f"CoreConfigSniffer: rolling_origin_stride={stride} is not yet supported. "
+                    f"Supported: {SUPPORTED_STRIDES}. "
+                    f"Update SUPPORTED_STRIDES in core_config_sniffer.py when ready."
+                )
 
     def _check_level(self) -> None:
         level = self._c.get("level")
@@ -297,7 +299,7 @@ class CoreConfigSniffer:
         test_start  = partition[_PARTITION_TEST][0]
         test_end    = partition[_PARTITION_TEST][1]
         time_steps  = self._resolve_time_steps()
-        stride      = self._c["rolling_origin_stride"]
+        stride      = self._c.get("rolling_origin_stride", 1)
         base_origin = test_start - 1
 
         if test_start <= train_end:

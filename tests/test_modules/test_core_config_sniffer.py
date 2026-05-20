@@ -396,7 +396,6 @@ def _valid_ensemble_configs():
         "deployment_status": "shadow",
         "regression_targets": ["lr_sb"],
         "steps": list(range(1, 37)),
-        "rolling_origin_stride": 1,
         "regression_point_metrics": ["MSE"],
         "models": ["model_a", "model_b"],
     }
@@ -441,6 +440,11 @@ class TestEnsembleConfigValidation:
     def test_ensemble_without_prediction_format_passes(self):
         configs = _valid_ensemble_configs()
         assert "prediction_format" not in configs
+        CoreConfigSniffer(configs, {}, target="ensemble").sniff_all("forecasting")
+
+    def test_ensemble_without_rolling_origin_stride_passes(self):
+        configs = _valid_ensemble_configs()
+        assert "rolling_origin_stride" not in configs
         CoreConfigSniffer(configs, {}, target="ensemble").sniff_all("forecasting")
 
     def test_ensemble_derives_time_steps_from_steps(self):

@@ -37,8 +37,8 @@ the execution engine.
 
 - Guarantees that all mandatory keys are present: `MANDATORY_KEYS_UNIVERSAL` for all
   pipeline units, plus `MANDATORY_KEYS_MODEL` (`algorithm`, `time_steps`,
-  `prediction_format`) for non-ensemble configs. Ensemble vs model identity is
-  declared via the required `target` parameter (ADR-003).
+  `prediction_format`, `rolling_origin_stride`) for non-ensemble configs. Ensemble
+  vs model identity is declared via the required `target` parameter (ADR-003).
 - Guarantees that `deployment_status` is a recognised value; raises immediately if the
   model is `"deprecated"`.
 - Guarantees that `level` is in the set of currently supported levels (`{"cm", "pgm"}`).
