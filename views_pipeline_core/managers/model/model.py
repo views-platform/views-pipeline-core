@@ -820,12 +820,14 @@ class ForecastingModelManager(ModelManager):
         )
     
     @staticmethod
-    def dataset_class(loa: str) -> Optional[type]:
+    def dataset_class(loa: str) -> type:
         dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
         dataset_cls = dataset_classes.get(loa)
         if dataset_cls:
             return partial(dataset_cls)
-        return None
+        raise ValueError(
+            f"Unknown level-of-analysis '{loa}'. Expected one of: {list(dataset_classes.keys())}"
+        )
 
     def _has_evaluation_metrics(self) -> bool:
         """Return True if any metric keys are specified in config."""
@@ -852,10 +854,11 @@ class ForecastingModelManager(ModelManager):
             eval_type: Type of evaluation
 
         Returns:
-            Number of sequences, or None for complete type
+            Number of sequences.
 
         Raises:
-            ValueError: If eval_type invalid
+            NotImplementedError: If eval_type is "complete" (not yet implemented).
+            ValueError: If eval_type is not recognized.
 
         Example:
             >>> n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
@@ -867,7 +870,11 @@ class ForecastingModelManager(ModelManager):
         elif eval_type == "long":
             return 3 * MAX_SHIFT_COUNT + 1   # 37: base origin + 36 shifts
         elif eval_type == "complete":
-            return None  # currently set as None because sophisticated calculation is needed
+            raise NotImplementedError(
+                "eval_type='complete' is not yet implemented — the required "
+                "sequence count depends on partition geometry. Use 'standard' "
+                "or 'long' instead."
+            )
         elif eval_type == "live":
             return MAX_SHIFT_COUNT + 1       # 13: same as standard
         else:

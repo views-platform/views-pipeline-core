@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _PRIOGRID_NCOL = 720
 _DATAFACTORY_REQUIRED_KEYS = {"region", "features", "zarr_url", "loa"}
+_SYNTHETIC_REQUIRED_KEYS = {"pattern", "level", "features"}
 
 _LOA_TO_OUTPUT_FORMAT = {
     "priogrid_month": "dataframe",
@@ -1095,9 +1096,11 @@ class ViewsDataLoader:
             source = queryset.get("source")
             if source == "views-datafactory":
                 return "datafactory"
+            if source == "synthetic":
+                return "synthetic"
             raise TypeError(
                 f"Dict queryset for {self._model_name} has unrecognized "
-                f"source='{source}'. Expected 'views-datafactory'."
+                f"source='{source}'. Expected 'views-datafactory' or 'synthetic'."
             )
 
         if hasattr(queryset, "publish"):
@@ -1219,12 +1222,67 @@ class ViewsDataLoader:
 
         return df, None
 
+    def _fetch_data_from_synthetic(
+        self, self_test: bool, descriptor: Optional[dict] = None,
+    ) -> tuple[pd.DataFrame, None]:
+        """Generate synthetic data from a descriptor dict.
+
+        Args:
+            self_test: Whether drift detection self-testing was requested.
+                Logged as a warning since synthetic data has no drift detection.
+            descriptor: Pre-fetched dict descriptor. If None, calls get_queryset().
+
+        Returns:
+            Tuple of (dataframe, None). Alerts are always None.
+
+        Raises:
+            ValueError: If descriptor is invalid.
+        """
+        from views_pipeline_core.modules.dataloaders.synthetic import (
+            generate_synthetic_data,
+            SYNTHETIC_REQUIRED_KEYS,
+        )
+
+        if descriptor is None:
+            descriptor = self._model_path.get_queryset()
+
+        if descriptor is None or not isinstance(descriptor, dict):
+            raise RuntimeError(
+                f"Expected dict descriptor for synthetic model {self._model_name}, "
+                f"got {type(descriptor).__name__}"
+            )
+
+        missing = SYNTHETIC_REQUIRED_KEYS - descriptor.keys()
+        if missing:
+            raise ValueError(
+                f"Synthetic descriptor for {self._model_name} is missing "
+                f"required keys: {sorted(missing)}"
+            )
+
+        if self_test:
+            logger.warning(
+                f"Drift detection self_test requested for {self._model_name} "
+                f"but is not available for synthetic data sources. "
+                f"Returning alerts=None."
+            )
+
+        df = generate_synthetic_data(
+            descriptor, self.month_first, self.month_last
+        )
+
+        logger.info(
+            f"Synthetic fetch complete for {self._model_name}: "
+            f"{len(df)} rows, {len(df.columns)} columns"
+        )
+
+        return df, None
+
     def _fetch_data(self, self_test: bool, source: str) -> tuple[pd.DataFrame, list | None]:
         """Dispatch to the correct fetch strategy based on detected source.
 
         Args:
             self_test: Whether to perform drift detection self-testing.
-            source: Data source identifier ('viewser' or 'datafactory')
+            source: Data source identifier ('viewser', 'datafactory', or 'synthetic')
                 as returned by _detect_data_source().
 
         Returns:
@@ -1237,10 +1295,12 @@ class ViewsDataLoader:
             return self._fetch_data_from_viewser(self_test)
         elif source == "datafactory":
             return self._fetch_data_from_datafactory(self_test)
+        elif source == "synthetic":
+            return self._fetch_data_from_synthetic(self_test)
         else:
             raise ValueError(
                 f"Unknown data source '{source}' for model {self._model_name}. "
-                f"Expected 'viewser' or 'datafactory'."
+                f"Expected 'viewser', 'datafactory', or 'synthetic'."
             )
 
     def _get_month_range(self) -> tuple[int, int]:
@@ -1425,7 +1485,7 @@ class ViewsDataLoader:
             self.month_first, self.month_last = self._get_month_range()
 
         source = self._detect_data_source()
-        cache_label = "viewser" if source == "viewser" else "datafactory"
+        cache_label = source
         path_cached_df = Path(
             os.path.join(str(self._path_raw), f"{self.partition}_{cache_label}_df{PipelineConfig.dataframe_format}")
         )

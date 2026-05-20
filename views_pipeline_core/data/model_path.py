@@ -588,7 +588,8 @@ class ModelPathManager:
             for f in self.data_raw.iterdir()
             if f.is_file()
             and (f.stem.startswith(f"{run_type}_viewser_df")
-                 or f.stem.startswith(f"{run_type}_datafactory_df"))
+                 or f.stem.startswith(f"{run_type}_datafactory_df")
+                 or f.stem.startswith(f"{run_type}_synthetic_df"))
             and f.suffix == PipelineConfig.dataframe_format
         ]
         return sorted(paths, reverse=True)

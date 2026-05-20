@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-03-03
+**Last reviewed:** 2026-05-20
 **Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern), ADR-042 (PredictionFrame Adoption)
 
 ---
@@ -48,6 +48,12 @@ gatekeeper between a model's declared intentions and the execution engine.
 - Guarantees that `prediction_format` is present and is a supported value
   (`"dataframe"` or `"prediction_frame"`). Raises `ValueError` if the value is
   unrecognised.
+- Guarantees that the optional `evaluation_mode` key, when present, is a supported
+  value (`"stochastic"` or `"point"`). When `evaluation_mode="point"`,
+  `aggregate_method` must be present and supported (`"arithmetic_mean"`).
+- Guarantees that the optional `reconciliation` key, when present, is a supported
+  value (`"pgm_cm_point"`). When `reconciliation="pgm_cm_point"`,
+  `reconcile_with` must be a non-empty string identifying the CM model.
 
 ---
 
@@ -67,6 +73,12 @@ gatekeeper between a model's declared intentions and the execution engine.
 - `prediction_format: str` (mandatory config key) — declares the format of the model's
   inference output. Must be `"dataframe"` or `"prediction_frame"`. All model configs
   must include this key; the sniffer raises `KeyError` if it is absent.
+- `evaluation_mode: str` (optional config key) — when present, must be `"stochastic"`
+  or `"point"`. When `"point"`, requires `aggregate_method` to also be present.
+- `reconciliation: str` (optional config key) — when present, must be
+  `"pgm_cm_point"`. Requires `reconcile_with` to specify the CM model name.
+- `reconcile_with: str` (conditionally required) — the CM model used for PGM-CM
+  reconciliation. Required when `reconciliation="pgm_cm_point"`.
 
 ---
 
@@ -134,8 +146,10 @@ if result:   # sniff_all returns None; absence of exception is the success signa
 ## 10. Test Alignment
 
 - Covered by `tests/test_modules/test_core_config_sniffer.py`.
-- Tests must cover every mandatory key, every supported/unsupported value, deprecated
-  status blocking, and the evaluation-contract checks.
+- `TestCoreConfigSniffer` — mandatory keys, targets/metrics coupling, supported values,
+  level, deployment status, evaluation contract, prediction format.
+- `TestEvaluationModeValidation` — optional `evaluation_mode` / `aggregate_method` keys.
+- `TestReconciliationConfigValidation` — optional `reconciliation` / `reconcile_with` keys.
 - The absence of a raised exception is the success signal; no return value is asserted.
 
 ---
@@ -150,8 +164,10 @@ if result:   # sniff_all returns None; absence of exception is the success signa
   values are supported.
 - Adding a new mandatory key requires adding it to `MANDATORY_KEYS` and updating this
   contract.
-- `SUPPORTED_PREDICTION_FORMATS` is added alongside existing `SUPPORTED_*` constants.
-  Extend it there — not via inline checks — when new formats are supported.
+- `SUPPORTED_PREDICTION_FORMATS`, `SUPPORTED_EVALUATION_MODES`,
+  `SUPPORTED_AGGREGATE_METHODS`, and `SUPPORTED_RECONCILIATION_TYPES` are added
+  alongside existing `SUPPORTED_*` constants. Extend them there — not via inline
+  checks — when new values are supported.
 
 ## 12. Known Deviations
 

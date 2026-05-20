@@ -485,6 +485,13 @@ class TestGetRawDataFilePathsFilter:
         assert len(paths) == 1
         assert paths[0].name == "calibration_datafactory_df.parquet"
 
+    def test_finds_synthetic_df_file(self, tmp_path):
+        (tmp_path / "calibration_synthetic_df.parquet").touch()
+
+        paths = self._call_get_raw(tmp_path, "calibration")
+        assert len(paths) == 1
+        assert paths[0].name == "calibration_synthetic_df.parquet"
+
     def test_ignores_unrelated_files(self, tmp_path):
         (tmp_path / "calibration_viewser_df.parquet").touch()
         (tmp_path / "calibration_model_20260422.pt").touch()

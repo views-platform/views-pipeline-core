@@ -41,6 +41,9 @@ SUPPORTED_PREDICTION_FORMATS = frozenset({"dataframe", "prediction_frame"})
 SUPPORTED_EVALUATION_MODES  = frozenset({"stochastic", "point"})
 SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
 
+# Reconciliation — optional config key; controls hierarchical prediction reconciliation
+SUPPORTED_RECONCILIATION_TYPES = frozenset({"pgm_cm_point"})
+
 # Run-type identifiers
 FORECASTING_RUN_TYPE = "forecasting"   # used in sniff_all() guard
 
@@ -82,6 +85,7 @@ class CoreConfigSniffer:
         self._check_level()
         self._check_prediction_format()
         self._check_evaluation_mode()
+        self._check_reconciliation_config()
         if run_type != FORECASTING_RUN_TYPE:
             self._check_evaluation_contract(run_type)
         logger.info("CoreConfigSniffer: Config audited (run_type='%s').", run_type)
@@ -224,6 +228,25 @@ class CoreConfigSniffer:
                     f"CoreConfigSniffer: aggregate_method='{method}' is not supported. "
                     f"Supported: {sorted(SUPPORTED_AGGREGATE_METHODS)}. "
                     f"Update SUPPORTED_AGGREGATE_METHODS in core_config_sniffer.py when ready."
+                )
+
+    def _check_reconciliation_config(self) -> None:
+        recon = self._c.get("reconciliation")
+        if recon is None:
+            return
+        if recon not in SUPPORTED_RECONCILIATION_TYPES:
+            raise ValueError(
+                f"CoreConfigSniffer: reconciliation='{recon}' is not supported. "
+                f"Supported: {sorted(SUPPORTED_RECONCILIATION_TYPES)}. "
+                f"Update SUPPORTED_RECONCILIATION_TYPES in core_config_sniffer.py when ready."
+            )
+        if recon == "pgm_cm_point":
+            recon_with = self._c.get("reconcile_with")
+            if not recon_with:
+                raise ValueError(
+                    "CoreConfigSniffer: reconciliation='pgm_cm_point' requires "
+                    "'reconcile_with' to specify the CM model for reconciliation. "
+                    "Add reconcile_with to config_meta.py."
                 )
 
     def _check_evaluation_contract(self, run_type: str) -> None:

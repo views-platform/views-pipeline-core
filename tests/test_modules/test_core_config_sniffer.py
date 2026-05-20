@@ -332,3 +332,53 @@ class TestEvaluationModeValidation:
         """
         configs = {**_valid_configs(), "aggregate_method": "arithmetic_mean"}
         CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+
+class TestReconciliationConfigValidation:
+    """
+    Tests for the optional reconciliation / reconcile_with config keys.
+
+    - reconciliation is optional; absent or None → no raise.
+    - Supported values: "pgm_cm_point".
+    - When reconciliation="pgm_cm_point", reconcile_with is required.
+    """
+
+    def test_absent_reconciliation_does_not_raise(self):
+        configs = _valid_configs()
+        configs.pop("reconciliation", None)
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_reconciliation_none_does_not_raise(self):
+        configs = {**_valid_configs(), "reconciliation": None}
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_pgm_cm_point_with_reconcile_with_passes(self):
+        configs = {
+            **_valid_configs(),
+            "reconciliation": "pgm_cm_point",
+            "reconcile_with": "cruel_summer",
+        }
+        CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_unsupported_reconciliation_type_raises(self):
+        configs = {**_valid_configs(), "reconciliation": "unknown_method"}
+        with pytest.raises(ValueError, match="reconciliation"):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_pgm_cm_point_without_reconcile_with_raises(self):
+        configs = {
+            **_valid_configs(),
+            "reconciliation": "pgm_cm_point",
+            "reconcile_with": None,
+        }
+        with pytest.raises(ValueError, match="reconcile_with"):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")
+
+    def test_pgm_cm_point_with_empty_reconcile_with_raises(self):
+        configs = {
+            **_valid_configs(),
+            "reconciliation": "pgm_cm_point",
+            "reconcile_with": "",
+        }
+        with pytest.raises(ValueError, match="reconcile_with"):
+            CoreConfigSniffer(configs, _valid_partition()).sniff_all("calibration")

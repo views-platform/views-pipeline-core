@@ -413,9 +413,70 @@ class TestCreateModelArgs:
 # Test Aggregation Methods
 # ============================================================================
 
-# Note: TestGetAggregatedDf tests removed because _get_aggregated_df method
-# now uses AggregationManager internally and the API has changed significantly.
-# The method is tested indirectly through higher-level tests.
+# Note: Full TestGetAggregatedDf tests removed because _get_aggregated_df
+# now uses AggregationModule internally. The method is tested indirectly
+# through higher-level tests. Only the _ENTITY_RENAME behavior is tested
+# directly below.
+
+
+class TestEntityRenameInAggregation:
+    """ADR-034: verify priogrid_gid → priogrid_id rename in index_cols."""
+
+    def test_index_cols_use_priogrid_id_when_df_has_priogrid_id(self, manager, sample_dataframe):
+        """Normal path: DataFrames already have priogrid_id after _PGDataset."""
+        df = sample_dataframe.copy()
+        df.index = df.index.set_names(["month_id", "priogrid_id"])
+        df_to_aggregate = {"model_a": df}
+
+        manager._config_manager.get_combined_config.return_value = {
+            "targets": ["ged_sb"],
+            "use_weights": False,
+            "weights": {},
+        }
+
+        with patch("views_pipeline_core.managers.ensemble.ensemble.AggregationModule") as MockAgg:
+            mock_agg = MagicMock()
+            mock_agg.prediction_type = "point"
+            mock_pl = MagicMock()
+            mock_pl.to_pandas.return_value = df.reset_index()
+            mock_agg.aggregate.return_value = mock_pl
+            MockAgg.return_value = mock_agg
+
+            manager._get_aggregated_df(df_to_aggregate, "mean")
+
+            MockAgg.assert_called_once_with(
+                index_cols=["month_id", "priogrid_id"],
+                target_cols=["pred_ged_sb"],
+            )
+
+    def test_index_cols_rename_priogrid_gid_to_priogrid_id(self, manager, sample_dataframe):
+        """Defensive path: if a DataFrame still has priogrid_gid, rename it."""
+        df = sample_dataframe.copy()
+        df.index = df.index.set_names(["month_id", "priogrid_gid"])
+        df_to_aggregate = {"model_a": df}
+
+        manager._config_manager.get_combined_config.return_value = {
+            "targets": ["ged_sb"],
+            "use_weights": False,
+            "weights": {},
+        }
+
+        with patch("views_pipeline_core.managers.ensemble.ensemble.AggregationModule") as MockAgg:
+            mock_agg = MagicMock()
+            mock_agg.prediction_type = "point"
+            mock_pl = MagicMock()
+            mock_pl.to_pandas.return_value = df.reset_index().rename(
+                columns={"priogrid_gid": "priogrid_id"}
+            )
+            mock_agg.aggregate.return_value = mock_pl
+            MockAgg.return_value = mock_agg
+
+            manager._get_aggregated_df(df_to_aggregate, "mean")
+
+            MockAgg.assert_called_once_with(
+                index_cols=["month_id", "priogrid_id"],
+                target_cols=["pred_ged_sb"],
+            )
 
 
 # ============================================================================
@@ -471,8 +532,8 @@ class TestApplyReconciliation:
             assert result.equals(reconciled_df)
             mock_wandb_module.send_alert.assert_called()
     
-    def test_reconciliation_returns_original_on_failure(self, manager, sample_dataframe, mock_wandb_module):
-        """Test original DataFrame is returned when reconciliation fails."""
+    def test_reconciliation_raises_on_failure(self, manager, sample_dataframe, mock_wandb_module):
+        """Test PipelineException raised when configured reconciliation fails."""
         self._set_manager_configs(manager, {
             "reconciliation": "pgm_cm_point",
             "reconcile_with": "cm_model",
@@ -480,13 +541,10 @@ class TestApplyReconciliation:
         })
         manager._EnsembleManager__activate_reconciliation = True
         manager._wandb_module = mock_wandb_module
-        
+
         with patch.object(manager, '_EnsembleManager__reconcile_pg_with_c', return_value=None):
-            with patch('views_pipeline_core.managers.ensemble.ensemble.wandb') as mock_wandb:
-                mock_wandb.AlertLevel.WARNING = "WARNING"
-                result = manager._apply_reconciliation(sample_dataframe)
-                
-                assert result.equals(sample_dataframe)
+            with pytest.raises(PipelineException, match="Reconciliation configured but failed"):
+                manager._apply_reconciliation(sample_dataframe)
 
 
 # ============================================================================
@@ -665,7 +723,7 @@ class TestLoadCDataset:
         
         with patch('views_pipeline_core.managers.ensemble.ensemble.EnsemblePathManager') as MockPath:
             mock_path = MagicMock()
-            mock_path._get_generated_predictions_data_file_paths.side_effect = Exception("Not found")
+            mock_path._get_generated_predictions_data_file_paths.side_effect = FileNotFoundError("Not found")
             MockPath.return_value = mock_path
             
             result = manager._load_c_dataset("cm_model", None)

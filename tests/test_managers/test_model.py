@@ -278,9 +278,9 @@ class TestForecastingModelManagerStatic:
         assert n == 37  # base origin + 36 shifts
         
     def test_resolve_evaluation_sequence_complete(self):
-        """Test complete evaluation returns None."""
-        n = ForecastingModelManager._resolve_evaluation_sequence_number("complete")
-        assert n is None
+        """Test complete evaluation raises NotImplementedError."""
+        with pytest.raises(NotImplementedError, match="not yet implemented"):
+            ForecastingModelManager._resolve_evaluation_sequence_number("complete")
         
     def test_resolve_evaluation_sequence_invalid(self):
         """Test invalid eval type raises error."""
