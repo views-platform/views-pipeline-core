@@ -164,7 +164,7 @@ class CoreConfigSniffer:
                 "classification_targets is empty. Add targets or remove the metric keys."
             )
 
-    def _resolve_time_steps(self) -> int | float:
+    def _resolve_time_steps(self) -> int:
         """Return the effective time_steps value for validation.
 
         Models declare time_steps explicitly; ensembles derive it from
@@ -174,6 +174,11 @@ class CoreConfigSniffer:
         time_steps = self._c.get("time_steps")
         if time_steps is None:
             return len(steps)
+        if not isinstance(time_steps, int):
+            raise TypeError(
+                f"CoreConfigSniffer: time_steps must be int, got {type(time_steps).__name__} "
+                f"({time_steps!r}). Fix in config_hyperparameters.py."
+            )
         if len(steps) != time_steps:
             raise ValueError(
                 f"CoreConfigSniffer: time_steps={time_steps} but len(steps)={len(steps)}. "

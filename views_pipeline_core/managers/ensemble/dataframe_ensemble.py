@@ -279,6 +279,8 @@ class DataFrameEnsembleManager:
                 validate_ensemble_model(self.configs)
 
             self._execute_model_tasks(ctx)
+        except PipelineException:
+            raise
         except Exception as e:
             logger.error(
                 f"Error during ensemble execution: {e}", exc_info=True
@@ -345,6 +347,8 @@ class DataFrameEnsembleManager:
                 self._wandb_module.send_alert(
                     title=f"Training for ensemble {ctx.configs['name']} completed successfully.",
                 )
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Ensemble training failed: {traceback.format_exc()}"
@@ -382,6 +386,8 @@ class DataFrameEnsembleManager:
                 self._wandb_module.send_alert(
                     title=f"Evaluation for ensemble {ctx.configs['name']} completed successfully.",
                 )
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Ensemble evaluation failed: {traceback.format_exc()}"
@@ -415,6 +421,8 @@ class DataFrameEnsembleManager:
                     run_type=ctx.run_type,
                     timestamp=ctx.timestamp,
                 )
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Ensemble forecasting failed: {traceback.format_exc()}"
@@ -440,6 +448,8 @@ class DataFrameEnsembleManager:
                     entity=self._entity,
                 )
                 self._reporting_stage.generate_forecast_report(reporting_ctx)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Forecast report generation failed: {traceback.format_exc()}"
@@ -465,6 +475,8 @@ class DataFrameEnsembleManager:
                     entity=self._entity,
                 )
                 self._reporting_stage.generate_evaluation_report(reporting_ctx)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(
                     f"Evaluation report generation failed: {traceback.format_exc()}"
@@ -852,11 +864,6 @@ class DataFrameEnsembleManager:
                 )
                 return reconciled_pg
             else:
-                self._wandb_module.send_alert(
-                    title="Ensemble Reconciliation Failed",
-                    text="Reconciliation configured but failed. Cannot publish unreconciled predictions.",
-                    level=wandb.AlertLevel.ERROR,
-                )
                 logger.error(
                     "Reconciliation configured (pgm_cm_point) but failed. "
                     "Refusing to publish unreconciled predictions as reconciled."
@@ -864,7 +871,8 @@ class DataFrameEnsembleManager:
                 raise PipelineException(
                     "Reconciliation configured but failed. C dataset could not be loaded "
                     "or reconciliation computation returned None. Cannot publish "
-                    "unreconciled predictions as reconciled."
+                    "unreconciled predictions as reconciled.",
+                    wandb_module=self._wandb_module,
                 )
         else:
             logger.info(

@@ -157,6 +157,8 @@ class EnsembleManager(ForecastingModelManager):
                 validate_ensemble_model(self.configs)
 
             self._execute_model_tasks()
+        except PipelineException:
+            raise
         except Exception as e:
             logger.error(
                 f"Error during {self._model_path.target} execution: {e}",
@@ -207,6 +209,8 @@ class EnsembleManager(ForecastingModelManager):
                     title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Ensemble training failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -245,6 +249,8 @@ class EnsembleManager(ForecastingModelManager):
                     title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Ensemble evaluation failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -277,6 +283,8 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Ensemble forecasting failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -667,11 +675,6 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 return reconciled_pg
             else:
-                self._wandb_module.send_alert(
-                    title=f"{self._model_path.target.title()} Reconciliation Failed",
-                    text="Reconciliation configured but failed. Cannot publish unreconciled predictions.",
-                    level=wandb.AlertLevel.ERROR,
-                )
                 logger.error(
                     "Reconciliation configured (pgm_cm_point) but failed. "
                     "Refusing to publish unreconciled predictions as reconciled."
@@ -679,7 +682,8 @@ class EnsembleManager(ForecastingModelManager):
                 raise PipelineException(
                     "Reconciliation configured but failed. C dataset could not be loaded "
                     "or reconciliation computation returned None. Cannot publish "
-                    "unreconciled predictions as reconciled."
+                    "unreconciled predictions as reconciled.",
+                    wandb_module=self._wandb_module,
                 )
         else:
             logger.info(

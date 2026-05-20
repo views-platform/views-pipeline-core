@@ -41,7 +41,7 @@ def validate_model_conditions(path_generated, run_type):
     log_file_path = Path(path_generated) / f"{run_type}_log.txt"
     try:
         log_data = read_log_file(log_file_path)
-    except Exception as e:
+    except (FileNotFoundError, OSError, ValueError, KeyError) as e:
         logger.error(f"Error reading log file: {e}")
         return False
 
@@ -125,7 +125,7 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     log_file_path = Path(path_generated) / f"{run_type}_log.txt"
     try:
         log_data = read_log_file(log_file_path)
-    except Exception as e:
+    except (FileNotFoundError, OSError, ValueError, KeyError) as e:
         logger.error(f"Error reading log file: {e}. Exiting.")
         return False
 
