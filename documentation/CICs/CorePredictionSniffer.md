@@ -111,12 +111,18 @@ CorePredictionSniffer().sniff_predictions(df, targets="ged_sb")
 
 ## 10. Test Alignment
 
-- Covered by `tests/test_modules/test_core_prediction_sniffer.py`.
-- Tests must cover: empty DataFrame; invalid targets type; missing `pred_` columns;
-  flat-index rejection; `priogrid_id` rejection; pgm level rejects cm index; cm level
-  rejects pgm index; pgm level accepts pgm index; cm level accepts cm index.
-- Behavior-change tests (old "pass" → new "fail") must be present and clearly
-  labelled.
+- Covered by `tests/test_modules/test_core_prediction_sniffer.py` (7 test classes,
+  22 test methods).
+- `TestSniffPredictionsPass` — happy-path validation: valid pgm and cm DataFrames
+  pass without raising.
+- `TestBehaviorChanges` — regressions from refactor: flat-index rejection,
+  `priogrid_id` rejection, wrong-level index rejection (old "pass" → new "fail").
+- `TestEmptyDataFrame` — `ValueError` on zero-row input.
+- `TestInvalidTargetType` — `TypeError` when `targets` is not a list.
+- `TestMissingPredictionColumns` — `ValueError` when no `pred_` columns found.
+- `TestMultiIndexStructure` — flat-index rejection, wrong index names, missing
+  level values.
+- `TestStrictLevel` — pgm-level rejects cm index; cm-level rejects pgm index.
 
 ---
 

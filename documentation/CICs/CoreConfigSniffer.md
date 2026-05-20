@@ -165,11 +165,15 @@ if result:   # sniff_all returns None; absence of exception is the success signa
 
 ## 10. Test Alignment
 
-- Covered by `tests/test_modules/test_core_config_sniffer.py`.
-- `TestCoreConfigSniffer` — mandatory keys, targets/metrics coupling, supported values,
-  level, deployment status, evaluation contract, prediction format.
-- `TestEvaluationModeValidation` — optional `evaluation_mode` / `aggregate_method` keys.
-- `TestReconciliationConfigValidation` — optional `reconciliation` / `reconcile_with` keys.
+- Covered by `tests/test_modules/test_core_config_sniffer.py` (5 test classes,
+  89 test methods).
+- `TestCoreConfigSniffer` — mandatory keys (`KeyError` on missing), targets/metrics
+  coupling, supported values (level, time_steps, stride), deployment status,
+  evaluation contract, prediction format.
+- `TestEvaluationModeValidation` — optional `evaluation_mode` / `aggregate_method`
+  keys; valid, invalid, and missing combinations.
+- `TestReconciliationConfigValidation` — optional `reconciliation` / `reconcile_with`
+  keys; valid types, orphan `reconcile_with`, invalid types.
 - `TestEnsembleConfigValidation` — ensemble-aware mandatory key split, `time_steps`
   derivation from `len(steps)`, prediction format skip, reconciliation config.
 - `TestExplicitTargetParameter` — `target` parameter validation, cross-check

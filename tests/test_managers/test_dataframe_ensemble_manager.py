@@ -740,6 +740,17 @@ class TestFailureModes:
                         with pytest.raises(ValueError, match="returned only 1 outputs"):
                             df_manager._evaluate_ensemble(ensemble_context)
 
+    def test_wandb_login_failure_propagates(self, df_manager, mock_wandb_module):
+        """CIC §6 mode 5: WandB initialization failure propagates loudly."""
+        mock_wandb_module.login.side_effect = RuntimeError("WandB API unreachable")
+        args = ForecastingModelArgs(run_type="calibration", train=True)
+
+        with patch(
+            "views_pipeline_core.managers.ensemble.dataframe_ensemble.CoreConfigSniffer"
+        ):
+            with pytest.raises(RuntimeError, match="WandB API unreachable"):
+                df_manager.execute_single_run(args)
+
 
 # ============================================================================
 # TestReconciliation — Reconciliation behaviour
