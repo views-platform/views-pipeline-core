@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-04-01
+**Last reviewed:** 2026-05-20
 **Related ADRs:** ADR-001 (Ontology), ADR-004 (Evolution), ADR-006 (Intent Contracts), ADR-036 (Ensemble Reconciliation)
 
 ---
@@ -214,9 +214,13 @@ manager.execute_single_run(args)
   subprocess exit code; stderr output is not captured or parsed. A sub-model
   that fails silently (exit code 0 but produces garbage) will not be detected
   until aggregation or evaluation.
-- **No `CoreConfigSniffer` call:** `EnsembleManager.execute_single_run()`
-  replaces the parent's pre-flight sniffing with
-  `validate_ensemble_model(configs)`, which has a different (narrower) scope.
+- **`CoreConfigSniffer` call is a bridge fix (2026-05-20):**
+  `EnsembleManager.execute_single_run()` now calls
+  `CoreConfigSniffer.sniff_all()` before WandB login (C-55 bridge fix).
+  However, the override still duplicates the parent's execution sequence —
+  new preconditions added to `ForecastingModelManager.execute_single_run()`
+  will not propagate automatically. Permanent fix: retire EnsembleManager
+  in favour of `DataFrameEnsembleManager` (D-13 trajectory).
 - **Reconciliation is forecasting-only:** The `__activate_reconciliation`
   flag is checked only in `_forecast_ensemble()`. Reconciliation is not
   applied during evaluation, so evaluation metrics reflect un-reconciled

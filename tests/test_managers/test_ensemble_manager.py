@@ -222,41 +222,45 @@ class TestExecuteSingleRun:
     def test_execute_single_run_sets_args(self, manager):
         """Test execute_single_run sets args property."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
-        
+
         with patch.object(manager, '_execute_model_tasks'):
             with patch('views_pipeline_core.modules.validation.ensemble.validate_ensemble_model'):
-                manager.execute_single_run(args)
-                
-                assert manager._args == args
-    
+                with patch('views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer'):
+                    manager.execute_single_run(args)
+
+                    assert manager._args == args
+
     def test_execute_single_run_calls_wandb_login(self, manager, mock_wandb_module):
         """Test execute_single_run calls WandB login."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
-        
+
         with patch.object(manager, '_execute_model_tasks'):
-            manager.execute_single_run(args)
-            
-            mock_wandb_module.login.assert_called_once()
-    
+            with patch('views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer'):
+                manager.execute_single_run(args)
+
+                mock_wandb_module.login.assert_called_once()
+
     def test_execute_single_run_validates_ensemble_when_not_training(self, manager):
         """Test ensemble validation is called when not training."""
         args = ForecastingModelArgs(run_type="calibration", train=False, evaluate=True, saved=True)
-        
+
         with patch.object(manager, '_execute_model_tasks'):
             with patch('views_pipeline_core.managers.ensemble.ensemble.validate_ensemble_model') as mock_validate:
-                manager.execute_single_run(args)
-                
-                mock_validate.assert_called_once()
-    
+                with patch('views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer'):
+                    manager.execute_single_run(args)
+
+                    mock_validate.assert_called_once()
+
     def test_execute_single_run_skips_validation_when_training(self, manager):
         """Test ensemble validation is skipped when training."""
         args = ForecastingModelArgs(run_type="calibration", train=True)
-        
+
         with patch.object(manager, '_execute_model_tasks'):
             with patch('views_pipeline_core.modules.validation.ensemble.validate_ensemble_model') as mock_validate:
-                manager.execute_single_run(args)
-                
-                mock_validate.assert_not_called()
+                with patch('views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer'):
+                    manager.execute_single_run(args)
+
+                    mock_validate.assert_not_called()
 
 
 # ============================================================================

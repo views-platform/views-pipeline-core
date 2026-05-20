@@ -14,6 +14,7 @@ from views_pipeline_core.managers.model import (
 )
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
+from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.modules.reconciliation.reconciliation import (
@@ -130,6 +131,10 @@ class EnsembleManager(ForecastingModelManager):
 
         # Store args first
         self._args = args
+
+        # C-55 bridge fix: CoreConfigSniffer before any side effects.
+        # Permanent fix: retire EnsembleManager → DataFrameEnsembleManager (D-13).
+        CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
 
         self._wandb_module.login()
 
