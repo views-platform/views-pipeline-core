@@ -45,6 +45,9 @@ from .ensemble import EnsemblePathManager
 
 logger = logging.getLogger(__name__)
 
+# ADR-034: priogrid_gid → priogrid_id rename for AggregationModule compatibility
+_ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
+
 
 # ---------------------------------------------------------------------------
 # Frozen context — single source of truth during a run
@@ -767,7 +770,17 @@ class DataFrameEnsembleManager:
                     f"No prediction files found for {model_name} after generation",
                     wandb_module=self._wandb_module,
                 )
-            latest_prediction_file = prediction_files[0]
+            if sequence_number is not None:
+                seq_suffix = f"_{str(sequence_number).zfill(2)}"
+                matching = [f for f in prediction_files if f.stem.endswith(seq_suffix)]
+                if not matching:
+                    raise PipelineException(
+                        f"No prediction file for sequence {sequence_number} found for {model_name} after generation",
+                        wandb_module=self._wandb_module,
+                    )
+                latest_prediction_file = matching[0]
+            else:
+                latest_prediction_file = prediction_files[0]
             logger.info(
                 f"Loading newly generated prediction from {latest_prediction_file}"
             )
@@ -785,10 +798,6 @@ class DataFrameEnsembleManager:
             )
 
         first_df = next(iter(df_to_aggregate.values()))
-        # ADR-034: PGMDataset renames priogrid_gid → priogrid_id at the
-        # dataset boundary. Use the post-rename name so AggregationModule's
-        # schema validation matches the actual column names.
-        _ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
         index_cols = [
             _ENTITY_RENAME.get(c, c) for c in first_df.index.names
         ]

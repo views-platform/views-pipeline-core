@@ -28,6 +28,9 @@ from views_pipeline_core.modules.aggregation.aggregator import (
 
 logger = logging.getLogger(__name__)
 
+# ADR-034: priogrid_gid → priogrid_id rename for AggregationModule compatibility
+_ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
+
 # ============================================================ Ensemble Path Manager ============================================================
 
 
@@ -132,8 +135,7 @@ class EnsembleManager(ForecastingModelManager):
         # Store args first
         self._args = args
 
-        # C-55 bridge fix: CoreConfigSniffer before any side effects.
-        # Permanent fix: retire EnsembleManager → DataFrameEnsembleManager (D-13).
+        # C-55 bridge fix: CoreConfigSniffer before any side effects (see D-13).
         CoreConfigSniffer(
             self.configs, self._partition_dict, target=self._model_path.target
         ).sniff_all(args.run_type)
@@ -578,9 +580,9 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 logger.info(f"Loading existing prediction {name} from prediction store")
                 return pred
-            except Exception:
+            except (ImportError, KeyError, IndexError, ValueError, AttributeError, OSError) as e:
                 logger.info(
-                    f"No existing {run_type} predictions found. Generating new predictions..."
+                    f"No existing {run_type} predictions found ({type(e).__name__}). Generating new predictions..."
                 )
         else:
             seq_suffix = (
@@ -592,7 +594,6 @@ class EnsembleManager(ForecastingModelManager):
                 path_generated
                 / f"predictions_{run_type}_{ts}{seq_suffix}{PipelineConfig.dataframe_format}"
             )
-            logger.info(f"REQUESTED FILE PATH: {file_path}")
             if file_path.exists():
                 pred = read_dataframe(file_path)
                 logger.info(f"Loading existing prediction {name} from local file")
@@ -815,57 +816,40 @@ class EnsembleManager(ForecastingModelManager):
         if not df_to_aggregate:
             raise ValueError("df_to_aggregate must contain at least one DataFrame.")
 
-        # ---- 1) Define index + target columns -----------------------------------
-
         first_df = next(iter(df_to_aggregate.values()))
-        # ADR-034: PGMDataset renames priogrid_gid → priogrid_id at the
-        # dataset boundary. Use the post-rename name so downstream joins
-        # and set_index calls match the actual column names.
-        _ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
         index_cols = [
             _ENTITY_RENAME.get(c, c) for c in first_df.index.names
         ]
         target_cols = ["pred_" + col for col in self.configs.get("targets")]
 
-        # ---- 2) Create AggregationModule ---------------------------------------
-        manager = AggregationModule(
+        agg = AggregationModule(
             index_cols=index_cols,
             target_cols=target_cols,
         )
 
-        # ---- 3) Add each model to the manager -----------------------------------
-        # Read weighting behaviour from config
         use_weights = self.configs.get("use_weights", False)
-        weights_cfg = self.configs.get("weights", {})  # dict: {model_name: weight}
+        weights_cfg = self.configs.get("weights", {})
 
         for model_name, df in df_to_aggregate.items():
-            weight = weights_cfg.get(model_name)  # may be None
-            manager.add_model(
+            agg.add_model(
                 data=df,
-                weight=weight,
+                weight=weights_cfg.get(model_name),
                 name=model_name,
             )
 
-        # ---- 4) Decide how to call aggregate() based on prediction type ---------
-        # AggregationModule infers prediction_type ("point" vs "distribution")
-        # when you call add_model().
-        pred_type = manager.prediction_type
+        pred_type = agg.prediction_type
         if pred_type is None:
             raise RuntimeError(
                 "AggregationModule.prediction_type is None. "
                 "Make sure at least one model was added with `add_model`."
             )
 
-        aggregated_pl = manager.aggregate(
+        aggregated_pl = agg.aggregate(
             method=aggregation,
             use_weights=use_weights,
         )
 
-        # ---- 5) Convert back to pandas with MultiIndex -------------------------
         aggregated_pdf = aggregated_pl.to_pandas()
-
-        # AggregationModule returns index columns as normal columns.
-        # To match your previous behaviour, set a MultiIndex again:
         aggregated_pdf = aggregated_pdf.set_index(index_cols).sort_index()
 
         return aggregated_pdf
