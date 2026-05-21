@@ -547,10 +547,6 @@ class PredictionFrameEnsembleManager:
             agg_pf.save(save_dir)
             forecasts[target] = agg_pf
 
-        handle_ensemble_log_creation(
-            model_path=self._ensemble_path, config=ctx.configs
-        )
-
         return forecasts
 
     # ------------------------------------------------------------------
