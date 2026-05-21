@@ -1,2 +1,3 @@
 from .dataframe_ensemble import DataFrameEnsembleManager as DataFrameEnsembleManager
 from .ensemble import EnsembleManager as EnsembleManager, EnsemblePathManager as EnsemblePathManager
+from .prediction_frame_ensemble import PredictionFrameEnsembleManager as PredictionFrameEnsembleManager
