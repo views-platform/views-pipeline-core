@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.data.prediction_frame import PredictionFrame
@@ -26,9 +26,7 @@ from views_pipeline_core.managers.ensemble.prediction_frame_ensemble import (
 from views_pipeline_core.managers.model import (
     ForecastingModelManager,
     ModelManager,
-    ModelPathManager,
 )
-from views_pipeline_core.types import BaseStageContext
 
 
 # ============================================================================

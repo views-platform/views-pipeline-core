@@ -586,9 +586,6 @@ class PredictionFrameEnsembleManager:
             ctx.eval_type
         )
 
-        model_args = self._create_model_args(ctx, evaluate=True)
-        self._execute_shell_script(model_path, model_name, model_args)
-
         result: Dict[str, List[PredictionFrame]] = {}
         for target in ctx.targets:
             pfs = []
@@ -605,6 +602,7 @@ class PredictionFrameEnsembleManager:
                     pf_dir=pf_dir,
                     ctx=ctx,
                     mmap=True,
+                    evaluate=True,
                 )
                 pfs.append(pf)
             result[target] = pfs
@@ -626,9 +624,6 @@ class PredictionFrameEnsembleManager:
 
         ts = path_artifact.stem[-15:]
 
-        model_args = self._create_model_args(ctx, forecast=True)
-        self._execute_shell_script(model_path, model_name, model_args)
-
         result: Dict[str, PredictionFrame] = {}
         for target in ctx.targets:
             pf_dir = (
@@ -642,6 +637,7 @@ class PredictionFrameEnsembleManager:
                 pf_dir=pf_dir,
                 ctx=ctx,
                 mmap=False,
+                forecast=True,
             )
             result[target] = pf
 
@@ -667,6 +663,7 @@ class PredictionFrameEnsembleManager:
             saved=saved,
             eval_type=ctx.args.eval_type,
             update_viewser=ctx.args.update_viewser,
+            prediction_store=False,
             wandb_notifications=self._wandb_notifications,
             override_timestep=ctx.args.override_timestep,
         )
