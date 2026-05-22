@@ -369,3 +369,155 @@ class TestSequenceCountValidation:
         from views_pipeline_core.exceptions import ModelEvaluationException
         with pytest.raises(ModelEvaluationException, match="Evaluation failed"):
             manager._execute_model_evaluation()
+
+
+# ============================================================
+# PATH 7: PF permanent persistence for ensemble consumption
+# ============================================================
+
+
+class TestPFPermanentPersistence:
+    """Verify PF evaluation path persists to ensemble-discoverable location."""
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    def test_pf_eval_persists_to_permanent_location(self, mock_log_creation, tmp_path):
+        """PF origin_sink must save to data_generated/predictions_{run_type}_{ts}/origin_{i}/{target}/."""
+        import numpy as np
+        from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+        manager = _make_manager()
+        manager._model_path.data_generated = tmp_path / "data" / "generated"
+        manager._model_path.data_generated.mkdir(parents=True)
+
+        pf_configs = dict(manager.configs)
+        pf_configs["prediction_format"] = "prediction_frame"
+        pf_configs["skip_evaluation_metrics"] = True
+        pf_configs["skip_predictions_delivery"] = True
+        pf_configs["timestamp"] = "20260501_120000"
+        manager._config_manager.get_combined_config.return_value = pf_configs
+
+        pf = PredictionFrame(
+            y_pred=np.ones((10, 4), dtype=np.float32),
+            identifiers={"time": np.arange(10), "unit": np.arange(10)},
+        )
+
+        def fake_streaming(eval_type, artifact_name, origin_sink):
+            origin_sink(0, {"target_sb": pf})
+
+        manager._evaluate_model_artifact_streaming = MagicMock(
+            side_effect=fake_streaming
+        )
+
+        manager._execute_model_evaluation()
+
+        permanent_dir = (
+            manager._model_path.data_generated
+            / "predictions_calibration_20260501_120000"
+            / "origin_0"
+            / "target_sb"
+        )
+        assert (permanent_dir / "y_pred.npy").exists()
+        assert (permanent_dir / "identifiers.npz").exists()
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    def test_pf_eval_staging_cleaned_up_after_metrics(self, mock_log_creation, tmp_path):
+        """Staging path must be cleaned up after evaluation completes."""
+        import numpy as np
+        from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+        manager = _make_manager()
+        manager._model_path.data_generated = tmp_path / "data" / "generated"
+        manager._model_path.data_generated.mkdir(parents=True)
+
+        pf_configs = dict(manager.configs)
+        pf_configs["prediction_format"] = "prediction_frame"
+        pf_configs["skip_evaluation_metrics"] = True
+        pf_configs["skip_predictions_delivery"] = True
+        pf_configs["timestamp"] = "20260501_120000"
+        manager._config_manager.get_combined_config.return_value = pf_configs
+
+        pf = PredictionFrame(
+            y_pred=np.ones((10, 4), dtype=np.float32),
+            identifiers={"time": np.arange(10), "unit": np.arange(10)},
+        )
+
+        def fake_streaming(eval_type, artifact_name, origin_sink):
+            origin_sink(0, {"target_sb": pf})
+
+        manager._evaluate_model_artifact_streaming = MagicMock(
+            side_effect=fake_streaming
+        )
+
+        manager._execute_model_evaluation()
+
+        staging_dir = manager._model_path.data_generated / "_pf_staging"
+        assert not staging_dir.exists()
+
+
+# ============================================================
+# PATH 8: PF forecast permanent persistence
+# ============================================================
+
+
+class TestPFForecastPersistence:
+    """Verify PF forecast path persists to ensemble-discoverable location."""
+
+    def test_pf_forecast_persists_to_data_generated(self, tmp_path):
+        """PF forecast must save to data_generated/predictions_{run_type}_{ts}/{target}/."""
+        import numpy as np
+        from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+        manager = _make_manager()
+        manager._model_path.data_generated = tmp_path / "data" / "generated"
+        manager._model_path.data_generated.mkdir(parents=True)
+
+        pf_configs = dict(manager.configs)
+        pf_configs["prediction_format"] = "prediction_frame"
+        pf_configs["timestamp"] = "20260501_120000"
+        manager._config_manager.get_combined_config.return_value = pf_configs
+
+        pf = PredictionFrame(
+            y_pred=np.ones((10, 4), dtype=np.float32),
+            identifiers={"time": np.arange(10), "unit": np.arange(10)},
+        )
+        manager._forecast_model_artifact = MagicMock(
+            return_value={"target_sb": pf}
+        )
+        manager._forecasting_stage = MagicMock()
+
+        manager._execute_model_forecasting()
+
+        pf_dir = (
+            manager._model_path.data_generated
+            / "predictions_calibration_20260501_120000"
+            / "target_sb"
+        )
+        assert (pf_dir / "y_pred.npy").exists()
+        assert (pf_dir / "identifiers.npz").exists()
+
+    def test_pf_forecast_still_calls_forecasting_stage(self, tmp_path):
+        """PF save must not prevent ForecastingStage from running."""
+        import numpy as np
+        from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+        manager = _make_manager()
+        manager._model_path.data_generated = tmp_path / "data" / "generated"
+        manager._model_path.data_generated.mkdir(parents=True)
+
+        pf_configs = dict(manager.configs)
+        pf_configs["prediction_format"] = "prediction_frame"
+        pf_configs["timestamp"] = "20260501_120000"
+        manager._config_manager.get_combined_config.return_value = pf_configs
+
+        pf = PredictionFrame(
+            y_pred=np.ones((10, 4), dtype=np.float32),
+            identifiers={"time": np.arange(10), "unit": np.arange(10)},
+        )
+        manager._forecast_model_artifact = MagicMock(
+            return_value={"target_sb": pf}
+        )
+        manager._forecasting_stage = MagicMock()
+
+        manager._execute_model_forecasting()
+
+        manager._forecasting_stage.process_and_save_forecast.assert_called_once()
