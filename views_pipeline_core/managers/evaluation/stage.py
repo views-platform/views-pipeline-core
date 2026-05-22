@@ -114,9 +114,11 @@ class EvaluationStage:
 
         # --- Summary alert ---
         import wandb
+        from views_pipeline_core.managers.prediction.io import PredictionIOManager
+
         self._wandb_module.send_alert(
             title=f"Metrics for {context.model_path.model_name}",
-            text=f"{self._io.generate_evaluation_table(wandb.summary._as_dict())}",
+            text=f"{PredictionIOManager.generate_evaluation_table(wandb.summary._as_dict())}",
             notifications_enabled=self._wandb_notifications,
         )
 
@@ -225,13 +227,18 @@ class EvaluationStage:
             step_wise, month_wise, time_series_wise, target_identifier,
         )
 
-        if not context.configs.get("sweep", False):
+        if not context.configs.get("sweep", False) and self._io is not None:
             self._io.save_evaluations(
                 df_step, df_ts, df_month,
                 context.model_path.data_generated,
                 target_identifier,
                 context.configs.get("run_type", ""),
                 context.configs.get("timestamp", ""),
+            )
+        elif self._io is None:
+            logger.info(
+                "Skipping evaluation file save — no io_manager configured "
+                "(expected for PredictionFrame ensembles)."
             )
 
     @staticmethod

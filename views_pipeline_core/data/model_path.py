@@ -642,7 +642,6 @@ class ModelPathManager:
             if d.is_dir()
             and d.name.startswith(f"predictions_{run_type}")
             and not d.name.startswith("_")
-            and (d / "y_pred.npy").exists()
         ]
         return sorted(paths, key=lambda p: p.name, reverse=True)
 

@@ -388,6 +388,9 @@ class TestPFPermanentPersistence:
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
         manager._model_path.data_generated.mkdir(parents=True)
+        manager._model_path.get_latest_model_artifact_path.return_value = (
+            Path("calibration_model_20260501_120000")
+        )
 
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"
@@ -428,6 +431,9 @@ class TestPFPermanentPersistence:
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
         manager._model_path.data_generated.mkdir(parents=True)
+        manager._model_path.get_latest_model_artifact_path.return_value = (
+            Path("calibration_model_20260501_120000")
+        )
 
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"
@@ -470,6 +476,9 @@ class TestPFForecastPersistence:
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
         manager._model_path.data_generated.mkdir(parents=True)
+        manager._model_path.get_latest_model_artifact_path.return_value = (
+            Path("calibration_model_20260501_120000")
+        )
 
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"
@@ -503,6 +512,9 @@ class TestPFForecastPersistence:
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
         manager._model_path.data_generated.mkdir(parents=True)
+        manager._model_path.get_latest_model_artifact_path.return_value = (
+            Path("calibration_model_20260501_120000")
+        )
 
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"
