@@ -5,6 +5,7 @@ Originally falsification audit stubs (5 hard falsifications). Converted
 to passing regression tests after fixes for C-94, C-95, C-96.
 """
 import numpy as np
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
@@ -64,35 +65,147 @@ class TestP2TimestampFromArtifact:
     stem, not from ConfigurationManager's runtime timestamp. This ensures
     the ensemble can find sub-model outputs at the path it constructs."""
 
-    def test_eval_track_a_plus_uses_artifact_timestamp(self, tmp_path):
-        """Evaluation: Track A+ save path uses artifact stem[-15:]."""
+    def _make_pf_manager(self, tmp_path, artifact_stem):
+        """Build a ForecastingModelManager with mocked internals for PF path."""
+        from views_pipeline_core.managers.model.model import ForecastingModelManager
+
+        mock_path = MagicMock()
+        mock_path.data_generated = tmp_path / "data" / "generated"
+        mock_path.data_generated.mkdir(parents=True)
+        mock_path.root = tmp_path
+        mock_path.get_latest_model_artifact_path.return_value = Path(artifact_stem)
+        mock_path.target = "model"
+        mock_path._target = "model"
+        mock_path.model_name = "test_model"
+        mock_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+
+        with patch(
+            "views_pipeline_core.managers.model.model.ForecastingModelManager"
+            "._ModelManager__load_config",
+            return_value={},
+        ), patch(
+            "views_pipeline_core.modules.logging.LoggingModule.get_logger",
+            return_value=MagicMock(),
+        ), patch(
+            "views_pipeline_core.managers.ConfigurationManager",
+            return_value=MagicMock(),
+        ), patch(
+            "views_pipeline_core.managers.model.model.ModelManager"
+            "._ModelManager__ascii_splash",
+        ):
+            mgr = ForecastingModelManager(mock_path)
+
+        mgr._args = MagicMock()
+        mgr._args.run_type = "calibration"
+        mgr._args.artifact_name = "latest"
+        mgr._project = "test"
+        mgr._wandb_module = MagicMock()
+        mgr._wandb_module.initialize_run.return_value.__enter__ = MagicMock()
+        mgr._wandb_module.initialize_run.return_value.__exit__ = MagicMock(
+            return_value=False
+        )
+        mgr._wandb_notifications = False
+        mgr._sweep = False
+        mgr._eval_type = "standard"
+        mgr._io = MagicMock()
+        mgr._evaluation_stage = MagicMock()
+
+        pf_configs = {
+            "prediction_format": "prediction_frame",
+            "skip_evaluation_metrics": True,
+            "skip_predictions_delivery": True,
+            "timestamp": "99999999_999999",
+            "regression_targets": ["ged_sb"],
+            "classification_targets": [],
+            "targets": ["ged_sb"],
+            "name": "test",
+            "sweep": False,
+            "run_type": "calibration",
+            "level": "cm",
+            "steps": list(range(1, 37)),
+        }
+        mock_cm = MagicMock()
+        mock_cm.get_combined_config.return_value = pf_configs
+        mgr._config_manager = mock_cm
+        mgr._partition_dict = {
+            "calibration": {"train": (1, 400), "test": (401, 448)},
+        }
+
+        return mgr
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    def test_eval_uses_artifact_timestamp_not_runtime(self, mock_log, tmp_path):
+        """Track A+ eval save must use artifact stem, not configs["timestamp"]."""
+        from views_pipeline_core.data.prediction_frame import PredictionFrame
+
         artifact_stem = "calibration_model_20260510_140000"
-        artifact_ts = artifact_stem[-15:]
+        mgr = self._make_pf_manager(tmp_path, artifact_stem)
 
-        save_path = (
-            tmp_path / f"predictions_calibration_{artifact_ts}"
+        pf = PredictionFrame(
+            y_pred=np.ones((10, 4), dtype=np.float32),
+            identifiers={"time": np.arange(10), "unit": np.arange(10)},
+        )
+
+        def fake_streaming(eval_type, artifact_name, origin_sink):
+            origin_sink(0, {"ged_sb": pf})
+
+        mgr._evaluate_model_artifact_streaming = MagicMock(side_effect=fake_streaming)
+        mgr._execute_model_evaluation()
+
+        artifact_ts = artifact_stem[-15:]
+        expected = (
+            mgr._model_path.data_generated
+            / f"predictions_calibration_{artifact_ts}"
             / "origin_0" / "ged_sb"
         )
-
-        ensemble_load_path = (
-            tmp_path / f"predictions_calibration_{artifact_ts}"
-            / "origin_0" / "ged_sb"
+        assert (expected / "y_pred.npy").exists(), (
+            f"Track A+ must save at artifact timestamp path {expected}, "
+            f"not at runtime timestamp from configs."
         )
 
-        assert save_path == ensemble_load_path, (
-            "Producer and consumer must construct identical paths from "
-            "the same artifact timestamp."
+        runtime_ts = "99999999_999999"
+        wrong_path = (
+            mgr._model_path.data_generated
+            / f"predictions_calibration_{runtime_ts}"
+        )
+        assert not wrong_path.exists(), (
+            "Track A+ must NOT save at the runtime timestamp path."
         )
 
-    def test_forecast_track_a_plus_uses_artifact_timestamp(self, tmp_path):
-        """Forecast: Track A+ save path uses artifact stem[-15:]."""
-        artifact_stem = "forecasting_model_20260510_140000"
+    def test_forecast_uses_artifact_timestamp_not_runtime(self, tmp_path):
+        """Track A+ forecast save must use artifact stem, not configs["timestamp"]."""
+        from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+        artifact_stem = "calibration_model_20260510_140000"
+        mgr = self._make_pf_manager(tmp_path, artifact_stem)
+
+        pf = PredictionFrame(
+            y_pred=np.ones((10, 4), dtype=np.float32),
+            identifiers={"time": np.arange(10), "unit": np.arange(10)},
+        )
+        mgr._forecast_model_artifact = MagicMock(return_value={"ged_sb": pf})
+        mgr._forecasting_stage = MagicMock()
+        mgr._execute_model_forecasting()
+
         artifact_ts = artifact_stem[-15:]
+        expected = (
+            mgr._model_path.data_generated
+            / f"predictions_calibration_{artifact_ts}"
+            / "ged_sb"
+        )
+        assert (expected / "y_pred.npy").exists(), (
+            f"Track A+ must save at artifact timestamp path {expected}, "
+            f"not at runtime timestamp from configs."
+        )
 
-        save_path = tmp_path / f"predictions_forecasting_{artifact_ts}" / "ged_sb"
-        ensemble_load_path = tmp_path / f"predictions_forecasting_{artifact_ts}" / "ged_sb"
-
-        assert save_path == ensemble_load_path
+        runtime_ts = "99999999_999999"
+        wrong_path = (
+            mgr._model_path.data_generated
+            / f"predictions_calibration_{runtime_ts}"
+        )
+        assert not wrong_path.exists(), (
+            "Track A+ must NOT save at the runtime timestamp path."
+        )
 
 
 # ---------------------------------------------------------------------------

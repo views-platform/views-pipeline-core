@@ -227,19 +227,20 @@ class EvaluationStage:
             step_wise, month_wise, time_series_wise, target_identifier,
         )
 
-        if not context.configs.get("sweep", False) and self._io is not None:
-            self._io.save_evaluations(
-                df_step, df_ts, df_month,
-                context.model_path.data_generated,
-                target_identifier,
-                context.configs.get("run_type", ""),
-                context.configs.get("timestamp", ""),
-            )
-        elif self._io is None:
-            logger.info(
-                "Skipping evaluation file save — no io_manager configured "
-                "(expected for PredictionFrame ensembles)."
-            )
+        if not context.configs.get("sweep", False):
+            if self._io is not None:
+                self._io.save_evaluations(
+                    df_step, df_ts, df_month,
+                    context.model_path.data_generated,
+                    target_identifier,
+                    context.configs.get("run_type", ""),
+                    context.configs.get("timestamp", ""),
+                )
+            else:
+                logger.info(
+                    "Skipping evaluation file save — no io_manager configured "
+                    "(expected for PredictionFrame ensembles)."
+                )
 
     @staticmethod
     def _get_evaluation_step_mappings(
