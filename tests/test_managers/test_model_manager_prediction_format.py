@@ -130,8 +130,9 @@ def _run_execute_forecast(manager, mock_df_result=None):
         "views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer"
     ) as MockSniffer:
         with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-            manager._execute_model_forecasting()
-            return MockSniffer
+            with patch.object(PredictionFrame, "save"):
+                manager._execute_model_forecasting()
+                return MockSniffer
 
 
 # ── Phase 4A: Forecast dispatch ───────────────────────────────────────────────
@@ -825,10 +826,11 @@ class TestPFDictDispatch:
         manager._test_return = {"lr_sb": pf}
         dummy_df = _make_dummy_df()
 
-        with patch.object(
-            PredictionFrameConverter, "to_prediction_df", return_value=dummy_df
-        ) as mock_tld:
-            _run_execute_forecast(manager, mock_df_result=dummy_df)
+        with patch.object(PredictionFrame, "save"):
+            with patch.object(
+                PredictionFrameConverter, "to_prediction_df", return_value=dummy_df
+            ) as mock_tld:
+                _run_execute_forecast(manager, mock_df_result=dummy_df)
 
         mock_tld.assert_called_once()
 
@@ -843,9 +845,10 @@ class TestPFDictDispatch:
         manager._test_return = {"lr_sb": pf1, "ged_ns": pf2}
         dummy_df = _make_dummy_df()
 
-        with patch.object(PredictionFrameConverter, "to_legacy_dfs", return_value=[dummy_df]):
-            with patch.object(PredictionFrameConverter, "audit_prediction_structure"):
-                _run_execute_forecast(manager, mock_df_result=dummy_df)
+        with patch.object(PredictionFrame, "save"):
+            with patch.object(PredictionFrameConverter, "to_legacy_dfs", return_value=[dummy_df]):
+                with patch.object(PredictionFrameConverter, "audit_prediction_structure"):
+                    _run_execute_forecast(manager, mock_df_result=dummy_df)
 
         # E4: saves now go through ForecastingStage → io_manager, not facade._save_predictions
         assert manager._io.save_predictions.call_count == 2

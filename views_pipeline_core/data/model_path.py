@@ -618,6 +618,34 @@ class ModelPathManager:
         ]
         return sorted(paths, reverse=True)
 
+    def _get_generated_pf_prediction_paths(self, run_type: str) -> List[Path]:
+        """
+        Get generated PredictionFrame directories for run type.
+
+        Finds directories in data_generated/ that contain y_pred.npy
+        and match the predictions_{run_type}_* naming convention.
+
+        Internal Use:
+            Used by ensemble managers to discover sub-model numpy outputs.
+
+        Args:
+            run_type: Run type ('calibration', 'validation', 'forecasting')
+
+        Returns:
+            Sorted list of prediction directory paths (newest first)
+        """
+        if not self.data_generated.exists():
+            return []
+        paths = [
+            d
+            for d in self.data_generated.iterdir()
+            if d.is_dir()
+            and d.name.startswith(f"predictions_{run_type}")
+            and not d.name.startswith("_")
+            and (d / "y_pred.npy").exists()
+        ]
+        return sorted(paths, key=lambda p: p.name, reverse=True)
+
     def get_latest_model_artifact_path(self, run_type: str) -> Path:
         """
         Get path to latest model artifact for run type.

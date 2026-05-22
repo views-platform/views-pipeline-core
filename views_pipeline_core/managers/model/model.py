@@ -1290,6 +1290,8 @@ class ForecastingModelManager(ModelManager):
                     )
                     converter = PredictionFrameConverter()
                     staging_path = self._model_path.data_generated / "_pf_staging"
+                    _run_type = self.args.run_type
+                    _ts = self.configs.get("timestamp", "")
                     all_targets: List[str] = []
                     n_sequences = 0
 
@@ -1311,8 +1313,15 @@ class ForecastingModelManager(ModelManager):
                                 )
                         for target in list(pf_dict.keys()):
                             pf = pf_dict.pop(target)  # remove from dict → refcount drops
-                            # Track A — compact numpy (metrics)
+                            # Track A — compact numpy (metrics mmap reload)
                             pf.save(staging_path / f"origin_{origin_idx}" / target)
+                            # Track A+ — permanent numpy for ensemble consumption
+                            pf.save(
+                                self._model_path.data_generated
+                                / f"predictions_{_run_type}_{_ts}"
+                                / f"origin_{origin_idx}"
+                                / target
+                            )
                             # Track B — list-in-cell parquet (delivery)
                             # Skipped when skip_predictions_delivery=True to
                             # reduce peak memory.  Ensemble downstream will not
@@ -1465,6 +1474,17 @@ class ForecastingModelManager(ModelManager):
         ):
             try:
                 predictions = self._forecast_model_artifact(self.args.artifact_name)
+                if (
+                    self._prediction_format == "prediction_frame"
+                    and isinstance(predictions, dict)
+                ):
+                    _ts = self.configs.get("timestamp", "")
+                    for target, pf in predictions.items():
+                        pf.save(
+                            self._model_path.data_generated
+                            / f"predictions_{self.args.run_type}_{_ts}"
+                            / target
+                        )
                 context = ForecastingContext(
                     configs=self.configs,
                     model_path=self._model_path,
