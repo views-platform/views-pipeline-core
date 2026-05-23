@@ -1291,7 +1291,9 @@ class ForecastingModelManager(ModelManager):
                     converter = PredictionFrameConverter()
                     staging_path = self._model_path.data_generated / "_pf_staging"
                     _run_type = self.args.run_type
-                    _ts = self.configs.get("timestamp", "")
+                    _ts = self._model_path.get_latest_model_artifact_path(
+                        self.args.run_type
+                    ).stem[-15:]
                     all_targets: List[str] = []
                     n_sequences = 0
 
@@ -1478,7 +1480,9 @@ class ForecastingModelManager(ModelManager):
                     self._prediction_format == "prediction_frame"
                     and isinstance(predictions, dict)
                 ):
-                    _ts = self.configs.get("timestamp", "")
+                    _ts = self._model_path.get_latest_model_artifact_path(
+                        self.args.run_type
+                    ).stem[-15:]
                     for target, pf in predictions.items():
                         pf.save(
                             self._model_path.data_generated

@@ -3,7 +3,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-04-08
+**Last reviewed:** 2026-05-22
 **Related ADRs:** ADR-040 (Authority over Inference), ADR-045 (Stage Pattern, E2)
 
 ---
@@ -48,7 +48,7 @@ class.
   `_get_evaluation_step_mappings()`, fulfilling ADR-040 (orchestrator is sole authority
   on lead-times).
 - Guarantees that evaluation DataFrames are saved to disk (via `PredictionIOManager`)
-  unless `configs["sweep"]` is `True`.
+  unless `configs["sweep"]` is `True` or `io_manager` is `None`.
 - Guarantees that a WandB summary alert is sent after all targets are processed.
 - Guarantees aggressive memory management: `EvaluationFrame` and raw prediction
   objects are deleted and `gc.collect()` is called after each target.
@@ -58,7 +58,10 @@ class.
 ## 4. Inputs and Assumptions
 
 - `wandb_module` -- `WandBModule` instance for metrics logging and alerts.
-- `io_manager` -- `PredictionIOManager` instance for saving evaluation DataFrames.
+- `io_manager` -- `PredictionIOManager` instance or `None`. When `None`, evaluation
+  file saves are skipped (expected for PredictionFrame ensembles, which have no
+  parquet IO). The summary alert still fires — `generate_evaluation_table` is called
+  as a `@staticmethod` via the class, not the instance.
 - `wandb_notifications: bool` -- gate for WandB alerts.
 - `evaluate()` arguments:
   - `df_predictions` -- one of:
@@ -84,8 +87,11 @@ class.
 - **Side effects:**
   - Logs evaluation metrics to WandB via `log_evaluation_results()`.
   - Saves step-wise, time-series-wise, and month-wise evaluation DataFrames to
-    `data_generated/` via `PredictionIOManager.save_evaluations()`.
-  - Sends a WandB summary alert with the evaluation table.
+    `data_generated/` via `PredictionIOManager.save_evaluations()` (skipped when
+    `io_manager` is `None`; an info log is emitted instead).
+  - Sends a WandB summary alert with the evaluation table (via
+    `PredictionIOManager.generate_evaluation_table` as a `@staticmethod` — does not
+    require an `io_manager` instance).
   - Reads raw VIEWSER data from disk.
   - Triggers garbage collection after each target evaluation.
 
@@ -102,6 +108,9 @@ class.
 - Missing `pred_{target}` columns in the DF path are logged as warnings and skipped.
 - If no targets are defined (`regression_targets` and `classification_targets` both
   empty), `_load_actuals()` returns `None` and `evaluate()` returns early.
+- When `io_manager` is `None` and `sweep` is not set, `save_evaluations()` is skipped
+  and an info message is logged. Metrics are still logged to WandB and the summary
+  alert still fires. This is expected for PredictionFrame ensembles.
 
 ---
 
@@ -150,6 +159,23 @@ stage.evaluate(
 )
 ```
 
+PredictionFrame ensemble usage (no io_manager):
+
+```python
+stage = EvaluationStage(
+    wandb_module=wandb_mod,
+    io_manager=None,
+    wandb_notifications=True,
+)
+
+stage.evaluate(
+    df_predictions={"ged_sb": [pf_seq0, pf_seq1]},
+    context=pf_context,
+    ensemble=True,
+)
+# Metrics logged to WandB; evaluation files NOT saved to disk.
+```
+
 ---
 
 ## 9. Examples of Incorrect Usage
@@ -172,6 +198,10 @@ stage.evaluate(
 - **Red tests:** Tests should verify that `ValueError` is raised when `data_loader`
   is `None` for forecasting, that `KeyError` is raised for unknown run types in the
   partition dict, and that missing targets produce warnings (not crashes).
+- **Regression tests:** `tests/test_falsification_pf_ensemble_integration.py` —
+  `TestP3EvaluationStageNoneIO` verifies construction with `io_manager=None` and
+  that `generate_evaluation_table` is callable as a `@staticmethod` without an
+  instance (C-95 regression coverage).
 
 ---
 

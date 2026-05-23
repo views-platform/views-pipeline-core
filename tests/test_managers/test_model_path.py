@@ -615,8 +615,9 @@ class TestPFPredictionDiscovery:
         manager = ModelPathManager("purple_alien", validate=True)
 
         pf_dir = manager.data_generated / "predictions_calibration_20241105_120000"
-        pf_dir.mkdir(parents=True)
-        (pf_dir / "y_pred.npy").touch()
+        target_dir = pf_dir / "ged_sb"
+        target_dir.mkdir(parents=True)
+        (target_dir / "y_pred.npy").touch()
 
         paths = manager._get_generated_pf_prediction_paths("calibration")
         assert len(paths) == 1
@@ -630,20 +631,35 @@ class TestPFPredictionDiscovery:
         paths = manager._get_generated_pf_prediction_paths("calibration")
         assert len(paths) == 0
 
-    def test_ignores_dirs_without_y_pred(self, mock_project_root):
+    def test_finds_forecast_layout(self, mock_project_root):
         manager = ModelPathManager("purple_alien", validate=True)
 
-        empty_dir = manager.data_generated / "predictions_calibration_20241105_120000"
-        empty_dir.mkdir(parents=True)
+        pf_dir = manager.data_generated / "predictions_forecasting_20241105_120000"
+        target_dir = pf_dir / "ged_sb"
+        target_dir.mkdir(parents=True)
+        (target_dir / "y_pred.npy").touch()
+
+        paths = manager._get_generated_pf_prediction_paths("forecasting")
+        assert len(paths) == 1
+        assert paths[0] == pf_dir
+
+    def test_finds_eval_layout(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        pf_dir = manager.data_generated / "predictions_calibration_20241105_120000"
+        origin_dir = pf_dir / "origin_0" / "ged_sb"
+        origin_dir.mkdir(parents=True)
+        (origin_dir / "y_pred.npy").touch()
 
         paths = manager._get_generated_pf_prediction_paths("calibration")
-        assert len(paths) == 0
+        assert len(paths) == 1
+        assert paths[0] == pf_dir
 
     def test_sorted_newest_first(self, mock_project_root):
         manager = ModelPathManager("purple_alien", validate=True)
 
         for ts in ["20241101_100000", "20241105_120000", "20241103_090000"]:
-            d = manager.data_generated / f"predictions_calibration_{ts}"
+            d = manager.data_generated / f"predictions_calibration_{ts}" / "ged_sb"
             d.mkdir(parents=True)
             (d / "y_pred.npy").touch()
 
@@ -657,7 +673,7 @@ class TestPFPredictionDiscovery:
         manager = ModelPathManager("purple_alien", validate=True)
 
         for run_type in ["calibration", "validation"]:
-            d = manager.data_generated / f"predictions_{run_type}_20241105_120000"
+            d = manager.data_generated / f"predictions_{run_type}_20241105_120000" / "ged_sb"
             d.mkdir(parents=True)
             (d / "y_pred.npy").touch()
 
