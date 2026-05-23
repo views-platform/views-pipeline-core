@@ -622,8 +622,8 @@ class ModelPathManager:
         """
         Get generated PredictionFrame directories for run type.
 
-        Finds directories in data_generated/ that contain y_pred.npy
-        and match the predictions_{run_type}_* naming convention.
+        Finds directories in data_generated/ that match the
+        predictions_{run_type}_* naming convention.
 
         Internal Use:
             Used by ensemble managers to discover sub-model numpy outputs.
