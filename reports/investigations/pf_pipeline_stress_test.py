@@ -35,7 +35,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -216,7 +216,6 @@ def test_c_origin_sink(n_cells: int, s: int) -> tuple[bool, float]:
         _result(f"after creating pf_dict (K={K_TARGETS} PFs)", r0, r1)
 
         # Pop-pattern loop (the fix)
-        converter = PredictionFrameConverter()
         peak_in_loop = r1
         for target in list(pf_dict.keys()):
             pf = pf_dict.pop(target)
@@ -290,12 +289,12 @@ def test_d_track_b(n_cells: int, s: int) -> tuple[bool, float]:
         ratio = peak / max(pf_mb, 1)
         print(f"\n  ✓ RAN  peak = {_gb(peak)}  ({ratio:.1f}× PF size)")
         print(f"         residual fragmentation = {_gb(residual)}")
-        print(f"  FULL-SCALE PROJECTION (N=172k, S=64, PF≈1,593 MB):")
+        print("  FULL-SCALE PROJECTION (N=172k, S=64, PF≈1,593 MB):")
         full_ratio = peak / max(pf_mb, 1)
         full_pf_mb = _pf_bytes(N_CELLS_FULL, T_STEPS, S_FULL) / (1024 ** 2)
         print(f"    projected peak ≈ {_gb(full_pf_mb * full_ratio)}")
         return True, peak
-    except MemoryError as e:
+    except MemoryError:
         peak = _rss_mb() - r0
         print(f"\n  ✗ FAIL  MemoryError (peak before OOM = {_gb(peak)})")
         return False, peak
@@ -354,10 +353,9 @@ def test_e_adapter_fpf(n_cells: int, s: int) -> tuple[bool, float]:
         _result("after del predictions + gc.collect()", r3, r4)
 
         peak = r2 - r0
-        y_pred_expected = pf_mb * M_ORIGINS  # EF y_pred_out ≈ same as all input PFs
         ratio = peak / max(total_mb, 1)
         print(f"\n  ✓ RAN  peak = {_gb(peak)}  ({ratio:.1f}× single PF input)")
-        print(f"  FULL-SCALE PROJECTION (N=172k, S=64, 13 PFs):")
+        print("  FULL-SCALE PROJECTION (N=172k, S=64, 13 PFs):")
         full_pf_mb   = _pf_bytes(N_CELLS_FULL, T_STEPS, S_FULL) / (1024 ** 2)
         full_total_mb = full_pf_mb * M_ORIGINS
         print(f"    input PFs: {_gb(full_total_mb)}")
@@ -446,7 +444,7 @@ def test_f_full_pipeline(n_cells: int, s: int) -> tuple[bool, float]:
         print(f"         (pop pattern progressively reduces from {_gb(naive_peak_mb)} to 0)")
         print(f"         Note: mmap reload shows {_gb(r2 - r1)} RSS — identifiers are")
         print(f"         loaded eagerly (~{_gb(pf_mb * 0.134 * K_TARGETS * M_ORIGINS)}")
-        print(f"         for 78 PFs). With skip_evaluation_metrics=True this path is skipped.")
+        print("         for 78 PFs). With skip_evaluation_metrics=True this path is skipped.")
         return True, peak
 
     except MemoryError as e:

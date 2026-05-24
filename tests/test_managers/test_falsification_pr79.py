@@ -13,8 +13,6 @@ exceptions, changing behavior from graceful degradation (return None) to crash.
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
-from pathlib import Path
-import pandas as pd
 
 
 @pytest.fixture

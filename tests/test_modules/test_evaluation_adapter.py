@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # 1. Create a dummy EvaluationFrame that behaves like a real object (not a mock)
 class DummyEvaluationFrame:
