@@ -12,8 +12,6 @@ import pandas as pd
 
 from views_pipeline_core.modules.dataloaders.synthetic import (
     generate_synthetic_data,
-    SYNTHETIC_REQUIRED_KEYS,
-    SUPPORTED_PATTERNS,
     _PRIOGRID_NCOL,
     DEFAULT_N_ENTITIES_PGM,
 )

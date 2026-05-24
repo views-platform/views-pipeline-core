@@ -9,7 +9,6 @@ recurring on any manager type.
 Permanent fix: retire EnsembleManager → DataFrameEnsembleManager (D-13).
 """
 
-import pytest
 from unittest.mock import patch, MagicMock
 
 from views_pipeline_core.cli.args import ForecastingModelArgs
