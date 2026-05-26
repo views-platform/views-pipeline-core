@@ -1,26 +1,5 @@
 """
-Tests for prediction_format dispatch in ModelManager.
-
-Phase 4A — Forecast path dispatch (RED → GREEN after implementing dispatch in
-              _execute_model_forecasting()):
-    test_df_path_calls_sniffer
-    test_pf_path_skips_sniffer
-    test_pf_path_converts_via_pf_to_legacy_dfs
-
-Phase 4B — _audit_parity_ef() unit tests (RED → GREEN after implementing the
-              method on ModelManager):
-    test_audit_parity_ef_matching_frames_passes
-    test_audit_parity_ef_mismatched_y_pred_raises
-    test_audit_parity_ef_mismatched_identifier_raises
-
-Issue 7 — Bridge-period fallback contract (RED → GREEN after .get() harmonisation
-              in _execute_model_forecasting()):
-    TestForecastDispatchFallback.test_absent_prediction_format_falls_back_to_df_path
-    TestForecastDispatchFallback.test_eval_also_falls_back_to_df_when_key_absent
-
-DoD #1 dict interface — multi-target PF support (RED → GREEN after Steps A-E):
-    TestPFDictDispatch — dict eval/forecast dispatch for single and multi-target
-    TestTypeEnforcementGuards — fail-loud type guards at abstract call sites
+Tests for prediction_format dispatch and PredictionFrame evaluation path in ModelManager.
 """
 
 import numpy as np
@@ -414,6 +393,7 @@ def _make_eval_stub(prediction_format: str) -> _ForecastStub:
         "classification_targets": [],
         "regression_point_metrics": ["MSE"],
         "prediction_format": prediction_format,
+        "skip_predictions_delivery": True,
         "sweep": False,
         "steps": list(range(1, 37)),
     }
@@ -714,6 +694,21 @@ class TestSweepDispatch:
         manager = _make_sweep_stub("prediction_frame")
         MockSniffer = _run_execute_sweep(manager, {"lr_sb": [pf]})  # dict interface (DoD #1)
         MockSniffer.return_value.sniff_predictions.assert_not_called()
+
+    def test_sweep_pf_with_skip_delivery_does_not_crash(self):
+        """Sweep path with PF config + skip_predictions_delivery must not crash.
+        Sweeps use _evaluate_sweep(), not _execute_model_evaluation(), so the
+        mandatory dict access at model.py:1290 is unreachable — but the config
+        key should not cause problems if present."""
+        pf = PredictionFrame(
+            y_pred=np.ones((2, 3)),
+            identifiers={"time": np.array([445, 446]), "unit": np.array([1, 2])},
+        )
+        manager = _make_sweep_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ] = True
+        _run_execute_sweep(manager, {"lr_sb": [pf]})
 
     def test_sweep_df_path_calls_sniffer(self):
         """
@@ -1217,7 +1212,7 @@ class TestOOMMitigation:
     def test_skip_predictions_delivery_skips_track_b(self):
         """
         When configs['skip_predictions_delivery'] = True, Track B is suppressed:
-        - converter.to_prediction_df must NOT be called
+        - converter.to_arrow_table must NOT be called
         - _save_predictions must NOT be called
         - PredictionFrame.save (Track A) MUST still be called
         """
@@ -1232,7 +1227,7 @@ class TestOOMMitigation:
         ] = True
         manager._test_eval_return = {"lr_sb": [pf]}
 
-        with patch.object(PredictionFrameConverter, "to_prediction_df") as mock_convert:
+        with patch.object(PredictionFrameConverter, "to_arrow_table") as mock_convert:
             with patch.object(
                 ForecastingModelManager, "_assert_predictions_in_step_window"
             ):
@@ -1252,44 +1247,74 @@ class TestOOMMitigation:
         manager._save_predictions.assert_not_called()
         mock_save.assert_called()  # Track A must still run
 
-    def test_pf_default_skips_track_b_without_explicit_flag(self):
+    def test_pf_missing_skip_predictions_delivery_raises(self):
         """
-        When skip_predictions_delivery is absent from config (the common case
-        for PF models), Track B is skipped by default:
-        - _save_predictions must NOT be called
-        - PredictionFrame.save (Track A/A+) MUST still be called
+        When skip_predictions_delivery is absent from a PF model config,
+        _execute_model_evaluation must crash — no silent default.
         """
+        from views_pipeline_core.exceptions import ModelEvaluationException
+
         pf = _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
-        # Do NOT set skip_predictions_delivery — rely on default (True for PF)
-        assert "skip_predictions_delivery" not in (
-            manager._config_manager.get_combined_config.return_value
-        )
+        del manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ]
         manager._test_eval_return = {"lr_sb": [pf]}
 
-        with patch.object(
-            ForecastingModelManager, "_assert_predictions_in_step_window"
-        ):
+        with pytest.raises(ModelEvaluationException, match="skip_predictions_delivery"):
             with patch.object(
-                ForecastingModelManager, "_evaluate_prediction_dataframe"
+                ForecastingModelManager, "_assert_predictions_in_step_window"
             ):
-                with patch(
-                    "views_pipeline_core.files.utils.handle_single_log_creation"
+                with patch.object(
+                    ForecastingModelManager, "_evaluate_prediction_dataframe"
                 ):
-                    with patch.object(PredictionFrame, "save") as mock_save:
-                        with patch.object(
-                            PredictionFrame, "load", return_value=Mock()
-                        ):
-                            manager._execute_model_evaluation()
+                    with patch(
+                        "views_pipeline_core.files.utils.handle_single_log_creation"
+                    ):
+                        with patch.object(PredictionFrame, "save"):
+                            with patch.object(
+                                PredictionFrame, "load", return_value=Mock()
+                            ):
+                                manager._execute_model_evaluation()
 
-        manager._save_predictions.assert_not_called()
-        mock_save.assert_called()  # Track A/A+ must still run
+    def test_pf_missing_skip_predictions_delivery_crashes_before_save(self):
+        """
+        When skip_predictions_delivery is absent, the crash must happen BEFORE
+        any Track A writes (PredictionFrame.save). Fail-fast guarantee: no
+        partial writes on config error.
+        """
+        from views_pipeline_core.exceptions import ModelEvaluationException
+
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        del manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ]
+        manager._test_eval_return = {"lr_sb": [pf]}
+
+        with pytest.raises(ModelEvaluationException, match="skip_predictions_delivery"):
+            with patch.object(
+                ForecastingModelManager, "_assert_predictions_in_step_window"
+            ):
+                with patch.object(
+                    ForecastingModelManager, "_evaluate_prediction_dataframe"
+                ):
+                    with patch(
+                        "views_pipeline_core.files.utils.handle_single_log_creation"
+                    ):
+                        with patch.object(PredictionFrame, "save") as mock_save:
+                            with patch.object(
+                                PredictionFrame, "load", return_value=Mock()
+                            ):
+                                manager._execute_model_evaluation()
+
+        mock_save.assert_not_called()
 
     def test_pf_explicit_false_enables_track_b(self):
         """
         When skip_predictions_delivery is explicitly set to False, Track B fires:
         - to_arrow_table must be called
-        - _save_predictions must be called
+        - _save_predictions must be called with correct target_identifier
         """
         import pyarrow as pa
         from views_pipeline_core.managers.prediction.prediction_frame_converter import (
@@ -1317,6 +1342,8 @@ class TestOOMMitigation:
 
         mock_tat.assert_called_once()
         manager._save_predictions.assert_called()
+        _, kwargs = manager._save_predictions.call_args
+        assert kwargs.get("target_identifier") == "lr_sb"
 
     def test_df_raw_freed_before_target_loop(self):
         """

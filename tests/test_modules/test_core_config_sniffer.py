@@ -266,7 +266,66 @@ class TestCoreConfigSniffer:
         """'prediction_frame' is a supported prediction_format value."""
         configs = _valid_configs()
         configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = True
         CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+
+# ---------------------------------------------------------------------------
+# TestSkipPredictionsDeliveryValidation
+# ---------------------------------------------------------------------------
+
+class TestSkipPredictionsDeliveryValidation:
+
+    def test_pf_missing_skip_predictions_delivery_raises(self):
+        """prediction_frame without skip_predictions_delivery → KeyError."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        with pytest.raises(KeyError, match="skip_predictions_delivery"):
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_pf_non_bool_skip_predictions_delivery_raises(self):
+        """skip_predictions_delivery must be bool, not string."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = "yes"
+        with pytest.raises(TypeError, match="skip_predictions_delivery"):
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_df_format_skips_check(self):
+        """dataframe format does not require skip_predictions_delivery."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "dataframe"
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_pf_skip_true_passes(self):
+        """skip_predictions_delivery=True is valid."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = True
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_pf_skip_false_passes(self):
+        """skip_predictions_delivery=False is valid."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = False
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_pf_integer_skip_predictions_delivery_raises(self):
+        """skip_predictions_delivery=1 (truthy int) must raise TypeError, not pass."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = 1
+        with pytest.raises(TypeError, match="skip_predictions_delivery"):
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_pf_none_skip_predictions_delivery_raises(self):
+        """skip_predictions_delivery=None must raise TypeError."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = None
+        with pytest.raises(TypeError, match="skip_predictions_delivery"):
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +522,23 @@ class TestEnsembleConfigValidation:
         """Ensemble without prediction_format must not raise in _check_prediction_format."""
         configs = _valid_ensemble_configs()
         assert "prediction_format" not in configs
+        CoreConfigSniffer(configs, {}, target="ensemble").sniff_all("forecasting")
+
+    def test_ensemble_explicit_pf_missing_skip_delivery_raises(self):
+        """Ensemble with explicit prediction_format='prediction_frame' but missing
+        skip_predictions_delivery must raise KeyError — validation fires regardless
+        of ensemble/model identity."""
+        configs = _valid_ensemble_configs()
+        configs["prediction_format"] = "prediction_frame"
+        with pytest.raises(KeyError, match="skip_predictions_delivery"):
+            CoreConfigSniffer(configs, {}, target="ensemble").sniff_all("forecasting")
+
+    def test_ensemble_explicit_pf_with_skip_delivery_passes(self):
+        """Ensemble with explicit prediction_format='prediction_frame' and valid
+        skip_predictions_delivery=True must pass."""
+        configs = _valid_ensemble_configs()
+        configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = True
         CoreConfigSniffer(configs, {}, target="ensemble").sniff_all("forecasting")
 
     def test_ensemble_with_reconciliation_passes(self):
