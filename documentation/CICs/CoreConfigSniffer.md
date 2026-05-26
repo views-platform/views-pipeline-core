@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-05-20
+**Last reviewed:** 2026-05-26
 **Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern), ADR-042 (PredictionFrame Adoption)
 
 ---
@@ -54,6 +54,11 @@ the execution engine.
   value (`"dataframe"` or `"prediction_frame"`). Ensembles may omit
   `prediction_format` (it is a model-only key); when present on an ensemble it is
   still validated. Raises `ValueError` if the value is unrecognised.
+- Guarantees that when `prediction_format="prediction_frame"`,
+  `skip_predictions_delivery` is present and is a `bool`. Raises `KeyError` if
+  missing, `TypeError` if not a bool. This check fires after `_check_prediction_format`
+  so the format value is already validated. Models with `prediction_format="dataframe"`
+  and ensembles that omit `prediction_format` bypass this check entirely.
 - Guarantees that the optional `evaluation_mode` key, when present, is a supported
   value (`"stochastic"` or `"point"`). When `evaluation_mode="point"`,
   `aggregate_method` must be present and supported (`"arithmetic_mean"`).
@@ -86,6 +91,9 @@ the execution engine.
   the format of the model's inference output. Must be `"dataframe"` or
   `"prediction_frame"` when present. Model configs must include this key; ensemble
   configs (declared via `target="ensemble"`) may omit it.
+- `skip_predictions_delivery: bool` (conditionally required) — required when
+  `prediction_format="prediction_frame"`. Controls whether eval-path Track B
+  (list-in-cell parquet delivery) runs. Must be a `bool`, not a truthy value.
 - `evaluation_mode: str` (optional config key) — when present, must be `"stochastic"`
   or `"point"`. When `"point"`, requires `aggregate_method` to also be present.
 - `reconciliation: str` (optional config key) — when present, must be
@@ -108,7 +116,9 @@ the execution engine.
 
 ## 6. Failure Modes and Loudness
 
-- `KeyError` — a mandatory config key is absent.
+- `KeyError` — a mandatory config key is absent (including `skip_predictions_delivery`
+  when `prediction_format='prediction_frame'`).
+- `TypeError` — `time_steps` is not `int`; `skip_predictions_delivery` is not `bool`.
 - `ValueError` — invalid or deprecated `deployment_status`; target / metric
   mismatch; partition overlap; unrecognised `prediction_format` value.
 - `NotImplementedError` — `time_steps`, `rolling_origin_stride`, `level`
@@ -165,11 +175,14 @@ if result:   # sniff_all returns None; absence of exception is the success signa
 
 ## 10. Test Alignment
 
-- Covered by `tests/test_modules/test_core_config_sniffer.py` (5 test classes,
-  89 test methods).
+- Covered by `tests/test_modules/test_core_config_sniffer.py` (6 test classes,
+  74 test methods).
 - `TestCoreConfigSniffer` — mandatory keys (`KeyError` on missing), targets/metrics
   coupling, supported values (level, time_steps, stride), deployment status,
   evaluation contract, prediction format.
+- `TestSkipPredictionsDeliveryValidation` — conditional requirement when
+  `prediction_format='prediction_frame'`: missing key raises `KeyError`, non-bool
+  raises `TypeError`, dataframe format bypasses check, both `True`/`False` pass.
 - `TestEvaluationModeValidation` — optional `evaluation_mode` / `aggregate_method`
   keys; valid, invalid, and missing combinations.
 - `TestReconciliationConfigValidation` — optional `reconciliation` / `reconcile_with`

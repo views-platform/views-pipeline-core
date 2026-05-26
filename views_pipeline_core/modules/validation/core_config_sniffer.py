@@ -247,6 +247,7 @@ class CoreConfigSniffer:
             )
 
     def _check_skip_predictions_delivery(self) -> None:
+        """Require skip_predictions_delivery (bool) when prediction_format='prediction_frame'."""
         fmt = self._c.get("prediction_format")
         if fmt != "prediction_frame":
             return
