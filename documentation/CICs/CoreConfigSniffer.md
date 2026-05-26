@@ -176,19 +176,22 @@ if result:   # sniff_all returns None; absence of exception is the success signa
 ## 10. Test Alignment
 
 - Covered by `tests/test_modules/test_core_config_sniffer.py` (6 test classes,
-  74 test methods).
+  78 test methods).
 - `TestCoreConfigSniffer` — mandatory keys (`KeyError` on missing), targets/metrics
   coupling, supported values (level, time_steps, stride), deployment status,
   evaluation contract, prediction format.
 - `TestSkipPredictionsDeliveryValidation` — conditional requirement when
   `prediction_format='prediction_frame'`: missing key raises `KeyError`, non-bool
-  raises `TypeError`, dataframe format bypasses check, both `True`/`False` pass.
+  raises `TypeError`, integer truthy (1) raises `TypeError`, `None` raises
+  `TypeError`, dataframe format bypasses check, both `True`/`False` pass.
 - `TestEvaluationModeValidation` — optional `evaluation_mode` / `aggregate_method`
   keys; valid, invalid, and missing combinations.
 - `TestReconciliationConfigValidation` — optional `reconciliation` / `reconcile_with`
   keys; valid types, orphan `reconcile_with`, invalid types.
 - `TestEnsembleConfigValidation` — ensemble-aware mandatory key split, `time_steps`
-  derivation from `len(steps)`, prediction format skip, reconciliation config.
+  derivation from `len(steps)`, prediction format skip, reconciliation config,
+  ensemble with explicit `prediction_format='prediction_frame'` validates
+  `skip_predictions_delivery`.
 - `TestExplicitTargetParameter` — `target` parameter validation, cross-check
   (`target="model"` + `"models"` in config), required keyword-only enforcement.
 - The absence of a raised exception is the success signal; no return value is asserted.
