@@ -769,6 +769,9 @@ class TestPFDictDispatch:
 
         pf = _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ] = False
         manager._test_eval_return = {"lr_sb": [pf]}
 
         dummy_table = pa.table({"month_id": [445, 445], "priogrid_id": [1, 2],
@@ -797,6 +800,9 @@ class TestPFDictDispatch:
 
         pf1, pf2 = _make_simple_pf(), _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ] = False
         manager._test_eval_return = {"lr_sb": [pf1], "ged_ns": [pf2]}
 
         dummy_table = pa.table({"month_id": [445, 445], "priogrid_id": [1, 2],
@@ -1245,6 +1251,72 @@ class TestOOMMitigation:
         mock_convert.assert_not_called()
         manager._save_predictions.assert_not_called()
         mock_save.assert_called()  # Track A must still run
+
+    def test_pf_default_skips_track_b_without_explicit_flag(self):
+        """
+        When skip_predictions_delivery is absent from config (the common case
+        for PF models), Track B is skipped by default:
+        - _save_predictions must NOT be called
+        - PredictionFrame.save (Track A/A+) MUST still be called
+        """
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        # Do NOT set skip_predictions_delivery — rely on default (True for PF)
+        assert "skip_predictions_delivery" not in (
+            manager._config_manager.get_combined_config.return_value
+        )
+        manager._test_eval_return = {"lr_sb": [pf]}
+
+        with patch.object(
+            ForecastingModelManager, "_assert_predictions_in_step_window"
+        ):
+            with patch.object(
+                ForecastingModelManager, "_evaluate_prediction_dataframe"
+            ):
+                with patch(
+                    "views_pipeline_core.files.utils.handle_single_log_creation"
+                ):
+                    with patch.object(PredictionFrame, "save") as mock_save:
+                        with patch.object(
+                            PredictionFrame, "load", return_value=Mock()
+                        ):
+                            manager._execute_model_evaluation()
+
+        manager._save_predictions.assert_not_called()
+        mock_save.assert_called()  # Track A/A+ must still run
+
+    def test_pf_explicit_false_enables_track_b(self):
+        """
+        When skip_predictions_delivery is explicitly set to False, Track B fires:
+        - to_arrow_table must be called
+        - _save_predictions must be called
+        """
+        import pyarrow as pa
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
+        )
+
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ] = False
+        manager._test_eval_return = {"lr_sb": [pf]}
+
+        dummy_table = pa.table({"month_id": [445, 445], "priogrid_id": [1, 2],
+                                 "pred_lr_sb": [[1.0, 1.0], [1.0, 1.0]]})
+        with patch.object(
+            PredictionFrameConverter, "to_arrow_table", return_value=dummy_table
+        ) as mock_tat:
+            with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
+                with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
+                    with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
+                        with patch.object(PredictionFrame, "save"):
+                            with patch.object(PredictionFrame, "load", return_value=Mock()):
+                                manager._execute_model_evaluation()
+
+        mock_tat.assert_called_once()
+        manager._save_predictions.assert_called()
 
     def test_df_raw_freed_before_target_loop(self):
         """

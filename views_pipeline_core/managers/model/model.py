@@ -1283,12 +1283,19 @@ class ForecastingModelManager(ModelManager):
                     # are alive simultaneously.  Each origin writes:
                     #   Track A  staging/_pf_staging/origin_i/target/ — compact .npy,
                     #            used by the metrics reload below (mmap-safe)
+                    #   Track A+ data_generated/predictions_{run_type}_{ts}/origin_i/target/
+                    #            — permanent numpy for PF ensemble consumption
                     #   Track B  data_generated/predictions_*.parquet — list-in-cell,
-                    #            for downstream consumers (unchanged format)
-                    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
-                        PredictionFrameConverter,
+                    #            disabled by default for PF models (opt-in via
+                    #            skip_predictions_delivery: False in config)
+                    _skip_delivery = self.configs.get(
+                        "skip_predictions_delivery", True
                     )
-                    converter = PredictionFrameConverter()
+                    if not _skip_delivery:
+                        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+                            PredictionFrameConverter,
+                        )
+                        converter = PredictionFrameConverter()
                     staging_path = self._model_path.data_generated / "_pf_staging"
                     _run_type = self.args.run_type
                     _ts = self._model_path.get_latest_model_artifact_path(
@@ -1325,10 +1332,10 @@ class ForecastingModelManager(ModelManager):
                                 / target
                             )
                             # Track B — list-in-cell parquet (delivery)
-                            # Skipped when skip_predictions_delivery=True to
-                            # reduce peak memory.  Ensemble downstream will not
-                            # receive prediction parquets for this run.
-                            if not self.configs.get("skip_predictions_delivery", False):
+                            # Disabled by default for PF models. PF ensembles
+                            # consume Track A+ numpy. Opt in with
+                            # skip_predictions_delivery: False.
+                            if not _skip_delivery:
                                 table = converter.to_arrow_table(
                                     pf, target, level=self.configs["level"]
                                 )
