@@ -249,6 +249,7 @@ class TestPFStreamingPath:
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"
         pf_configs["skip_evaluation_metrics"] = True
+        pf_configs["skip_predictions_delivery"] = True
         manager._config_manager.get_combined_config.return_value = pf_configs
 
         manager._evaluate_model_artifact_streaming = MagicMock()
@@ -293,6 +294,7 @@ class TestSkipEvaluationMetrics:
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"
         pf_configs["skip_evaluation_metrics"] = True
+        pf_configs["skip_predictions_delivery"] = True
         manager._config_manager.get_combined_config.return_value = pf_configs
 
         manager._evaluate_model_artifact_streaming = MagicMock()

@@ -1286,11 +1286,8 @@ class ForecastingModelManager(ModelManager):
                     #   Track A+ data_generated/predictions_{run_type}_{ts}/origin_i/target/
                     #            — permanent numpy for PF ensemble consumption
                     #   Track B  data_generated/predictions_*.parquet — list-in-cell,
-                    #            disabled by default for PF models (opt-in via
-                    #            skip_predictions_delivery: False in config)
-                    _skip_delivery = self.configs.get(
-                        "skip_predictions_delivery", True
-                    )
+                    #            controlled by mandatory skip_predictions_delivery key
+                    _skip_delivery = self.configs["skip_predictions_delivery"]
                     if not _skip_delivery:
                         from views_pipeline_core.managers.prediction.prediction_frame_converter import (
                             PredictionFrameConverter,

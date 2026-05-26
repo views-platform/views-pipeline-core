@@ -414,6 +414,7 @@ def _make_eval_stub(prediction_format: str) -> _ForecastStub:
         "classification_targets": [],
         "regression_point_metrics": ["MSE"],
         "prediction_format": prediction_format,
+        "skip_predictions_delivery": True,
         "sweep": False,
         "steps": list(range(1, 37)),
     }
@@ -1252,38 +1253,35 @@ class TestOOMMitigation:
         manager._save_predictions.assert_not_called()
         mock_save.assert_called()  # Track A must still run
 
-    def test_pf_default_skips_track_b_without_explicit_flag(self):
+    def test_pf_missing_skip_predictions_delivery_raises(self):
         """
-        When skip_predictions_delivery is absent from config (the common case
-        for PF models), Track B is skipped by default:
-        - _save_predictions must NOT be called
-        - PredictionFrame.save (Track A/A+) MUST still be called
+        When skip_predictions_delivery is absent from a PF model config,
+        _execute_model_evaluation must crash — no silent default.
         """
+        from views_pipeline_core.exceptions import ModelEvaluationException
+
         pf = _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
-        # Do NOT set skip_predictions_delivery — rely on default (True for PF)
-        assert "skip_predictions_delivery" not in (
-            manager._config_manager.get_combined_config.return_value
-        )
+        del manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ]
         manager._test_eval_return = {"lr_sb": [pf]}
 
-        with patch.object(
-            ForecastingModelManager, "_assert_predictions_in_step_window"
-        ):
+        with pytest.raises(ModelEvaluationException, match="skip_predictions_delivery"):
             with patch.object(
-                ForecastingModelManager, "_evaluate_prediction_dataframe"
+                ForecastingModelManager, "_assert_predictions_in_step_window"
             ):
-                with patch(
-                    "views_pipeline_core.files.utils.handle_single_log_creation"
+                with patch.object(
+                    ForecastingModelManager, "_evaluate_prediction_dataframe"
                 ):
-                    with patch.object(PredictionFrame, "save") as mock_save:
-                        with patch.object(
-                            PredictionFrame, "load", return_value=Mock()
-                        ):
-                            manager._execute_model_evaluation()
-
-        manager._save_predictions.assert_not_called()
-        mock_save.assert_called()  # Track A/A+ must still run
+                    with patch(
+                        "views_pipeline_core.files.utils.handle_single_log_creation"
+                    ):
+                        with patch.object(PredictionFrame, "save"):
+                            with patch.object(
+                                PredictionFrame, "load", return_value=Mock()
+                            ):
+                                manager._execute_model_evaluation()
 
     def test_pf_explicit_false_enables_track_b(self):
         """

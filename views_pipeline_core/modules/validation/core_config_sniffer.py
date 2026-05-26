@@ -104,6 +104,7 @@ class CoreConfigSniffer:
         self._check_currently_supported_values()
         self._check_level()
         self._check_prediction_format()
+        self._check_skip_predictions_delivery()
         self._check_evaluation_mode()
         self._check_reconciliation_config()
         if run_type != FORECASTING_RUN_TYPE:
@@ -243,6 +244,24 @@ class CoreConfigSniffer:
                 f"Supported: {SUPPORTED_PREDICTION_FORMATS}. "
                 f"Update SUPPORTED_PREDICTION_FORMATS in core_config_sniffer.py "
                 f"when a new format is ready."
+            )
+
+    def _check_skip_predictions_delivery(self) -> None:
+        fmt = self._c.get("prediction_format")
+        if fmt != "prediction_frame":
+            return
+        key = "skip_predictions_delivery"
+        if key not in self._c:
+            raise KeyError(
+                f"CoreConfigSniffer: '{key}' is required when "
+                f"prediction_format='prediction_frame'. "
+                f"Set it to True (skip eval-path parquets) or False (produce them) "
+                f"in config_hyperparameters.py."
+            )
+        if not isinstance(self._c[key], bool):
+            raise TypeError(
+                f"CoreConfigSniffer: '{key}' must be a bool, "
+                f"got {type(self._c[key]).__name__}: {self._c[key]!r}."
             )
 
     def _check_evaluation_mode(self) -> None:

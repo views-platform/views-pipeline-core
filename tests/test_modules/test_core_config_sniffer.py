@@ -266,6 +266,49 @@ class TestCoreConfigSniffer:
         """'prediction_frame' is a supported prediction_format value."""
         configs = _valid_configs()
         configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = True
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+
+# ---------------------------------------------------------------------------
+# TestSkipPredictionsDeliveryValidation
+# ---------------------------------------------------------------------------
+
+class TestSkipPredictionsDeliveryValidation:
+
+    def test_pf_missing_skip_predictions_delivery_raises(self):
+        """prediction_frame without skip_predictions_delivery → KeyError."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        with pytest.raises(KeyError, match="skip_predictions_delivery"):
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_pf_non_bool_skip_predictions_delivery_raises(self):
+        """skip_predictions_delivery must be bool, not string."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = "yes"
+        with pytest.raises(TypeError, match="skip_predictions_delivery"):
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_df_format_skips_check(self):
+        """dataframe format does not require skip_predictions_delivery."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "dataframe"
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_pf_skip_true_passes(self):
+        """skip_predictions_delivery=True is valid."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = True
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_pf_skip_false_passes(self):
+        """skip_predictions_delivery=False is valid."""
+        configs = _valid_configs()
+        configs["prediction_format"] = "prediction_frame"
+        configs["skip_predictions_delivery"] = False
         CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
 
 
