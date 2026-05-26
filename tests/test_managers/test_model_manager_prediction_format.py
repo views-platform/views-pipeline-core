@@ -1,26 +1,5 @@
 """
-Tests for prediction_format dispatch in ModelManager.
-
-Phase 4A — Forecast path dispatch (RED → GREEN after implementing dispatch in
-              _execute_model_forecasting()):
-    test_df_path_calls_sniffer
-    test_pf_path_skips_sniffer
-    test_pf_path_converts_via_pf_to_legacy_dfs
-
-Phase 4B — _audit_parity_ef() unit tests (RED → GREEN after implementing the
-              method on ModelManager):
-    test_audit_parity_ef_matching_frames_passes
-    test_audit_parity_ef_mismatched_y_pred_raises
-    test_audit_parity_ef_mismatched_identifier_raises
-
-Issue 7 — Bridge-period fallback contract (RED → GREEN after .get() harmonisation
-              in _execute_model_forecasting()):
-    TestForecastDispatchFallback.test_absent_prediction_format_falls_back_to_df_path
-    TestForecastDispatchFallback.test_eval_also_falls_back_to_df_when_key_absent
-
-DoD #1 dict interface — multi-target PF support (RED → GREEN after Steps A-E):
-    TestPFDictDispatch — dict eval/forecast dispatch for single and multi-target
-    TestTypeEnforcementGuards — fail-loud type guards at abstract call sites
+Tests for prediction_format dispatch and PredictionFrame evaluation path in ModelManager.
 """
 
 import numpy as np

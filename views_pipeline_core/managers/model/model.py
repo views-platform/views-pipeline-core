@@ -1329,9 +1329,8 @@ class ForecastingModelManager(ModelManager):
                                 / target
                             )
                             # Track B — list-in-cell parquet (delivery)
-                            # Disabled by default for PF models. PF ensembles
-                            # consume Track A+ numpy. Opt in with
-                            # skip_predictions_delivery: False.
+                            # Controlled by mandatory skip_predictions_delivery key.
+                            # PF ensembles consume Track A+ numpy, not Track B.
                             if not _skip_delivery:
                                 table = converter.to_arrow_table(
                                     pf, target, level=self.configs["level"]
