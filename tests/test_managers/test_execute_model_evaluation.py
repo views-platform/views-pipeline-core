@@ -99,6 +99,9 @@ def _make_manager():
         return_value=False
     )
     manager._wandb_notifications = False
+    _default_artifact = Path("calibration_model_20260501_120000")
+    mock_path_manager.get_latest_model_artifact_path.return_value = _default_artifact
+    mock_path_manager.resolve_artifact_path.return_value = _default_artifact
     manager._io = MagicMock()
     manager._evaluation_stage = MagicMock()
     manager._evaluation_stage._wandb_module = manager._wandb_module
@@ -390,9 +393,6 @@ class TestPFPermanentPersistence:
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
         manager._model_path.data_generated.mkdir(parents=True)
-        manager._model_path.get_latest_model_artifact_path.return_value = (
-            Path("calibration_model_20260501_120000")
-        )
 
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"
@@ -433,9 +433,6 @@ class TestPFPermanentPersistence:
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
         manager._model_path.data_generated.mkdir(parents=True)
-        manager._model_path.get_latest_model_artifact_path.return_value = (
-            Path("calibration_model_20260501_120000")
-        )
 
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"
@@ -478,9 +475,6 @@ class TestPFForecastPersistence:
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
         manager._model_path.data_generated.mkdir(parents=True)
-        manager._model_path.get_latest_model_artifact_path.return_value = (
-            Path("calibration_model_20260501_120000")
-        )
 
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"
@@ -514,9 +508,6 @@ class TestPFForecastPersistence:
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
         manager._model_path.data_generated.mkdir(parents=True)
-        manager._model_path.get_latest_model_artifact_path.return_value = (
-            Path("calibration_model_20260501_120000")
-        )
 
         pf_configs = dict(manager.configs)
         pf_configs["prediction_format"] = "prediction_frame"

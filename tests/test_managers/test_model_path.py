@@ -444,6 +444,44 @@ class TestArtifactMethods:
         assert "config" not in latest.name
 
 
+class TestResolveArtifactPath:
+    """Tests for resolve_artifact_path() — C-99 fix."""
+
+    def test_resolve_none_delegates_to_latest(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+        (manager.artifacts / "calibration_model_20241101_120000.pt").touch()
+        (manager.artifacts / "calibration_model_20241105_143022.pt").touch()
+
+        result = manager.resolve_artifact_path("calibration")
+        latest = manager.get_latest_model_artifact_path("calibration")
+        assert result == latest
+
+    def test_resolve_named_returns_exact(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+        (manager.artifacts / "calibration_model_20241101_120000.pt").touch()
+        (manager.artifacts / "calibration_model_20241105_143022.pt").touch()
+
+        result = manager.resolve_artifact_path(
+            "calibration", "calibration_model_20241101_120000.pt"
+        )
+        assert result == manager.artifacts / "calibration_model_20241101_120000.pt"
+
+    def test_resolve_missing_raises(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        with pytest.raises(FileNotFoundError, match="nonexistent.pt"):
+            manager.resolve_artifact_path("calibration", "nonexistent.pt")
+
+    def test_resolve_stem_timestamp_extraction(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+        (manager.artifacts / "calibration_model_20241101_120000.pt").touch()
+
+        result = manager.resolve_artifact_path(
+            "calibration", "calibration_model_20241101_120000.pt"
+        )
+        assert result.stem[-15:] == "20241101_120000"
+
+
 # ============================================================================
 # Test Data File Methods
 # ============================================================================

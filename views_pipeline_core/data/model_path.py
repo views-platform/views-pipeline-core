@@ -685,6 +685,35 @@ class ModelPathManager:
 
         return self.artifacts / model_files[0]
 
+    def resolve_artifact_path(self, run_type: str, artifact_name: str = None) -> Path:
+        """
+        Return the artifact path for the given run_type.
+
+        When artifact_name is provided, resolve it directly in the artifacts
+        directory. When artifact_name is None, delegate to
+        get_latest_model_artifact_path(run_type).
+
+        Args:
+            run_type: Run type ('calibration', 'validation', 'forecasting')
+            artifact_name: Optional explicit artifact filename
+
+        Returns:
+            Path to the resolved model artifact
+
+        Raises:
+            FileNotFoundError: If artifact_name is given but does not exist,
+                or if no artifacts exist for run_type when delegating
+        """
+        if artifact_name is not None:
+            path = self.artifacts / artifact_name
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Named artifact '{artifact_name}' not found in '{self.artifacts}'"
+                )
+            logger.info(f"Artifact used (named): {path}")
+            return path
+        return self.get_latest_model_artifact_path(run_type)
+
     def get_queryset(self) -> Optional[Dict[str, str]]:
         """
         Get queryset configuration if it exists.
