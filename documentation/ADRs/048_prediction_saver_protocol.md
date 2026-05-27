@@ -153,3 +153,6 @@ minimal and avoids baking operational policy into a type-level contract.
 - **ADR-046:** Appwrite as Secondary Cloud Storage for views-faoapi
 - **ADR-047:** Three-Destination Persistence Model
 - **C-40:** Serialisation and format conventions
+- **ADR-053:** Eval-Path Track B Retirement — documents the separate, older eval-path
+  Track B mechanism (inline `_origin_sink` closure) and its retirement. This ADR (048)
+  covers only the forecasting-path Track B (`LocalParquetSaver`).
