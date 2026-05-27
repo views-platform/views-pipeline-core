@@ -74,6 +74,8 @@ views_reporting/
    ```
 3. **Downstream repos** update imports over one release cycle, then shims are removed
 
+**Deployment requirement:** During the transition period, `views-reporting` must be installed alongside `pipeline-core` in all environments. The shims fail loudly with install instructions when it is not — unlike ADR-045's `ModelPathManager` relocation (which stayed within the same package), these shims cross package boundaries.
+
 **Dependency direction constraint:** `views-reporting` depends on `views-pipeline-core` (for `_ViewsDataset`, `ModelPathManager`). Pipeline-core **NEVER** depends on views-reporting. The re-export shims use `try/except ImportError` — they provide a helpful error message but do not add views-reporting as an install dependency.
 
 **Version coordination:** `views-reporting` pins `views-pipeline-core >= 2.3.0, < 3.0.0`. A breaking change to `_ViewsDataset` interface requires a coordinated release with version bumps in both packages.
@@ -107,8 +109,8 @@ views_reporting/
 
 ### Positive
 
-- **~2.5 GB dependency footprint reduction** from pipeline-core (torch, scipy, geopandas, plotly, matplotlib, seaborn, markdown, joblib leave)
-- **`handlers.py` loses top-level imports** of torch, scipy (via statistics), matplotlib, and joblib — every `CMDataset` consumer no longer pays the dependency tax
+- **~510 MB certain dependency reduction** from pipeline-core (scipy, geopandas, plotly, matplotlib, seaborn, markdown, joblib leave). Torch (~2 GB) is conditional — `_ViewsDataset.to_tensor()` uses torch for core tensor conversion; torch can only leave pipeline-core if PR 8 extracts `to_tensor()` or makes it lazy-import. Total reduction is ~510 MB certain, up to ~2.5 GB if torch becomes optional.
+- **`handlers.py` loses top-level imports** of scipy (via statistics), matplotlib, and joblib — every `CMDataset` consumer no longer pays the dependency tax for these. Torch remains a top-level import until `to_tensor()` is addressed (PR 8 or follow-up).
 - **Scale problems** (C-105, C-106) become addressable in an outer-layer package with proper rendering infrastructure
 - **Clean Architecture alignment** — orchestration library no longer contains presentation-layer code
 - **Independent testing** — each extracted module testable in views-reporting without pipeline infrastructure
