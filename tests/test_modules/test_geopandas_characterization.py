@@ -115,7 +115,7 @@ class TestGeoDataFrameReadFile:
 
     def test_read_file_raises_on_missing_path(self):
         """Sanity: gpd.read_file raises for non-existent paths."""
-        with pytest.raises((Exception,)):
+        with pytest.raises(Exception):
             geopandas.read_file("/nonexistent/path/to/shapefile.shp")
 
     def test_country_shapefile_readable(self):
