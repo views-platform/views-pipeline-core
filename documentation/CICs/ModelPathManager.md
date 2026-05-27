@@ -49,6 +49,10 @@ directory tree to find a `.gitignore` marker. Serves as the base class for
 - Guarantees that `get_latest_model_artifact_path(run_type)` returns the most
   recent artifact file by timestamp-sorted filename. Raises
   `FileNotFoundError` if no artifacts exist.
+- Guarantees that `resolve_artifact_path(run_type, artifact_name)` returns the
+  named artifact when `artifact_name` is provided (raising `FileNotFoundError`
+  if missing), or delegates to `get_latest_model_artifact_path(run_type)` when
+  `artifact_name` is `None`.
 - Guarantees that `get_model_name_from_path(path)` extracts the model name
   from a filesystem path by locating exactly one of the valid parent
   directories (`models`, `ensembles`, `preprocessors`, `postprocessors`,
@@ -180,7 +184,8 @@ ModelPathManager._root  # -> None (not yet initialized)
 
 - `tests/test_managers/test_model_path.py` -- tests for name validation,
   path extraction from filesystem paths, root discovery, directory
-  initialization, and artifact file resolution.
+  initialization, artifact file resolution, and `resolve_artifact_path()`
+  (named artifact resolution, missing artifact error, timestamp extraction).
 
 ---
 

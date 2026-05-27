@@ -4,7 +4,6 @@ Falsification audit: PR #84 merge readiness (2026-05-23).
 F-1: Docstring lie in _get_generated_pf_prediction_paths after C-96 fix.
 F-3: Timestamp mismatch when artifact_name is non-latest.
 """
-import pytest
 import numpy as np
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -56,6 +55,7 @@ class TestF3ArtifactTimestampAgreement:
         old_artifact = Path("calibration_model_20260101_120000.pt")
         latest_artifact = Path("calibration_model_20260510_140000.pt")
         mock_path.get_latest_model_artifact_path.return_value = latest_artifact
+        mock_path.resolve_artifact_path.return_value = old_artifact
         mock_path.artifacts.__truediv__ = lambda self, name: Path(name)
 
         with patch(
@@ -111,7 +111,6 @@ class TestF3ArtifactTimestampAgreement:
         }
         return mgr, old_artifact, latest_artifact
 
-    @pytest.mark.xfail(reason="C-99: get_latest_model_artifact_path ignores artifact_name", strict=True)
     def test_forecast_save_uses_named_artifact_timestamp(self, tmp_path):
         """When --artifact_name names a non-latest artifact, PF forecast save
         path must use that artifact's timestamp, not the latest's.

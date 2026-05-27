@@ -232,8 +232,9 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
 - `tests/test_managers/test_execute_model_evaluation.py` -- 10 characterization
   tests for `_execute_model_evaluation()`: DF validation+save, type enforcement,
   PF streaming, skip-metrics, no-metrics, WandB lifecycle, sequence count.
-  PF persistence tests mock `get_latest_model_artifact_path` to verify Track A+
-  saves use artifact timestamp, not runtime timestamp.
+  PF persistence tests mock `resolve_artifact_path` (and its delegate
+  `get_latest_model_artifact_path`) to verify Track A+ saves use artifact
+  timestamp, not runtime timestamp.
 - `tests/test_falsification_pf_ensemble_integration.py` -- 10 regression tests
   (C-94, C-95, C-96): PF discovery nesting layouts, artifact timestamp derivation
   (eval + forecast), EvaluationStage with `io_manager=None`, producer-consumer

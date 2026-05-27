@@ -573,7 +573,7 @@ class PredictionFrameEnsembleManager:
         model_path = ModelPathManager(model_name)
         run_type = ctx.run_type
         path_generated = model_path.data_generated
-        path_artifact = model_path.get_latest_model_artifact_path(
+        path_artifact = model_path.resolve_artifact_path(
             run_type=run_type
         )
 
@@ -614,7 +614,7 @@ class PredictionFrameEnsembleManager:
         model_path = ModelPathManager(model_name)
         run_type = ctx.run_type
         path_generated = model_path.data_generated
-        path_artifact = model_path.get_latest_model_artifact_path(
+        path_artifact = model_path.resolve_artifact_path(
             run_type=run_type
         )
 

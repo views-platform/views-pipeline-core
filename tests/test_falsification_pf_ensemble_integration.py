@@ -74,6 +74,7 @@ class TestP2TimestampFromArtifact:
         mock_path.data_generated.mkdir(parents=True)
         mock_path.root = tmp_path
         mock_path.get_latest_model_artifact_path.return_value = Path(artifact_stem)
+        mock_path.resolve_artifact_path.return_value = Path(artifact_stem)
         mock_path.target = "model"
         mock_path._target = "model"
         mock_path.model_name = "test_model"
