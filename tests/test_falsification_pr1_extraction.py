@@ -105,6 +105,10 @@ class TestF2_PrivateAttributeCoupling:
             source_path = Path(
                 "views_pipeline_core/modules/transformations/transformations.py"
             )
+        assert source_path.exists(), (
+            f"transformations.py not found at views-reporting or "
+            f"pipeline-core path: {source_path}"
+        )
         source = source_path.read_text()
 
         uses_private = "_time_id" in source and "_entity_id" in source
