@@ -1,5 +1,15 @@
 # Sprint Plan: C-105 — Scale-Aware Eval Report Sample Graphs
 
+> **SUPERSEDED (2026-05-27):** This sprint plan was written before the architectural
+> misplacement investigation concluded. The investigation (see
+> `architectural_misplacement_investigation.md` Section 11) determined that extraction
+> PRs 0-6 must complete before Sprint 4. After extraction, the files referenced below
+> (`views_pipeline_core/templates/reports/evaluation.py`,
+> `views_pipeline_core/modules/visualizations/historical.py`) will live in the
+> `views-reporting` package. **This plan must be rewritten against `views-reporting`
+> file paths before Sprint 4 begins.** The design approach (entity sampling, numpy
+> fallback, dual-path dispatch) remains valid — only the file locations change.
+
 **Risk register entry:** C-105 (Tier 2)
 **Target branch:** `fix/eval-report-scale-aware-graphs`
 **Base branch:** `development`
