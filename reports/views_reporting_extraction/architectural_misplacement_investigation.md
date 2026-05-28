@@ -351,14 +351,20 @@ The new package (`views-reporting`) receives:
 
 ### Re-Export Shims (Transition Period)
 
-Per ADR-045 pattern, pipeline-core's `__init__.py` files keep re-exports for one release cycle:
+Per ADR-045 pattern, pipeline-core's `__init__.py` files keep re-exports with explicit error messages for one release cycle:
 
 ```python
 # views_pipeline_core/modules/statistics/__init__.py (transition shim)
-from views_reporting.statistics import PosteriorDistributionAnalyzer, ForecastReconciler
+try:
+    from views_reporting.statistics import PosteriorDistributionAnalyzer, ForecastReconciler
+except ImportError:
+    raise ImportError(
+        "PosteriorDistributionAnalyzer and ForecastReconciler have moved to views-reporting. "
+        "Install: pip install views-reporting"
+    )
 ```
 
-This allows downstream repos to update their imports incrementally. Remove shims after all consumers are updated.
+This allows downstream repos to update their imports incrementally while providing a clear error message if `views-reporting` is not installed. Remove shims after all consumers are updated.
 
 ---
 
