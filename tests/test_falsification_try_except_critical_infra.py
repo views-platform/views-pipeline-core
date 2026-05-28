@@ -6,6 +6,8 @@ These tests encode findings from the falsification audit. Each test currently
 FAILS, documenting a real issue. Fix the underlying code, then the test passes.
 """
 
+from pathlib import Path
+
 import pytest
 
 
@@ -31,9 +33,8 @@ class TestF1_NestedImportErrorMasking:
         (e.g., torch._C missing) is misdiagnosed as 'views-reporting not installed'.
         """
         # Read ADR-054's shim pattern
-        adr_path = "documentation/ADRs/054_visualization_and_reporting_extraction.md"
-        with open(adr_path) as f:
-            content = f.read()
+        adr_path = Path("documentation/ADRs/054_visualization_and_reporting_extraction.md")
+        content = adr_path.read_text()
 
         # Find the shim code block
         in_shim = False
@@ -62,11 +63,10 @@ class TestF1_NestedImportErrorMasking:
         """
         All 7 shim examples in extraction_pr_plans.md must use 'from e'.
         """
-        plans_path = (
+        plans_path = Path(
             "reports/views_reporting_extraction/extraction_pr_plans.md"
         )
-        with open(plans_path) as f:
-            content = f.read()
+        content = plans_path.read_text()
 
         # Count shim patterns: 'except ImportError:' (bare) vs 'except ImportError as e:'
         bare_count = content.count("except ImportError:")
@@ -102,12 +102,11 @@ class TestF3_MissingFromE:
         """
         The investigation report's Section 8 shim example must use 'from e'.
         """
-        inv_path = (
+        inv_path = Path(
             "reports/views_reporting_extraction/"
             "architectural_misplacement_investigation.md"
         )
-        with open(inv_path) as f:
-            content = f.read()
+        content = inv_path.read_text()
 
         # Find the shim section
         in_section_8 = False
@@ -145,11 +144,10 @@ class TestF5_ReportSilentDegradation:
     @pytest.mark.xfail(reason="C-133: report.py missing logging import")
     def test_report_module_imports_logging(self):
         """ReportModule must import logging to comply with ADR-008."""
-        report_path = (
+        report_path = Path(
             "views_pipeline_core/modules/reports/report.py"
         )
-        with open(report_path) as f:
-            content = f.read()
+        content = report_path.read_text()
 
         assert "import logging" in content or "from logging" in content, (
             "report.py does not import logging. ADR-008 requires all modules "
@@ -163,11 +161,10 @@ class TestF5_ReportSilentDegradation:
         before falling back to plain text. ADR-008 §Degraded Operation:
         'Log at WARNING + document scope of degradation'.
         """
-        report_path = (
+        report_path = Path(
             "views_pipeline_core/modules/reports/report.py"
         )
-        with open(report_path) as f:
-            lines = f.readlines()
+        lines = report_path.read_text().splitlines(True)
 
         # Find the except ImportError block
         for i, line in enumerate(lines):
