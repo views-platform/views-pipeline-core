@@ -181,6 +181,7 @@ Each stage receives an immutable frozen context object and is independently unit
 | [reconciliation](./views_pipeline_core/modules/reconciliation/README.md) | Hierarchical grid ↔ country alignment |
 | [reports](./views_pipeline_core/modules/reports/README.md) | Tailwind-styled HTML evaluation/forecast report generation |
 | [mapping](./views_pipeline_core/modules/mapping/README.md) | Static + interactive choropleth maps (matplotlib / Plotly) |
+| visualizations | Historical line graphs & distribution plots (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | [logging](./views_pipeline_core/modules/logging/README.md) | Central logging configuration injection |
 | statistics | Posterior distribution analysis & forecast reconciliation (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | [wandb](./views_pipeline_core/modules/wandb/README.md) | Alerts, artifact logging, run lifecycle |

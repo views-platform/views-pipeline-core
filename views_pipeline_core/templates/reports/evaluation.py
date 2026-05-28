@@ -313,7 +313,7 @@ class EvaluationReportTemplate:
         import re
         from views_pipeline_core.files.utils import read_dataframe
         from views_pipeline_core.data.handlers import CMDataset, PGMDataset
-        from views_pipeline_core.modules.visualizations import HistoricalLineGraph
+        from views_reporting.visualizations import HistoricalLineGraph
 
         # ── 1. Collect all sequenced prediction files ─────────────────
         all_pred_paths = self.model_path._get_generated_predictions_data_file_paths(
