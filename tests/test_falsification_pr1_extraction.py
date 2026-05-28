@@ -99,7 +99,15 @@ class TestF2_PrivateAttributeCoupling:
         pr1_section = content.split("## PR 1:")[1].split("## PR 2:")[0]
 
         source_path = Path(
-            "views_pipeline_core/modules/transformations/transformations.py"
+            "../views-reporting/views_reporting/transformations/transformations.py"
+        )
+        if not source_path.exists():
+            source_path = Path(
+                "views_pipeline_core/modules/transformations/transformations.py"
+            )
+        assert source_path.exists(), (
+            f"transformations.py not found at views-reporting or "
+            f"pipeline-core path: {source_path}"
         )
         source = source_path.read_text()
 
