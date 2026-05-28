@@ -1,8 +1,8 @@
 # Technical Risk Register
 
-**Last updated:** 2026-05-27
+**Last updated:** 2026-05-28
 **Governing ADR:** ADR-044 (Technical Risk Register)
-**Entry count:** 134 concerns (83 resolved) + 21 disagreements
+**Entry count:** 134 concerns (81 resolved) + 21 disagreements
 
 ---
 
