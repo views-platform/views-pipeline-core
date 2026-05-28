@@ -66,11 +66,11 @@ views_reporting/
    ```python
    try:
        from views_reporting.statistics import PosteriorDistributionAnalyzer
-   except ImportError:
+   except ImportError as e:
        raise ImportError(
            "PosteriorDistributionAnalyzer has moved to views-reporting. "
            "Install: pip install views-reporting"
-       )
+       ) from e
    ```
 3. **Downstream repos** update imports over one release cycle, then shims are removed
 

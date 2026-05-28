@@ -357,11 +357,11 @@ Per ADR-045 pattern, pipeline-core's `__init__.py` files keep re-exports with ex
 # views_pipeline_core/modules/statistics/__init__.py (transition shim)
 try:
     from views_reporting.statistics import PosteriorDistributionAnalyzer, ForecastReconciler
-except ImportError:
+except ImportError as e:
     raise ImportError(
         "PosteriorDistributionAnalyzer and ForecastReconciler have moved to views-reporting. "
         "Install: pip install views-reporting"
-    )
+    ) from e
 ```
 
 This allows downstream repos to update their imports incrementally while providing a clear error message if `views-reporting` is not installed. Remove shims after all consumers are updated.

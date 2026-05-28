@@ -176,11 +176,11 @@ Record all hits here before proceeding. Each downstream file needs a companion P
    # Remove after all downstream consumers update their imports
    try:
        from views_reporting.transformations import DatasetTransformationModule as DatasetTransformationModule
-   except ImportError:
+   except ImportError as e:
        raise ImportError(
            "views_pipeline_core.modules.transformations has moved to the views-reporting package. "
            "Install it with: pip install -e /path/to/views-reporting"
-       )
+       ) from e
    ```
 
 5. Delete `views_pipeline_core/modules/transformations/transformations.py`
@@ -260,11 +260,11 @@ The top-level import `from views_pipeline_core.modules.statistics import Posteri
    # Re-export shim — module moved to views-reporting (ADR-054)
    try:
        from views_reporting.statistics import PosteriorDistributionAnalyzer as PosteriorDistributionAnalyzer, ForecastReconciler as ForecastReconciler
-   except ImportError:
+   except ImportError as e:
        raise ImportError(
            "views_pipeline_core.modules.statistics has moved to the views-reporting package. "
            "Install it with: pip install -e /path/to/views-reporting"
-       )
+       ) from e
    ```
 
 5. Delete `views_pipeline_core/modules/statistics/statistics.py`
@@ -364,11 +364,11 @@ Note: `templates/reports/evaluation.py` line 316 is a deferred import inside a m
    try:
        from views_reporting.visualizations import PlotDistribution as PlotDistribution
        from views_reporting.visualizations import HistoricalLineGraph as HistoricalLineGraph
-   except ImportError:
+   except ImportError as e:
        raise ImportError(
            "views_pipeline_core.modules.visualizations has moved to the views-reporting package. "
            "Install it with: pip install -e /path/to/views-reporting"
-       )
+       ) from e
    ```
 
 5. Delete original files from `views_pipeline_core/modules/visualizations/`
@@ -474,11 +474,11 @@ Assets consumed by:
    # Re-export shim — module moved to views-reporting (ADR-054)
    try:
        from views_reporting.mapping import MappingModule as MappingModule
-   except ImportError:
+   except ImportError as e:
        raise ImportError(
            "views_pipeline_core.modules.mapping has moved to the views-reporting package. "
            "Install it with: pip install -e /path/to/views-reporting"
-       )
+       ) from e
    ```
 
 7. Update `forecast.py` line 12:
@@ -587,11 +587,11 @@ Consumed by:
            search_for_item_name2 as search_for_item_name2,
            filter_metrics_by_eval_type_and_metrics as filter_metrics_by_eval_type_and_metrics,
        )
-   except ImportError:
+   except ImportError as e:
        raise ImportError(
            "views_pipeline_core.modules.reports has moved to the views-reporting package. "
            "Install it with: pip install -e /path/to/views-reporting"
-       )
+       ) from e
    ```
 
 7. Delete originals
@@ -819,11 +819,11 @@ Reconciliation is optional per-ensemble (gated by `self.__activate_reconciliatio
    # Re-export shim — module moved to views-reporting (ADR-054)
    try:
        from views_reporting.reconciliation import ReconciliationModule as ReconciliationModule
-   except ImportError:
+   except ImportError as e:
        raise ImportError(
            "views_pipeline_core.modules.reconciliation has moved to the views-reporting package. "
            "Install it with: pip install -e /path/to/views-reporting"
-       )
+       ) from e
    ```
 
 4. Update `ensemble.py` lines 20-22:
@@ -1093,11 +1093,11 @@ Remove heavyweight dependencies from pipeline-core's `pyproject.toml` that are n
    # Remove after all downstream consumers update their imports
    try:
        from views_reporting.transformations import DatasetTransformationModule as DatasetTransformationModule
-   except ImportError:
+   except ImportError as e:
        raise ImportError(
            "views_pipeline_core.modules.transformations has moved to the views-reporting package. "
            "Install it with: pip install -e /path/to/views-reporting"
-       )
+       ) from e
    ```
    This makes views-reporting a soft dependency — pipeline-core installs cleanly, and
    the re-export shims give a clear error message pointing developers to the new package.

@@ -24,7 +24,6 @@ class TestF1_NestedImportErrorMasking:
     `raise ... from e` so the original traceback is preserved.
     """
 
-    @pytest.mark.xfail(reason="C-132: ADR-054 shim pattern omits 'from e'")
     def test_shim_preserves_original_cause_via_from_e(self):
         """
         The prescribed shim pattern must use 'from e' to preserve the original
@@ -59,7 +58,6 @@ class TestF1_NestedImportErrorMasking:
             f"Pattern found:\n{shim_text}"
         )
 
-    @pytest.mark.xfail(reason="C-132: extraction plan shims omit 'from e'")
     def test_extraction_plan_shims_preserve_original_cause(self):
         """
         All 7 shim examples in extraction_pr_plans.md must use 'from e'.
@@ -100,7 +98,6 @@ class TestF3_MissingFromE:
     own precedent and makes debugging harder in critical infrastructure.
     """
 
-    @pytest.mark.xfail(reason="C-132: investigation report shim omits 'from e'")
     def test_investigation_report_shim_uses_from_e(self):
         """
         The investigation report's Section 8 shim example must use 'from e'.
