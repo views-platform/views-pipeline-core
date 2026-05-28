@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # F-1 (HARD): Nested ImportError masking — shim catches wrong ImportError
 # ---------------------------------------------------------------------------

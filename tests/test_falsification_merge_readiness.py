@@ -8,7 +8,6 @@ These tests encode findings from the merge-readiness falsification audit.
 import re
 from pathlib import Path
 
-
 REGISTER = Path("reports/technical_risk_register.md")
 
 

@@ -8,7 +8,6 @@ Fix the underlying issue, then the test passes.
 
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # F-1 (HARD): Test file imports bypass the shim
 # ---------------------------------------------------------------------------
