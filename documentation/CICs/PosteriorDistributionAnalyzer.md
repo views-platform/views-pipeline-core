@@ -116,7 +116,7 @@ Computes Maximum A Posteriori (MAP) estimates and Highest Density Intervals (HDI
 
 ```python
 import numpy as np
-from views_pipeline_core.modules.statistics.statistics import PosteriorDistributionAnalyzer
+from views_reporting.statistics import PosteriorDistributionAnalyzer
 
 # Basic analysis
 analyzer = PosteriorDistributionAnalyzer()
