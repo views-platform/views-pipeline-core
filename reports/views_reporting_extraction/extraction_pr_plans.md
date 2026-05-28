@@ -142,12 +142,18 @@ grep -rn "from views_pipeline_core.modules.transformations" ~/Documents/scripts/
 
 Record all hits here before proceeding. Each downstream file needs a companion PR to update its import path from `views_pipeline_core.modules.transformations` to `views_reporting.transformations` (or rely on the re-export shim during transition). The re-export shim ensures downstream repos continue to work without immediate updates, but companion PRs should be opened and tracked.
 
+### Known Coupling: Private Attribute Access
+
+`transformations.py:119-120` accesses `dataset._time_id` and `dataset._entity_id` — private attributes on `_ViewsDataset` (C-135). After extraction, this becomes cross-package private attribute access. Accepted for now: `_ViewsDataset` decomposition is Phase 2 (deferred in ADR-054). If `_ViewsDataset` renames these attributes before Phase 2, views-reporting must be updated.
+
 ### Files Changed in views-pipeline-core
 
 | File | Change |
 |------|--------|
 | `modules/transformations/__init__.py` | Replace with re-export shim |
 | `modules/transformations/transformations.py` | DELETE (moved to views-reporting) |
+| `modules/transformations/README.md` | DELETE (moved to views-reporting) or update import paths to point to `views_reporting.transformations` |
+| `tests/test_modules/test_transformations.py` | Update import from direct file path to package path (C-134: direct imports bypass `__init__.py` shim) |
 
 ### Files Created in views-reporting
 
@@ -155,6 +161,7 @@ Record all hits here before proceeding. Each downstream file needs a companion P
 |------|---------|
 | `views_reporting/transformations/transformations.py` | Exact copy from pipeline-core |
 | `views_reporting/transformations/__init__.py` | `from .transformations import DatasetTransformationModule as DatasetTransformationModule` |
+| `views_reporting/transformations/README.md` | Copy from pipeline-core, update import paths from `views_pipeline_core.modules.transformations` to `views_reporting.transformations` |
 
 ### Steps
 
