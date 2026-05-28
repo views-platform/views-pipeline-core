@@ -4,8 +4,8 @@ Falsification audit: extraction document consistency (2026-05-27).
 Tests that the three documents in reports/views_reporting_extraction/ are
 internally and mutually consistent on quantitative facts.
 """
-from pathlib import Path
 import re
+from pathlib import Path
 
 REPORTS_DIR = Path(__file__).resolve().parents[1] / "reports" / "views_reporting_extraction"
 INVESTIGATION = REPORTS_DIR / "architectural_misplacement_investigation.md"
