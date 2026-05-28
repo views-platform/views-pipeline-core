@@ -3,9 +3,9 @@ import numpy as np
 import torch
 from io import StringIO
 from unittest.mock import patch
-from views_pipeline_core.modules.statistics.statistics import (
+from views_pipeline_core.modules.statistics import (
     PosteriorDistributionAnalyzer,
-    ForecastReconciler
+    ForecastReconciler,
 )
 
 

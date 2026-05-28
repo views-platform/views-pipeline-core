@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
-from views_pipeline_core.modules.statistics import PosteriorDistributionAnalyzer
+from views_reporting.statistics import PosteriorDistributionAnalyzer
 # from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
 from viewser import Queryset, Column
 
