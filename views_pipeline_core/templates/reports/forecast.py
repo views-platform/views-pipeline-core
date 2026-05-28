@@ -9,7 +9,7 @@ from views_pipeline_core.data.handlers import (
     _CDataset,
 )
 from views_pipeline_core.modules.reports import ReportModule
-from views_pipeline_core.modules.mapping import MappingModule
+from views_reporting.mapping import MappingModule
 from views_reporting.visualizations import HistoricalLineGraph
 from views_pipeline_core.files.utils import generate_model_file_name
 import logging
