@@ -3,7 +3,6 @@ import numpy as np
 from typing import List, Dict, Union, Tuple, Optional
 from views_pipeline_core.files.utils import read_dataframe
 from views_reporting.statistics import PosteriorDistributionAnalyzer
-# from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
 from viewser import Queryset, Column
 
 from pathlib import Path
@@ -663,7 +662,7 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes
         """
-        from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
+        from views_reporting.visualizations import PlotDistribution
         self._distribution_plotter = (
             PlotDistribution(dataset=self)
             if not hasattr(self, "_distribution_plotter")
@@ -1308,7 +1307,7 @@ class _ViewsDataset:
         Returns:
         matplotlib.axes.Axes: The plot axes
         """
-        from views_pipeline_core.modules.visualizations.distributions import PlotDistribution
+        from views_reporting.visualizations import PlotDistribution
         self._distribution_plotter = (
             PlotDistribution(dataset=self)
             if not hasattr(self, "_distribution_plotter")
