@@ -99,8 +99,12 @@ class TestF2_PrivateAttributeCoupling:
         pr1_section = content.split("## PR 1:")[1].split("## PR 2:")[0]
 
         source_path = Path(
-            "views_pipeline_core/modules/transformations/transformations.py"
+            "../views-reporting/views_reporting/transformations/transformations.py"
         )
+        if not source_path.exists():
+            source_path = Path(
+                "views_pipeline_core/modules/transformations/transformations.py"
+            )
         source = source_path.read_text()
 
         uses_private = "_time_id" in source and "_entity_id" in source
