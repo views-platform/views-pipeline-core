@@ -1,10 +1,10 @@
 import pytest
 import pandas as pd
 from unittest.mock import patch
-from views_pipeline_core.modules.reports.utils import (
+from views_pipeline_core.modules.reports import (
     search_for_item_name,
     search_for_item_name2,
-    filter_metrics_by_eval_type_and_metrics
+    filter_metrics_by_eval_type_and_metrics,
 )
 
 
@@ -219,7 +219,7 @@ class TestFilterMetricsByEvalTypeAndMetrics:
         assert 'classification_accuracy_ns_test' in result_ns.columns
         assert 'classification_recall_os_test' in result_os.columns
 
-    @patch('views_pipeline_core.modules.reports.utils.logger')
+    @patch('views_reporting.reports.utils.logger')
     def test_debug_logging(self, mock_logger, sample_eval_dict):
         """Test that debug logging is called."""
         filter_metrics_by_eval_type_and_metrics(
@@ -441,7 +441,7 @@ class TestSearchForItemName2:
         # Should return one of the 2-match items
         assert result in ['accuracy_ns_test', 'accuracy_ns_test_validation']
 
-    @patch('views_pipeline_core.modules.reports.utils.logger')
+    @patch('views_reporting.reports.utils.logger')
     def test_warning_on_equal_match_counts(self, mock_logger):
         """Test warning when all matches have equal counts."""
         searchspace = ['accuracy_ns_test', 'precision_ns_test']
