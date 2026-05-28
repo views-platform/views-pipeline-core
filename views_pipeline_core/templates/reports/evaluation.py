@@ -10,14 +10,14 @@ from views_pipeline_core.modules.wandb import (
     format_metadata_dict,
     timestamp_to_date,
 )
-from views_pipeline_core.modules.reports import (
+from views_reporting.reports import (
+    ReportModule,
     search_for_item_name,
     filter_metrics_by_eval_type_and_metrics,
 )
 from views_pipeline_core.files.utils import (
     generate_model_file_name,
 )
-from views_pipeline_core.modules.reports import ReportModule
 from views_pipeline_core.configs.pipeline import PipelineConfig
 
 logger = logging.getLogger(__name__)

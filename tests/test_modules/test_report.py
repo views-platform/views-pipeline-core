@@ -2,7 +2,7 @@ import pytest
 import pandas as pd
 import matplotlib.pyplot as plt
 from unittest.mock import patch
-from views_pipeline_core.modules.reports.report import ReportModule
+from views_pipeline_core.modules.reports import ReportModule
 
 
 class TestReportModuleInit:
@@ -25,7 +25,7 @@ class TestReportModuleInit:
         report = ReportModule()
         assert report.footer is None
 
-    @patch('views_pipeline_core.modules.reports.report.Path')
+    @patch('views_reporting.reports.report.Path')
     def test_init_adds_header_image(self, mock_path):
         """Test that initialization adds VIEWS header image."""
         report = ReportModule()
