@@ -18,7 +18,7 @@ import torch
 from views_pipeline_core.modules.reconciliation.reconciliation import (
     ReconciliationModule,
 )
-from views_pipeline_core.modules.statistics.statistics import ForecastReconciler
+from views_pipeline_core.modules.statistics import ForecastReconciler
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 
 

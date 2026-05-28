@@ -7,7 +7,7 @@ import wandb
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 import torch
 import logging
-from views_pipeline_core.modules.statistics import ForecastReconciler
+from views_reporting.statistics import ForecastReconciler
 from views_pipeline_core.modules.wandb import WandBModule
 
 logger = logging.getLogger(__name__)

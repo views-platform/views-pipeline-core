@@ -182,7 +182,7 @@ Each stage receives an immutable frozen context object and is independently unit
 | [reports](./views_pipeline_core/modules/reports/README.md) | Tailwind-styled HTML evaluation/forecast report generation |
 | [mapping](./views_pipeline_core/modules/mapping/README.md) | Static + interactive choropleth maps (matplotlib / Plotly) |
 | [logging](./views_pipeline_core/modules/logging/README.md) | Central logging configuration injection |
-| [statistics](./views_pipeline_core/modules/statistics/README.md) | Forecast reconciliation math (proportional scaling) |
+| statistics | Posterior distribution analysis & forecast reconciliation (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | [wandb](./views_pipeline_core/modules/wandb/README.md) | Alerts, artifact logging, run lifecycle |
 | [model validation](./views_pipeline_core/modules/validation/README.md) | Structural & logical integrity checks (sniffer pattern, ADR-041) |
 | [ensemble validation](./views_pipeline_core/modules/validation/ensemble/README.md) | Structural & logical integrity checks |
