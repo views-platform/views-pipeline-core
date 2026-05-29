@@ -178,7 +178,7 @@ Each stage receives an immutable frozen context object and is independently unit
 |-------------------------------|------------------------------------------------|
 | [dataloaders](./views_pipeline_core/modules/dataloaders/README.md) | Partition-aware data retrieval + drift detection + incremental update |
 | transformations | Dataset transformation undo/management (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
-| [reconciliation](./views_pipeline_core/modules/reconciliation/README.md) | Hierarchical grid ↔ country alignment |
+| reconciliation | Hierarchical grid ↔ country alignment (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | reports | Tailwind-styled HTML evaluation/forecast report generation (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | mapping | Static + interactive choropleth maps (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | visualizations | Historical line graphs & distribution plots (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |

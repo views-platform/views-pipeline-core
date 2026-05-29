@@ -34,9 +34,6 @@ from views_pipeline_core.files.utils import (
 from views_pipeline_core.modules.aggregation.aggregator import (
     AggregationModule,
 )
-from views_pipeline_core.modules.reconciliation.reconciliation import (
-    ReconciliationModule,
-)
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
 from views_pipeline_core.types import BaseStageContext
@@ -907,6 +904,7 @@ class DataFrameEnsembleManager:
             )
             return None
 
+        from views_reporting.reconciliation import ReconciliationModule
         reconciliation_manager = ReconciliationModule(
             c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset
         )

@@ -185,8 +185,8 @@ def _make_reconcile_stub():
 class TestReconcileOrchestration:
     """Tests for reconcile() parallel execution, partial failure, and result collection."""
 
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    @patch("views_reporting.reconciliation.reconciliation.WandBModule")
+    @patch("views_reporting.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
     def test_reconcile_collects_successful_results(self, MockExecutor, MockWandB):
         """Successful worker results must be applied to the pg_dataset."""
         mod = _make_reconcile_stub()
@@ -208,8 +208,8 @@ class TestReconcileOrchestration:
             country_id=1, time_id=100, reconciled_tensor=result_tensor, feature="pred_ged_sb"
         )
 
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    @patch("views_reporting.reconciliation.reconciliation.WandBModule")
+    @patch("views_reporting.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
     def test_reconcile_continues_on_partial_failure(self, MockExecutor, MockWandB):
         """Failed tasks must be logged and skipped — reconcile() must not raise."""
         mod = _make_reconcile_stub()
@@ -236,9 +236,9 @@ class TestReconcileOrchestration:
         # WandB alert should be sent for the failure
         assert MockWandB.send_alert.call_count >= 1
 
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.as_completed", return_value=iter([]))
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    @patch("views_reporting.reconciliation.reconciliation.as_completed", return_value=iter([]))
+    @patch("views_reporting.reconciliation.reconciliation.WandBModule")
+    @patch("views_reporting.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
     @patch("os.cpu_count", return_value=4)
     def test_reconcile_uses_computed_max_workers(self, mock_cpu, MockPPE, MockWandB, mock_as_completed):
         """When max_workers=None, ProcessPoolExecutor must receive min(32, cpu_count+4)."""
@@ -254,8 +254,8 @@ class TestReconcileOrchestration:
 
         MockPPE.assert_called_once_with(max_workers=8)
 
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    @patch("views_reporting.reconciliation.reconciliation.WandBModule")
+    @patch("views_reporting.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
     def test_reconcile_sends_completion_alert(self, MockExecutor, MockWandB):
         """reconcile() must send a WandB alert on completion."""
         mod = _make_reconcile_stub()
