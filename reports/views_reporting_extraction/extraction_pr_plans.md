@@ -1,3 +1,7 @@
+> **HISTORICAL (2026-05-29):** This document drove the extraction effort completed
+> in PRs #91-#101. The extraction is now implemented. For current architecture,
+> see ADR-054 (Status: Implemented). Retained for audit trail.
+
 # Extraction PR Development Plans
 
 **Date:** 2026-05-27
