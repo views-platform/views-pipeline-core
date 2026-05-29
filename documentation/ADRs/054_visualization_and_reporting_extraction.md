@@ -1,7 +1,8 @@
 # ADR-054: Visualization and Reporting Extraction
 
-**Status:** Accepted
+**Status:** Implemented
 **Date:** 2026-05-27
+**Implementation Date:** 2026-05-29
 **Deciders:** Simon, VIEWS platform team
 
 ---
@@ -144,6 +145,31 @@ views_reporting/
 | C-127 | REP: version coordination strategy (addressed: `>= 2.3.0, < 3.0.0` pin) |
 | C-129 | Multi-class files relocated without structural discussion (addressed: documented in investigation) |
 | C-130 | File organization principles absent (addressed: documented in investigation) |
+
+## Outcomes (2026-05-29)
+
+All 11 extraction PRs merged into `integration/views-reporting-extraction`.
+
+| PR | GitHub | Scope |
+|----|--------|-------|
+| 0 | #91 | Package skeleton + ADR-054 |
+| 0.5 | #92 | Integration branch setup |
+| 1 | #93 | Extract transformations/ (1,431 LOC) |
+| 2 | #94 | Extract statistics/ (769 LOC) |
+| 3 | #95 | Extract visualizations/ (737 LOC) |
+| 4 | #96 | Extract mapping/ + assets (868 LOC + 57 MB) |
+| 5 | #97 | Extract reports/ (1,388 LOC) |
+| 7 | #98 | Extract reconciliation/ (298 LOC) |
+| 8 | #99 | Extract methods from handlers.py (~1,342 LOC) |
+| 6 | #100 | Extract templates/reports/ (541 LOC) |
+| 9 | #101 | Remove 8 heavyweight dependencies |
+| 10 | TBD | This PR — documentation close-out |
+
+**Dependencies removed from pyproject.toml:** properscoring, geopandas, seaborn, plotly, plotly-express, scipy, torch, markdown.
+
+**Re-export shims active in pipeline-core:** 7 `__init__.py` files (transformations, statistics, visualizations, mapping, reports, reconciliation, templates/reports). Shims use `try/except ImportError as e: raise ... from e` pattern per ADR-008. Remove after all downstream repos update imports.
+
+**CIC ownership:** 8 CICs for extracted classes live in views-reporting (commit `06984b3`). Pipeline-core CICs are unaffected.
 
 ## References
 
