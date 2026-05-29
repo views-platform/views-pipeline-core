@@ -17,9 +17,6 @@ from views_pipeline_core.modules.validation.ensemble import validate_ensemble_mo
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.modules.reconciliation.reconciliation import (
-    ReconciliationModule,
-)
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.modules.aggregation.aggregator import (
@@ -733,6 +730,7 @@ class EnsembleManager(ForecastingModelManager):
             return None
 
         # Perform reconciliation
+        from views_reporting.reconciliation import ReconciliationModule
         reconciliation_manager = ReconciliationModule(
             c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset
         )
