@@ -3,7 +3,6 @@ import pandas as pd
 from unittest.mock import patch
 from views_pipeline_core.modules.reports import (
     search_for_item_name,
-    search_for_item_name2,
     filter_metrics_by_eval_type_and_metrics,
 )
 
@@ -90,8 +89,6 @@ class TestFilterMetricsByEvalTypeAndMetrics:
         )
         
         # May return partial match or nothing depending on implementation
-        # Since search_for_item_name2 does partial matching, it might return something
-        # So we just check it returns a DataFrame
         assert isinstance(result, pd.DataFrame)
 
     def test_invalid_metrics_type_raises_error(self, sample_eval_dict):
@@ -261,7 +258,7 @@ class TestFilterMetricsByEvalTypeAndMetrics:
 
     def test_partial_matching_behavior(self, sample_eval_dict):
         """Test that partial matching returns best available match."""
-        # This documents the actual behavior: search_for_item_name2 does partial matching
+        # This documents the actual behavior: search_for_item_name does partial matching
         result = filter_metrics_by_eval_type_and_metrics(
             sample_eval_dict,
             eval_type='classification',
@@ -384,98 +381,3 @@ class TestSearchForItemName:
         assert result is None
 
 
-class TestSearchForItemName2:
-    """Test suite for search_for_item_name2 function."""
-
-    def test_single_keyword_single_match(self):
-        """Test single keyword with single match."""
-        searchspace = ['accuracy_test', 'precision_test', 'recall_validation']
-        result = search_for_item_name2(searchspace, ['accuracy'])
-        
-        assert result == 'accuracy_test'
-
-    def test_multiple_keywords_single_match(self):
-        """Test multiple keywords with single match."""
-        searchspace = ['accuracy_ns_test', 'precision_ns_test', 'accuracy_os_test']
-        result = search_for_item_name2(searchspace, ['accuracy', 'ns'])
-        
-        assert result == 'accuracy_ns_test'
-
-    def test_no_matches(self):
-        """Test when no matches are found."""
-        searchspace = ['accuracy_test', 'precision_test']
-        result = search_for_item_name2(searchspace, ['rmse'])
-        
-        assert result is None
-
-    def test_partial_match_returns_best(self):
-        """Test that partial matches return the best match."""
-        searchspace = ['accuracy_ns_test', 'accuracy_test', 'ns_test']
-        result = search_for_item_name2(searchspace, ['accuracy', 'ns', 'test'])
-        
-        # Should return the one with most matches (all 3)
-        assert result == 'accuracy_ns_test'
-
-    def test_empty_keywords(self):
-        """Test with empty keywords list."""
-        searchspace = ['accuracy_test', 'precision_test']
-        result = search_for_item_name2(searchspace, [])
-        
-        assert result is None
-
-    def test_empty_searchspace(self):
-        """Test with empty searchspace."""
-        result = search_for_item_name2([], ['accuracy'])
-        
-        assert result is None
-
-    def test_returns_highest_match_count(self):
-        """Test that it returns item with highest match count."""
-        searchspace = [
-            'accuracy_test',  # 1 match
-            'accuracy_ns_test',  # 2 matches
-            'accuracy_ns_test_validation'  # 2 matches (test appears once in split)
-        ]
-        result = search_for_item_name2(searchspace, ['accuracy', 'ns'])
-        
-        # Should return one of the 2-match items
-        assert result in ['accuracy_ns_test', 'accuracy_ns_test_validation']
-
-    @patch('views_reporting.reports.utils.logger')
-    def test_warning_on_equal_match_counts(self, mock_logger):
-        """Test warning when all matches have equal counts."""
-        searchspace = ['accuracy_ns_test', 'precision_ns_test']
-        result = search_for_item_name2(searchspace, ['ns', 'test'])
-        
-        # Both have 2 matches, should log warning
-        mock_logger.warning.assert_called_once()
-        assert result in searchspace
-
-    def test_case_insensitive_matching(self):
-        """Test case insensitive matching."""
-        searchspace = ['Accuracy_NS_Test', 'precision_os_test']
-        result = search_for_item_name2(searchspace, ['accuracy', 'ns'])
-        
-        assert result == 'Accuracy_NS_Test'
-
-    def test_keywords_with_only_separators(self):
-        """Test keywords containing only separators."""
-        searchspace = ['accuracy_test', 'precision_test']
-        result = search_for_item_name2(searchspace, ['___', '---'])
-        
-        assert result is None
-
-    def test_mixed_separators(self):
-        """Test with mixed separators."""
-        searchspace = ['accuracy_ns-test/validation', 'precision_os_test']
-        result = search_for_item_name2(searchspace, ['accuracy', 'ns', 'test'])
-        
-        assert result == 'accuracy_ns-test/validation'
-
-    def test_single_match_with_one_keyword(self):
-        """Test single partial match with one keyword present."""
-        searchspace = ['accuracy_test', 'precision_validation']
-        result = search_for_item_name2(searchspace, ['accuracy', 'ns'])
-        
-        # Should return None because 'ns' is missing
-        assert result is None
