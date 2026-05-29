@@ -85,7 +85,7 @@ class ReportingStage:
             ) from e
 
         # --- Generate report ---
-        from views_pipeline_core.templates.reports.forecast import (
+        from views_reporting.templates.reports.forecast import (
             ForecastReportTemplate,
         )
 
@@ -122,7 +122,7 @@ class ReportingStage:
             Path to the last generated HTML report file.
         """
         from views_pipeline_core.modules.wandb import get_latest_run
-        from views_pipeline_core.templates.reports.evaluation import (
+        from views_reporting.templates.reports.evaluation import (
             EvaluationReportTemplate,
         )
 
