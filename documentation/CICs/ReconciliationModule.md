@@ -22,7 +22,7 @@ The reconciliation is parallelised across all combinations of (country, time ste
 - Does **not** decide which models to reconcile or when to reconcile. The orchestrator makes those decisions.
 - Does **not** persist results to disk. It returns the reconciled DataFrame; the caller is responsible for saving.
 - Does **not** implement the reconciliation algorithm itself. It delegates to `ForecastReconciler` from `views_reporting.statistics`.
-- Does **not** handle country-to-grid spatial mappings directly. It relies on `_PGDataset._build_country_to_grids_cache()`.
+- Does **not** handle country-to-grid spatial mappings directly. It relies on `build_country_to_grids_cache()` and `get_subset_by_country_id()` from `views_reporting.metadata`.
 
 ---
 

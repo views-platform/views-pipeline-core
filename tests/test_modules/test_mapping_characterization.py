@@ -20,6 +20,19 @@ from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 from views_pipeline_core.modules.mapping import MappingModule
 
 
+@pytest.fixture(autouse=True)
+def _patch_metadata_functions(monkeypatch):
+    """Redirect standalone metadata functions to read mock test data."""
+    monkeypatch.setattr(
+        "views_reporting.mapping.mapping.get_isoab",
+        lambda dataset: dataset._mock_iso_data,
+    )
+    monkeypatch.setattr(
+        "views_reporting.mapping.mapping.get_name",
+        lambda dataset, **kwargs: dataset._mock_name_data,
+    )
+
+
 def _make_country_shapefile_gdf():
     """Minimal GeoDataFrame mimicking Natural Earth country shapefile."""
     return geopandas.GeoDataFrame(
@@ -78,7 +91,7 @@ def _make_mock_country_dataset():
             "isoab": ["NOR", "SWE", "FIN"],
         }
     )
-    ds.get_isoab.return_value = iso_df.set_index(["month_id", "country_id"])
+    ds._mock_iso_data = iso_df.set_index(["month_id", "country_id"])
 
     name_df = pd.DataFrame(
         {
@@ -87,7 +100,7 @@ def _make_mock_country_dataset():
             "name": ["Norway", "Sweden", "Finland"],
         }
     )
-    ds.get_name.return_value = name_df.set_index(["month_id", "country_id"])
+    ds._mock_name_data = name_df.set_index(["month_id", "country_id"])
     ds.get_subset_dataframe.return_value = df
     return ds
 
@@ -114,7 +127,7 @@ def _make_mock_priogrid_dataset():
             "isoab": ["NOR", "SWE", "FIN"],
         }
     )
-    ds.get_isoab.return_value = iso_df.set_index(["month_id", "priogrid_gid"])
+    ds._mock_iso_data = iso_df.set_index(["month_id", "priogrid_gid"])
 
     name_df = pd.DataFrame(
         {
@@ -123,7 +136,7 @@ def _make_mock_priogrid_dataset():
             "name": ["Norway", "Sweden", "Finland"],
         }
     )
-    ds.get_name.return_value = name_df.set_index(["month_id", "priogrid_gid"])
+    ds._mock_name_data = name_df.set_index(["month_id", "priogrid_gid"])
     ds.get_subset_dataframe.return_value = df
     return ds
 
@@ -330,7 +343,7 @@ class TestPlotMapValidation:
                 "isoab": ["NOR", "SWE", "NOR", "SWE"],
             }
         )
-        ds.get_isoab.return_value = iso_df.set_index(["month_id", "country_id"])
+        ds._mock_iso_data = iso_df.set_index(["month_id", "country_id"])
 
         name_df = pd.DataFrame(
             {
@@ -339,7 +352,7 @@ class TestPlotMapValidation:
                 "name": ["Norway", "Sweden", "Norway", "Sweden"],
             }
         )
-        ds.get_name.return_value = name_df.set_index(["month_id", "country_id"])
+        ds._mock_name_data = name_df.set_index(["month_id", "country_id"])
 
         gdf = mapper.get_subset_mapping_dataframe()
         with pytest.raises(ValueError, match="Static plots require single time unit"):

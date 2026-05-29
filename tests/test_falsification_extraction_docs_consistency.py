@@ -7,6 +7,8 @@ internally and mutually consistent on quantitative facts.
 import re
 from pathlib import Path
 
+import pytest
+
 REPORTS_DIR = Path(__file__).resolve().parents[1] / "reports" / "views_reporting_extraction"
 INVESTIGATION = REPORTS_DIR / "architectural_misplacement_investigation.md"
 PR_PLANS = REPORTS_DIR / "extraction_pr_plans.md"
@@ -103,10 +105,12 @@ class TestF4HandlerLineNumbers:
         for i, line in enumerate(self.HANDLERS.read_text().splitlines(), 1):
             if pattern in line:
                 return i
-        raise AssertionError(f"Pattern {pattern!r} not found in handlers.py")
+        return None
 
     def test_matplotlib_line_number(self):
         actual = self._actual_line("import matplotlib")
+        if actual is None:
+            pytest.skip("Extracted to views-reporting (PR 8)")
         text = INVESTIGATION.read_text()
         assert f"handlers.py:{actual}" in text or "handlers.py:9" not in text, (
             f"Investigation cites handlers.py:9 for matplotlib but actual line is {actual}."
@@ -114,6 +118,8 @@ class TestF4HandlerLineNumbers:
 
     def test_joblib_line_number(self):
         actual = self._actual_line("from joblib")
+        if actual is None:
+            pytest.skip("Extracted to views-reporting (PR 8)")
         text = INVESTIGATION.read_text()
         assert f"handlers.py:{actual}" in text or "handlers.py:11" not in text, (
             f"Investigation cites handlers.py:11 for joblib but actual line is {actual}."
@@ -121,6 +127,8 @@ class TestF4HandlerLineNumbers:
 
     def test_torch_line_number(self):
         actual = self._actual_line("import torch")
+        if actual is None:
+            pytest.skip("Extracted to views-reporting (PR 8)")
         text = INVESTIGATION.read_text()
         assert f"handlers.py:{actual}" in text or "handlers.py:14" not in text, (
             f"Investigation cites handlers.py:14 for torch but actual line is {actual}."
