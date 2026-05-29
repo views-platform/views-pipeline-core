@@ -256,8 +256,6 @@ def _make_distribution_mock(
     mock.to_tensor.return_value = rng.random(tensor_shape)
     mock._get_entity_index.return_value = 0
     mock._get_time_index.return_value = 0
-    mock._calculate_single_hdi.return_value = (0.2, 0.8)
-    mock._simon_compute_single_map.return_value = 0.5
     return mock
 
 
@@ -368,7 +366,8 @@ class TestPlotHighestDensityIntervals:
         assert isinstance(result, plt.Axes)
         plt.close(fig)
 
-    def test_multiple_alphas(self):
+    @patch("views_reporting.visualizations.distributions._calculate_single_hdi", return_value=(0.2, 0.8))
+    def test_multiple_alphas(self, mock_hdi):
         mock = _make_distribution_mock()
         plotter = PlotDistribution(dataset=mock)
         fig, ax_input = plt.subplots()
@@ -376,7 +375,7 @@ class TestPlotHighestDensityIntervals:
             var_name="pred_ged_sb", alphas=(0.9, 0.5), ax=ax_input
         )
         assert isinstance(result, plt.Axes)
-        assert mock._calculate_single_hdi.call_count == 2
+        assert mock_hdi.call_count == 2
         plt.close(fig)
 
     def test_single_float_alpha_coerced_to_tuple(self):

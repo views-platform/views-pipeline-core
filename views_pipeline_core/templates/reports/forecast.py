@@ -10,6 +10,7 @@ from views_pipeline_core.data.handlers import (
 )
 from views_reporting.reports import ReportModule
 from views_reporting.mapping import MappingModule
+from views_reporting.statistics import calculate_map
 from views_reporting.visualizations import HistoricalLineGraph
 from views_pipeline_core.files.utils import generate_model_file_name
 import logging
@@ -53,7 +54,7 @@ class ForecastReportTemplate:
                         f"Sample size of {forecast_dataset.sample_size} for target {target} found. Calculating MAP..."
                     )
                     forecast_dataset_map = type(forecast_dataset)(
-                        forecast_dataset.calculate_map(features=[f"pred_{target}"])
+                        calculate_map(forecast_dataset, features=[f"pred_{target}"])
                     )
                     target = f"{target}_map"
 
