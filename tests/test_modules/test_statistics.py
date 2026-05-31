@@ -1,12 +1,15 @@
-import pytest
-import numpy as np
-import torch
 from io import StringIO
 from unittest.mock import patch
+
+import numpy as np
+import pytest
+
 from views_pipeline_core.modules.statistics import (
     PosteriorDistributionAnalyzer,
     ForecastReconciler,
 )
+
+torch = pytest.importorskip("torch")
 
 
 class TestPosteriorDistributionAnalyzer:

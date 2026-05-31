@@ -9,15 +9,16 @@ class with no tests, enabling safe future modifications.
 """
 from concurrent.futures import Future
 from unittest.mock import MagicMock, patch
-import pytest
 
 import numpy as np
 import pandas as pd
-import torch
+import pytest
 
+from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 from views_pipeline_core.modules.reconciliation import ReconciliationModule
 from views_pipeline_core.modules.statistics import ForecastReconciler
-from views_pipeline_core.data.handlers import _CDataset, _PGDataset
+
+torch = pytest.importorskip("torch")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

@@ -5,20 +5,21 @@ These tests exercise the visualization classes with mocked datasets,
 breaking the zero-test-coverage barrier before extraction to views-reporting.
 Matplotlib backend is set to "Agg" (non-interactive) so no display is needed.
 """
-import matplotlib
-matplotlib.use("Agg")
+from unittest.mock import MagicMock, patch
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import MagicMock, patch
 
+from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 from views_pipeline_core.modules.visualizations import (
     HistoricalLineGraph,
     PlotDistribution,
 )
-from views_pipeline_core.data.handlers import _CDataset, _PGDataset
+
+matplotlib = pytest.importorskip("matplotlib")
+matplotlib.use("Agg")
+plt = matplotlib.pyplot
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
