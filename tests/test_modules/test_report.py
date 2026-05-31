@@ -80,11 +80,9 @@ class TestAddHeading:
 
     def test_add_heading_with_special_chars(self, report):
         """Test that heading text with special characters works."""
-        # The add_heading method doesn't escape the text parameter itself,
-        # only the link parameter. This is the actual behavior.
         report.add_heading("Test & Review", level=1)
-        
-        assert 'Test & Review' in report.content[-1]
+
+        assert 'Test &amp; Review' in report.content[-1]
 
 
 class TestAddParagraph:

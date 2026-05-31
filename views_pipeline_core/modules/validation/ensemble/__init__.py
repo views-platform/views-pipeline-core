@@ -1,1 +1,1 @@
-from .check import *
+from .check import *  # noqa: F403

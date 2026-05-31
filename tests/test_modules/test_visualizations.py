@@ -367,8 +367,7 @@ class TestPlotHighestDensityIntervals:
         assert isinstance(result, plt.Axes)
         plt.close(fig)
 
-    @patch("views_reporting.visualizations.distributions._calculate_single_hdi", return_value=(0.2, 0.8))
-    def test_multiple_alphas(self, mock_hdi):
+    def test_multiple_alphas(self):
         mock = _make_distribution_mock()
         plotter = PlotDistribution(dataset=mock)
         fig, ax_input = plt.subplots()
@@ -376,7 +375,7 @@ class TestPlotHighestDensityIntervals:
             var_name="pred_ged_sb", alphas=(0.9, 0.5), ax=ax_input
         )
         assert isinstance(result, plt.Axes)
-        assert mock_hdi.call_count == 2
+        assert len(ax_input.collections) >= 2
         plt.close(fig)
 
     def test_single_float_alpha_coerced_to_tuple(self):

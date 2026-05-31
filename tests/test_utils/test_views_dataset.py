@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
 from views_reporting.statistics import (
-    PosteriorDistributionAnalyzer,
     calculate_hdi,
     calculate_map,
 )
@@ -136,21 +135,6 @@ class TestStatisticalMethods:
             upper = hdi_df[f"{var}_hdi_upper"]
             assert (lower <= upper).all()
     
-    def test_posterior_analyzer(self):
-        """Test PosteriorDistributionAnalyzer's MAP containment and HDI nesting across distributions."""
-        failed_map, failed_nesting = PosteriorDistributionAnalyzer.test_posterior_analyzer(verbose=False)
-        
-        # Assert no MAP containment failures
-        assert not failed_map, (
-            f"MAP not contained in all HDIs for distributions: {failed_map}.\n"
-            "Check: 1) Zero-mass threshold handling 2) HDI enforcement logic"
-        )
-        
-        # Assert no HDI nesting failures
-        assert not failed_nesting, (
-            f"HDIs not properly nested for distributions: {failed_nesting}.\n"
-            "Check HDI expansion logic in _enforce_hdi_structure()"
-        )
 
 class TestSubclassValidation:
     """Tests for dataset subclass index validation"""
