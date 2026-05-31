@@ -63,9 +63,6 @@ class TestReconcileCountryWorker:
             1,        # country_id
             1,        # time_id
             feature,  # feature (must include pred_ prefix)
-            0.01,     # lr
-            500,      # max_iters
-            1e-6,     # tol
             cm_df,    # c_subset
             pg_df,    # pg_subset
             "cpu",    # device_str
@@ -88,7 +85,7 @@ class TestReconcileCountryWorker:
         pg_df = _make_pg_dataframe(n_grids, n_times, n_samples, feature="ged_sb")
         cm_df = _make_cm_dataframe(n_times, n_samples, feature="ged_sb")
 
-        args = (1, 1, feature, 0.01, 500, 1e-6, cm_df, pg_df, "cpu")
+        args = (1, 1, feature, cm_df, pg_df, "cpu")
         _, _, _, tensor = ReconciliationModule._reconcile_country_worker(args)
 
         # Reconciled tensor should be (n_samples, n_grids) — same as grid input
@@ -104,7 +101,7 @@ class TestReconcileCountryWorker:
         pg_df = _make_pg_dataframe(n_grids, n_times, n_samples, feature="ged_sb")
         cm_df = _make_cm_dataframe(n_times, n_samples, feature="ged_sb")
 
-        args = (1, 1, feature, 0.01, 500, 1e-6, cm_df, pg_df, "cpu")
+        args = (1, 1, feature, cm_df, pg_df, "cpu")
         _, _, _, tensor = ReconciliationModule._reconcile_country_worker(args)
 
         assert tensor.device == torch.device("cpu"), (
@@ -119,7 +116,7 @@ class TestReconcileCountryWorker:
         pg_df = _make_pg_dataframe(n_grids, n_times, n_samples, feature="ged_sb")
         cm_df = _make_cm_dataframe(n_times, n_samples, feature="ged_sb")
 
-        args = (1, 1, feature, 0.01, 500, 1e-6, cm_df, pg_df, "cpu")
+        args = (1, 1, feature, cm_df, pg_df, "cpu")
         _, _, _, tensor = ReconciliationModule._reconcile_country_worker(args)
 
         assert not torch.isnan(tensor).any(), (

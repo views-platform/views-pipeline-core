@@ -564,7 +564,7 @@ class TestForecastReconciler:
         grid = torch.randn(100, 50)
         country = torch.randn(50)  # Wrong number of samples
         
-        with pytest.raises(AssertionError, match="Mismatch in sample count"):
+        with pytest.raises(ValueError, match="Mismatch in sample count"):
             reconciler_cpu.reconcile_forecast(grid, country)
 
     def test_reconcile_forecast_probabilistic_non_negative(self, reconciler_cpu):
