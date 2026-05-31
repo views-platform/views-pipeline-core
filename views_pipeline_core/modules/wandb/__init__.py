@@ -1,2 +1,2 @@
 from .wandb import WandBModule as WandBModule
-from .utils import *
+from .utils import *  # noqa: F403
