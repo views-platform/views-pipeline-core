@@ -1,8 +1,12 @@
-import pytest
-import pandas as pd
-import matplotlib.pyplot as plt
 from unittest.mock import patch
+
+import pandas as pd
+import pytest
+
 from views_pipeline_core.modules.reports import ReportModule
+
+matplotlib = pytest.importorskip("matplotlib")
+plt = matplotlib.pyplot
 
 
 class TestReportModuleInit:

@@ -5,19 +5,20 @@ shapefile I/O. Written BEFORE extraction to views-reporting so they
 validate behavior through the re-export shim post-move.
 """
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import geopandas
-import pandas as pd
-import plotly
-import pytest
-from shapely.geometry import box
 from unittest.mock import MagicMock, patch
+
+import pandas as pd
+import pytest
 
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset
 from views_pipeline_core.modules.mapping import MappingModule
+
+matplotlib = pytest.importorskip("matplotlib")
+matplotlib.use("Agg")
+geopandas = pytest.importorskip("geopandas")
+plotly = pytest.importorskip("plotly")
+shapely = pytest.importorskip("shapely")
+box = shapely.geometry.box
 
 
 @pytest.fixture(autouse=True)
