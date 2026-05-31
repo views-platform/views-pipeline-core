@@ -734,7 +734,7 @@ class EnsembleManager(ForecastingModelManager):
         reconciliation_manager = ReconciliationModule(
             c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset
         )
-        return reconciliation_manager.reconcile(lr=0.01, max_iters=500, tol=1e-6)
+        return reconciliation_manager.reconcile()
 
     def _load_c_dataset(
         self, cm_model: str, c_dataframe: Optional[pd.DataFrame]
