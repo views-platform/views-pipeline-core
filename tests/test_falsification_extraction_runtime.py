@@ -13,6 +13,10 @@ import ast
 import inspect
 import pathlib
 
+import pytest
+
+pytest.importorskip("views_reporting")
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
