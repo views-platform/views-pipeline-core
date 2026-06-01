@@ -11,8 +11,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from views_pipeline_core.data.handlers import _CDataset, _PGDataset
-from views_pipeline_core.modules.visualizations import (
+pytest.importorskip("views_reporting")
+
+from views_pipeline_core.data.handlers import _CDataset, _PGDataset  # noqa: E402
+from views_pipeline_core.modules.visualizations import (  # noqa: E402
     HistoricalLineGraph,
     PlotDistribution,
 )

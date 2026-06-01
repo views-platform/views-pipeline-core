@@ -3,7 +3,9 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from views_pipeline_core.modules.reports import ReportModule
+pytest.importorskip("views_reporting")
+
+from views_pipeline_core.modules.reports import ReportModule  # noqa: E402
 
 matplotlib = pytest.importorskip("matplotlib")
 plt = matplotlib.pyplot

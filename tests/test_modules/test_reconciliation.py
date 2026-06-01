@@ -14,9 +14,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from views_pipeline_core.data.handlers import _CDataset, _PGDataset
-from views_pipeline_core.modules.reconciliation import ReconciliationModule
-from views_pipeline_core.modules.statistics import ForecastReconciler
+pytest.importorskip("views_reporting")
+
+from views_pipeline_core.data.handlers import _CDataset, _PGDataset  # noqa: E402
+from views_pipeline_core.modules.reconciliation import ReconciliationModule  # noqa: E402
+from views_pipeline_core.modules.statistics import ForecastReconciler  # noqa: E402
 
 torch = pytest.importorskip("torch")
 
