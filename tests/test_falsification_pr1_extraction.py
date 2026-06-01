@@ -5,6 +5,9 @@ Generated: 2026-05-28
 These tests encode findings. Each currently FAILS, documenting a real issue.
 Fix the underlying issue, then the test passes.
 """
+import pytest
+
+pytest.importorskip("views_reporting")
 
 from pathlib import Path
 
