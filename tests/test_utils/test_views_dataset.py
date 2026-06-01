@@ -2,7 +2,10 @@ import pytest
 import pandas as pd
 import numpy as np
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
-from views_reporting.statistics import (
+
+pytest.importorskip("views_reporting")
+
+from views_reporting.statistics import (  # noqa: E402
     calculate_hdi,
     calculate_map,
 )

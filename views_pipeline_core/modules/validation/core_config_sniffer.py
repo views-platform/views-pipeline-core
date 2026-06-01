@@ -307,6 +307,13 @@ class CoreConfigSniffer:
                 f"Supported: {sorted(SUPPORTED_RECONCILIATION_TYPES)}. "
                 f"Update SUPPORTED_RECONCILIATION_TYPES in core_config_sniffer.py when ready."
             )
+        import importlib.util
+        if importlib.util.find_spec("views_reporting") is None:
+            raise ImportError(
+                "CoreConfigSniffer: reconciliation is configured but views-reporting "
+                "is not installed. Reconciliation requires views-reporting. "
+                "Install it with: pip install -e /path/to/views-reporting"
+            )
         if recon == "pgm_cm_point":
             recon_with = self._c.get("reconcile_with")
             if not recon_with:
