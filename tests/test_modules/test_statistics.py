@@ -4,7 +4,9 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from views_pipeline_core.modules.statistics import (
+pytest.importorskip("views_reporting")
+
+from views_pipeline_core.modules.statistics import (  # noqa: E402
     PosteriorDistributionAnalyzer,
     ForecastReconciler,
 )

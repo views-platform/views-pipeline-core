@@ -1,7 +1,10 @@
 import pytest
 import pandas as pd
 from unittest.mock import patch
-from views_pipeline_core.modules.reports import (
+
+pytest.importorskip("views_reporting")
+
+from views_pipeline_core.modules.reports import (  # noqa: E402
     search_for_item_name,
     filter_metrics_by_eval_type_and_metrics,
 )
