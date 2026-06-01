@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("views_reporting")
 
-from pathlib import Path  # noqa: E402
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # F-1 (HARD): Test file imports bypass the shim
