@@ -159,10 +159,12 @@ def test_falsify_06_reconciliation_max_workers_ignored():
 
     Expected: ProcessPoolExecutor receives the computed max_workers value.
     """
+    pytest.importorskip("views_reporting")
     from pathlib import Path
     import ast
 
-    src = Path("views_pipeline_core/modules/reconciliation/reconciliation.py")
+    import views_reporting.reconciliation.reconciliation as _mod
+    src = Path(_mod.__file__)
     tree = ast.parse(src.read_text())
 
     # Find the ProcessPoolExecutor call and check its max_workers argument

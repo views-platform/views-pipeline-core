@@ -1,12 +1,17 @@
-import pytest
-import numpy as np
-import torch
 from io import StringIO
 from unittest.mock import patch
-from views_pipeline_core.modules.statistics.statistics import (
+
+import numpy as np
+import pytest
+
+pytest.importorskip("views_reporting")
+
+from views_pipeline_core.modules.statistics import (  # noqa: E402
     PosteriorDistributionAnalyzer,
-    ForecastReconciler
+    ForecastReconciler,
 )
+
+torch = pytest.importorskip("torch")
 
 
 class TestPosteriorDistributionAnalyzer:
@@ -403,25 +408,6 @@ class TestPosteriorDistributionAnalyzer:
             analyzer.plot_summary(show=False, save_path=save_path)
             mock_savefig.assert_called_once_with(save_path)
 
-    # Test test_posterior_analyzer static method
-    def test_test_posterior_analyzer_runs_successfully(self):
-        """Test that test suite runs without errors."""
-        failed_map, failed_nest = PosteriorDistributionAnalyzer.test_posterior_analyzer(verbose=False)
-        
-        assert isinstance(failed_map, list)
-        assert isinstance(failed_nest, list)
-        # All tests should pass
-        assert len(failed_map) == 0
-        assert len(failed_nest) == 0
-
-    def test_test_posterior_analyzer_verbose_output(self):
-        """Test verbose output of test suite."""
-        # Just verify it runs with verbose=True without errors
-        failed_map, failed_nest = PosteriorDistributionAnalyzer.test_posterior_analyzer(verbose=True)
-        
-        assert len(failed_map) == 0
-        assert len(failed_nest) == 0
-
 
 class TestForecastReconciler:
     """Test suite for ForecastReconciler class."""
@@ -564,7 +550,7 @@ class TestForecastReconciler:
         grid = torch.randn(100, 50)
         country = torch.randn(50)  # Wrong number of samples
         
-        with pytest.raises(AssertionError, match="Mismatch in sample count"):
+        with pytest.raises(ValueError, match="Mismatch in sample count"):
             reconciler_cpu.reconcile_forecast(grid, country)
 
     def test_reconcile_forecast_probabilistic_non_negative(self, reconciler_cpu):
@@ -576,28 +562,6 @@ class TestForecastReconciler:
         adjusted = reconciler_cpu.reconcile_forecast(grid, country)
         
         assert torch.all(adjusted >= 0)
-
-    # Test run_tests method
-    @patch.object(ForecastReconciler, 'run_tests_probabilistic')
-    @patch.object(ForecastReconciler, 'run_tests_point')
-    def test_run_tests_calls_both_suites(self, mock_point, mock_prob, reconciler_cpu):
-        """Test that run_tests calls both test suites."""
-        reconciler_cpu.run_tests()
-        
-        mock_prob.assert_called_once()
-        mock_point.assert_called_once()
-
-    # Test run_tests_probabilistic
-    def test_run_tests_probabilistic_executes(self, reconciler_cpu):
-        """Test that probabilistic test suite runs without errors."""
-        # Should not raise any exceptions
-        reconciler_cpu.run_tests_probabilistic()
-
-    # Test run_tests_point
-    def test_run_tests_point_executes(self, reconciler_cpu):
-        """Test that point forecast test suite runs without errors."""
-        # Should not raise any exceptions
-        reconciler_cpu.run_tests_point()
 
     # Edge cases
     def test_reconcile_forecast_single_cell(self, reconciler_cpu):

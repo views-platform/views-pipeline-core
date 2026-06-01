@@ -129,14 +129,6 @@ class TestInnerLayerBoundaries:
             ["views_pipeline_core.modules"],
             "data/ (Layer 1)",
         )
-        # Known deviations documented in ADR-002:
-        # - handlers.py imports modules/statistics (MAP computation)
-        # - handlers.py imports modules/visualizations (distribution plots)
-        violations = [
-            v for v in violations
-            if "modules.statistics" not in v
-            and "modules.visualizations" not in v
-        ]
         assert violations == [], (
             "Layer violation: data/ imports modules/:\n"
             + "\n".join(f"  - {v}" for v in violations)

@@ -315,6 +315,13 @@ class CoreConfigSniffer:
                     "'reconcile_with' to specify the CM model for reconciliation. "
                     "Add reconcile_with to config_meta.py."
                 )
+        import importlib.util
+        if importlib.util.find_spec("views_reporting") is None:
+            raise ImportError(
+                "CoreConfigSniffer: reconciliation is configured but views-reporting "
+                "is not installed. Reconciliation requires views-reporting. "
+                "Install it with: pip install -e /path/to/views-reporting"
+            )
 
     def _check_evaluation_contract(self, run_type: str) -> None:
         if run_type not in self._partition_dict:

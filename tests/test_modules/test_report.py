@@ -1,8 +1,14 @@
-import pytest
-import pandas as pd
-import matplotlib.pyplot as plt
 from unittest.mock import patch
-from views_pipeline_core.modules.reports.report import ReportModule
+
+import pandas as pd
+import pytest
+
+pytest.importorskip("views_reporting")
+
+from views_pipeline_core.modules.reports import ReportModule  # noqa: E402
+
+matplotlib = pytest.importorskip("matplotlib")
+plt = matplotlib.pyplot
 
 
 class TestReportModuleInit:
@@ -25,7 +31,7 @@ class TestReportModuleInit:
         report = ReportModule()
         assert report.footer is None
 
-    @patch('views_pipeline_core.modules.reports.report.Path')
+    @patch('views_reporting.reports.report.Path')
     def test_init_adds_header_image(self, mock_path):
         """Test that initialization adds VIEWS header image."""
         report = ReportModule()
@@ -76,11 +82,9 @@ class TestAddHeading:
 
     def test_add_heading_with_special_chars(self, report):
         """Test that heading text with special characters works."""
-        # The add_heading method doesn't escape the text parameter itself,
-        # only the link parameter. This is the actual behavior.
         report.add_heading("Test & Review", level=1)
-        
-        assert 'Test & Review' in report.content[-1]
+
+        assert 'Test &amp; Review' in report.content[-1]
 
 
 class TestAddParagraph:

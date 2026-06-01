@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytest.importorskip("views_reporting")
+
 sys.modules["wandb"] = MagicMock()
 sys.modules["views_evaluation"] = MagicMock()
 sys.modules["views_evaluation.evaluation"] = MagicMock()
@@ -101,7 +103,7 @@ class TestForecastReportModel:
 
     @patch("views_pipeline_core.files.utils.read_dataframe")
     @patch(
-        "views_pipeline_core.templates.reports.forecast.ForecastReportTemplate"
+        "views_reporting.templates.reports.forecast.ForecastReportTemplate"
     )
     def test_model_path_generates_report(self, mock_template_cls, mock_read):
         """Single model: loads historical from own raw data, delegates to template."""
@@ -128,7 +130,7 @@ class TestForecastReportModel:
 
     @patch("views_pipeline_core.files.utils.read_dataframe")
     @patch(
-        "views_pipeline_core.templates.reports.forecast.ForecastReportTemplate"
+        "views_reporting.templates.reports.forecast.ForecastReportTemplate"
     )
     def test_model_path_sends_wandb_alert(self, mock_template_cls, mock_read):
         """Forecast report must send WandB alert on success."""
@@ -160,7 +162,7 @@ class TestForecastReportEnsemble:
     @patch("views_pipeline_core.managers.model.ModelManager")
     @patch("views_pipeline_core.managers.model.ModelPathManager")
     @patch(
-        "views_pipeline_core.templates.reports.forecast.ForecastReportTemplate"
+        "views_reporting.templates.reports.forecast.ForecastReportTemplate"
     )
     def test_ensemble_path_loads_from_sub_models(
         self, mock_template_cls, mock_mpm_cls, mock_mm_cls, mock_read,
@@ -244,7 +246,7 @@ class TestEvaluationReport:
 
     @patch("views_pipeline_core.modules.wandb.get_latest_run")
     @patch(
-        "views_pipeline_core.templates.reports.evaluation.EvaluationReportTemplate"
+        "views_reporting.templates.reports.evaluation.EvaluationReportTemplate"
     )
     def test_evaluation_report_calls_template_per_target(
         self, mock_template_cls, mock_get_run,
@@ -277,7 +279,7 @@ class TestEvaluationReport:
 
     @patch("views_pipeline_core.modules.wandb.get_latest_run")
     @patch(
-        "views_pipeline_core.templates.reports.evaluation.EvaluationReportTemplate"
+        "views_reporting.templates.reports.evaluation.EvaluationReportTemplate"
     )
     def test_evaluation_report_sends_wandb_alert(
         self, mock_template_cls, mock_get_run,

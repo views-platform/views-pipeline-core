@@ -9,17 +9,18 @@ class with no tests, enabling safe future modifications.
 """
 from concurrent.futures import Future
 from unittest.mock import MagicMock, patch
-import pytest
 
 import numpy as np
 import pandas as pd
-import torch
+import pytest
 
-from views_pipeline_core.modules.reconciliation.reconciliation import (
-    ReconciliationModule,
-)
-from views_pipeline_core.modules.statistics.statistics import ForecastReconciler
-from views_pipeline_core.data.handlers import _CDataset, _PGDataset
+pytest.importorskip("views_reporting")
+
+from views_pipeline_core.data.handlers import _CDataset, _PGDataset  # noqa: E402
+from views_pipeline_core.modules.reconciliation import ReconciliationModule  # noqa: E402
+from views_pipeline_core.modules.statistics import ForecastReconciler  # noqa: E402
+
+torch = pytest.importorskip("torch")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -65,9 +66,6 @@ class TestReconcileCountryWorker:
             1,        # country_id
             1,        # time_id
             feature,  # feature (must include pred_ prefix)
-            0.01,     # lr
-            500,      # max_iters
-            1e-6,     # tol
             cm_df,    # c_subset
             pg_df,    # pg_subset
             "cpu",    # device_str
@@ -90,7 +88,7 @@ class TestReconcileCountryWorker:
         pg_df = _make_pg_dataframe(n_grids, n_times, n_samples, feature="ged_sb")
         cm_df = _make_cm_dataframe(n_times, n_samples, feature="ged_sb")
 
-        args = (1, 1, feature, 0.01, 500, 1e-6, cm_df, pg_df, "cpu")
+        args = (1, 1, feature, cm_df, pg_df, "cpu")
         _, _, _, tensor = ReconciliationModule._reconcile_country_worker(args)
 
         # Reconciled tensor should be (n_samples, n_grids) — same as grid input
@@ -106,7 +104,7 @@ class TestReconcileCountryWorker:
         pg_df = _make_pg_dataframe(n_grids, n_times, n_samples, feature="ged_sb")
         cm_df = _make_cm_dataframe(n_times, n_samples, feature="ged_sb")
 
-        args = (1, 1, feature, 0.01, 500, 1e-6, cm_df, pg_df, "cpu")
+        args = (1, 1, feature, cm_df, pg_df, "cpu")
         _, _, _, tensor = ReconciliationModule._reconcile_country_worker(args)
 
         assert tensor.device == torch.device("cpu"), (
@@ -121,7 +119,7 @@ class TestReconcileCountryWorker:
         pg_df = _make_pg_dataframe(n_grids, n_times, n_samples, feature="ged_sb")
         cm_df = _make_cm_dataframe(n_times, n_samples, feature="ged_sb")
 
-        args = (1, 1, feature, 0.01, 500, 1e-6, cm_df, pg_df, "cpu")
+        args = (1, 1, feature, cm_df, pg_df, "cpu")
         _, _, _, tensor = ReconciliationModule._reconcile_country_worker(args)
 
         assert not torch.isnan(tensor).any(), (
@@ -178,18 +176,18 @@ def _make_reconcile_stub():
     mod._valid_cids = [1]
     mod._valid_time_ids = {100}
     mod._valid_targets = {"pred_ged_sb"}
-    # get_subset_dataframe and get_subset_by_country_id return DataFrames
     mod._c_dataset.get_subset_dataframe.return_value = pd.DataFrame()
-    mod._pg_dataset.get_subset_by_country_id.return_value = pd.DataFrame()
     return mod
 
 
 class TestReconcileOrchestration:
     """Tests for reconcile() parallel execution, partial failure, and result collection."""
 
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
-    def test_reconcile_collects_successful_results(self, MockExecutor, MockWandB):
+    @patch("views_reporting.reconciliation.reconciliation.get_subset_by_country_id", return_value=pd.DataFrame())
+    @patch("views_reporting.reconciliation.reconciliation.reconcile_pg_dataset")
+    @patch("views_reporting.reconciliation.reconciliation.WandBModule")
+    @patch("views_reporting.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    def test_reconcile_collects_successful_results(self, MockExecutor, MockWandB, mock_reconcile_pg, _mock_subset):
         """Successful worker results must be applied to the pg_dataset."""
         mod = _make_reconcile_stub()
         result_tensor = torch.tensor([[1.0, 2.0]])
@@ -205,14 +203,17 @@ class TestReconcileOrchestration:
 
         mod.reconcile(max_workers=1)
 
-        # pg_dataset.reconcile must be called with the successful result
-        mod._pg_dataset.reconcile.assert_called_once_with(
-            country_id=1, time_id=100, reconciled_tensor=result_tensor, feature="pred_ged_sb"
+        # reconcile_pg_dataset must be called with the successful result
+        mock_reconcile_pg.assert_called_once_with(
+            mod._pg_dataset,
+            country_id=1, time_id=100, reconciled_tensor=result_tensor, feature="pred_ged_sb",
         )
 
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
-    def test_reconcile_continues_on_partial_failure(self, MockExecutor, MockWandB):
+    @patch("views_reporting.reconciliation.reconciliation.get_subset_by_country_id", return_value=pd.DataFrame())
+    @patch("views_reporting.reconciliation.reconciliation.reconcile_pg_dataset")
+    @patch("views_reporting.reconciliation.reconciliation.WandBModule")
+    @patch("views_reporting.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    def test_reconcile_continues_on_partial_failure(self, MockExecutor, MockWandB, mock_reconcile_pg, _mock_subset):
         """Failed tasks must be logged and skipped — reconcile() must not raise."""
         mod = _make_reconcile_stub()
         # 2 countries, each with 1 time × 1 target = 2 tasks
@@ -234,15 +235,16 @@ class TestReconcileOrchestration:
         mod.reconcile(max_workers=1)
 
         # Only the successful result should be applied
-        assert mod._pg_dataset.reconcile.call_count == 1
+        assert mock_reconcile_pg.call_count == 1
         # WandB alert should be sent for the failure
         assert MockWandB.send_alert.call_count >= 1
 
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.as_completed", return_value=iter([]))
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    @patch("views_reporting.reconciliation.reconciliation.get_subset_by_country_id", return_value=pd.DataFrame())
+    @patch("views_reporting.reconciliation.reconciliation.as_completed", return_value=iter([]))
+    @patch("views_reporting.reconciliation.reconciliation.WandBModule")
+    @patch("views_reporting.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
     @patch("os.cpu_count", return_value=4)
-    def test_reconcile_uses_computed_max_workers(self, mock_cpu, MockPPE, MockWandB, mock_as_completed):
+    def test_reconcile_uses_computed_max_workers(self, mock_cpu, MockPPE, MockWandB, mock_as_completed, _mock_subset):
         """When max_workers=None, ProcessPoolExecutor must receive min(32, cpu_count+4)."""
         mod = _make_reconcile_stub()
 
@@ -256,9 +258,11 @@ class TestReconcileOrchestration:
 
         MockPPE.assert_called_once_with(max_workers=8)
 
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.WandBModule")
-    @patch("views_pipeline_core.modules.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
-    def test_reconcile_sends_completion_alert(self, MockExecutor, MockWandB):
+    @patch("views_reporting.reconciliation.reconciliation.get_subset_by_country_id", return_value=pd.DataFrame())
+    @patch("views_reporting.reconciliation.reconciliation.reconcile_pg_dataset")
+    @patch("views_reporting.reconciliation.reconciliation.WandBModule")
+    @patch("views_reporting.reconciliation.reconciliation.concurrent.futures.ProcessPoolExecutor")
+    def test_reconcile_sends_completion_alert(self, MockExecutor, MockWandB, mock_reconcile_pg, _mock_subset):
         """reconcile() must send a WandB alert on completion."""
         mod = _make_reconcile_stub()
 

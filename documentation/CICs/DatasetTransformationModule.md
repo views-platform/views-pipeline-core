@@ -88,6 +88,8 @@ Manages reversible data transformations for the VIEWS forecasting pipeline. Prov
 
 ## 7. Boundaries and Interactions
 
+- **Canonical location**: `views_reporting.transformations` (extracted from pipeline-core via ADR-054).
+- **Re-export shim**: `views_pipeline_core.modules.transformations` re-exports from `views_reporting` for backwards compatibility. The shim raises `ImportError` if `views-reporting` is not installed.
 - **Depends on**: `CMDataset` / `PGMDataset` (from `views_pipeline_core.data.handlers`), `polars`, `numpy`, `pandas`.
 - **Used by**: Forecast reporting modules that need to reverse log transformations before presenting results.
 - Has no interaction with storage, model training, or external services.

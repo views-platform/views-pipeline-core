@@ -103,6 +103,8 @@ Computes Maximum A Posteriori (MAP) estimates and Highest Density Intervals (HDI
 
 ## 7. Boundaries and Interactions
 
+- **Canonical location**: `views_reporting.statistics` (extracted from pipeline-core via ADR-054).
+- **Re-export shim**: `views_pipeline_core.modules.statistics` re-exports from `views_reporting` for backwards compatibility. The shim raises `ImportError` if `views-reporting` is not installed.
 - **Depends on**: `numpy`, `scipy.stats` (used only in `test_posterior_analyzer()`), `matplotlib.pyplot`, `torch` (imported but not used by `PosteriorDistributionAnalyzer` -- used by `ForecastReconciler` in the same module).
 - **Co-located with**: `ForecastReconciler` in the same `statistics.py` module. These are independent classes.
 - **Used by**: Pipeline reporting and analysis code that works with probabilistic model outputs.
@@ -114,7 +116,7 @@ Computes Maximum A Posteriori (MAP) estimates and Highest Density Intervals (HDI
 
 ```python
 import numpy as np
-from views_pipeline_core.modules.statistics.statistics import PosteriorDistributionAnalyzer
+from views_reporting.statistics import PosteriorDistributionAnalyzer
 
 # Basic analysis
 analyzer = PosteriorDistributionAnalyzer()

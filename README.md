@@ -177,12 +177,13 @@ Each stage receives an immutable frozen context object and is independently unit
 | Module                        | Role                                           |
 |-------------------------------|------------------------------------------------|
 | [dataloaders](./views_pipeline_core/modules/dataloaders/README.md) | Partition-aware data retrieval + drift detection + incremental update |
-| [transformations](./views_pipeline_core/modules/transformations/README.md) | Dataset transformation undo/management |
-| [reconciliation](./views_pipeline_core/modules/reconciliation/README.md) | Hierarchical grid ↔ country alignment |
-| [reports](./views_pipeline_core/modules/reports/README.md) | Tailwind-styled HTML evaluation/forecast report generation |
-| [mapping](./views_pipeline_core/modules/mapping/README.md) | Static + interactive choropleth maps (matplotlib / Plotly) |
+| transformations | Dataset transformation undo/management (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
+| reconciliation | Hierarchical grid ↔ country alignment (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
+| reports | Tailwind-styled HTML evaluation/forecast report generation (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
+| mapping | Static + interactive choropleth maps (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
+| visualizations | Historical line graphs & distribution plots (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | [logging](./views_pipeline_core/modules/logging/README.md) | Central logging configuration injection |
-| [statistics](./views_pipeline_core/modules/statistics/README.md) | Forecast reconciliation math (proportional scaling) |
+| statistics | Posterior distribution analysis & forecast reconciliation (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | [wandb](./views_pipeline_core/modules/wandb/README.md) | Alerts, artifact logging, run lifecycle |
 | [model validation](./views_pipeline_core/modules/validation/README.md) | Structural & logical integrity checks (sniffer pattern, ADR-041) |
 | [ensemble validation](./views_pipeline_core/modules/validation/ensemble/README.md) | Structural & logical integrity checks |

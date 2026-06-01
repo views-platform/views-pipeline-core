@@ -2,7 +2,13 @@ import pytest
 import pandas as pd
 import numpy as np
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
-from views_pipeline_core.modules.statistics import PosteriorDistributionAnalyzer
+
+pytest.importorskip("views_reporting")
+
+from views_reporting.statistics import (  # noqa: E402
+    calculate_hdi,
+    calculate_map,
+)
 
 # Fixtures for test data
 @pytest.fixture
@@ -107,7 +113,7 @@ class TestStatisticalMethods:
     def test_map_df(self, sample_predictions_df):
         """Test MAP estimation logic"""
         ds = _ViewsDataset(sample_predictions_df)
-        map_df = ds.calculate_map()
+        map_df = calculate_map(ds)
         
         # Validate structure
         assert map_df.shape == (4, 2)  # 4 observations, 2 variables
@@ -123,7 +129,7 @@ class TestStatisticalMethods:
     def test_hdi_calculation(self, sample_predictions_df):
         """Test HDI interval calculation"""
         ds = _ViewsDataset(sample_predictions_df)
-        hdi_df = ds.calculate_hdi(alpha=0.5)
+        hdi_df = calculate_hdi(ds, alpha=0.5)
         
         # Validate interval structure
         assert hdi_df.shape == (4, 4)  # 4 observations, 2 vars × 2 bounds
@@ -132,21 +138,6 @@ class TestStatisticalMethods:
             upper = hdi_df[f"{var}_hdi_upper"]
             assert (lower <= upper).all()
     
-    def test_posterior_analyzer(self):
-        """Test PosteriorDistributionAnalyzer's MAP containment and HDI nesting across distributions."""
-        failed_map, failed_nesting = PosteriorDistributionAnalyzer.test_posterior_analyzer(verbose=False)
-        
-        # Assert no MAP containment failures
-        assert not failed_map, (
-            f"MAP not contained in all HDIs for distributions: {failed_map}.\n"
-            "Check: 1) Zero-mass threshold handling 2) HDI enforcement logic"
-        )
-        
-        # Assert no HDI nesting failures
-        assert not failed_nesting, (
-            f"HDIs not properly nested for distributions: {failed_nesting}.\n"
-            "Check HDI expansion logic in _enforce_hdi_structure()"
-        )
 
 class TestSubclassValidation:
     """Tests for dataset subclass index validation"""
