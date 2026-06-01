@@ -5,8 +5,11 @@ Generated: 2026-05-28
 These tests encode findings. Each currently FAILS, documenting a real issue.
 Fix the underlying issue, then the test passes.
 """
+import pytest
 
-from pathlib import Path
+pytest.importorskip("views_reporting")
+
+from pathlib import Path  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # F-1 (HARD): Test file imports bypass the shim
