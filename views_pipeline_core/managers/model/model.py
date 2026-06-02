@@ -1626,6 +1626,7 @@ class ForecastingModelManager(ModelManager):
                     model_path=self._model_path,
                     run_type=self.args.run_type,
                     entity=self._entity,
+                    prediction_format=self._prediction_format,
                 )
                 self._reporting_stage.generate_forecast_report(context)
             except PipelineException:
@@ -1954,6 +1955,7 @@ class ForecastingModelManager(ModelManager):
                     model_path=self._model_path,
                     run_type=self.args.run_type,
                     entity=self._entity,
+                    prediction_format=self._prediction_format,
                 )
                 self._reporting_stage.generate_evaluation_report(context)
             except PipelineException:

@@ -238,6 +238,91 @@ class TestForecastReportErrors:
             stage.generate_forecast_report(ctx)
 
 
+# ── GREEN: Forecast report — PredictionFrame path ─────────────────────────
+
+
+class TestForecastReportPredictionFrame:
+    """Verify forecast report generation for PredictionFrame models."""
+
+    @patch("views_pipeline_core.files.utils.read_dataframe")
+    @patch(
+        "views_reporting.templates.reports.forecast.ForecastReportTemplate"
+    )
+    def test_pf_path_passes_prediction_format_and_path(
+        self, mock_template_cls, mock_read,
+    ):
+        """PF path: template.generate() receives prediction_format and prediction_path."""
+        import pandas as pd
+
+        stage = _make_stage()
+        ctx = _make_context(prediction_format="prediction_frame")
+        ctx.model_path.target = "model"
+        ctx.model_path._get_generated_pf_prediction_paths.return_value = [
+            Path("/tmp/predictions_forecasting_20260601")
+        ]
+
+        mock_read.return_value = pd.DataFrame({"lr_sb": [0.1]})
+        mock_template_cls.return_value.generate.return_value = Path(
+            "/tmp/report.html"
+        )
+
+        result = stage.generate_forecast_report(ctx)
+
+        assert result == Path("/tmp/report.html")
+        mock_read.assert_called_once()  # historical only — PF path skips read_dataframe for forecast
+        mock_template_cls.return_value.generate.assert_called_once_with(
+            historical_dataframe=mock_read.return_value,
+            prediction_format="prediction_frame",
+            prediction_path=Path("/tmp/predictions_forecasting_20260601"),
+        )
+
+    @patch("views_pipeline_core.files.utils.read_dataframe")
+    @patch(
+        "views_reporting.templates.reports.forecast.ForecastReportTemplate"
+    )
+    def test_pf_path_missing_predictions_raises_file_not_found(
+        self, mock_template_cls, mock_read,
+    ):
+        """PF path: missing prediction directory raises FileNotFoundError."""
+        import pandas as pd
+
+        stage = _make_stage()
+        ctx = _make_context(prediction_format="prediction_frame")
+        ctx.model_path.target = "model"
+        ctx.model_path._get_generated_pf_prediction_paths.return_value = []
+
+        mock_read.return_value = pd.DataFrame({"lr_sb": [0.1]})
+
+        with pytest.raises(FileNotFoundError, match="PredictionFrame"):
+            stage.generate_forecast_report(ctx)
+
+    @patch("views_pipeline_core.files.utils.read_dataframe")
+    @patch(
+        "views_reporting.templates.reports.forecast.ForecastReportTemplate"
+    )
+    def test_df_path_unchanged_with_default_format(
+        self, mock_template_cls, mock_read,
+    ):
+        """Default prediction_format='dataframe' takes the existing parquet path."""
+        import pandas as pd
+
+        stage = _make_stage()
+        ctx = _make_context()  # default prediction_format="dataframe"
+        ctx.model_path.target = "model"
+
+        mock_read.return_value = pd.DataFrame({"lr_sb": [0.1]})
+        mock_template_cls.return_value.generate.return_value = Path(
+            "/tmp/report.html"
+        )
+
+        stage.generate_forecast_report(ctx)
+
+        mock_template_cls.return_value.generate.assert_called_once_with(
+            forecast_dataframe=mock_read.return_value,
+            historical_dataframe=mock_read.return_value,
+        )
+
+
 # ── GREEN: Evaluation report ────────────────────────────────────────────────
 
 

@@ -389,6 +389,7 @@ class PredictionFrameEnsembleManager:
                     model_path=self._ensemble_path,
                     run_type=ctx.run_type,
                     entity=self._entity,
+                    prediction_format=ctx.prediction_format,
                 )
                 self._reporting_stage.generate_forecast_report(reporting_ctx)
             except PipelineException:
@@ -416,6 +417,7 @@ class PredictionFrameEnsembleManager:
                     model_path=self._ensemble_path,
                     run_type=ctx.run_type,
                     entity=self._entity,
+                    prediction_format=ctx.prediction_format,
                 )
                 self._reporting_stage.generate_evaluation_report(reporting_ctx)
             except PipelineException:
