@@ -28,6 +28,7 @@ class ReportingContext(BaseStageContext):
     reporting-specific fields.
     """
     entity: str  # WandB entity for get_latest_run(), e.g. "views_pipeline"
+    prediction_format: str = "dataframe"
 
 
 class ReportingStage:
@@ -59,8 +60,6 @@ class ReportingStage:
             FileNotFoundError: If forecast dataframe is not found.
             ValueError: If model_path.target is not 'model' or 'ensemble'.
         """
-        from views_pipeline_core.files.utils import read_dataframe
-
         logger.info(
             f"Generating forecast report for "
             f"{context.model_path.target} {context.configs['name']}..."
@@ -68,21 +67,6 @@ class ReportingStage:
 
         # --- Load historical data ---
         historical_df = self._load_historical_data(context)
-
-        # --- Load forecast data ---
-        try:
-            forecast_df = read_dataframe(
-                context.model_path._get_generated_predictions_data_file_paths(
-                    run_type=context.run_type
-                )[0]
-            )
-            logger.info("Using latest forecast dataframe")
-        except (FileNotFoundError, IndexError) as e:
-            raise FileNotFoundError(
-                f"Forecast dataframe was probably not found. Please run the "
-                f"pipeline in forecasting mode with '--run_type forecasting' "
-                f"to generate the forecast dataframe. More info: {e}"
-            ) from e
 
         # --- Generate report ---
         from views_reporting.templates.reports.forecast import (
@@ -94,10 +78,46 @@ class ReportingStage:
             model_path=context.model_path,
             run_type=context.run_type,
         )
-        report_path = forecast_template.generate(
-            forecast_dataframe=forecast_df,
-            historical_dataframe=historical_df,
-        )
+
+        if context.prediction_format == "prediction_frame":
+            try:
+                prediction_path = (
+                    context.model_path._get_generated_pf_prediction_paths(
+                        run_type=context.run_type
+                    )[0]
+                )
+            except (FileNotFoundError, IndexError) as e:
+                raise FileNotFoundError(
+                    f"No PredictionFrame prediction directory found. Run the "
+                    f"pipeline in forecasting mode with '--run_type forecasting' "
+                    f"to generate predictions. More info: {e}"
+                ) from e
+            logger.info("Using PredictionFrame predictions from %s", prediction_path)
+            report_path = forecast_template.generate(
+                historical_dataframe=historical_df,
+                prediction_format="prediction_frame",
+                prediction_path=prediction_path,
+            )
+        else:
+            from views_pipeline_core.files.utils import read_dataframe
+
+            try:
+                forecast_df = read_dataframe(
+                    context.model_path._get_generated_predictions_data_file_paths(
+                        run_type=context.run_type
+                    )[0]
+                )
+                logger.info("Using latest forecast dataframe")
+            except (FileNotFoundError, IndexError) as e:
+                raise FileNotFoundError(
+                    f"Forecast dataframe was probably not found. Please run the "
+                    f"pipeline in forecasting mode with '--run_type forecasting' "
+                    f"to generate the forecast dataframe. More info: {e}"
+                ) from e
+            report_path = forecast_template.generate(
+                forecast_dataframe=forecast_df,
+                historical_dataframe=historical_df,
+            )
 
         self._wandb_module.send_alert(
             title="Forecast Report Generated",
