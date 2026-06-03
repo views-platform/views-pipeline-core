@@ -355,12 +355,19 @@ def format_metadata_dict(metadata_dict):
     formatted_dict = dict(sorted(formatted_dict.items(), key=lambda item: item[0]))
     return formatted_dict
 
-def get_latest_run(entity: str, model_name: str, run_type: str) -> Optional['wandb.apis.public.runs.Run']:
+def get_latest_run(entity: str, model_name: str, run_type: str, job_type: Optional[str] = None) -> Optional['wandb.apis.public.runs.Run']:
     """
     Retrieves the latest WandB run from the current session.
 
+    Args:
+        entity: WandB entity name.
+        model_name: Model name used to identify the WandB project.
+        run_type: Run type suffix appended to the project name.
+        job_type: Optional WandB job_type to filter by (e.g. 'evaluate', 'train').
+            When provided only runs with a matching job_type are considered.
+
     Returns:
-        Optional[wandb.Run]: The latest run object if available, otherwise None.
+        Optional[wandb.Run]: The latest matching run object if available, otherwise None.
     """
     from wandb import Api
     api = Api()
@@ -369,10 +376,12 @@ def get_latest_run(entity: str, model_name: str, run_type: str) -> Optional['wan
         key=lambda run: run.created_at,
         reverse=True,
     )
-    # Pick the latest successfully finished run
+    # Pick the latest successfully finished run, optionally filtered by job_type
     latest_run = next(
         run
         for run in wandb_runs
-        if run.state == "finished" and len(dict(run.summary)) > 1
+        if run.state == "finished"
+        and len(dict(run.summary)) > 1
+        and (job_type is None or run.job_type == job_type)
     )
     return latest_run if len(dict(latest_run.summary)) > 1 else None

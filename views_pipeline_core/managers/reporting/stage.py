@@ -130,6 +130,7 @@ class ReportingStage:
             entity=context.entity,
             model_name=context.model_path.model_name,
             run_type=context.run_type,
+            job_type="evaluate",
         )
 
         targets = context.configs["targets"]

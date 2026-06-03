@@ -186,7 +186,7 @@ class EvaluationReportTemplate:
         for model in models:
             try:
                 latest_run = get_latest_run(
-                    entity="views_pipeline", model_name=model, run_type=self.run_type
+                    entity="views_pipeline", model_name=model, run_type=self.run_type, job_type="evaluate"
                 )
                 if latest_run:
                     constituent_model_runs.append(latest_run)
@@ -206,23 +206,14 @@ class EvaluationReportTemplate:
                     for k, v in temp_metadata_dict.items()
                     if k.lower() == self.run_type.lower()
                 }
-                constituent_level = temp_metadata_dict.get("level", None)
                 if verified_level is None:
-                    verified_level = constituent_level
-                elif constituent_level is not None and verified_level != constituent_level:
+                    verified_level = temp_metadata_dict.get("level", None)
+                elif verified_level != temp_metadata_dict.get("level", None):
                     raise ValueError(
-                        f"LoA metadata mismatch between models: Offending model: {temp_metadata_dict.get('name', 'N/A')}. Expected level: {verified_level}, found: {constituent_level}"
-                    )
-                elif constituent_level is None:
-                    logger.warning(
-                        f"Constituent model '{temp_metadata_dict.get('name', 'N/A')}' has no 'level' metadata — skipping LoA check for this model."
+                        f"LoA metadata mismatch between models: Offending model: {temp_metadata_dict.get('name', 'N/A')}. Expected level: {verified_level}, found: {temp_metadata_dict.get('level', 'N/A')}"
                     )
                 model_name = temp_metadata_dict.get("name", "N/A")
-                if not partition_metadata_dict:
-                    logger.warning(
-                        f"Constituent model '{model_name}' has no partition metadata for run_type '{self.run_type}' — skipping partition check for this model."
-                    )
-                elif verified_partition_dict is None:
+                if verified_partition_dict is None:
                     verified_partition_dict = partition_metadata_dict
                 elif verified_partition_dict != partition_metadata_dict:
                     logger.error("Partition metadata mismatch: %s vs %s", verified_partition_dict, partition_metadata_dict)
