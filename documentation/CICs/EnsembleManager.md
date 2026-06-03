@@ -52,6 +52,8 @@ hierarchical PGM-CM consistency.
   called before execution when `args.train` is `False` (i.e., when using
   existing artifacts). Data freshness checks (Conditions 2+3) are only
   enforced for forecasting runs with non-saved data (ADR-018 amendment).
+- Guarantees that `_create_model_args()` forces `saved=True` for all
+  non-training subprocess dispatch, independent of the caller's `saved` flag.
 - Guarantees that `handle_ensemble_log_creation` is called after evaluation
   and forecasting for audit trail purposes.
 - Guarantees that WandB alerts are sent on stage completion and on errors,

@@ -75,6 +75,8 @@ def validate_model_conditions(path_generated, run_type, saved=False):
     # Only enforced for forecasting runs with non-saved data.
     # Calibration/validation use fixed historical partitions; saved runs
     # consume pre-computed output — fetch timing is irrelevant in both cases.
+    # Guards are deliberately independent: run_type encodes domain knowledge
+    # (ADR-018), saved encodes CLI state (args.py:411). See C-146, D-23.
     if run_type == "forecasting" and not saved:
         # Condition 2: Data generated in the current month
         if data_generation_timestamp and not (

@@ -70,6 +70,8 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   before execution when `args.train is False`. Data freshness checks (Conditions
   2+3) are only enforced for forecasting runs with non-saved data (ADR-018
   amendment).
+- Guarantees that `_create_model_args()` forces `saved=True` for all
+  non-training subprocess dispatch, independent of the caller's `saved` flag.
 - Guarantees that subprocess execution uses `timeout=7200` seconds.
 - Guarantees cache-first loading: `_load_or_generate_pf()` checks for existing
   `y_pred.npy` before dispatching a subprocess.
