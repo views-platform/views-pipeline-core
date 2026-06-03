@@ -19,7 +19,10 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.modules.reconciliation.reconciliation import (
     ReconciliationModule,
 )
-from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
+from views_pipeline_core.modules.dataset.core import (
+    PriogridMonthDataset,
+    CountryMonthDataset,
+)
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.modules.aggregation.aggregator import (
     AggregationModule,
@@ -355,7 +358,6 @@ class EnsembleManager(ForecastingModelManager):
         df_prediction = self._get_aggregated_df(
             df_to_aggregate=model_dfs, aggregation=self.configs["aggregation"]
         )
-        df_prediction = _ViewsDataset(source=df_prediction).dataframe
 
         # Apply reconciliation if configured
         if self.__activate_reconciliation:
@@ -698,14 +700,15 @@ class EnsembleManager(ForecastingModelManager):
             return None
 
         # Load PG dataset
-        latest_pg_dataset = (
-            _PGDataset(
-                source=self._model_path._get_generated_predictions_data_file_paths(
-                    run_type=self.configs["run_type"]
-                )[0]
-            )
-            if pg_dataframe is None
-            else _PGDataset(source=pg_dataframe)
+        if pg_dataframe is None:
+            pg_source = self._model_path._get_generated_predictions_data_file_paths(
+                run_type=self.configs["run_type"]
+            )[0]
+        else:
+            pg_source = pg_dataframe
+
+        latest_pg_dataset = PriogridMonthDataset(
+            data=pg_source,
         )
 
         if latest_pg_dataset is None:
@@ -718,11 +721,19 @@ class EnsembleManager(ForecastingModelManager):
         reconciliation_manager = ReconciliationModule(
             c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset
         )
-        return reconciliation_manager.reconcile(lr=0.01, max_iters=500, tol=1e-6)
+        reconciled_lf = reconciliation_manager.reconcile(lr=0.01, max_iters=500, tol=1e-6)
+
+        # Convert back to pandas with MultiIndex for downstream compatibility
+        if reconciled_lf is not None:
+            reconciled_df = reconciled_lf.collect(engine="streaming").to_pandas()
+            index_cols = [latest_pg_dataset.time_col, latest_pg_dataset.entity_col]
+            reconciled_df = reconciled_df.set_index(index_cols).sort_index()
+            return reconciled_df
+        return None
 
     def _load_c_dataset(
         self, cm_model: str, c_dataframe: Optional[pd.DataFrame]
-    ) -> Optional[_CDataset]:
+    ) -> Optional[CountryMonthDataset]:
         """
         Load C dataset from prediction store, local path, or provided DataFrame.
 
@@ -731,11 +742,11 @@ class EnsembleManager(ForecastingModelManager):
             c_dataframe (Optional[pd.DataFrame]): Optional DataFrame to use.
 
         Returns:
-            Optional[_CDataset]: The loaded C dataset or None.
+            Optional[CountryMonthDataset]: The loaded C dataset or None.
         """
         if c_dataframe is not None:
             logger.info(f"Using provided C dataset for model {cm_model}")
-            return _CDataset(source=c_dataframe)
+            return CountryMonthDataset(data=c_dataframe)
 
         if self._use_prediction_store:
             try:
@@ -753,8 +764,8 @@ class EnsembleManager(ForecastingModelManager):
                 reconcile_with_forecasts.sort()
                 reconcile_with_forecast = reconcile_with_forecasts[-1]
 
-                return _CDataset(
-                    source=pd.DataFrame.forecasts.read_store(
+                return CountryMonthDataset(
+                    data=pd.DataFrame.forecasts.read_store(
                         run=run_id, name=reconcile_with_forecast
                     )
                 )
@@ -766,15 +777,12 @@ class EnsembleManager(ForecastingModelManager):
         # Try local path
         try:
             logger.info(f"Fetching latest C dataset for {cm_model} from local path")
-            return _CDataset(
-                source=EnsemblePathManager(
-                    cm_model
-                )._get_generated_predictions_data_file_paths(
-                    run_type=self.configs["run_type"]
-                )[
-                    0
-                ]
-            )
+            path = EnsemblePathManager(
+                cm_model
+            )._get_generated_predictions_data_file_paths(
+                run_type=self.configs["run_type"]
+            )[0]
+            return CountryMonthDataset(data=path)
         except Exception as e:
             logger.warning(
                 f"Could not find latest C dataset for {cm_model} locally: {e}"

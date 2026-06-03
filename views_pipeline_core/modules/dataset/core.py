@@ -1112,7 +1112,91 @@ class SpatioTemporalDataset:
             dtype=dtype,
         )
         return converter.convert(df, columns)
-    
+
+    def to_tensor_mmap(
+        self,
+        features: Optional[List[str]] = None,
+        time_ids: Optional[Union[int, List[int]]] = None,
+        entity_ids: Optional[Union[int, List[int]]] = None,
+        dtype: str = "float32",
+        name: Optional[str] = None,
+    ) -> np.ndarray:
+        """Convert dataset to a memory-mapped 4D tensor (T, E, S, F).
+
+        Builds the tensor feature-by-feature so peak RAM never exceeds
+        one feature's worth of data (T * E * S). The result is a
+        read-only np.memmap backed by a file on disk.
+
+        Args:
+            features: Feature columns to include (None = all data columns).
+            time_ids: Filter to specific time indices.
+            entity_ids: Filter to specific entity indices.
+            dtype: Numpy dtype string.
+            name: Identifier for the stored tensor (default: auto-generated).
+
+        Returns:
+            Read-only np.memmap with shape (T, E, S, F).
+        """
+        feat_list = self._resolve_features(features)
+        if not feat_list:
+            raise ValidationError("No features to convert")
+
+        if time_ids is not None:
+            times = [time_ids] if isinstance(time_ids, int) else list(time_ids)
+        else:
+            times = self._unique_times
+        if entity_ids is not None:
+            entities = [entity_ids] if isinstance(entity_ids, int) else list(entity_ids)
+        else:
+            entities = self._unique_entities
+
+        n_times = len(times)
+        n_entities = len(entities)
+        n_samples = self._dist_layout.sample_size
+        n_features = len(feat_list)
+
+        tensor_name = name or f"tensor_{n_times}x{n_entities}x{n_samples}x{n_features}"
+        shape = (n_times, n_entities, n_samples, n_features)
+
+        logger.info(
+            f"Creating mmap tensor '{tensor_name}': shape={shape}, "
+            f"dtype={dtype}, ~{np.prod(shape) * np.dtype(dtype).itemsize / 1e9:.2f} GB on disk"
+        )
+
+        handle = self._tensors.create(tensor_name, shape=shape, dtype=dtype)
+
+        # Build base lazy plan once — select only index + all requested features.
+        # No .sort() overhead: self._lf is already sorted.
+        index_cols = list(self._index.index_cols)
+        base_lf = self._lf.select(index_cols + feat_list)
+
+        # Apply row filters directly (bypass _get_subset_lazy overhead)
+        if time_ids is not None:
+            t_list = [time_ids] if isinstance(time_ids, int) else list(time_ids)
+            base_lf = base_lf.filter(pl.col(self.time_col).is_in(t_list))
+        if entity_ids is not None:
+            e_list = [entity_ids] if isinstance(entity_ids, int) else list(entity_ids)
+            base_lf = base_lf.filter(pl.col(self.entity_col).is_in(e_list))
+
+        for f_idx, feat in enumerate(feat_list):
+            # Collect only index + this feature via streaming engine
+            feat_df = base_lf.select(index_cols + [feat]).collect(engine="streaming")
+            data = self._tensor_mod.convert(
+                feat_df, [feat], self._index, self._dist_layout
+            )
+            del feat_df
+            if data.size == 0:
+                logger.warning(f"Feature '{feat}' produced empty tensor, skipping")
+                continue
+            # data shape: (T, E, S, 1) -> write into feature slice
+            handle.write_block(
+                data.squeeze(axis=-1),
+                (slice(None), slice(None), slice(None), f_idx),
+            )
+            del data
+
+        return handle.read()
+
     def get_ml_inputs(
         self,
         feature_cols: List[str],
@@ -1299,6 +1383,40 @@ class CountryDataset(SpatioTemporalDataset):
     ) -> Union[pl.DataFrame, pd.DataFrame]:
         """Get region classification based on GW codes."""
         return self._country_meta.get_region_name(self._entity_lookup_df(), return_pandas=return_pandas)
+
+    # -------------------------------------------------------------------------
+    # Reconciliation Support
+    # -------------------------------------------------------------------------
+
+    def to_reconciler(
+        self,
+        feature: str,
+        time_id: int,
+        country_id: Optional[int] = None,
+    ) -> np.ndarray:
+        """Extract country values for ForecastReconciler.
+
+        Returns values in natural scale (exp applied to ln_ features)
+        with shape (n_samples, n_entities).
+
+        Args:
+            feature: Prediction feature to extract.
+            time_id: Time ID to extract.
+            country_id: Specific country (None = all entities).
+
+        Returns:
+            Array of shape (n_samples, n_entities) in natural scale.
+        """
+        entity_ids = [country_id] if country_id is not None else None
+
+        tensor = self.get_subset_tensor(
+            time_ids=[time_id], entity_ids=entity_ids, features=[feature]
+        )
+        # Shape: (1, n_entities, n_samples, 1) -> (n_samples, n_entities)
+        values = tensor.squeeze(axis=(0, 3)).T
+
+        values = ReconciliationModule._transform_for_reconciliation(values, feature)
+        return values
 
 
 # =============================================================================

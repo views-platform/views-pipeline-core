@@ -1,5 +1,6 @@
 import logging
 import pandas as pd
+import polars as pl
 from pathlib import Path
 from typing import Optional, Union
 from datetime import datetime
@@ -293,6 +294,71 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     except Exception as e:
         logger.exception(f"Error reading the DataFrame from {file_path}: {e}")
         raise
+
+
+def read_dataframe_polars(file_path: Union[str, Path]) -> pl.LazyFrame:
+    """
+    Return a Polars LazyFrame backed by the given file (zero-copy scan).
+
+    Supports .parquet and .csv. For .pkl files, falls back to loading via
+    pandas and converting (unavoidable since pickle is pandas-native).
+
+    Args:
+        file_path: Path to a .parquet, .csv, or .pkl file.
+
+    Returns:
+        pl.LazyFrame pointing at the file.
+
+    Raises:
+        ValueError: If the file extension is not supported.
+    """
+    if not isinstance(file_path, Path):
+        file_path = Path(file_path)
+    suffix = file_path.suffix
+
+    if suffix == ".parquet":
+        return pl.scan_parquet(file_path)
+    elif suffix == ".csv":
+        return pl.scan_csv(file_path)
+    elif suffix == ".pkl":
+        # Fallback: load via pandas, convert
+        df_pd = pd.read_pickle(file_path)
+        return pl.from_pandas(df_pd).lazy()
+    else:
+        raise ValueError(
+            f"Unsupported file extension '{suffix}' for Polars read. "
+            f"Supported: .parquet, .csv, .pkl"
+        )
+
+
+def save_lazyframe(lf: pl.LazyFrame, save_path: Union[str, Path]) -> None:
+    """
+    Sink a Polars LazyFrame to disk in streaming mode.
+
+    Uses sink_parquet for .parquet (streaming, bounded memory).
+    For other formats, collects to DataFrame first.
+
+    Args:
+        lf: The LazyFrame to persist.
+        save_path: Destination path. Extension determines format.
+
+    Raises:
+        ValueError: If the file extension is not supported.
+    """
+    if not isinstance(save_path, Path):
+        save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    suffix = save_path.suffix
+
+    if suffix == ".parquet":
+        lf.sink_parquet(save_path)
+    elif suffix == ".csv":
+        lf.collect().write_csv(save_path)
+    else:
+        raise ValueError(
+            f"Unsupported file extension '{suffix}' for LazyFrame save. "
+            f"Supported: .parquet, .csv"
+        )
 
 
 def generate_model_file_name(run_type: str, file_extension: str) -> str:

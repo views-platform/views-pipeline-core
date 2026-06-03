@@ -1,6 +1,7 @@
 import os
 from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
+import polars as pl
 import logging
 from pathlib import Path
 from datetime import datetime
@@ -1476,4 +1477,62 @@ class ViewsDataLoader:
                 logger.warning({f"{partition} data alert {ialert}": str(alert)})
 
         return df, alerts
+
+    def get_data_lazy(
+        self,
+        self_test: bool,
+        partition: str,
+        use_saved: bool,
+        validate: bool = True,
+        override_month: int = None,
+        level: Optional[str] = None,
+    ) -> tuple[pl.LazyFrame, list]:
+        """
+        Fetch or load model data as a Polars LazyFrame.
+
+        Delegates to get_data() to handle VIEWSER fetch, caching, and
+        validation, then returns a zero-copy scan of the cached parquet file.
+        For .pkl cached files, converts through pandas.
+
+        Args:
+            Same as get_data().
+
+        Returns:
+            Tuple of (lazy_frame, alerts):
+                - lazy_frame: pl.LazyFrame backed by the cached parquet file.
+                    Columns correspond to the queryset features/targets.
+                    The MultiIndex [month_id, entity_id] is flattened to columns.
+                - alerts: List of drift detection alerts (empty if none).
+        """
+        # Ensure data is fetched/cached
+        _, alerts = self.get_data(
+            self_test=self_test,
+            partition=partition,
+            use_saved=use_saved,
+            validate=validate,
+            override_month=override_month,
+            level=level,
+        )
+
+        cached_path = self._cached_data_path
+        if cached_path is None:
+            raise RuntimeError(
+                "get_data_lazy: cached_data_path is None after get_data(). "
+                "This indicates a bug in the data loading pipeline."
+            )
+
+        if cached_path.suffix == ".parquet":
+            lf = pl.scan_parquet(cached_path)
+        elif cached_path.suffix == ".pkl":
+            # Fallback: read via pandas, convert
+            df_pd = pd.read_pickle(cached_path)
+            if isinstance(df_pd.index, pd.MultiIndex):
+                df_pd = df_pd.reset_index()
+            lf = pl.from_pandas(df_pd).lazy()
+        else:
+            raise ValueError(
+                f"Unsupported cached file format: {cached_path.suffix}"
+            )
+
+        return lf, alerts
     

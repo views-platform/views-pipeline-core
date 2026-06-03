@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, Optional, Union
 
 import pandas as pd
+import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -84,6 +85,10 @@ class PredictionIOManager:
 
             if isinstance(df_predictions, pa.Table):
                 pq.write_table(df_predictions, path_generated / predictions_name)
+            elif isinstance(df_predictions, pl.LazyFrame):
+                df_predictions.sink_parquet(path_generated / predictions_name)
+            elif isinstance(df_predictions, pl.DataFrame):
+                df_predictions.write_parquet(path_generated / predictions_name)
             else:
                 save_dataframe(df_predictions, path_generated / predictions_name)
 

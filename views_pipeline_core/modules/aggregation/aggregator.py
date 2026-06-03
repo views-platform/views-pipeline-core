@@ -6,7 +6,11 @@ from typing import List, Union, Optional, Dict
 from pathlib import Path
 import logging
 from dataclasses import dataclass
-from views_pipeline_core.data.handlers import CMDataset, PGMDataset, _ViewsDataset
+from views_pipeline_core.modules.dataset.core import (
+    SpatioTemporalDataset,
+    CountryMonthDataset,
+    PriogridMonthDataset,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -767,50 +771,36 @@ class AggregationModule:
         """
         Normalize input to a Polars DataFrame with index columns included.
         Steps:
-        1. Accept polars / pandas / path.
-        2. Convert to pandas and ensure a 2-level MultiIndex.
-        3. Wrap in CMDataset or PGMDataset depending on the second index level.
-        4. Convert the processed dataset back to Polars, keeping index as columns.
+        1. Accept polars / pandas / path / LazyFrame.
+        2. Detect index columns and validate structure.
+        3. Sort by index columns for consistency.
         """
 
-        # ---------- 1) Normalize to pandas.DataFrame ----------
+        # ---------- 1) Normalize to Polars DataFrame ----------
         if isinstance(data, pl.DataFrame):
-            # Polars -> pandas
-            pdf = data.to_pandas()
-        elif isinstance(data, (pd.DataFrame, str, Path)):
-            pdf = data
+            df = data
+        elif isinstance(data, pl.LazyFrame):
+            df = data.collect(engine="streaming")
+        elif isinstance(data, pd.DataFrame):
+            if isinstance(data.index, pd.MultiIndex) or data.index.name is not None:
+                data = data.reset_index()
+            df = pl.from_pandas(data)
+        elif isinstance(data, (str, Path)):
+            path = Path(data)
+            if path.suffix == ".parquet":
+                df = pl.read_parquet(path)
+            elif path.suffix == ".csv":
+                df = pl.read_csv(path)
+            else:
+                raise TypeError(f"Unsupported file format: {path.suffix}")
         else:
             raise TypeError(
                 f"Unsupported data type: {type(data)}. "
-                "Type must be either Polars DataFrame, Pandas DataFrame or path to a file."
+                "Type must be Polars DataFrame/LazyFrame, Pandas DataFrame, or path."
             )
 
-        # Get index names
-        time_name, entity_name = _ViewsDataset(data).original_index.names
-
-        # ---------- 2) Wrap in CMDataset or PGMDataset ----------
-        # Decide based on the *second index level* entity_id --> country_id OR priogrid_id.
-        # Accepts priogrid_gid and pg_id defensively for data from any pipeline stage
-        # (ADR-034: priogrid_gid is pre-rename, priogrid_id is post-rename).
-        if entity_name == "country_id":
-            ds = CMDataset(pdf)
-        elif entity_name in ("priogrid_id", "priogrid_gid", "pg_id"):
-            ds = PGMDataset(pdf)
-        else:
-            raise ValueError(
-                f"Cannot infer dataset type from second index level '{entity_name}'. "
-                "Expected 'country_id' for CMDataset or one of "
-                "['priogrid_id', 'priogrid_gid', 'pg_id'] for PGMDataset."
-            )
-
-        # ---------- 3) Convert to Polars and keep index as columns ----------
-        #
-        pdf_processed = ds.dataframe.reset_index()
-        df = pl.from_pandas(pdf_processed)
-        logger.info(f"Data frame has the following columns: {df.columns}")
-
-        # ---------- 4) Schema validation on Polars dataframe ----------
-        # Validate that index columns are in dataframe
+        # ---------- 2) Detect and validate index columns ----------
+        # Check that configured index_cols are present
         missing_index_cols = [c for c in self.index_cols if c not in df.columns]
         if missing_index_cols:
             raise ValueError(f"Missing required index columns: {missing_index_cols}")
@@ -828,6 +818,10 @@ class AggregationModule:
                 raise TypeError(
                     f"Index column '{col}' must be integer, got {df[col].dtype}"
                 )
+
+        # ---------- 3) Sort for consistent ordering ----------
+        df = df.sort(self.index_cols)
+        logger.info(f"Data frame has the following columns: {df.columns}")
 
         # Validate target column types
         for col in self.target_cols:
