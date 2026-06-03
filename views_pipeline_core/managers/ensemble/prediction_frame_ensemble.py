@@ -237,7 +237,7 @@ class PredictionFrameEnsembleManager:
 
         try:
             if not args.train:
-                validate_ensemble_model(self.configs)
+                validate_ensemble_model(self.configs, saved=args.saved)
 
             self._execute_model_tasks(ctx)
         except PipelineException:

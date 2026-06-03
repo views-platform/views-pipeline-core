@@ -7,17 +7,20 @@ from views_pipeline_core.modules.validation.core_config_sniffer import DEPRECATE
 logger = logging.getLogger(__name__)
 
 
-def validate_model_conditions(path_generated, run_type):
+def validate_model_conditions(path_generated, run_type, saved=False):
     """
     Validate temporal requirements for model training and data freshness.
 
-    Checks that the model was trained in the current training cycle (after July)
-    and that both generated features and raw data were fetched in the current month.
+    Checks that the model was trained in the current training cycle (after July).
+    For forecasting runs with non-saved data, also checks that generated features
+    and raw data were fetched in the current month.
 
     Args:
         path_generated: Path to model's data_generated directory containing log files
         run_type: Type of run to validate: 'calibration' | 'forecasting' | 'validation'
             Determines which log file to read ({run_type}_log.txt)
+        saved: If True, skip data freshness checks (Conditions 2+3). Pre-computed
+            output means raw data fetch timing is irrelevant.
 
     Returns:
         True if all temporal conditions are met, False otherwise
@@ -25,17 +28,12 @@ def validate_model_conditions(path_generated, run_type):
     Raises:
         Exception: If log file cannot be read (logged but not raised)
 
-    Example:
-        >>> from pathlib import Path
-        >>> path = Path('models/conflict_model_v1/data/generated')
-        >>> is_valid = validate_model_conditions(path, 'forecasting')
-        >>> if not is_valid:
-        ...     print("Model does not meet temporal requirements")
-
     Note:
-        - Training cycle: July-June (models trained after July of previous year)
-        - Current month requirement ensures data freshness for production
-        - Logs detailed error messages before returning False
+        - Training cycle check (Condition 1) applies to all run types
+        - Data freshness checks (Conditions 2+3) only apply to forecasting
+          runs with non-saved data (see ADR-018 amendment)
+        - Calibration/validation runs use fixed historical partitions where
+          fetch timing is irrelevant
     """
     
     log_file_path = Path(path_generated) / f"{run_type}_log.txt"
@@ -73,17 +71,32 @@ def validate_model_conditions(path_generated, run_type):
                          f"Please use the latest model that is trained after {current_year - 1}_07. Exiting.")
             return False
 
-    # Condition 2: Data generated in the current month
-    if data_generation_timestamp and not (
-            data_generation_timestamp.year == current_year and data_generation_timestamp.month == current_month):
-        logger.error(f"Data for model {model_name} was not generated in the current month. Exiting.")
-        return False
+    # Conditions 2+3: data freshness (ADR-018).
+    # Only enforced for forecasting runs with non-saved data.
+    # Calibration/validation use fixed historical partitions; saved runs
+    # consume pre-computed output — fetch timing is irrelevant in both cases.
+    if run_type == "forecasting" and not saved:
+        # Condition 2: Data generated in the current month
+        if data_generation_timestamp and not (
+                data_generation_timestamp.year == current_year and data_generation_timestamp.month == current_month):
+            logger.error(f"Data for model {model_name} was not generated in the current month. Exiting.")
+            return False
 
-    # Condition 3: Raw data fetched in the current month
-    if data_fetch_timestamp and not (
-            data_fetch_timestamp.year == current_year and data_fetch_timestamp.month == current_month):
-        logger.error(f"Raw data for model {model_name} was not fetched in the current month. Exiting.")
-        return False
+        # Condition 3: Raw data fetched in the current month
+        if data_fetch_timestamp and not (
+                data_fetch_timestamp.year == current_year and data_fetch_timestamp.month == current_month):
+            logger.error(f"Raw data for model {model_name} was not fetched in the current month. Exiting.")
+            return False
+    elif run_type != "forecasting":
+        logger.info(
+            f"Skipping data freshness checks for model {model_name} "
+            f"(run_type={run_type} uses fixed historical partitions)."
+        )
+    elif saved:
+        logger.info(
+            f"Skipping data freshness checks for model {model_name} "
+            f"(--saved: using pre-computed output)."
+        )
 
     return True
 
@@ -206,35 +219,19 @@ def validate_ensemble_raw_data_alignment(model_names, run_type):
     return True
 
 
-def validate_ensemble_model(config):
+def validate_ensemble_model(config, saved=False):
     """
-    Validate data partition compatibility between ensemble and constituent model.
-
-    Ensures that train/test splits match between the ensemble and individual
-    models to maintain evaluation integrity.
+    Validate ensemble constituent models against temporal, deployment, and
+    partition requirements.
 
     Args:
-        ensemble_manager: EnsembleManager instance containing partition configuration
-        model_manager: ModelManager instance containing partition configuration
-        run_type: Type of run to validate partition for:
-            'calibration' | 'forecasting' | 'validation'
+        config: Ensemble configuration dict with keys: 'name', 'models',
+            'run_type', 'deployment_status'
+        saved: If True, skip data freshness checks in validate_model_conditions
+            (pre-computed output means raw data fetch timing is irrelevant)
 
-    Returns:
-        True if partition configurations match, False otherwise
-
-    Example:
-        >>> from views_pipeline_core.managers.ensemble import EnsembleManager
-        >>> from views_pipeline_core.managers.model import ModelManager
-        >>> ensemble = EnsembleManager(ensemble_path)
-        >>> model = ModelManager(model_path)
-        >>> is_valid = validate_partition_config(ensemble, model, 'calibration')
-        >>> if not is_valid:
-        ...     print("Partition mismatch detected")
-
-    Note:
-        - Critical for fair ensemble evaluation
-        - Prevents data leakage between train/test sets
-        - Logs error with both partition configs on mismatch
+    Raises:
+        ValueError: If any constituent model fails validation
     """
     from views_pipeline_core.data.model_path import ModelPathManager
     from views_pipeline_core.managers.model import ModelManager
@@ -247,7 +244,7 @@ def validate_ensemble_model(config):
         path_generated = model_path_manager.data_generated
 
         if (
-                (not validate_model_conditions(path_generated, config["run_type"])) or
+                (not validate_model_conditions(path_generated, config["run_type"], saved=saved)) or
                 (not validate_ensemble_model_deployment_status(path_generated, config["run_type"], config["deployment_status"])) or
                 (not validate_partition_config(ensemble_manager, model_manager, config["run_type"]))
         ):

@@ -40,12 +40,23 @@ This logging will involve creating a **.txt** log file in each model-specific fo
 - The deployment status of the single model.
 
 Additionally, ensemble models will enforce a set of preconditions before running:
-- The model artifact used must be trained within the current year (after July).
-- The generated data must be from the current month.
-- The raw data must also have been fetched in the current month.
+- **Condition 1 (all run types):** The model artifact used must be trained within the current year (after July).
+- **Condition 2 (forecasting only):** The generated data must be from the current month.
+- **Condition 3 (forecasting only):** The raw data must also have been fetched in the current month.
 
-In the deployment, when one tries to run an ensemble model, a model check must be passed before executing evaluation or forecatsing. 
+In the deployment, when one tries to run an ensemble model, a model check must be passed before executing evaluation or forecasting. 
 If any of these conditions are not met, the pipeline will automatically shut down and output a clear and verbose warning, detailing where the issue occurred.
+
+### Amendment (2026-06-02): Context-dependent data freshness checks
+
+Conditions 2 and 3 (data freshness) are only enforced for **forecasting** runs with **non-saved** data. They are skipped when:
+
+- **`run_type` is `calibration` or `validation`:** These runs evaluate on fixed historical partitions. The raw data content is determined by the queryset and partition config, not by when it was fetched. Data fetched on May 27 and June 1 from the same queryset at the same `month_id` yields identical bytes.
+- **`--saved` is set:** The ensemble reads pre-computed output from constituent models. It never re-fetches raw data or re-generates features. The fetch timestamps in the log file describe a prior computation whose artifacts are already materialized on disk.
+
+Condition 1 (training cycle) continues to apply to all run types, because a model trained in a previous cycle may have been trained on a fundamentally different data vintage.
+
+**Rationale:** The original ADR was written for production forecasting, where data freshness directly affects prediction quality. Applying calendar-month freshness checks to calibration/validation runs created a predictable failure window at every month boundary for development workflows spanning more than a few days (see issue #150).
 
 ## Consequences
 **Positive Effects:**

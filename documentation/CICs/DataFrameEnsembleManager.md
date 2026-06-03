@@ -56,8 +56,10 @@ collaborators vs. inheritance chain.
   raises `ValueError` if any model returns fewer.
 - Guarantees that `ReconciliationModule` is applied during forecasting when
   `ctx.reconciliation == "pgm_cm_point"`.
-- Guarantees that `validate_ensemble_model(configs)` is called before execution
-  when `args.train is False`.
+- Guarantees that `validate_ensemble_model(configs, saved=args.saved)` is called
+  before execution when `args.train is False`. Data freshness checks (Conditions
+  2+3) are only enforced for forecasting runs with non-saved data (ADR-018
+  amendment).
 - Guarantees that subprocess execution uses `timeout=7200` seconds.
 
 ---
