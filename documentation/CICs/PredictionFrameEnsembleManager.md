@@ -66,8 +66,10 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   arrays must be `np.array_equal`), supported method.
 - Guarantees that all sub-models return the same number of evaluation outputs per
   target; raises `ValueError` if any model returns fewer.
-- Guarantees that `validate_ensemble_model(configs)` is called before execution
-  when `args.train is False`.
+- Guarantees that `validate_ensemble_model(configs, saved=args.saved)` is called
+  before execution when `args.train is False`. Data freshness checks (Conditions
+  2+3) are only enforced for forecasting runs with non-saved data (ADR-018
+  amendment).
 - Guarantees that subprocess execution uses `timeout=7200` seconds.
 - Guarantees cache-first loading: `_load_or_generate_pf()` checks for existing
   `y_pred.npy` before dispatching a subprocess.

@@ -17,12 +17,12 @@ REGISTER = Path("reports/technical_risk_register.md")
 
 class TestF1_RegisterHeaderCountAccuracy:
     """
-    The register header says "139 concerns (82 resolved) + 21 disagreements"
-    but the actual resolved count is 85 (raw) or 81 (deduplicated).
+    Verify header counts match actual entry counts.
 
-    Root cause: 4 duplicate IDs (C-14, C-51, C-52, C-53) exist across
-    sections — each appears in both Open Concerns AND Mitigated/Closed.
-    The header count (82) matches neither the raw nor deduplicated count.
+    The register uses three resolution sections:
+    - ## Resolved Concerns (main table + ### Mitigated + ### Closed)
+    All entries in the Resolved Concerns section count as resolved.
+    Entries in Open Concerns with Resolved status also count.
     """
 
     def test_no_duplicate_ids_across_sections(self):
@@ -35,7 +35,7 @@ class TestF1_RegisterHeaderCountAccuracy:
             title = section.strip().split("\n")[0] if section.strip() else ""
             if not any(
                 k in title
-                for k in ["Open Concerns", "Mitigated Concerns", "Closed Concerns"]
+                for k in ["Open Concerns", "Resolved Concerns"]
             ):
                 continue
             for line in section.split("\n"):
@@ -68,7 +68,7 @@ class TestF1_RegisterHeaderCountAccuracy:
             for line in section.split("\n"):
                 if not re.match(r"\| C-\d+", line):
                     continue
-                if "Mitigated Concerns" in title or "Closed Concerns" in title:
+                if "Resolved Concerns" in title:
                     resolved += 1
                 elif "Open Concerns" in title:
                     fields = [f.strip() for f in line.split("|")]

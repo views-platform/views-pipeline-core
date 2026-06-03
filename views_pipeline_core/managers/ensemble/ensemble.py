@@ -151,7 +151,7 @@ class EnsembleManager(ForecastingModelManager):
 
         try:
             if not self.args.train:
-                validate_ensemble_model(self.configs)
+                validate_ensemble_model(self.configs, saved=self.args.saved)
 
             self._execute_model_tasks()
         except PipelineException:

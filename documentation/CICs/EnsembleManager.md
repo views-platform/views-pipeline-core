@@ -48,9 +48,10 @@ hierarchical PGM-CM consistency.
 - Guarantees that `ReconciliationModule` is applied during forecasting when
   `self.__activate_reconciliation` is `True` and `configs["reconciliation"]`
   is `"pgm_cm_point"`.
-- Guarantees that `validate_ensemble_model(configs)` is called before
-  execution when `args.train` is `False` (i.e., when using existing
-  artifacts).
+- Guarantees that `validate_ensemble_model(configs, saved=args.saved)` is
+  called before execution when `args.train` is `False` (i.e., when using
+  existing artifacts). Data freshness checks (Conditions 2+3) are only
+  enforced for forecasting runs with non-saved data (ADR-018 amendment).
 - Guarantees that `handle_ensemble_log_creation` is called after evaluation
   and forecasting for audit trail purposes.
 - Guarantees that WandB alerts are sent on stage completion and on errors,
