@@ -206,11 +206,16 @@ class EvaluationReportTemplate:
                     for k, v in temp_metadata_dict.items()
                     if k.lower() == self.run_type.lower()
                 }
+                constituent_level = temp_metadata_dict.get("level", None)
                 if verified_level is None:
-                    verified_level = temp_metadata_dict.get("level", None)
-                elif verified_level != temp_metadata_dict.get("level", None):
+                    verified_level = constituent_level
+                elif constituent_level is not None and verified_level != constituent_level:
                     raise ValueError(
-                        f"LoA metadata mismatch between models: Offending model: {temp_metadata_dict.get('name', 'N/A')}. Expected level: {verified_level}, found: {temp_metadata_dict.get('level', 'N/A')}"
+                        f"LoA metadata mismatch between models: Offending model: {temp_metadata_dict.get('name', 'N/A')}. Expected level: {verified_level}, found: {constituent_level}"
+                    )
+                elif constituent_level is None:
+                    logger.warning(
+                        f"Constituent model '{temp_metadata_dict.get('name', 'N/A')}' has no 'level' metadata — skipping LoA check for this model."
                     )
                 model_name = temp_metadata_dict.get("name", "N/A")
                 if verified_partition_dict is None:

@@ -82,7 +82,7 @@ def validate_model_conditions(path_generated, run_type):
     # Condition 3: Raw data fetched in the current month
     if data_fetch_timestamp and not (
             data_fetch_timestamp.year == current_year and data_fetch_timestamp.month == current_month):
-        logger.error(f"Raw data for model {model_name} was not fetched in the current month. Exiting. Current: {current_year}_{current_month}, Data fetch timestamp: {data_fetch_timestamp.year}_{data_fetch_timestamp.month}")
+        logger.error(f"Raw data for model {model_name} was not fetched in the current month. Exiting. Current : {current_year}_{current_month}, Data fetch timestamp: {data_fetch_timestamp.year}_{data_fetch_timestamp.month}")
         return False
 
     return True
