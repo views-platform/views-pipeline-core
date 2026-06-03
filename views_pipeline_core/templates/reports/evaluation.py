@@ -218,7 +218,11 @@ class EvaluationReportTemplate:
                         f"Constituent model '{temp_metadata_dict.get('name', 'N/A')}' has no 'level' metadata — skipping LoA check for this model."
                     )
                 model_name = temp_metadata_dict.get("name", "N/A")
-                if verified_partition_dict is None:
+                if not partition_metadata_dict:
+                    logger.warning(
+                        f"Constituent model '{model_name}' has no partition metadata for run_type '{self.run_type}' — skipping partition check for this model."
+                    )
+                elif verified_partition_dict is None:
                     verified_partition_dict = partition_metadata_dict
                 elif verified_partition_dict != partition_metadata_dict:
                     logger.error("Partition metadata mismatch: %s vs %s", verified_partition_dict, partition_metadata_dict)
