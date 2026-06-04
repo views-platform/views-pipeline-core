@@ -136,13 +136,13 @@ def df_manager(mock_ensemble_path, mock_wandb_module, mock_config_manager):
         {"steps": list(range(1, 37))},
         {
             "name": "test_ensemble",
-            "models": ["purple_alien", "blue_cat"],
             "aggregation": "mean",
             "regression_targets": ["ged_sb"],
             "classification_targets": [],
             "targets": ["ged_sb"],
             "level": "pgm",
         },
+        {"models": ["purple_alien", "blue_cat"]},
         PARTITION_DICT,
     ]
 

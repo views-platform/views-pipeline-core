@@ -67,6 +67,9 @@ hierarchical PGM-CM consistency.
   directory under `ensembles/`.
 - `args: ForecastingModelArgs` -- validated CLI arguments. Must be a
   `ForecastingModelArgs` instance; raises `ValueError` otherwise.
+- `config_modelset.py` -- optional. When present, its keys are merged into
+  `config_meta` (modelset values take precedence). Collision warning logged.
+  Contains the `"models"` list for ensemble constituent models.
 - `configs["models"]` -- a list of sub-model names (strings). Each must be
   a valid model name resolvable by `ModelPathManager`.
 - `configs["aggregation"]` -- the aggregation method (e.g., `"mean"`,

@@ -214,7 +214,6 @@ class TestCreateDropdownButtons:
             entity_ids=[1, 2, 3],
             name_map=None,
             traces_per_entity=2,
-            target="ged_sb",
         )
         assert len(buttons) == 3
 
@@ -225,7 +224,6 @@ class TestCreateDropdownButtons:
             entity_ids=[1, 2],
             name_map=None,
             traces_per_entity=3,
-            target="ged_sb",
         )
         for btn in buttons:
             visibility = btn["args"][0]["visible"]
@@ -238,7 +236,6 @@ class TestCreateDropdownButtons:
             entity_ids=[1, 2],
             name_map=None,
             traces_per_entity=2,
-            target="ged_sb",
         )
         vis = buttons[0]["args"][0]["visible"]
         assert vis == [True, True, False, False]

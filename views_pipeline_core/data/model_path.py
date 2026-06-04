@@ -474,9 +474,11 @@ class ModelPathManager:
             self._build_absolute_directory(Path("main.py")),
             self._build_absolute_directory(Path("README.md")),
         ]
-        # Initialize model-specific directories only if the class is ModelPathManager
-        if self.__class__.__name__ == "ModelPathManager":
+        # Initialize type-specific scripts
+        if self.target == "model":
             self._initialize_model_specific_scripts()
+        elif self.target == "ensemble":
+            self._initialize_ensemble_specific_scripts()
 
     def _initialize_model_specific_scripts(self) -> None:
         """
@@ -493,6 +495,19 @@ class ModelPathManager:
         self.scripts += [
             self.queryset_path,
             self._build_absolute_directory(Path("configs/config_sweep.py")),
+        ]
+
+    def _initialize_ensemble_specific_scripts(self) -> None:
+        """
+        Initialize ensemble-specific script paths.
+
+        Sets up paths to scripts unique to ensembles (modelset config).
+
+        Internal Use:
+            Called by _initialize_scripts for ensemble instances.
+        """
+        self.scripts += [
+            self._build_absolute_directory(Path("configs/config_modelset.py")),
         ]
 
     @staticmethod

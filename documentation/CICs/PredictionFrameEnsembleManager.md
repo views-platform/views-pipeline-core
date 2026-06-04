@@ -91,8 +91,11 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
 - `execute_single_run(args: ForecastingModelArgs)` -- must receive a
   `ForecastingModelArgs` instance; raises `ValueError` otherwise.
 - Config files (`config_deployment.py`, `config_hyperparameters.py`,
-  `config_meta.py`, `config_partitions.py`) are loaded via `importlib` from
-  `ensemble_path.get_scripts()`.
+  `config_meta.py`, `config_modelset.py`, `config_partitions.py`) are loaded
+  via `importlib` from `ensemble_path.get_scripts()`.
+- `config_modelset.py` -- optional. When present, its keys are merged into
+  `config_meta` (modelset values take precedence). Collision warning logged.
+  Contains the `"models"` list for ensemble constituent models.
 - `configs["models"]` -- list of sub-model names, each resolvable by
   `ModelPathManager`.
 - `configs["aggregation"]` -- must be in `SUPPORTED_PF_AGGREGATION_METHODS`:

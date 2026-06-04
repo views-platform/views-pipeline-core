@@ -147,12 +147,24 @@ class PredictionFrameEnsembleManager:
             "config_hyperparameters.py", "get_hp_config"
         )
         self._config_meta = self._load_config("config_meta.py", "get_meta_config")
+        self._config_modelset = self._load_config("config_modelset.py", "get_modelset_config")
         self._partition_dict = self._load_config("config_partitions.py", "generate")
+
+        effective_meta = dict(self._config_meta or {})
+        if self._config_modelset:
+            collisions = set(effective_meta) & set(self._config_modelset)
+            if collisions:
+                logger.warning(
+                    "config_modelset overlaps config_meta on keys %s — "
+                    "config_modelset values take precedence",
+                    collisions,
+                )
+            effective_meta.update(self._config_modelset)
 
         self._config_manager = ConfigurationManager(
             config_hyperparameters=self._config_hyperparameters or {},
             config_deployment=self._config_deployment or {},
-            config_meta=self._config_meta or {},
+            config_meta=effective_meta,
             partition_dict=self._partition_dict,
             config_sweep=None,
         )

@@ -31,7 +31,6 @@ def generate(script_path: Path, model_name: str) -> bool:
     \"""
     meta_config = {{
         "name": "{model_name}", # Eg. "happy_kitten"
-        "models": [], # Eg. ["model1", "model2", "model3"]
         "regression_targets": ["ln_ged_sb_dep"],
         "classification_targets": [],
         "level": "pgm", # Eg. "pgm", "cm"

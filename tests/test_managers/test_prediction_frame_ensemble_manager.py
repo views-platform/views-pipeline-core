@@ -188,13 +188,13 @@ def pf_manager(mock_ensemble_path, mock_wandb_module, mock_config_manager):
         {"steps": list(range(1, 37))},
         {
             "name": "test_pf_ensemble",
-            "models": ["hydra_alpha", "hydra_beta"],
             "aggregation": "concat",
             "regression_targets": ["ged_sb"],
             "classification_targets": [],
             "targets": ["ged_sb"],
             "level": "pgm",
         },
+        {"models": ["hydra_alpha", "hydra_beta"]},
         PARTITION_DICT,
     ]
 

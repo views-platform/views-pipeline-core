@@ -113,6 +113,20 @@ class EnsembleManager(ForecastingModelManager):
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
         self.__activate_reconciliation = True
 
+        # Name-mangled access: ModelManager.__load_config is private (double underscore)
+        config_modelset = self._ModelManager__load_config(
+            "config_modelset.py", "get_modelset_config"
+        )
+        if config_modelset:
+            collisions = set(self._config_manager.config_meta) & set(config_modelset)
+            if collisions:
+                logger.warning(
+                    "config_modelset overlaps config_meta on keys %s — "
+                    "config_modelset values take precedence",
+                    collisions,
+                )
+            self._config_manager.config_meta.update(config_modelset)
+
     # ============================================================
     # EXECUTION METHODS (using self.args and self.configs)
     # ============================================================

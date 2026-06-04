@@ -37,6 +37,7 @@ def temp_dir(tmp_path):
         "configs/config_deployment.py",
         "configs/config_hyperparameters.py",
         "configs/config_meta.py",
+        "configs/config_modelset.py",
         "configs/config_partitions.py",
         "configs/config_queryset.py",
         "configs/config_sweep.py",
