@@ -759,9 +759,13 @@ class AggregationModule:
 
         for col in self.target_cols or []:
             if not isinstance(df[col].dtype, pl.datatypes.List):
-                raise TypeError(
-                    f"Target column '{col}' must be List, got {df[col].dtype}"
-                )
+                if df[col].dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]:
+                    logger.info(f"Target column '{col}' is scalar ({df[col].dtype}), wrapping in list.")
+                    df = df.with_columns(pl.col(col).cast(pl.List(pl.Float32)))
+                else:
+                    raise TypeError(
+                        f"Target column '{col}' must be a list or numeric, got {df[col].dtype}"
+                    )
 
         return df
 
@@ -823,12 +827,16 @@ class AggregationModule:
         df = df.sort(self.index_cols)
         logger.info(f"Data frame has the following columns: {df.columns}")
 
-        # Validate target column types
+        # Validate target column types, wrapping scalars in lists if necessary
         for col in self.target_cols:
             if not isinstance(df[col].dtype, pl.datatypes.List):
-                raise TypeError(
-                    f"Target column '{col}' must be a list, got {df[col].dtype}"
-                )
+                if df[col].dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]:
+                    logger.info(f"Target column '{col}' is scalar ({df[col].dtype}), wrapping in list.")
+                    df = df.with_columns(pl.col(col).cast(pl.List(pl.Float32)))
+                else:
+                    raise TypeError(
+                        f"Target column '{col}' must be a list or numeric, got {df[col].dtype}"
+                    )
 
         return df
 
