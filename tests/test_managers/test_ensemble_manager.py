@@ -6,6 +6,7 @@ which orchestrates ensemble forecasting models including training,
 evaluation, forecasting, and reconciliation.
 """
 
+import logging
 import subprocess as sp
 
 import pytest
@@ -1044,3 +1045,116 @@ class TestEnsembleFailureModes:
         with patch("views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer"):
             with pytest.raises(RuntimeError, match="WandB API unreachable"):
                 manager.execute_single_run(args)
+
+
+# ============================================================================
+# Test config_modelset merge semantics (C-151)
+# ============================================================================
+
+
+class TestConfigModelsetMerge:
+    """config_modelset → config_meta merge in EnsembleManager (CIC §4)."""
+
+    @pytest.fixture
+    def _build(self, mock_ensemble_path, mock_wandb_module):
+        """Factory: construct EnsembleManager with controlled
+        config_meta and config_modelset return values."""
+
+        def _go(meta_dict, modelset_dict):
+            lookup = {
+                "deployment": {
+                    "deployment_status": "deployed",
+                    "name": "test_ensemble",
+                },
+                "hyperparameters": {"algorithm": "ensemble"},
+                "meta": meta_dict,
+                "partitions": {
+                    "calibration": {
+                        "train": (121, 396),
+                        "test": (397, 444),
+                    },
+                },
+                "modelset": modelset_dict,
+            }
+            original_meta = dict(meta_dict)
+            mock_cm = MagicMock()
+            mock_cm.config_meta = original_meta
+            mock_cm.configs = {}
+            mock_cm.get_combined_config.return_value = {}
+
+            with patch(
+                "views_pipeline_core.managers.model.model"
+                ".ModelManager._ModelManager__load_config",
+            ) as mock_load, patch(
+                "views_pipeline_core.modules.wandb.WandBModule",
+                return_value=mock_wandb_module,
+            ), patch(
+                "views_pipeline_core.managers.model.model"
+                ".ConfigurationManager",
+                return_value=mock_cm,
+            ), patch(
+                "views_pipeline_core.modules.logging.LoggingModule",
+            ):
+                mock_load.side_effect = lambda script, method: (
+                    lookup.get(
+                        script.replace("config_", "").replace(
+                            ".py", ""
+                        )
+                    )
+                )
+                mgr = EnsembleManager(
+                    ensemble_path=mock_ensemble_path,
+                    wandb_notifications=False,
+                    use_prediction_store=False,
+                )
+                return mgr, mock_cm, original_meta
+
+        return _go
+
+    def test_no_modelset_meta_unchanged(self, _build):
+        """config_meta passes through when config_modelset is absent."""
+        meta = {"description": "Test ensemble", "targets": ["ged_sb"]}
+        _, mock_cm, _ = _build(meta, None)
+        assert mock_cm.config_meta == {
+            "description": "Test ensemble",
+            "targets": ["ged_sb"],
+        }
+
+    def test_modelset_disjoint_keys_merged(self, _build):
+        """Disjoint keys from both configs appear in config_meta."""
+        meta = {"description": "Test ensemble"}
+        modelset = {"models": ["purple_alien", "blue_cat"]}
+        _, mock_cm, _ = _build(meta, modelset)
+        assert mock_cm.config_meta == {
+            "description": "Test ensemble",
+            "models": ["purple_alien", "blue_cat"],
+        }
+
+    def test_modelset_overlap_precedence(self, _build):
+        """config_modelset values override config_meta on collision."""
+        meta = {"models": ["old_model"], "description": "Test"}
+        modelset = {"models": ["new_a", "new_b"]}
+        _, mock_cm, _ = _build(meta, modelset)
+        assert mock_cm.config_meta["models"] == ["new_a", "new_b"]
+        assert mock_cm.config_meta["description"] == "Test"
+
+    def test_modelset_overlap_emits_warning(self, _build, caplog):
+        """Collision emits logger.warning naming the colliding keys."""
+        with caplog.at_level(
+            logging.WARNING,
+            logger="views_pipeline_core.managers.ensemble.ensemble",
+        ):
+            _build({"models": ["old"]}, {"models": ["new"]})
+        assert "config_modelset overlaps config_meta" in caplog.text
+        assert "models" in caplog.text
+
+    def test_inplace_mutation_preserves_dict_identity(self, _build):
+        """update() mutates config_meta in-place (same dict object)."""
+        meta = {"description": "Test"}
+        modelset = {"models": ["a"]}
+        _, mock_cm, original_meta = _build(meta, modelset)
+        assert mock_cm.config_meta is original_meta
+        assert original_meta == {
+            "description": "Test",
+            "models": ["a"],
+        }

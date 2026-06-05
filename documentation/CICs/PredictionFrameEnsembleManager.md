@@ -228,8 +228,8 @@ manager._evaluate_ensemble(ctx)
 
 ## 10. Test Alignment
 
-- `tests/test_managers/test_prediction_frame_ensemble_manager.py` -- 43
-  characterization tests across 8 test classes:
+- `tests/test_managers/test_prediction_frame_ensemble_manager.py` -- 48
+  characterization tests across 9 test classes:
   - `TestPredictionFrameAggregation` (9 tests) -- verifies concat stacks samples
     axis, arithmetic mean averages correctly, identifiers are preserved, mismatches
     raise, empty list raises, unsupported method raises.
@@ -249,6 +249,9 @@ manager._evaluate_ensemble(ctx)
   - `TestPredictionFrameEntryPoint` (11 tests) -- verifies args validation, sniffer
     call, wandb login (and failure propagation), task dispatch, subprocess timeout/
     failure → PipelineException, validation gating.
+  - `TestConfigModelsetMerge` (5 tests) -- verifies config_modelset →
+    effective_meta merge precedence, collision warning, copy semantics
+    (original config_meta unchanged), and no-op when config_modelset is absent.
 
 ---
 

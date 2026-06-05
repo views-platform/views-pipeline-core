@@ -67,6 +67,30 @@ def test_initialization_with_valid_name(temp_dir):
                 assert ensemble_path_instance.root == project_root
                 assert ensemble_path_instance.model_dir == ensemble_dir
 
+def test_construction_succeeds_without_config_modelset(temp_dir):
+    """config_modelset.py is optional — construction must not crash when absent."""
+    project_root, ensemble_dir = temp_dir
+    (ensemble_dir / "configs" / "config_modelset.py").unlink()
+
+    with patch.object(EnsemblePathManager, '_root', project_root):
+        with patch.object(EnsemblePathManager, 'get_models', return_value=project_root / "ensembles"):
+            with patch('views_pipeline_core.managers.ensemble.EnsemblePathManager._get_model_dir', return_value=ensemble_dir):
+                ep = EnsemblePathManager(ensemble_name_or_path="test_ensemble", validate=True)
+                assert ep.model_name == "test_ensemble"
+                assert "config_modelset.py" not in ep.get_scripts()
+
+
+def test_config_modelset_in_scripts_when_present(temp_dir):
+    """When config_modelset.py exists, it must appear in get_scripts()."""
+    project_root, ensemble_dir = temp_dir
+
+    with patch.object(EnsemblePathManager, '_root', project_root):
+        with patch.object(EnsemblePathManager, 'get_models', return_value=project_root / "ensembles"):
+            with patch('views_pipeline_core.managers.ensemble.EnsemblePathManager._get_model_dir', return_value=ensemble_dir):
+                ep = EnsemblePathManager(ensemble_name_or_path="test_ensemble", validate=True)
+                assert "config_modelset.py" in ep.get_scripts()
+
+
 def test_initialization_with_invalid_name(temp_dir):
     """
     Test the initialization of EnsemblePathManager with an invalid ensemble name.

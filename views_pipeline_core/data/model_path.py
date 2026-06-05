@@ -502,13 +502,14 @@ class ModelPathManager:
         Initialize ensemble-specific script paths.
 
         Sets up paths to scripts unique to ensembles (modelset config).
+        config_modelset.py is optional — only added when present on disk.
 
         Internal Use:
             Called by _initialize_scripts for ensemble instances.
         """
-        self.scripts += [
-            self._build_absolute_directory(Path("configs/config_modelset.py")),
-        ]
+        config_modelset = self.model_dir / "configs" / "config_modelset.py"
+        if config_modelset.exists():
+            self.scripts.append(config_modelset)
 
     @staticmethod
     def _is_path(path_input: Union[str, Path], validate: bool = True) -> bool:

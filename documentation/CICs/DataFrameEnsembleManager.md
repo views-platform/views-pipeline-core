@@ -203,8 +203,8 @@ manager._execute_model_training(ctx)
 
 ## 10. Test Alignment
 
-- `tests/test_managers/test_dataframe_ensemble_manager.py` -- 36 characterization
-  tests across 11 test classes:
+- `tests/test_managers/test_dataframe_ensemble_manager.py` -- 45 characterization
+  tests across 13 test classes:
   - `TestNoInheritance` -- verifies no inheritance from ForecastingModelManager
     or ModelManager, and that composed stages exist as attributes.
   - `TestEnsembleContext` -- verifies immutability, field population, and
@@ -226,6 +226,11 @@ manager._execute_model_training(ctx)
     training failure, forecasting failure, and mismatched model output counts.
   - `TestReconciliation` -- verifies reconciliation dispatch, pgm_cm_point
     application, and fallback when reconciler returns None.
+  - `TestEntityRenameDataFrameEnsemble` -- verifies ADR-034
+    `priogrid_gid` → `priogrid_id` rename in aggregation dispatch.
+  - `TestConfigModelsetMerge` -- verifies config_modelset → effective_meta
+    merge precedence, collision warning, copy semantics (original
+    config_meta unchanged), and no-op when config_modelset is absent.
 
 ---
 

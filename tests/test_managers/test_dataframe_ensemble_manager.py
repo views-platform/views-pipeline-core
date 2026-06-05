@@ -7,6 +7,7 @@ DataFrame prediction path, while also testing the C-55 fix
 (CoreConfigSniffer integration).
 """
 
+import logging
 import subprocess
 
 import pandas as pd
@@ -916,3 +917,113 @@ class TestEntityRenameDataFrameEnsemble:
                 index_cols=["month_id", "country_id"],
                 target_cols=["pred_ged_sb"],
             )
+
+
+# ============================================================================
+# Test config_modelset merge semantics (C-151)
+# ============================================================================
+
+
+class TestConfigModelsetMerge:
+    """config_modelset → effective_meta merge (CIC §4)."""
+
+    @pytest.fixture
+    def _build(self, mock_ensemble_path, mock_wandb_module):
+        """Factory: construct DF manager with controlled
+        config_meta and config_modelset return values."""
+
+        def _go(meta_dict, modelset_dict):
+            config_returns = [
+                {"deployment_status": "deployed"},
+                {"steps": list(range(1, 37))},
+                meta_dict,
+                modelset_dict,
+                PARTITION_DICT,
+            ]
+            mock_cm = MagicMock()
+            mock_cm.get_combined_config.return_value = (
+                COMBINED_CONFIGS.copy()
+            )
+
+            with patch.object(
+                DataFrameEnsembleManager,
+                "_load_config",
+                side_effect=config_returns,
+            ), patch(
+                "views_pipeline_core.managers.configuration"
+                ".ConfigurationManager",
+                return_value=mock_cm,
+            ) as MockCfgCls, patch(
+                "views_pipeline_core.modules.logging.LoggingModule",
+            ), patch(
+                "views_pipeline_core.modules.wandb.WandBModule",
+                return_value=mock_wandb_module,
+            ), patch(
+                "views_pipeline_core.managers.evaluation"
+                ".stage.EvaluationStage",
+            ), patch(
+                "views_pipeline_core.managers.prediction"
+                ".io.PredictionIOManager",
+            ), patch(
+                "views_pipeline_core.managers.reporting"
+                ".stage.ReportingStage",
+            ):
+                mgr = DataFrameEnsembleManager(
+                    ensemble_path=mock_ensemble_path,
+                    wandb_notifications=False,
+                    use_prediction_store=False,
+                )
+                return mgr, MockCfgCls
+
+        return _go
+
+    def test_no_modelset_meta_unchanged(self, _build):
+        """effective_meta equals config_meta when modelset is absent."""
+        meta = {"name": "test", "targets": ["ged_sb"]}
+        _, MockCfgCls = _build(meta, None)
+        passed_meta = MockCfgCls.call_args.kwargs["config_meta"]
+        assert passed_meta == {"name": "test", "targets": ["ged_sb"]}
+
+    def test_modelset_disjoint_keys_merged(self, _build):
+        """Disjoint keys from both configs appear in effective_meta."""
+        meta = {"name": "test", "targets": ["ged_sb"]}
+        modelset = {"models": ["purple_alien", "blue_cat"]}
+        _, MockCfgCls = _build(meta, modelset)
+        passed_meta = MockCfgCls.call_args.kwargs["config_meta"]
+        assert passed_meta == {
+            "name": "test",
+            "targets": ["ged_sb"],
+            "models": ["purple_alien", "blue_cat"],
+        }
+
+    def test_modelset_overlap_precedence(self, _build):
+        """config_modelset values override config_meta on collision."""
+        meta = {"models": ["old"], "description": "Test"}
+        modelset = {"models": ["new_a", "new_b"]}
+        _, MockCfgCls = _build(meta, modelset)
+        passed_meta = MockCfgCls.call_args.kwargs["config_meta"]
+        assert passed_meta["models"] == ["new_a", "new_b"]
+        assert passed_meta["description"] == "Test"
+
+    def test_modelset_overlap_emits_warning(self, _build, caplog):
+        """Collision emits logger.warning naming the colliding keys."""
+        with caplog.at_level(
+            logging.WARNING,
+            logger=(
+                "views_pipeline_core.managers"
+                ".ensemble.dataframe_ensemble"
+            ),
+        ):
+            _build({"models": ["old"]}, {"models": ["new"]})
+        assert "config_modelset overlaps config_meta" in caplog.text
+        assert "models" in caplog.text
+
+    def test_merge_does_not_mutate_original_config_meta(self, _build):
+        """effective_meta is a copy — _config_meta stays unchanged."""
+        meta = {"models": ["old"], "description": "Test"}
+        modelset = {"models": ["new"]}
+        mgr, _ = _build(meta, modelset)
+        assert mgr._config_meta == {
+            "models": ["old"],
+            "description": "Test",
+        }

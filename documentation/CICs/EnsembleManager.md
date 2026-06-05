@@ -189,8 +189,8 @@ manager.execute_single_run(args)
 
 ## 10. Test Alignment
 
-- Covered by `tests/test_managers/test_ensemble_manager.py` (18 test classes,
-  60+ test methods).
+- Covered by `tests/test_managers/test_ensemble_manager.py` (19 test classes,
+  51 test methods).
 - **Initialization:** `TestEnsembleManagerInit` — constructor wiring, attribute
   assignment.
 - **Execution flow:** `TestExecuteSingleRun` — args validation, WandB login,
@@ -212,6 +212,9 @@ manager.execute_single_run(args)
 - **Reconciliation:** `TestApplyReconciliation` — reconciliation dispatch and
   passthrough when unconfigured. `TestExecuteShellScript` — subprocess
   invocation mechanics.
+- **Config modelset merge:** `TestConfigModelsetMerge` — verifies
+  config_modelset → config_meta merge precedence, collision warning,
+  in-place dict mutation, and no-op when config_modelset is absent.
 
 ---
 

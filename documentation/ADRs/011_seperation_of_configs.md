@@ -20,13 +20,15 @@ The decision was made to restructure the model configuration into distinct files
 
 Here is a detailed table describing the new configuration files and their respective purposes:
 
-| Configuration File                        | Type            | Description                                                                                             |
-|-------------------------------------------|-----------------|---------------------------------------------------------------------------------------------------------|
-| **config_hyperparameters.py**           | Operational     | Defines hyperparameters that influence the training process of the model.                              |
-| **config_sweep.py**                     | Operational     | Specifies methods for conducting hyperparameter sweeps to optimize model performance.                   |
-| **config_deployment.py**                | Behavioral      | Manages settings for model deployment across various environments, affecting runtime behavior.          |
-| **config_inputdata.py**                 | Behavioral      | Configures the input data specifications using a viewer queryset format.                               |
-| **config_meta.py**                      | Documentation   | Contains metadata about the model, such as the algorithm used and the identity of the creator.          |
+| Configuration File                        | Type            | Scope           | Description                                                                                             |
+|-------------------------------------------|-----------------|-----------------|---------------------------------------------------------------------------------------------------------|
+| **config_deployment.py**                | Behavioral      | All             | Manages settings for model deployment across various environments, affecting runtime behavior.          |
+| **config_hyperparameters.py**           | Operational     | All             | Defines hyperparameters that influence the training process of the model.                              |
+| **config_meta.py**                      | Documentation   | All             | Contains metadata about the model, such as the algorithm used and the identity of the creator.          |
+| **config_partitions.py**                | Operational     | All             | Defines temporal partition boundaries (train/test splits) per run type.                                 |
+| **config_queryset.py**                  | Behavioral      | Models only     | Configures the input data specifications using a viewser queryset format.                              |
+| **config_sweep.py**                     | Operational     | Models only     | Specifies methods for conducting hyperparameter sweeps to optimize model performance.                   |
+| **config_modelset.py**                  | Operational (Optional) | Ensembles only | Lists constituent models for ensemble pipelines. Present only in ensemble directories. When present, its keys merge into `config_meta` with precedence (collision warning logged). Template: `views_pipeline_core/templates/ensemble/template_config_modelset.py`. |
 
 
 ## Consequences
@@ -51,6 +53,14 @@ The division of the configuration into specific files is designed to:
 
 
 
+### Mandatory vs Optional Configurations
+
+The four base configuration files (config_deployment, config_hyperparameters, config_meta, config_partitions) are mandatory for **all** pipeline unit types (models and ensembles). Their absence during path construction with `validate=True` raises `FileNotFoundError`.
+
+Two additional files are mandatory for **models only**: `config_queryset.py` and `config_sweep.py`. These are added in `_initialize_model_specific_scripts()` and are not required for ensembles.
+
+`config_modelset.py` is the first **optional** configuration file. It applies only to ensembles and is silently skipped when absent. This distinction is enforced at the path-management layer: mandatory files are resolved via `_build_absolute_directory` (fail-loud), while optional files use a direct `Path.exists()` check.
+
 ### Considerations
 
 - **Centralization vs. Duplication:** To avoid redundancy, certain information from the documentation configurations, such as levels in config_meta.py, could be used for orchestration. Changes in these settings should not impact model behavior but are crucial for ensuring that documentation influences operational decisions appropriately.
@@ -60,7 +70,7 @@ The division of the configuration into specific files is designed to:
 ## Additional Notes
 
 - **Partition Configurations:** While some current models use a local partition_config, we want to use set_partition from common_utils as a standard approach. This method can be adapted to accommodate unique needs in exceptional cases.
-- **Integration of Querysets:** As part of the restructuring, the queryset integration has been moved to config_inputdata.py to streamline data handling processes.
+- **Integration of Querysets:** As part of the restructuring, the queryset integration has been moved to config_queryset.py to streamline data handling processes.
 
 ## Feedback and Suggestions
 
