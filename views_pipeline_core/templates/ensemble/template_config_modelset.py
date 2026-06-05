@@ -20,9 +20,9 @@ def generate(script_path: Path, model_name: str) -> bool:
         bool:
             True if the script was written and compiled successfully, False otherwise.
     """
-    code = """def get_modelset_config():
+    code = f"""def get_modelset_config():
     \"""
-    Contains the list of constituent models for the ensemble.
+    Contains the list of constituent models for the {model_name} ensemble.
 
     Returns:
     - modelset_config (dict): A dictionary with the key 'models' listing constituent model names.

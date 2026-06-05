@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-06-05
 **Governing ADR:** ADR-044 (Technical Risk Register)
-**Entry count:** 155 concerns (96 resolved) + 24 disagreements
+**Entry count:** 156 concerns (97 resolved) + 24 disagreements
 
 ---
 
@@ -92,6 +92,7 @@
 | C-148 | 3 | **`config_modelset` merge overwrites on key collision (MITIGATED — collision warning added).** `dataframe_ensemble.py`, `prediction_frame_ensemble.py`, and `ensemble.py` merge `config_modelset` into `config_meta` via `dict.update()`. If both configs define the same key (e.g., `"models"` left in `config_meta` during migration), `config_modelset` wins. **Mitigated (2026-06-04):** All three managers now log `logger.warning` on key collision. During migration from old config format (models in config_meta) to new (models in config_modelset), overlapping keys produce a visible warning. Related: C-06 (dynamic script loading). | An ensemble is partially migrated — `"models"` list remains in `config_meta.py` AND a `config_modelset.py` is created with different content; the merge overwrites (now with warning) | review (feature/config-modelset, 2026-06-04) | Open |
 | C-152 | 4 | **Empty `models` list from config_modelset produces confusing errors.** If config_modelset returns `{"models": []}` and config_meta no longer contains `"models"`, ensemble managers iterate zero models. Training silently no-ops. Evaluation crashes with `StopIteration` in DF managers (`next(iter(eval_results.values()))` on empty dict) or `ValueError` in PF manager (empty frames list). All failures are loud but the error messages give no indication that the root cause is an empty models list. No test covers this path. Related: C-148 (config_modelset merge). | An ensemble's config_modelset.py is scaffolded from the template (which defaults to `"models": []`) and never populated before running | test-review (2026-06-05, config_modelset splash zone) | Open |
 | C-156 | 3 | **ADR-011 configuration table and "Mandatory vs Optional" subsection contained three false claims — RESOLVED.** (1) Table listed `config_inputdata.py` — stale name, code uses `config_queryset.py`. (2) Subsection claimed `config_sweep.py` mandatory for all types — model-only. (3) Subsection omitted `config_partitions.py`. **Fixed (2026-06-05):** Table restructured with Scope column (All/Models only/Ensembles only). `config_inputdata.py` → `config_queryset.py`. `config_partitions.py` added. Subsection rewritten: 4 base mandatory, 2 model-only, 1 ensemble-optional. Regression tests: `test_falsification_adr011_mandatory_configs.py` (4 passing). Related: C-154. | N/A — fixed | falsify (2026-06-05, P2) | Resolved |
+| C-157 | 4 | **Dead `model_name` parameter in `template_config_modelset.py` with lying docstring — RESOLVED.** `generate(script_path, model_name)` accepted `model_name: str` but the code string was a plain `"""` (not f-string) — `model_name` was never interpolated. The docstring falsely claimed it was "Included as a comment for reference." Copy-paste artifact from `template_config_meta.py`. **Fixed (2026-06-05):** Code string converted to f-string; `model_name` now embedded in generated docstring. Regression tests: `test_falsification_template_modelset_dead_param.py` (2 passing). Related: C-10 (template test coverage gap). | N/A — fixed | falsify (2026-06-05, dead-param audit) | Resolved |
 
 ---
 
