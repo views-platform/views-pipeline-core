@@ -32,13 +32,14 @@ def generate(script_path: Path, model_name: str, model_algorithm: str) -> bool:
     \"""
     
     meta_config = {{
-        "name": "{model_name}", 
+        "name": "{model_name}",
         "algorithm": "{model_algorithm}",
         # Uncomment and modify the following lines as needed for additional metadata:
         # "targets": ["ln_ged_sb_dep"],
         # "queryset": "escwa001_cflong",
         # "level": "pgm",
         # "creator": "Your name here",
+        # "output_scale": "log", # "log" for log-scale predictions, "natural" for engines that undo transforms (HydraNet, R2DARTS2, SHURF)
         "metrics": ["RMSLE", "CRPS", "MSE", "MSLE", "y_hat_bar"],
     }}
     return meta_config

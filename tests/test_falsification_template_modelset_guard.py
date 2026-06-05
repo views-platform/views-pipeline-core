@@ -56,3 +56,17 @@ def test_template_config_modelset_function_name():
         assert "def get_modelset_config():" in source, (
             "entry point must be get_modelset_config — managers use this name"
         )
+
+
+def test_template_config_meta_model_generates_output_scale_key():
+    """Model template must include output_scale for C-158 ensemble validation."""
+    from views_pipeline_core.templates.model.template_config_meta import generate
+
+    with tempfile.TemporaryDirectory() as tmp:
+        script_path = Path(tmp) / "config_meta.py"
+        generate(script_path, "test_model", "TestAlgo")
+        source = script_path.read_text()
+        assert "output_scale" in source, (
+            "model template must include output_scale key (commented or uncommented) "
+            "for ensemble output scale consistency validation (C-158)"
+        )

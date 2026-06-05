@@ -557,6 +557,7 @@ class TestValidateEnsembleModel:
             "Deployment Status": "production"
         }
 
+    @patch('views_pipeline_core.modules.validation.ensemble.check.validate_output_scale_consistency')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_partition_config')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
@@ -573,6 +574,7 @@ class TestValidateEnsembleModel:
         mock_validate_conditions,
         mock_validate_deployment,
         mock_validate_partition,
+        mock_validate_scale,
         mock_config
     ):
         """Test successful ensemble model validation."""
@@ -593,6 +595,7 @@ class TestValidateEnsembleModel:
         assert mock_validate_deployment.call_count == 2
         assert mock_validate_partition.call_count == 2
 
+    @patch('views_pipeline_core.modules.validation.ensemble.check.validate_output_scale_consistency')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_partition_config')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
@@ -609,6 +612,7 @@ class TestValidateEnsembleModel:
         mock_validate_conditions,
         mock_validate_deployment,
         mock_validate_partition,
+        mock_validate_scale,
         mock_config
     ):
         """Test ensemble validation raises when model conditions fail."""
@@ -623,6 +627,7 @@ class TestValidateEnsembleModel:
         with pytest.raises(ValueError, match="failed validation"):
             validate_ensemble_model(mock_config)
 
+    @patch('views_pipeline_core.modules.validation.ensemble.check.validate_output_scale_consistency')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_partition_config')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
@@ -639,6 +644,7 @@ class TestValidateEnsembleModel:
         mock_validate_conditions,
         mock_validate_deployment,
         mock_validate_partition,
+        mock_validate_scale,
         mock_config
     ):
         """Test ensemble validation raises when deployment status fails."""
@@ -653,6 +659,7 @@ class TestValidateEnsembleModel:
         with pytest.raises(ValueError, match="failed validation"):
             validate_ensemble_model(mock_config)
 
+    @patch('views_pipeline_core.modules.validation.ensemble.check.validate_output_scale_consistency')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_partition_config')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
@@ -669,6 +676,7 @@ class TestValidateEnsembleModel:
         mock_validate_conditions,
         mock_validate_deployment,
         mock_validate_partition,
+        mock_validate_scale,
         mock_config
     ):
         """Test ensemble validation raises when partition config fails."""
@@ -684,6 +692,7 @@ class TestValidateEnsembleModel:
             validate_ensemble_model(mock_config)
 
 
+    @patch('views_pipeline_core.modules.validation.ensemble.check.validate_output_scale_consistency')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_partition_config')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
@@ -700,6 +709,7 @@ class TestValidateEnsembleModel:
         mock_validate_conditions,
         mock_validate_deployment,
         mock_validate_partition,
+        mock_validate_scale,
         mock_config
     ):
         """saved=True is threaded to validate_model_conditions (issue #150)."""

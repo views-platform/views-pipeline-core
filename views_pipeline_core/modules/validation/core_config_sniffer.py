@@ -44,6 +44,9 @@ SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
 # Reconciliation — optional config key; controls hierarchical prediction reconciliation
 SUPPORTED_RECONCILIATION_TYPES = frozenset({"pgm_cm_point"})
 
+# Output scale — optional config key; declares whether model returns log-scale or natural-scale predictions
+SUPPORTED_OUTPUT_SCALES = frozenset({"log", "natural"})
+
 # Fallback stride for ensembles (which omit rolling_origin_stride)
 _FALLBACK_STRIDE = 1
 
@@ -107,6 +110,7 @@ class CoreConfigSniffer:
         self._check_skip_predictions_delivery()
         self._check_evaluation_mode()
         self._check_reconciliation_config()
+        self._check_output_scale()
         if run_type != FORECASTING_RUN_TYPE:
             self._check_evaluation_contract(run_type)
         logger.info("CoreConfigSniffer: Config audited (run_type='%s').", run_type)
@@ -321,6 +325,17 @@ class CoreConfigSniffer:
                 "CoreConfigSniffer: reconciliation is configured but views-reporting "
                 "is not installed. Reconciliation requires views-reporting. "
                 "Install it with: pip install -e /path/to/views-reporting"
+            )
+
+    def _check_output_scale(self) -> None:
+        scale = self._c.get("output_scale")
+        if scale is None:
+            return
+        if scale not in SUPPORTED_OUTPUT_SCALES:
+            raise ValueError(
+                f"CoreConfigSniffer: output_scale='{scale}' is not supported. "
+                f"Supported: {sorted(SUPPORTED_OUTPUT_SCALES)}. "
+                f"Update SUPPORTED_OUTPUT_SCALES in core_config_sniffer.py when ready."
             )
 
     def _check_evaluation_contract(self, run_type: str) -> None:

@@ -221,6 +221,70 @@ def validate_ensemble_raw_data_alignment(model_names, run_type):
     return True
 
 
+def validate_output_scale_consistency(model_names):
+    """
+    Validate that all ensemble constituent models declare the same output_scale.
+
+    Raises ValueError if models declare conflicting scales. Warns if some declare
+    and some don't (gradual adoption). Passes silently if none declare.
+
+    Args:
+        model_names: List of model name strings in the ensemble
+    """
+    import importlib.util
+    import sys
+    from views_pipeline_core.data.model_path import ModelPathManager
+
+    if len(model_names) <= 1:
+        return
+
+    scales = {}
+    for name in model_names:
+        mp = ModelPathManager(name)
+        config_path = mp.configs / "config_meta.py"
+        if not config_path.exists():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"config_meta_{name}", config_path
+            )
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[f"config_meta_{name}"] = mod
+            spec.loader.exec_module(mod)
+        except (AttributeError, ImportError, SyntaxError) as e:
+            logger.error(f"Failed to load config_meta.py for model '{name}': {e}")
+            continue
+        if hasattr(mod, "get_meta_config"):
+            meta = mod.get_meta_config()
+            if not isinstance(meta, dict):
+                logger.error(f"get_meta_config() for model '{name}' returned {type(meta).__name__}, expected dict")
+                continue
+            scales[name] = meta.get("output_scale")
+
+    declared = {k: v for k, v in scales.items() if v is not None}
+    undeclared = {k for k, v in scales.items() if v is None}
+
+    if not declared:
+        return
+
+    unique_scales = set(declared.values())
+    if len(unique_scales) > 1:
+        raise ValueError(
+            f"Ensemble output_scale mismatch: constituent models declare "
+            f"different output scales — {declared}. All models in an ensemble "
+            f"must return predictions in the same scale."
+        )
+
+    if undeclared:
+        logger.warning(
+            "Ensemble output_scale partially declared: %s declare output_scale=%r "
+            "but %s do not. Add output_scale to all constituent model configs.",
+            sorted(declared.keys()),
+            next(iter(unique_scales)),
+            sorted(undeclared),
+        )
+
+
 def validate_ensemble_model(config, saved=False):
     """
     Validate ensemble constituent models against temporal, deployment, and
@@ -238,6 +302,8 @@ def validate_ensemble_model(config, saved=False):
     from views_pipeline_core.data.model_path import ModelPathManager
     from views_pipeline_core.managers.model import ModelManager
     from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
+
+    validate_output_scale_consistency(config["models"])
 
     ensemble_manager = EnsembleManager(EnsemblePathManager(config["name"]))
     for model_name in config["models"]:
