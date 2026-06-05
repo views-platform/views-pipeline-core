@@ -244,12 +244,16 @@ def validate_output_scale_consistency(model_names):
         config_path = mp.configs / "config_meta.py"
         if not config_path.exists():
             continue
-        spec = importlib.util.spec_from_file_location(
-            f"config_meta_{name}", config_path
-        )
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[f"config_meta_{name}"] = mod
-        spec.loader.exec_module(mod)
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"config_meta_{name}", config_path
+            )
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[f"config_meta_{name}"] = mod
+            spec.loader.exec_module(mod)
+        except (AttributeError, ImportError, SyntaxError) as e:
+            logger.error(f"Failed to load config_meta.py for model '{name}': {e}")
+            continue
         if hasattr(mod, "get_meta_config"):
             meta = mod.get_meta_config()
             scales[name] = meta.get("output_scale")
