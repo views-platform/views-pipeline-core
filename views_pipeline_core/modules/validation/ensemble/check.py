@@ -256,6 +256,9 @@ def validate_output_scale_consistency(model_names):
             continue
         if hasattr(mod, "get_meta_config"):
             meta = mod.get_meta_config()
+            if not isinstance(meta, dict):
+                logger.error(f"get_meta_config() for model '{name}' returned {type(meta).__name__}, expected dict")
+                continue
             scales[name] = meta.get("output_scale")
 
     declared = {k: v for k, v in scales.items() if v is not None}

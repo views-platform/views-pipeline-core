@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-06-05
 **Governing ADR:** ADR-044 (Technical Risk Register)
-**Entry count:** 161 concerns (98 resolved) + 26 disagreements
+**Entry count:** 162 concerns (99 resolved) + 26 disagreements
 
 ---
 
@@ -243,6 +243,7 @@
 | C-156 | **ADR-011 configuration table and "Mandatory vs Optional" subsection contained three false claims.** (1) Table listed `config_inputdata.py` — stale name, code uses `config_queryset.py`. (2) Subsection claimed `config_sweep.py` mandatory for all types — model-only. (3) Subsection omitted `config_partitions.py`. | Table restructured with Scope column (All/Models only/Ensembles only). `config_inputdata.py` → `config_queryset.py`. `config_partitions.py` added. Subsection rewritten: 4 base mandatory, 2 model-only, 1 ensemble-optional. Regression tests: `test_falsification_adr011_mandatory_configs.py` (4 passing). | 2026-06-05 |
 | C-157 | **Dead `model_name` parameter in `template_config_modelset.py` with lying docstring.** `generate(script_path, model_name)` accepted `model_name: str` but the code string was a plain `"""` (not f-string) — `model_name` was never interpolated. The docstring falsely claimed it was "Included as a comment for reference." | Code string converted to f-string; `model_name` now embedded in generated docstring. Regression tests: `test_falsification_template_modelset_dead_param.py` (2 passing). | 2026-06-05 |
 | C-140 | **TEMPORARY transform undo responsibility ambiguous per-model — silent double-undo or missing-undo corrupts predictions.** Originally Tier 2. `model.py` contained TEMPORARY blocks that could double-exponentiate or miss transform undos. | TEMPORARY blocks removed in commit `017c85a` (2026-03-17, E1/ForecastingStage extraction). `ForecastingStage` has zero transform code — the original double-undo/missing-undo scenario is impossible. Residual risk (cross-engine scale mixing in ensembles) tracked as C-158 with `output_scale` config key + `validate_output_scale_consistency()` ensemble check. | 2026-06-05 |
+| C-163 | **`validate_output_scale_consistency()` crashes if `get_meta_config()` returns `None`.** `check.py:259` called `meta.get("output_scale")` outside the try/except block. If a model's `get_meta_config()` returned `None` instead of a dict, this raised an unhandled `AttributeError`. Unrealistic under normal usage (template always returns dict) but a defensive gap. | Fixed by adding `isinstance(meta, dict)` guard before `meta.get()`. Regression test: `test_falsification_merge_safety_c140.py::test_f2_get_meta_config_returns_none_crashes`. | 2026-06-05 |
 
 ---
 
