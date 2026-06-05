@@ -65,6 +65,8 @@ the execution engine.
 - Guarantees that the optional `reconciliation` key, when present, is a supported
   value (`"pgm_cm_point"`). When `reconciliation="pgm_cm_point"`,
   `reconcile_with` must be a non-empty string identifying the CM model.
+- Guarantees that the optional `output_scale` key, when present, is a supported
+  value (`"log"` or `"natural"`). When absent, validation is skipped (gradual adoption).
 
 ---
 

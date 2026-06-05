@@ -61,6 +61,16 @@ Two additional files are mandatory for **models only**: `config_queryset.py` and
 
 `config_modelset.py` is the first **optional** configuration file. It applies only to ensembles and is silently skipped when absent. This distinction is enforced at the path-management layer: mandatory files are resolved via `_build_absolute_directory` (fail-loud), while optional files use a direct `Path.exists()` check.
 
+### Optional Config Keys in `config_meta.py`
+
+The following keys are optional in `config_meta.py`. When present, they are validated by `CoreConfigSniffer`; when absent, validation is silently skipped (no regression on existing models).
+
+| Key | Valid Values | Purpose |
+|-----|-------------|---------|
+| `output_scale` | `"log"`, `"natural"` | Declares whether the model returns predictions in log-scale (no internal transform undo) or natural-scale (model undoes transforms internally). Used by `validate_output_scale_consistency()` to detect incompatible scales in ensemble constituent models. See C-158. |
+| `evaluation_mode` | `"stochastic"`, `"point"` | Controls whether samples are kept or collapsed during evaluation. |
+| `reconciliation` | `"pgm_cm_point"` | Enables hierarchical prediction reconciliation. Requires `reconcile_with`. |
+
 ### Considerations
 
 - **Centralization vs. Duplication:** To avoid redundancy, certain information from the documentation configurations, such as levels in config_meta.py, could be used for orchestration. Changes in these settings should not impact model behavior but are crucial for ensuring that documentation influences operational decisions appropriately.

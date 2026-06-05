@@ -601,3 +601,24 @@ class TestExplicitTargetParameter:
         configs = _valid_ensemble_configs()
         del configs["models"]
         CoreConfigSniffer(configs, {}, target="ensemble").sniff_all("forecasting")
+
+
+class TestOutputScaleValidation:
+
+    def test_absent_output_scale_does_not_raise(self):
+        configs = _valid_configs()
+        configs.pop("output_scale", None)
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_valid_output_scale_log_passes(self):
+        configs = {**_valid_configs(), "output_scale": "log"}
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_valid_output_scale_natural_passes(self):
+        configs = {**_valid_configs(), "output_scale": "natural"}
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_invalid_output_scale_raises(self):
+        configs = {**_valid_configs(), "output_scale": "cubic"}
+        with pytest.raises(ValueError, match="output_scale"):
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
