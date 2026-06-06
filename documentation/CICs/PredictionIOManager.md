@@ -96,9 +96,10 @@ The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHE
 | Any error in `save_predictions` | `PipelineException` | "Error saving predictions: {e}" |
 | Any error in `save_evaluations` | `PipelineException` | "Error saving model outputs: {e}" |
 | Arrow Table upload to prediction store | `NotImplementedError` | "Prediction store upload is not yet supported for Arrow Tables" |
-| Appwrite upload failure | Logged, not raised | `logger.error("Error uploading predictions to datastore: {e}")` |
+| Appwrite network/API failure (`ConnectionError`, `TimeoutError`, `OSError`, `AppwriteException`) | Logged, not raised | `logger.error("Error uploading predictions to datastore: {e}")` |
+| Appwrite programming error (`TypeError`, `AttributeError`, etc.) | Propagates | Not caught — "Fail Loud and Proud" applies to programming bugs |
 
-`PipelineException` is used to wrap errors and optionally trigger WandB error alerts. Appwrite upload failure is the one exception to the "fail loud" rule -- it logs the error but does not abort the pipeline, as Appwrite is a secondary persistence target.
+`PipelineException` is used to wrap errors and optionally trigger WandB error alerts. Appwrite *network/API* failure is the one exception to the "fail loud" rule -- it logs the error but does not abort the pipeline, as Appwrite is a secondary persistence target. Programming errors (wrong arguments, renamed fields) propagate to surface integration bugs early.
 
 ---
 
@@ -119,7 +120,7 @@ Phase 6 extracted format-specific persistence into composable saver classes impl
 |-------|-------|--------|-------------|
 | `NpzSaver` | A (internal) | `.npy` + `.npz` (numpy binary) | Raises on I/O error |
 | `LocalParquetSaver` | B (delivery) | Parquet via Arrow zero-copy | Raises on I/O error |
-| `AppwriteSaver` | Cloud | Delegates to `DatastoreModule.upload_data()` | Graceful: logs error, does not raise |
+| `AppwriteSaver` | Cloud | Delegates to `DatastoreModule.upload_data()` | Graceful for network/API errors (`ConnectionError`, `TimeoutError`, `OSError`, `AppwriteException`); programming errors propagate |
 | `ViewsForecastsSaver` | Store | Converts PF→DF, calls `df.forecasts.to_store()` | Raises (primary external store) |
 
 Task 5 will compose these savers into `save_predictions()`, replacing the current inline persistence logic.
@@ -221,7 +222,7 @@ Key gap: No integration test for the Arrow Table (`pa.Table`) path through `save
 
 - **Tight coupling to ForecastingModelManager internals**: The constructor receives `model_path` (a `ModelPathManager`), `wandb_module`, and several configuration flags as separate parameters rather than a structured command/config object. This makes the interface wide and fragile to orchestrator changes.
 - **Direct `wandb` import in `save_evaluations`**: The `wandb` package is imported inside the method body (`import wandb`) rather than being fully injected, creating a hard dependency that complicates testing.
-- **Appwrite failure is silent**: `_upload_to_prediction_store` catches Appwrite errors with `logger.error` but does not re-raise. This deviates from the project's "Fail Loud and Proud" principle but is intentional -- Appwrite is a secondary target and should not block the pipeline.
+- **Appwrite network failure is silent**: `_upload_to_prediction_store` catches network/API errors (`ConnectionError`, `TimeoutError`, `OSError`, `AppwriteException`) with `logger.error` but does not re-raise. This is intentional -- Appwrite is a secondary target and should not block the pipeline. Programming errors (`TypeError`, `AttributeError`, etc.) propagate per "Fail Loud and Proud" (C-166 fix, 2026-06-06).
 
 ---
 
