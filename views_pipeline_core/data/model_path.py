@@ -23,6 +23,7 @@ from pathlib import Path
 import dotenv
 
 from views_pipeline_core.configs import PipelineConfig
+from views_pipeline_core.data.constants import CACHE_SOURCES
 
 logger = logging.getLogger(__name__)
 
@@ -599,13 +600,12 @@ class ModelPathManager:
         Returns:
             Sorted list of raw data file paths (newest first)
         """
+        prefixes = tuple(f"{run_type}_{src}_df" for src in CACHE_SOURCES)
         paths = [
             f
             for f in self.data_raw.iterdir()
             if f.is_file()
-            and (f.stem.startswith(f"{run_type}_viewser_df")
-                 or f.stem.startswith(f"{run_type}_datafactory_df")
-                 or f.stem.startswith(f"{run_type}_synthetic_df"))
+            and f.stem.startswith(prefixes)
             and f.suffix == PipelineConfig.dataframe_format
         ]
         return sorted(paths, reverse=True)

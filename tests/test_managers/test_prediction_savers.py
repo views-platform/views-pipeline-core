@@ -246,12 +246,21 @@ class TestAppwriteSaver:
     def test_logs_error_on_failure(self, tmp_path, sample_pf, sample_metadata, caplog):
         """Failed upload logs error with exception details."""
         mock_datastore = MagicMock()
-        mock_datastore.upload_data.side_effect = RuntimeError("boom")
+        mock_datastore.upload_data.side_effect = ConnectionError("boom")
         saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
 
         with caplog.at_level(logging.ERROR):
             saver.save(sample_pf, tmp_path, sample_metadata)
         assert "boom" in caplog.text
+
+    def test_programming_error_propagates(self, tmp_path, sample_pf, sample_metadata):
+        """Programming errors (TypeError, AttributeError) must NOT be swallowed."""
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.side_effect = TypeError("wrong arg type")
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        with pytest.raises(TypeError, match="wrong arg type"):
+            saver.save(sample_pf, tmp_path, sample_metadata)
 
 
 # ── ViewsForecastsSaver ────────────────────────────────────────────────────
