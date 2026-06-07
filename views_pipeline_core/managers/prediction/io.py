@@ -11,6 +11,7 @@ from typing import Dict, Optional, Union
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from appwrite.exception import AppwriteException
 
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.exceptions import PipelineException
@@ -137,7 +138,7 @@ class PredictionIOManager:
                     type=self._model_path.target,
                 )
                 logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
-            except Exception as e:
+            except (ConnectionError, TimeoutError, OSError, AppwriteException) as e:
                 logger.error(
                     f"Error uploading predictions to datastore: {e}", exc_info=True
                 )

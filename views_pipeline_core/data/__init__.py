@@ -1,3 +1,5 @@
+from .constants import CACHE_FILENAME_TEMPLATE as CACHE_FILENAME_TEMPLATE
+from .constants import CACHE_SOURCES as CACHE_SOURCES
 from .handlers import _ViewsDataset as _ViewsDataset
 from .utils import (
     ensure_float64 as ensure_float64,
