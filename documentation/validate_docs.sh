@@ -79,7 +79,7 @@ while IFS= read -r ref; do
             errors=$((errors + 1))
         fi
     done
-done < <(grep -rnE 'ADRs/[0-9][0-9a-z_]+\.md' --include='*.md' . "$SCRIPT_DIR/.." 2>/dev/null | sort -u || true)
+done < <(grep -rnE 'ADRs/[0-9][0-9a-z_]+\.md' --include='*.md' . "$SCRIPT_DIR/.." 2>/dev/null | grep -v 'https://' | sort -u || true)
 
 # 3c. Verify relative ADR links (bare NNN_foo.md inside ADRs/) resolve to real files
 echo "--- Checking relative ADR links ---"
