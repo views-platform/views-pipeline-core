@@ -355,24 +355,84 @@ def format_metadata_dict(metadata_dict):
     formatted_dict = dict(sorted(formatted_dict.items(), key=lambda item: item[0]))
     return formatted_dict
 
-def get_latest_run(entity: str, model_name: str, run_type: str) -> Optional['wandb.apis.public.runs.Run']:
+# Substring wandb embeds in the ValueError raised by ``Api().runs(...)`` when the
+# project does not exist (the normal state for WANDB_MODE=offline models). This is
+# wandb's undocumented, human-readable message text — verified against wandb 0.18.x
+# (pyproject: wandb = "^0.18.7"). If a wandb bump rewords this, get_latest_run stops
+# recognising project-not-found and re-raises instead of returning None — see
+# risk register C-179. The WARNING log on the re-raise path makes that drift visible.
+_PROJECT_NOT_FOUND_MARKER = "could not find project"
+
+
+def get_latest_run(
+    entity: str, model_name: str, run_type: str
+) -> Optional['wandb.apis.public.runs.Run']:
     """
-    Retrieves the latest WandB run from the current session.
+    Retrieve the latest finished, metrics-bearing WandB run for a model.
+
+    Queries the WandB project ``f"{entity}/{model_name}_{run_type}"`` and returns
+    the most recently created run whose state is ``"finished"`` and whose summary
+    carries more than one key (i.e. it holds metrics).
+
+    Contract (see GitHub issue #177):
+        Returns the newest qualifying run, or ``None`` when the run is *genuinely
+        absent* — either the project does not exist (the normal case for models
+        run with ``WANDB_MODE=offline``, which never create a cloud project) or
+        the project exists but holds no finished, metrics-bearing run. "No run
+        available" is a normal state, not an error.
+
+        *Transient* failures (network/communication errors, or any other
+        unexpected WandB/API error) are propagated unchanged, so callers can
+        distinguish "this model is not in the cloud" (``None`` -> surface as
+        missing) from "WandB hiccupped" (exception -> retry or mark degraded).
 
     Returns:
-        Optional[wandb.Run]: The latest run object if available, otherwise None.
+        Optional[wandb.Run]: The latest qualifying run, or ``None`` if genuinely
+        absent.
+
+    Raises:
+        Exception: Transient WandB/API errors are propagated. Project-not-found
+            is NOT raised — it is reported as ``None``.
     """
     from wandb import Api
+
+    project_path = f"{entity}/{model_name}_{run_type}"
     api = Api()
-    wandb_runs = sorted(
-        api.runs(f"{entity}/{model_name}_{run_type}", include_sweeps=False),
-        key=lambda run: run.created_at,
-        reverse=True,
-    )
-    # Pick the latest successfully finished run
+    try:
+        wandb_runs = sorted(
+            api.runs(project_path, include_sweeps=False),
+            key=lambda run: run.created_at,
+            reverse=True,
+        )
+    except ValueError as e:
+        # WandB raises ValueError("Could not find project ...") when the project
+        # does not exist — routine for offline-only models. Treat as "no run".
+        # Any other ValueError is unexpected and propagates (logged so a wandb
+        # message-text change that breaks the match above is observable — C-179).
+        if _PROJECT_NOT_FOUND_MARKER in str(e).lower():
+            logger.info(
+                f"WandB project '{project_path}' not found; treating as no run "
+                f"available (e.g. model run with WANDB_MODE=offline)."
+            )
+            return None
+        logger.warning(
+            f"Unexpected ValueError from WandB for '{project_path}' "
+            f"(not recognised as project-not-found): {e}. Re-raising."
+        )
+        raise
+
+    # Pick the latest successfully finished run that carries metrics. Returns
+    # None (not StopIteration) when no run qualifies — this is a normal state.
     latest_run = next(
-        run
-        for run in wandb_runs
-        if run.state == "finished" and len(dict(run.summary)) > 1
+        (
+            run
+            for run in wandb_runs
+            if run.state == "finished" and len(dict(run.summary)) > 1
+        ),
+        None,
     )
-    return latest_run if len(dict(latest_run.summary)) > 1 else None
+    if latest_run is None:
+        logger.info(
+            f"No finished, metrics-bearing WandB run found for '{project_path}'."
+        )
+    return latest_run

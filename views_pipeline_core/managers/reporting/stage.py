@@ -151,6 +151,18 @@ class ReportingStage:
             model_name=context.model_path.model_name,
             run_type=context.run_type,
         )
+        # get_latest_run returns None when the run is genuinely absent (no cloud
+        # project, or no finished metrics-bearing run — see issue #177). The
+        # downstream template dereferences wandb_run.summary unconditionally, so
+        # we degrade here rather than crash. Transient errors are NOT swallowed:
+        # they propagate from get_latest_run so a flaky fetch stays visible.
+        if latest_run is None:
+            logger.warning(
+                f"No finished WandB run with metrics found for "
+                f"{context.model_path.model_name} ({context.run_type}); "
+                f"skipping evaluation report generation."
+            )
+            return None
 
         targets = context.configs["targets"]
         if not targets:
