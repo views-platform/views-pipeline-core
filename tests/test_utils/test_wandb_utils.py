@@ -469,3 +469,15 @@ class TestGetRunByTimestamp:
 
         with pytest.raises(ConnectionError):
             get_run_by_timestamp("entity", "model", "train", "20240101_010101")
+
+    @pytest.mark.parametrize("bad_ts", ["", None])
+    @patch('wandb.Api')
+    def test_raises_on_empty_timestamp(self, mock_api, bad_ts):
+        """A blank timestamp is a caller error -> ValueError, not a silent mismatch.
+
+        Without the guard, `config.get("timestamp") == None` would match a run
+        whose config carries no timestamp, returning a non-provenance-matched run.
+        """
+        with pytest.raises(ValueError):
+            get_run_by_timestamp("entity", "model", "train", bad_ts)
+        mock_api.return_value.runs.assert_not_called()

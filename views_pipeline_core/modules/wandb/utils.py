@@ -487,9 +487,18 @@ def get_run_by_timestamp(
         Optional[wandb.Run]: The run whose config timestamp matches, or ``None``.
 
     Raises:
+        ValueError: If ``timestamp`` is empty/falsy. A blank timestamp is a
+            caller error, not a "no match" — without this guard it would
+            silently match a run whose config carries no timestamp
+            (``None == None``), returning a non-provenance-matched run.
         Exception: Transient WandB/API errors are propagated. Project-not-found
             is NOT raised — it is reported as ``None``.
     """
+    if not timestamp:
+        raise ValueError(
+            "get_run_by_timestamp requires a non-empty timestamp "
+            "(the artifact's YYYYMMDD_HHMMSS stamp)."
+        )
     qualifying_runs = _fetch_qualifying_runs(entity, model_name, run_type)
     match = next(
         (
