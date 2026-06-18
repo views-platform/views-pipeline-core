@@ -366,6 +366,47 @@ class TestEvaluationReport:
     @patch(
         "views_reporting.templates.reports.evaluation.EvaluationReportTemplate"
     )
+    def test_evaluation_report_skips_when_no_run(
+        self, mock_template_cls, mock_get_run,
+    ):
+        """None from get_latest_run -> skip report, return None, do not crash (issue #177)."""
+        stage = _make_stage()
+        ctx = _make_context()
+
+        mock_get_run.return_value = None
+
+        result = stage.generate_evaluation_report(ctx)
+
+        assert result is None
+        mock_template_cls.assert_not_called()
+        stage._wandb_module.send_alert.assert_not_called()
+
+    @patch("views_pipeline_core.modules.wandb.get_latest_run")
+    @patch(
+        "views_reporting.templates.reports.evaluation.EvaluationReportTemplate"
+    )
+    def test_evaluation_report_propagates_transient_error(
+        self, mock_template_cls, mock_get_run,
+    ):
+        """Transient errors from get_latest_run must NOT be swallowed — they
+        propagate so a flaky fetch stays visible (issue #177, register C-180)."""
+        stage = _make_stage()
+        ctx = _make_context()
+
+        mock_get_run.side_effect = ConnectionError("wandb unreachable")
+
+        with pytest.raises(ConnectionError):
+            stage.generate_evaluation_report(ctx)
+
+        # A transient fetch error is exceptional, not a normal "no run" — the
+        # report must not be generated and no "success" alert must fire.
+        mock_template_cls.assert_not_called()
+        stage._wandb_module.send_alert.assert_not_called()
+
+    @patch("views_pipeline_core.modules.wandb.get_latest_run")
+    @patch(
+        "views_reporting.templates.reports.evaluation.EvaluationReportTemplate"
+    )
     def test_evaluation_report_sends_wandb_alert(
         self, mock_template_cls, mock_get_run,
     ):

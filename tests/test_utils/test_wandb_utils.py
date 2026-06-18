@@ -334,14 +334,63 @@ class TestGetLatestRun:
         mock_run1.state = "finished"
         mock_run1.created_at = "2024-01-02"
         mock_run1.summary = {"only_one": 0.5}
-        
+
         mock_run2 = Mock()
         mock_run2.state = "finished"
         mock_run2.created_at = "2024-01-01"
         mock_run2.summary = {"metric": 0.7, "another": 0.4}
-        
+
         mock_api.return_value.runs.return_value = [mock_run1, mock_run2]
-        
+
         result = get_latest_run("entity", "model", "train")
-        
+
         assert result == mock_run2
+
+    @patch('wandb.Api')
+    def test_returns_none_when_no_qualifying_run(self, mock_api):
+        """No finished, metrics-bearing run -> None, not StopIteration (issue #177 Problem 1)."""
+        failed = Mock()
+        failed.state = "failed"
+        failed.created_at = "2024-01-02"
+        failed.summary = {"metric": 0.5, "another": 0.3}
+
+        empty = Mock()
+        empty.state = "finished"
+        empty.created_at = "2024-01-01"
+        empty.summary = {"only_one": 0.5}
+
+        mock_api.return_value.runs.return_value = [failed, empty]
+
+        assert get_latest_run("entity", "model", "train") is None
+
+    @patch('wandb.Api')
+    def test_returns_none_when_run_list_empty(self, mock_api):
+        """Empty run list -> None, not StopIteration (issue #177 Problem 1)."""
+        mock_api.return_value.runs.return_value = []
+
+        assert get_latest_run("entity", "model", "train") is None
+
+    @patch('wandb.Api')
+    def test_returns_none_when_project_not_found(self, mock_api):
+        """Project absent (offline-only model) -> None, not a raised ValueError (#177 Problem 2a)."""
+        mock_api.return_value.runs.side_effect = ValueError(
+            "Could not find project 'entity/model_train'"
+        )
+
+        assert get_latest_run("entity", "model", "train") is None
+
+    @patch('wandb.Api')
+    def test_propagates_transient_api_error(self, mock_api):
+        """Transient errors stay distinguishable from 'absent' -> they propagate (#177 Problem 2c)."""
+        mock_api.return_value.runs.side_effect = ConnectionError("wandb unreachable")
+
+        with pytest.raises(ConnectionError):
+            get_latest_run("entity", "model", "train")
+
+    @patch('wandb.Api')
+    def test_unrelated_value_error_still_propagates(self, mock_api):
+        """Only 'could not find project' ValueErrors map to None; others propagate."""
+        mock_api.return_value.runs.side_effect = ValueError("malformed entity path")
+
+        with pytest.raises(ValueError):
+            get_latest_run("entity", "model", "train")
