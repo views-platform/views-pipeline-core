@@ -11,4 +11,5 @@ from .utils import (
     format_evaluation_dict as format_evaluation_dict,
     format_metadata_dict as format_metadata_dict,
     get_latest_run as get_latest_run,
+    get_run_by_timestamp as get_run_by_timestamp,
 )
