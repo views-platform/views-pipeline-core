@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-06-19
 **Governing ADR:** ADR-044 (Technical Risk Register)
-**Entry count:** 185 concerns (104 resolved, 5 relocated to views-reporting) + 33 disagreements
+**Entry count:** 185 concerns (104 resolved) + 33 disagreements — 5 relocated to views-reporting
 
 > **Strategic context (2026-06-19) — `views-frames` is coming.** A new leaf
 > data-contract package, `views_platform/views-frames` (scaffolded 2026-06-19,
