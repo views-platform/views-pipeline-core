@@ -30,7 +30,23 @@ sys.modules["views_evaluation.evaluation"] = MagicMock()
 sys.modules["views_evaluation.evaluation.evaluation_frame"] = MagicMock()
 sys.modules["art"] = MagicMock()
 
+import numpy as np  # noqa: E402
+from views_frames import (  # noqa: E402
+    PredictionFrame,
+    SpatialLevel,
+    SpatioTemporalIndex,
+)
 from views_pipeline_core.managers.model.model import ForecastingModelManager  # noqa: E402
+
+
+def _pf(y_pred, time, unit):
+    """Construct a leaf PredictionFrame (PGM) from raw arrays."""
+    index = SpatioTemporalIndex(
+        time=np.asarray(time, dtype=np.int64),
+        unit=np.asarray(unit, dtype=np.int64),
+        level=SpatialLevel.PGM,
+    )
+    return PredictionFrame(y_pred, index)
 
 
 # ── Shared helpers ──────────────────────────────────────────────────────────
@@ -388,7 +404,6 @@ class TestPFPermanentPersistence:
     def test_pf_eval_persists_to_permanent_location(self, mock_log_creation, tmp_path):
         """PF origin_sink must save to data_generated/predictions_{run_type}_{ts}/origin_{i}/{target}/."""
         import numpy as np
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
@@ -401,10 +416,7 @@ class TestPFPermanentPersistence:
         pf_configs["timestamp"] = "20260501_120000"
         manager._config_manager.get_combined_config.return_value = pf_configs
 
-        pf = PredictionFrame(
-            y_pred=np.ones((10, 4), dtype=np.float32),
-            identifiers={"time": np.arange(10), "unit": np.arange(10)},
-        )
+        pf = _pf(np.ones((10, 4), dtype=np.float32), np.arange(10), np.arange(10))
 
         def fake_streaming(eval_type, artifact_name, origin_sink):
             origin_sink(0, {"target_sb": pf})
@@ -428,7 +440,6 @@ class TestPFPermanentPersistence:
     def test_pf_eval_staging_cleaned_up_after_metrics(self, mock_log_creation, tmp_path):
         """Staging path must be cleaned up after evaluation completes."""
         import numpy as np
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
@@ -441,10 +452,7 @@ class TestPFPermanentPersistence:
         pf_configs["timestamp"] = "20260501_120000"
         manager._config_manager.get_combined_config.return_value = pf_configs
 
-        pf = PredictionFrame(
-            y_pred=np.ones((10, 4), dtype=np.float32),
-            identifiers={"time": np.arange(10), "unit": np.arange(10)},
-        )
+        pf = _pf(np.ones((10, 4), dtype=np.float32), np.arange(10), np.arange(10))
 
         def fake_streaming(eval_type, artifact_name, origin_sink):
             origin_sink(0, {"target_sb": pf})
@@ -470,7 +478,6 @@ class TestPFForecastPersistence:
     def test_pf_forecast_persists_to_data_generated(self, tmp_path):
         """PF forecast must save to data_generated/predictions_{run_type}_{ts}/{target}/."""
         import numpy as np
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
@@ -481,10 +488,7 @@ class TestPFForecastPersistence:
         pf_configs["timestamp"] = "20260501_120000"
         manager._config_manager.get_combined_config.return_value = pf_configs
 
-        pf = PredictionFrame(
-            y_pred=np.ones((10, 4), dtype=np.float32),
-            identifiers={"time": np.arange(10), "unit": np.arange(10)},
-        )
+        pf = _pf(np.ones((10, 4), dtype=np.float32), np.arange(10), np.arange(10))
         manager._forecast_model_artifact = MagicMock(
             return_value={"target_sb": pf}
         )
@@ -503,7 +507,6 @@ class TestPFForecastPersistence:
     def test_pf_forecast_still_calls_forecasting_stage(self, tmp_path):
         """PF save must not prevent ForecastingStage from running."""
         import numpy as np
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         manager = _make_manager()
         manager._model_path.data_generated = tmp_path / "data" / "generated"
@@ -514,10 +517,7 @@ class TestPFForecastPersistence:
         pf_configs["timestamp"] = "20260501_120000"
         manager._config_manager.get_combined_config.return_value = pf_configs
 
-        pf = PredictionFrame(
-            y_pred=np.ones((10, 4), dtype=np.float32),
-            identifiers={"time": np.arange(10), "unit": np.arange(10)},
-        )
+        pf = _pf(np.ones((10, 4), dtype=np.float32), np.arange(10), np.arange(10))
         manager._forecast_model_artifact = MagicMock(
             return_value={"target_sb": pf}
         )

@@ -20,6 +20,7 @@ from views_pipeline_core.data.prediction_frame import PredictionFrame
 from views_pipeline_core.managers.prediction.prediction_frame_converter import (
     PredictionFrameConverter,
 )
+from views_pipeline_core.managers.prediction.prediction_frame_io import save_pf
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +59,9 @@ class PredictionSaver(Protocol):
 class NpzSaver:
     """Save PredictionFrame as compact .npy + .npz (Track A format).
 
-    Delegates to PredictionFrame.save() — zero format conversion,
-    zero memory overhead beyond the array itself.  Output structure::
+    Delegates to ``prediction_frame_io.save_pf`` — pipeline-core's ``y_pred.npy``
+    layout (the cross-repo contract views-reporting reads), not the leaf's own
+    ``values.npy`` layout.  Output structure::
 
         path/
           {filename}/
@@ -77,7 +79,7 @@ class NpzSaver:
     ) -> None:
         stem = Path(metadata.filename).stem
         dest = Path(path) / stem
-        prediction.save(dest)
+        save_pf(prediction, dest)
         logger.info("NpzSaver: saved %s (%d rows, %d samples)",
                     dest, prediction.n_rows, prediction.sample_count)
 

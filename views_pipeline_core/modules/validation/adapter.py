@@ -249,7 +249,7 @@ class EvaluationAdapter:
         # This preserves the "Join" semantics exactly.
         pf_locs = pf_index.get_indexer(common_idx)
         
-        y_pred = prediction_frame.y_pred[pf_locs]
+        y_pred = prediction_frame.values[pf_locs]
         y_true = actual.loc[common_idx, target].values
         
         # Coerce legacy actuals if needed
@@ -402,7 +402,7 @@ class EvaluationAdapter:
                 steps_i = np.array([time_to_step[t] for t in times_i], dtype=np.int64)
 
             # Sample-count consistency (first non-empty sequence sets the count)
-            sc = pf.y_pred.shape[1]
+            sc = pf.values.shape[1]
             if sample_count is None:
                 sample_count = sc
             elif sc != sample_count:
@@ -421,14 +421,14 @@ class EvaluationAdapter:
         S = sample_count
 
         y_true_out = np.empty(total_rows, dtype=act_y_true_vals.dtype)
-        y_pred_out = np.empty((total_rows, S), dtype=predictions[0].y_pred.dtype)
+        y_pred_out = np.empty((total_rows, S), dtype=predictions[0].values.dtype)
         time_out   = np.empty(total_rows, dtype=np.int64)
         unit_out   = np.empty(total_rows, dtype=np.int64)
         origin_out = np.empty(total_rows, dtype=np.int64)
         step_out   = np.empty(total_rows, dtype=np.int64)
 
         # ── Pass 2: fill pre-allocated slices in-place ──────────────────────
-        # pf.y_pred[pf_locs] is a temporary copy (~149 MB for pgm/16 samples);
+        # pf.values[pf_locs] is a temporary copy (~149 MB for pgm/16 samples);
         # freed immediately after the in-place write — no accumulation across origins.
         offset = 0
         for (pf_locs, act_locs, times_i, units_i, steps_i, seq_idx), pf in zip(
@@ -436,7 +436,7 @@ class EvaluationAdapter:
         ):
             n  = len(pf_locs)
             sl = slice(offset, offset + n)
-            y_pred_out[sl] = pf.y_pred[pf_locs]
+            y_pred_out[sl] = pf.values[pf_locs]
             y_true_out[sl] = act_y_true_vals[act_locs]
             time_out[sl]   = times_i
             unit_out[sl]   = units_i

@@ -58,7 +58,7 @@ def _make_pf(months: List[int], units: List[int], n_samples: int = 2, value: flo
     unit_ids = units * len(months)
     n = len(times)
     return SimpleNamespace(
-        y_pred=np.full((n, n_samples), value),
+        values=np.full((n, n_samples), value),
         identifiers={
             "time":   np.array(times),
             "unit":   np.array(unit_ids),
@@ -208,20 +208,22 @@ class TestAuditParityEfEndToEnd:
 
     def test_real_pf_produces_parity(self):
         """A real PredictionFrame converted through both paths yields identical EFs."""
+        from views_frames import SpatialLevel, SpatioTemporalIndex
         from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         pf = PredictionFrame(
-            y_pred=np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32),
-            identifiers={
-                "time": np.array([500, 500, 501]),
-                "unit": np.array([1, 2, 1]),
-            },
+            np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32),
+            SpatioTemporalIndex(
+                time=np.array([500, 500, 501], dtype=np.int64),
+                unit=np.array([1, 2, 1], dtype=np.int64),
+                level=SpatialLevel.PGM,
+            ),
         )
 
         # Build EF-like objects from PF arrays (simulating both adapter paths)
         ef_pf = SimpleNamespace(
             y_true=np.array([10.0, 20.0, 30.0]),
-            y_pred=pf.y_pred,
+            y_pred=pf.values,
             identifiers={
                 "time":   pf.identifiers["time"],
                 "unit":   pf.identifiers["unit"],
@@ -231,7 +233,7 @@ class TestAuditParityEfEndToEnd:
         )
         ef_df = SimpleNamespace(
             y_true=np.array([10.0, 20.0, 30.0]),
-            y_pred=pf.y_pred.copy(),
+            y_pred=pf.values.copy(),
             identifiers={
                 "time":   pf.identifiers["time"].copy(),
                 "unit":   pf.identifiers["unit"].copy(),
@@ -245,19 +247,21 @@ class TestAuditParityEfEndToEnd:
 
     def test_real_pf_detects_mismatch(self):
         """Perturbed PF data must trigger parity failure."""
+        from views_frames import SpatialLevel, SpatioTemporalIndex
         from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         pf = PredictionFrame(
-            y_pred=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
-            identifiers={
-                "time": np.array([500, 501]),
-                "unit": np.array([1, 1]),
-            },
+            np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+            SpatioTemporalIndex(
+                time=np.array([500, 501], dtype=np.int64),
+                unit=np.array([1, 1], dtype=np.int64),
+                level=SpatialLevel.PGM,
+            ),
         )
 
         ef_pf = SimpleNamespace(
             y_true=np.array([10.0, 20.0]),
-            y_pred=pf.y_pred,
+            y_pred=pf.values,
             identifiers={
                 "time": pf.identifiers["time"],
                 "unit": pf.identifiers["unit"],
@@ -267,7 +271,7 @@ class TestAuditParityEfEndToEnd:
         )
         ef_df = SimpleNamespace(
             y_true=np.array([10.0, 20.0]),
-            y_pred=pf.y_pred + 999.0,  # ← deliberate mismatch
+            y_pred=pf.values + 999.0,  # ← deliberate mismatch
             identifiers={
                 "time": pf.identifiers["time"].copy(),
                 "unit": pf.identifiers["unit"].copy(),

@@ -8,6 +8,20 @@ import numpy as np
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+from views_frames import SpatialLevel, SpatioTemporalIndex
+
+
+def _pf(y_pred, time, unit):
+    """Construct a leaf PredictionFrame (PGM) from raw arrays."""
+    from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+    index = SpatioTemporalIndex(
+        time=np.asarray(time, dtype=np.int64),
+        unit=np.asarray(unit, dtype=np.int64),
+        level=SpatialLevel.PGM,
+    )
+    return PredictionFrame(y_pred, index)
+
 
 # ---------------------------------------------------------------------------
 # F-1: Docstring claims y_pred.npy check that no longer exists (C-96 fix)
@@ -117,14 +131,10 @@ class TestF3ArtifactTimestampAgreement:
 
         Currently FAILS: model.py always calls get_latest_model_artifact_path()
         regardless of args.artifact_name, so saves use latest timestamp."""
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         mgr, old_artifact, latest_artifact = self._make_manager_with_two_artifacts(tmp_path)
 
-        pf = PredictionFrame(
-            y_pred=np.ones((10, 4), dtype=np.float32),
-            identifiers={"time": np.arange(10), "unit": np.arange(10)},
-        )
+        pf = _pf(np.ones((10, 4), dtype=np.float32), np.arange(10), np.arange(10))
         mgr._forecast_model_artifact = MagicMock(return_value={"ged_sb": pf})
         mgr._forecasting_stage = MagicMock()
         mgr._execute_model_forecasting()

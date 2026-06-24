@@ -21,6 +21,7 @@ from views_pipeline_core.exceptions import (
 )
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.prediction_frame import PredictionFrame
+from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
@@ -1320,9 +1321,10 @@ class ForecastingModelManager(ModelManager):
                         for target in list(pf_dict.keys()):
                             pf = pf_dict.pop(target)  # remove from dict → refcount drops
                             # Track A — compact numpy (metrics mmap reload)
-                            pf.save(staging_path / f"origin_{origin_idx}" / target)
+                            save_pf(pf, staging_path / f"origin_{origin_idx}" / target)
                             # Track A+ — permanent numpy for ensemble consumption
-                            pf.save(
+                            save_pf(
+                                pf,
                                 self._model_path.data_generated
                                 / f"predictions_{_run_type}_{_ts}"
                                 / f"origin_{origin_idx}"
@@ -1418,8 +1420,9 @@ class ForecastingModelManager(ModelManager):
                         # not by M × T × PF_size simultaneously.
                         raw_preds_for_metrics = {
                             target: [
-                                PredictionFrame.load(
-                                    staging_path / f"origin_{i}" / target, mmap=True
+                                load_pf(
+                                    staging_path / f"origin_{i}" / target,
+                                    self.configs["level"], mmap=True,
                                 )
                                 for i in range(n_sequences)
                             ]
@@ -1487,7 +1490,8 @@ class ForecastingModelManager(ModelManager):
                         self.args.run_type, self.args.artifact_name
                     ).stem[-15:]
                     for target, pf in predictions.items():
-                        pf.save(
+                        save_pf(
+                            pf,
                             self._model_path.data_generated
                             / f"predictions_{self.args.run_type}_{_ts}"
                             / target

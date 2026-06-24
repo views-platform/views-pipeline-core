@@ -17,8 +17,12 @@ from pathlib import Path
 
 import numpy as np
 
-from views_pipeline_core.data.prediction_frame import PredictionFrame
+from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
 from views_pipeline_core.managers.model.model import ForecastingModelManager
+from views_pipeline_core.managers.prediction.prediction_frame_io import (
+    load_pf,
+    save_pf,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -27,11 +31,12 @@ from views_pipeline_core.managers.model.model import ForecastingModelManager
 
 def _make_pf(n_rows: int = 4, n_samples: int = 2) -> PredictionFrame:
     return PredictionFrame(
-        y_pred=np.ones((n_rows, n_samples), dtype=np.float32),
-        identifiers={
-            "time": np.arange(n_rows, dtype=np.int64),
-            "unit": np.arange(n_rows, dtype=np.int64) + 100,
-        },
+        np.ones((n_rows, n_samples), dtype=np.float32),
+        SpatioTemporalIndex(
+            time=np.arange(n_rows, dtype=np.int64),
+            unit=np.arange(n_rows, dtype=np.int64) + 100,
+            level=SpatialLevel.PGM,
+        ),
     )
 
 
@@ -214,7 +219,7 @@ class TestTrackASinkPattern:
             # Replicate the sink pattern that _execute_model_evaluation will use
             for origin_idx in range(3):
                 for target in targets:
-                    pf.save(staging / f"origin_{origin_idx}" / target)
+                    save_pf(pf, staging / f"origin_{origin_idx}" / target)
 
             for origin_idx in range(3):
                 for target in targets:
@@ -232,10 +237,10 @@ class TestTrackASinkPattern:
             original = _make_pf(n_rows=6, n_samples=8)
 
             for i in range(n_origins):
-                original.save(staging / f"origin_{i}" / targets[0])
+                save_pf(original, staging / f"origin_{i}" / targets[0])
 
             reloaded = [
-                PredictionFrame.load(staging / f"origin_{i}" / targets[0], mmap=True)
+                load_pf(staging / f"origin_{i}" / targets[0], "pgm", mmap=True)
                 for i in range(n_origins)
             ]
 
@@ -243,7 +248,7 @@ class TestTrackASinkPattern:
         for pf in reloaded:
             assert pf.n_rows == original.n_rows
             assert pf.sample_count == original.sample_count
-            assert isinstance(pf.y_pred, np.memmap)
+            assert isinstance(pf.values, np.memmap)
 
     def test_staging_files_survive_the_sink_loop(self):
         """
@@ -258,7 +263,7 @@ class TestTrackASinkPattern:
             for i in range(3):
                 pf = _make_pf()
                 pf_refs.append(weakref.ref(pf))
-                pf.save(staging / f"origin_{i}" / "target")
+                save_pf(pf, staging / f"origin_{i}" / "target")
                 del pf
                 gc.collect()
 
