@@ -1,44 +1,28 @@
-"""Tests for SpatialLevel domain value object."""
-import pytest
+"""`SpatialLevel` is now the published leaf type (views-frames); pipeline-core
+re-exports it from `views_pipeline_core.domain` (issue #187, retiring the local
+copy). These tests only assert the re-export wiring — the leaf owns its own
+behaviour tests (time-first `index_names`, consistent `priogrid_id`, etc.).
+"""
+import views_frames
 
-from views_pipeline_core.domain.spatial import SpatialLevel
-
-
-class TestFromStr:
-    def test_cm(self):
-        assert SpatialLevel.from_str("cm") is SpatialLevel.CM
-
-    def test_pgm(self):
-        assert SpatialLevel.from_str("pgm") is SpatialLevel.PGM
-
-    def test_invalid_raises(self):
-        with pytest.raises(ValueError, match="Unsupported spatial level"):
-            SpatialLevel.from_str("invalid")
-
-    def test_empty_raises(self):
-        with pytest.raises(ValueError):
-            SpatialLevel.from_str("")
+from views_pipeline_core.domain import SpatialLevel
 
 
-class TestIndexNames:
-    def test_cm_index_names(self):
-        assert SpatialLevel.CM.index_names == ("country_id", "month_id")
-
-    def test_pgm_index_names(self):
-        assert SpatialLevel.PGM.index_names == ("priogrid_gid", "month_id")
+def test_domain_reexports_the_leaf():
+    # the public `views_pipeline_core.domain.SpatialLevel` IS the leaf's enum,
+    # not a local duplicate — so there is one source of truth platform-wide.
+    assert SpatialLevel is views_frames.SpatialLevel
 
 
-class TestEntityColumn:
-    def test_cm_entity_column(self):
-        assert SpatialLevel.CM.entity_column == "country_id"
+def test_members_and_string_construction():
+    assert {m.value for m in SpatialLevel} == {"cm", "pgm"}
+    # config["level"] strings construct via the standard Enum(value) constructor
+    assert SpatialLevel("cm") is SpatialLevel.CM
+    assert SpatialLevel("pgm") is SpatialLevel.PGM
 
-    def test_pgm_entity_column(self):
-        assert SpatialLevel.PGM.entity_column == "priogrid_id"
 
-
-class TestEnumCompleteness:
-    def test_exactly_two_members(self):
-        assert len(SpatialLevel) == 2
-
-    def test_values(self):
-        assert {m.value for m in SpatialLevel} == {"cm", "pgm"}
+def test_pgm_entity_column_is_consistent():
+    # the local copy's latent gid/id inconsistency (register C-18/C-65) is gone:
+    # the leaf uses priogrid_id for the PGM entity column and index name alike.
+    assert SpatialLevel.PGM.entity_column == "priogrid_id"
+    assert SpatialLevel.CM.entity_column == "country_id"
