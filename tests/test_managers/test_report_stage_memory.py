@@ -17,7 +17,7 @@ import tracemalloc
 
 import numpy as np
 
-from views_pipeline_core.data.prediction_frame import PredictionFrame
+from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
 from views_pipeline_core.managers.prediction.prediction_frame_converter import (
     PredictionFrameConverter,
 )
@@ -36,13 +36,12 @@ class TestReportStageListInCellOverhead:
 
     def _make_pf(self, n_units: int, months: int, s: int) -> PredictionFrame:
         n = n_units * months
-        return PredictionFrame(
-            y_pred=np.zeros((n, s), dtype=np.float32),
-            identifiers={
-                "time": np.repeat(np.arange(months), n_units),
-                "unit": np.tile(np.arange(n_units), months),
-            },
+        index = SpatioTemporalIndex(
+            time=np.repeat(np.arange(months), n_units).astype(np.int64),
+            unit=np.tile(np.arange(n_units), months).astype(np.int64),
+            level=SpatialLevel.PGM,
         )
+        return PredictionFrame(np.zeros((n, s), dtype=np.float32), index)
 
     def test_list_in_cell_is_object_dtype(self):
         pf = self._make_pf(2000, 10, 8)
@@ -55,7 +54,7 @@ class TestReportStageListInCellOverhead:
         df, peak = _heap_peak(
             lambda: PredictionFrameConverter().to_prediction_df(pf, "t0")
         )
-        dense = pf.y_pred.nbytes
+        dense = pf.values.nbytes
         # Measured ~50-160x; assert a conservative floor of 8x. If this ever drops
         # below the floor because the report moved to dense arrays, that is the
         # #181 fix landing — update this guard rather than the production code.

@@ -254,6 +254,7 @@ class TestArrowAggregatorContract:
     """T2: Prove PredictionFrameConverter output is loadable by AggregationManager."""
 
     def test_converter_parquet_loadable_by_aggregator(self, output_dir):
+        from views_frames import SpatialLevel, SpatioTemporalIndex
         from views_pipeline_core.data.prediction_frame import PredictionFrame
         from views_pipeline_core.managers.prediction.prediction_frame_converter import (
             PredictionFrameConverter,
@@ -261,8 +262,12 @@ class TestArrowAggregatorContract:
         import pyarrow.parquet as pq_mod
 
         pf = PredictionFrame(
-            y_pred=np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32),
-            identifiers={"time": np.array([400, 400, 400]), "unit": np.array([1, 2, 3])},
+            np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32),
+            SpatioTemporalIndex(
+                time=np.array([400, 400, 400], dtype=np.int64),
+                unit=np.array([1, 2, 3], dtype=np.int64),
+                level=SpatialLevel.PGM,
+            ),
         )
 
         converter = PredictionFrameConverter()

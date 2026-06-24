@@ -8,6 +8,24 @@ import numpy as np
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+from views_frames import SpatialLevel, SpatioTemporalIndex
+from views_pipeline_core.managers.prediction.prediction_frame_io import (
+    load_pf,
+    save_pf,
+)
+
+
+def _pf(y_pred, time, unit):
+    """Construct a leaf PredictionFrame (PGM) from raw arrays."""
+    from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+    index = SpatioTemporalIndex(
+        time=np.asarray(time, dtype=np.int64),
+        unit=np.asarray(unit, dtype=np.int64),
+        level=SpatialLevel.PGM,
+    )
+    return PredictionFrame(y_pred, index)
+
 
 # ---------------------------------------------------------------------------
 # P-1: _get_generated_pf_prediction_paths — nesting level (C-96 regression)
@@ -137,15 +155,11 @@ class TestP2TimestampFromArtifact:
     @patch("views_pipeline_core.files.utils.handle_single_log_creation")
     def test_eval_uses_artifact_timestamp_not_runtime(self, mock_log, tmp_path):
         """Track A+ eval save must use artifact stem, not configs["timestamp"]."""
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         artifact_stem = "calibration_model_20260510_140000"
         mgr = self._make_pf_manager(tmp_path, artifact_stem)
 
-        pf = PredictionFrame(
-            y_pred=np.ones((10, 4), dtype=np.float32),
-            identifiers={"time": np.arange(10), "unit": np.arange(10)},
-        )
+        pf = _pf(np.ones((10, 4), dtype=np.float32), np.arange(10), np.arange(10))
 
         def fake_streaming(eval_type, artifact_name, origin_sink):
             origin_sink(0, {"ged_sb": pf})
@@ -175,15 +189,11 @@ class TestP2TimestampFromArtifact:
 
     def test_forecast_uses_artifact_timestamp_not_runtime(self, tmp_path):
         """Track A+ forecast save must use artifact stem, not configs["timestamp"]."""
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         artifact_stem = "calibration_model_20260510_140000"
         mgr = self._make_pf_manager(tmp_path, artifact_stem)
 
-        pf = PredictionFrame(
-            y_pred=np.ones((10, 4), dtype=np.float32),
-            identifiers={"time": np.arange(10), "unit": np.arange(10)},
-        )
+        pf = _pf(np.ones((10, 4), dtype=np.float32), np.arange(10), np.arange(10))
         mgr._forecast_model_artifact = MagicMock(return_value={"ged_sb": pf})
         mgr._forecasting_stage = MagicMock()
         mgr._execute_model_forecasting()
@@ -265,7 +275,6 @@ class TestP4ProducerConsumerPathAgreement:
 
     def test_eval_roundtrip_path_agreement(self, tmp_path):
         """PredictionFrame saved at artifact-ts path is loadable by ensemble."""
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         artifact_ts = "20260510_140000"
         target = "ged_sb"
@@ -279,14 +288,11 @@ class TestP4ProducerConsumerPathAgreement:
             / "origin_0" / target
         )
 
-        pf = PredictionFrame(
-            y_pred=np.random.rand(10, 4).astype(np.float32),
-            identifiers={"time": np.arange(10), "unit": np.arange(10)},
-        )
-        pf.save(producer_dir)
+        pf = _pf(np.random.rand(10, 4).astype(np.float32), np.arange(10), np.arange(10))
+        save_pf(pf, producer_dir)
 
-        loaded = PredictionFrame.load(consumer_dir, mmap=True)
-        np.testing.assert_array_equal(loaded.y_pred, pf.y_pred)
+        loaded = load_pf(consumer_dir, "pgm", mmap=True)
+        np.testing.assert_array_equal(loaded.values, pf.values)
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +305,6 @@ class TestP5IntegrationCoverageGap:
 
     def test_save_load_roundtrip_eval_layout(self, tmp_path):
         """PredictionFrame saved in eval layout is loadable."""
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         run_type = "calibration"
         ts = "20260522_120000"
@@ -315,24 +320,17 @@ class TestP5IntegrationCoverageGap:
             / f"origin_{origin_idx}" / target
         )
 
-        pf_original = PredictionFrame(
-            y_pred=np.random.rand(100, 64).astype(np.float32),
-            identifiers={
-                "time": np.arange(100),
-                "unit": np.arange(100),
-            },
-        )
-        pf_original.save(producer_dir)
+        pf_original = _pf(np.random.rand(100, 64).astype(np.float32), np.arange(100), np.arange(100))
+        save_pf(pf_original, producer_dir)
 
-        pf_loaded = PredictionFrame.load(consumer_dir, mmap=True)
+        pf_loaded = load_pf(consumer_dir, "pgm", mmap=True)
 
         assert pf_loaded.n_rows == pf_original.n_rows
         assert pf_loaded.sample_count == pf_original.sample_count
-        np.testing.assert_array_equal(pf_loaded.y_pred, pf_original.y_pred)
+        np.testing.assert_array_equal(pf_loaded.values, pf_original.values)
 
     def test_save_load_roundtrip_forecast_layout(self, tmp_path):
         """PredictionFrame saved in forecast layout is loadable."""
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         run_type = "forecasting"
         ts = "20260522_120000"
@@ -341,15 +339,9 @@ class TestP5IntegrationCoverageGap:
         producer_dir = tmp_path / f"predictions_{run_type}_{ts}" / target
         consumer_dir = tmp_path / f"predictions_{run_type}_{ts}" / target
 
-        pf_original = PredictionFrame(
-            y_pred=np.random.rand(100, 64).astype(np.float32),
-            identifiers={
-                "time": np.arange(100),
-                "unit": np.arange(100),
-            },
-        )
-        pf_original.save(producer_dir)
-        pf_loaded = PredictionFrame.load(consumer_dir, mmap=False)
+        pf_original = _pf(np.random.rand(100, 64).astype(np.float32), np.arange(100), np.arange(100))
+        save_pf(pf_original, producer_dir)
+        pf_loaded = load_pf(consumer_dir, "pgm", mmap=False)
 
         assert pf_loaded.n_rows == pf_original.n_rows
-        np.testing.assert_array_equal(pf_loaded.y_pred, pf_original.y_pred)
+        np.testing.assert_array_equal(pf_loaded.values, pf_original.values)

@@ -11,8 +11,19 @@ class DummyEvaluationFrame:
         self.identifiers = identifiers
         self.metadata = metadata
 
+from views_frames import SpatialLevel, SpatioTemporalIndex  # noqa: E402
 from views_pipeline_core.modules.validation.adapter import EvaluationAdapter  # noqa: E402
 from views_pipeline_core.data.prediction_frame import PredictionFrame  # noqa: E402
+
+
+def _pf(y_pred, time, unit):
+    """Construct a leaf PredictionFrame from raw arrays (integer identifiers)."""
+    index = SpatioTemporalIndex(
+        time=np.asarray(time, dtype=np.int64),
+        unit=np.asarray(unit, dtype=np.int64),
+        level=SpatialLevel.PGM,
+    )
+    return PredictionFrame(y_pred, index)
 
 
 @pytest.fixture(autouse=True)
@@ -44,12 +55,10 @@ class TestEvaluationAdapter:
         df_actual, df_pred = sample_data
         
         # Wrap the prediction dataframe in a PredictionFrame
-        pf = PredictionFrame(
-            y_pred=df_pred[['pred_target']].values,
-            identifiers={
-                'time': df_pred.index.get_level_values(0).values,
-                'unit': df_pred.index.get_level_values(1).values
-            }
+        pf = _pf(
+            df_pred[['pred_target']].values,
+            time=df_pred.index.get_level_values(0).values,
+            unit=df_pred.index.get_level_values(1).values,
         )
         
         ef = EvaluationAdapter.from_prediction_frame(df_actual, pf, 'target')
@@ -309,13 +318,7 @@ def _pf_actual():
 def _pf_seq(months, values, n_samples=2):
     """Build a minimal PredictionFrame for one sequence."""
     y_pred = np.array([[v + 0.1 * s for s in range(n_samples)] for v in values])
-    return PredictionFrame(
-        y_pred=y_pred,
-        identifiers={
-            'time': np.array(months),
-            'unit': np.ones(len(months), dtype=int),
-        }
-    )
+    return _pf(y_pred, time=np.array(months), unit=np.ones(len(months), dtype=int))
 
 
 class TestFromPredictionFrames:
@@ -407,10 +410,7 @@ class TestFromPredictionFrameSingular:
                 [(100, 1), (999, 2)], names=["month_id", "pgm_id"]
             ),
         )
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 2)),
-            identifiers={"time": np.array([100, 999]), "unit": np.array([1, 2])},
-        )
+        pf = _pf(np.ones((2, 2)), time=np.array([100, 999]), unit=np.array([1, 2]))
         mapping = {100: 1, 101: 2}  # month 999 not in mapping
         with pytest.raises(ValueError, match="declared base_origin does not match"):
             EvaluationAdapter.from_prediction_frame(actual, pf, "lr_sb", mapping)
@@ -423,10 +423,7 @@ class TestFromPredictionFrameSingular:
                 [(100, 1), (999, 2)], names=["month_id", "pgm_id"]
             ),
         )
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 2)),
-            identifiers={"time": np.array([100, 999]), "unit": np.array([1, 2])},
-        )
+        pf = _pf(np.ones((2, 2)), time=np.array([100, 999]), unit=np.array([1, 2]))
         # No mapping supplied → window-integrity guard skipped, positional inference used
         ef = EvaluationAdapter.from_prediction_frame(actual, pf, "lr_sb", step_mapping=None)
         assert len(ef.y_true) == 2

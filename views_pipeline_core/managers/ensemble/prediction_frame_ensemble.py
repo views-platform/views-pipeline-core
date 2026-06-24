@@ -24,6 +24,7 @@ import wandb
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 from views_pipeline_core.exceptions import PipelineException
+from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.files.utils import handle_ensemble_log_creation
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
@@ -94,12 +95,14 @@ def _aggregate_prediction_frames(
                 )
 
     if method == "concat":
-        y_agg = np.concatenate([pf.y_pred for pf in frames], axis=1)
+        y_agg = np.concatenate([pf.values for pf in frames], axis=1)
     else:
-        y_agg = np.mean(np.stack([pf.y_pred for pf in frames]), axis=0)
+        y_agg = np.mean(np.stack([pf.values for pf in frames]), axis=0)
 
-    identifiers = {k: v.copy() for k, v in reference.identifiers.items()}
-    return PredictionFrame(y_pred=y_agg, identifiers=identifiers)
+    # Reuse the reference frame's index — all frames share matching identifiers
+    # (validated above) and the aggregate keeps the same rows, so its (time, unit,
+    # level) index is identical. The leaf index is immutable, so sharing is safe.
+    return PredictionFrame(y_agg, reference.index)
 
 
 # ---------------------------------------------------------------------------
@@ -518,7 +521,7 @@ class PredictionFrameEnsembleManager:
                     / f"origin_{seq_idx}"
                     / target
                 )
-                agg_pf.save(save_dir)
+                save_pf(agg_pf, save_dir)
                 aggregated[target].append(agg_pf)
 
         tqdm.tqdm.write("Aggregation complete.")
@@ -558,7 +561,7 @@ class PredictionFrameEnsembleManager:
                 / f"predictions_{ctx.run_type}_{ctx.timestamp}"
                 / target
             )
-            agg_pf.save(save_dir)
+            save_pf(agg_pf, save_dir)
             forecasts[target] = agg_pf
 
         return forecasts
@@ -722,7 +725,7 @@ class PredictionFrameEnsembleManager:
             logger.info(
                 f"Loading existing PredictionFrame from {pf_dir}"
             )
-            return PredictionFrame.load(pf_dir, mmap=mmap)
+            return load_pf(pf_dir, ctx.configs["level"], mmap=mmap)
 
         logger.info(
             f"No existing PredictionFrame at {pf_dir}. "
@@ -734,7 +737,7 @@ class PredictionFrameEnsembleManager:
         self._execute_shell_script(model_path, model_name, model_args)
 
         try:
-            return PredictionFrame.load(pf_dir, mmap=mmap)
+            return load_pf(pf_dir, ctx.configs["level"], mmap=mmap)
         except FileNotFoundError:
             logger.error(
                 f"No PredictionFrame output found at {pf_dir} for "

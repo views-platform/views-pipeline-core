@@ -14,8 +14,8 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
 from views_pipeline_core.cli.args import ForecastingModelArgs
-from views_pipeline_core.data.prediction_frame import PredictionFrame
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.managers.ensemble import EnsemblePathManager
 from views_pipeline_core.managers.ensemble.dataframe_ensemble import EnsembleContext
@@ -34,25 +34,25 @@ from views_pipeline_core.managers.model import (
 # Helpers
 # ============================================================================
 
+def _pf_index(n_rows):
+    return SpatioTemporalIndex(
+        time=np.arange(n_rows, dtype=np.int64),
+        unit=np.arange(1000, 1000 + n_rows, dtype=np.int64),
+        level=SpatialLevel.PGM,
+    )
+
+
 def _make_pf(n_rows=100, n_samples=64, seed=42):
     """Create a PredictionFrame with deterministic random data."""
     rng = np.random.default_rng(seed)
     y_pred = rng.standard_normal((n_rows, n_samples)).astype(np.float32)
-    identifiers = {
-        "time": np.arange(n_rows, dtype=np.int64),
-        "unit": np.arange(1000, 1000 + n_rows, dtype=np.int64),
-    }
-    return PredictionFrame(y_pred=y_pred, identifiers=identifiers)
+    return PredictionFrame(y_pred, _pf_index(n_rows))
 
 
 def _make_pf_with_values(n_rows, n_samples, fill_value):
     """Create a PredictionFrame filled with a constant value."""
     y_pred = np.full((n_rows, n_samples), fill_value, dtype=np.float32)
-    identifiers = {
-        "time": np.arange(n_rows, dtype=np.int64),
-        "unit": np.arange(1000, 1000 + n_rows, dtype=np.int64),
-    }
-    return PredictionFrame(y_pred=y_pred, identifiers=identifiers)
+    return PredictionFrame(y_pred, _pf_index(n_rows))
 
 
 # ============================================================================
@@ -248,7 +248,7 @@ class TestPredictionFrameAggregation:
 
         result = _aggregate_prediction_frames([pf1, pf2, pf3], method="concat")
 
-        assert result.y_pred.shape == (100, 192)
+        assert result.values.shape == (100, 192)
 
     def test_concat_preserves_identifiers(self):
         pf1 = _make_pf(n_rows=100, n_samples=64, seed=1)
@@ -268,8 +268,8 @@ class TestPredictionFrameAggregation:
             [pf1, pf2, pf3], method="arithmetic_mean"
         )
 
-        assert result.y_pred.shape == (100, 64)
-        np.testing.assert_allclose(result.y_pred, 4.0, atol=1e-6)
+        assert result.values.shape == (100, 64)
+        np.testing.assert_allclose(result.values, 4.0, atol=1e-6)
 
     def test_arithmetic_mean_preserves_identifiers(self):
         pf1 = _make_pf(n_rows=100, n_samples=64, seed=1)
@@ -292,11 +292,12 @@ class TestPredictionFrameAggregation:
     def test_mismatched_identifiers_raises(self):
         pf1 = _make_pf(n_rows=100, n_samples=64, seed=1)
         pf2 = PredictionFrame(
-            y_pred=np.ones((100, 64), dtype=np.float32),
-            identifiers={
-                "time": np.arange(100, 200, dtype=np.int64),
-                "unit": np.arange(1000, 1100, dtype=np.int64),
-            },
+            np.ones((100, 64), dtype=np.float32),
+            SpatioTemporalIndex(
+                time=np.arange(100, 200, dtype=np.int64),
+                unit=np.arange(1000, 1100, dtype=np.int64),
+                level=SpatialLevel.PGM,
+            ),
         )
 
         with pytest.raises(ValueError, match="identifiers"):
@@ -311,7 +312,7 @@ class TestPredictionFrameAggregation:
 
         for method in ("concat", "arithmetic_mean"):
             result = _aggregate_prediction_frames([pf], method=method)
-            np.testing.assert_array_equal(result.y_pred, pf.y_pred)
+            np.testing.assert_array_equal(result.values, pf.values)
             np.testing.assert_array_equal(
                 result.identifiers["time"], pf.identifiers["time"]
             )
@@ -417,7 +418,7 @@ class TestPredictionFrameLoading:
 
     def test_load_existing_pf_from_disk(self, pf_manager, ensemble_context):
         pf = _make_pf()
-        with patch.object(PredictionFrame, "load", return_value=pf) as mock_load, \
+        with patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.load_pf", return_value=pf) as mock_load, \
              patch("pathlib.Path.exists", return_value=True):
             result = pf_manager._load_or_generate_pf(
                 model_path=MagicMock(),
@@ -435,7 +436,7 @@ class TestPredictionFrameLoading:
 
         with patch("pathlib.Path.exists", return_value=False), \
              patch.object(pf_manager, "_execute_shell_script") as mock_exec, \
-             patch.object(PredictionFrame, "load", return_value=pf):
+             patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.load_pf", return_value=pf):
             result = pf_manager._load_or_generate_pf(
                 model_path=mock_model_path,
                 model_name="hydra_alpha",
@@ -452,7 +453,7 @@ class TestPredictionFrameLoading:
 
         with patch("pathlib.Path.exists", return_value=False), \
              patch.object(pf_manager, "_execute_shell_script"), \
-             patch.object(PredictionFrame, "load", side_effect=FileNotFoundError):
+             patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.load_pf", side_effect=FileNotFoundError):
             with pytest.raises(PipelineException):
                 pf_manager._load_or_generate_pf(
                     model_path=mock_model_path,
@@ -466,7 +467,7 @@ class TestPredictionFrameLoading:
     def test_mmap_used_for_evaluation(self, pf_manager, ensemble_context):
         pf = _make_pf()
         with patch("pathlib.Path.exists", return_value=True), \
-             patch.object(PredictionFrame, "load", return_value=pf) as mock_load:
+             patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.load_pf", return_value=pf) as mock_load:
             pf_manager._load_or_generate_pf(
                 model_path=MagicMock(),
                 model_name="hydra_alpha",
@@ -480,7 +481,7 @@ class TestPredictionFrameLoading:
     def test_mmap_not_used_for_forecast(self, pf_manager, ensemble_context):
         pf = _make_pf()
         with patch("pathlib.Path.exists", return_value=True), \
-             patch.object(PredictionFrame, "load", return_value=pf) as mock_load:
+             patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.load_pf", return_value=pf) as mock_load:
             pf_manager._load_or_generate_pf(
                 model_path=MagicMock(),
                 model_name="hydra_alpha",
@@ -504,7 +505,7 @@ class TestPredictionFrameEvaluationFlow:
 
         with patch.object(pf_manager, "_evaluate_model_artifact", return_value={"ged_sb": [pf1]}), \
              patch.object(pf_manager, "_evaluate_predictions"), \
-             patch.object(PredictionFrame, "save"), \
+             patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.save_pf"), \
              patch(
                  "views_pipeline_core.managers.model.ForecastingModelManager._resolve_evaluation_sequence_number",
                  return_value=1,
@@ -520,7 +521,7 @@ class TestPredictionFrameEvaluationFlow:
         pf = _make_pf()
 
         with patch.object(pf_manager, "_evaluate_model_artifact", return_value={"ged_sb": [pf]}), \
-             patch.object(PredictionFrame, "save"), \
+             patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.save_pf"), \
              patch(
                  "views_pipeline_core.managers.model.ForecastingModelManager._resolve_evaluation_sequence_number",
                  return_value=1,
@@ -546,7 +547,7 @@ class TestPredictionFrameForecastingFlow:
         pf = _make_pf()
 
         with patch.object(pf_manager, "_forecast_model_artifact", return_value={"ged_sb": pf}), \
-             patch.object(PredictionFrame, "save"), \
+             patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.save_pf"), \
              patch(
                  "views_pipeline_core.managers.ensemble.prediction_frame_ensemble.handle_ensemble_log_creation",
              ), \
@@ -568,7 +569,7 @@ class TestPredictionFrameForecastingFlow:
                  "views_pipeline_core.managers.ensemble.prediction_frame_ensemble._aggregate_prediction_frames",
                  return_value=pf,
              ), \
-             patch.object(PredictionFrame, "save") as mock_save:
+             patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.save_pf") as mock_save:
             pf_manager._forecast_ensemble(ensemble_context)
             mock_save.assert_called()
 
@@ -579,7 +580,7 @@ class TestPredictionFrameForecastingFlow:
         pf = _make_pf()
 
         with patch.object(pf_manager, "_forecast_model_artifact", return_value={"ged_sb": pf}), \
-             patch.object(PredictionFrame, "save"), \
+             patch("views_pipeline_core.managers.ensemble.prediction_frame_ensemble.save_pf"), \
              patch(
                  "views_pipeline_core.managers.ensemble.prediction_frame_ensemble.handle_ensemble_log_creation",
              ), \

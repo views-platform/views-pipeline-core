@@ -71,7 +71,7 @@ class PredictionFrameConverter:
             [pf.identifiers["time"], pf.identifiers["unit"]]
         )
         return pd.DataFrame(
-            {f"pred_{target}": [list(row) for row in pf.y_pred]},
+            {f"pred_{target}": [list(row) for row in pf.values]},
             index=idx,
         )
 
@@ -225,10 +225,10 @@ class PredictionFrameConverter:
             )
         entity_col = _LEVEL_TO_ENTITY_COL[level]
 
-        n_rows, n_samples = pf.y_pred.shape
+        n_rows, n_samples = pf.values.shape
 
         # Build ListArray from flat numpy — zero-copy, no Python list objects
-        flat_values = pa.array(pf.y_pred.reshape(-1), type=pa.float32())
+        flat_values = pa.array(pf.values.reshape(-1), type=pa.float32())
         offsets = pa.array(
             np.arange(0, (n_rows + 1) * n_samples, n_samples, dtype=np.int32)
         )

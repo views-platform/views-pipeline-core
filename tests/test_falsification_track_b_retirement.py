@@ -9,14 +9,18 @@ from unittest.mock import patch, Mock
 from pathlib import Path
 import numpy as np
 
+from views_frames import SpatialLevel, SpatioTemporalIndex
+
 
 def _make_simple_pf():
     from views_pipeline_core.data.prediction_frame import PredictionFrame
 
-    return PredictionFrame(
-        y_pred=np.ones((10, 4), dtype=np.float32),
-        identifiers={"time": np.arange(10), "unit": np.arange(10)},
+    index = SpatioTemporalIndex(
+        time=np.arange(10, dtype=np.int64),
+        unit=np.arange(10, dtype=np.int64),
+        level=SpatialLevel.PGM,
     )
+    return PredictionFrame(np.ones((10, 4), dtype=np.float32), index)
 
 
 class TestF4StaleMethodPatch:
@@ -40,7 +44,6 @@ class TestF4StaleMethodPatch:
             PredictionFrameConverter,
         )
         from views_pipeline_core.managers.model.model import ForecastingModelManager
-        from views_pipeline_core.data.prediction_frame import PredictionFrame
 
         # Import the test helpers from the prediction format test module
         import sys
@@ -80,10 +83,8 @@ class TestF4StaleMethodPatch:
                         with patch(
                             "views_pipeline_core.files.utils.handle_single_log_creation"
                         ):
-                            with patch.object(PredictionFrame, "save"):
-                                with patch.object(
-                                    PredictionFrame, "load", return_value=Mock()
-                                ):
+                            with patch("views_pipeline_core.managers.model.model.save_pf"):
+                                with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
                                     manager._execute_model_evaluation()
 
         # This is the point: to_prediction_df is NEVER called, even when
