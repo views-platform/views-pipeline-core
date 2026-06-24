@@ -2,120 +2,113 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-04-08
-**Related ADRs:** ADR-003 (Authority of Declarations), ADR-009 (Boundary Contracts), ADR-042 (PredictionFrame Adoption)
+**Last reviewed:** 2026-06-24
+**Related ADRs:** ADR-003 (Authority of Declarations), ADR-009 (Boundary Contracts), ADR-042 (PredictionFrame Adoption), ADR-054 (extraction), views-frames ADR-018 (frozen leaf contract)
+
+> **#188 — the type now lives in the leaf.** `views_pipeline_core.data.prediction_frame.PredictionFrame` **re-exports** `views_frames.PredictionFrame` (the published, API-frozen leaf). The leaf **owns the type contract** (construction, validation, `.values`, save/load); pipeline-core owns only its *use* and its `y_pred.npy` *persistence layout*. This CIC documents pipeline-core's contract with the leaf — the authoritative type spec is the leaf's own docs/tests.
 
 ---
 
 ## 1. Purpose
 
-The canonical, framework-agnostic transport object for model inference output.
-Carries a dense matrix of posterior-sample predictions together with the explicit
-spatiotemporal metadata needed to align them with ground truth. Serves as the
-universal handoff between a model and the pipeline's evaluation and persistence
-layers, without coupling either side to Pandas.
+The canonical, framework-agnostic transport object for model inference output:
+a dense `(N, S)` float32 matrix of posterior-sample predictions plus an explicit
+`SpatioTemporalIndex` (`time`, `unit`, `level`). The universal handoff between a
+model and the pipeline's evaluation and persistence layers, with no Pandas coupling.
 
 ---
 
 ## 2. Non-Goals (Explicit Exclusions)
 
-- This class does **not** carry ground truth (`y_true`). That is the
-  `EvaluationFrame`'s responsibility, managed by the `EvaluationAdapter`.
-- This class does **not** perform alignment with actuals, intersection, or any
-  index join logic.
-- This class does **not** depend on Pandas, Polars, Xarray, or any DataFrame
-  library for its internal state. Its only dependency is NumPy.
-- This class does **not** infer identifiers from array position or data content.
-  Identifiers must be provided explicitly by the model; no guessing.
-- This class does **not** perform lead-time (step) assignment. That is the
-  orchestrator's responsibility (ADR-039, ADR-040).
+- Does **not** carry ground truth (`y_true`) — that is the `EvaluationFrame`'s job.
+- Does **not** perform alignment/intersection/index-join with actuals.
+- Does **not** depend on Pandas/Polars/Xarray — numpy-only (the leaf is numpy-only).
+- Does **not** infer identifiers from position or content — they are explicit.
+- Does **not** perform lead-time (step) assignment — the orchestrator's job.
 
 ---
 
-## 3. Responsibilities and Guarantees
+## 3. Responsibilities and Guarantees (as provided by the leaf)
 
-- **Shape integrity**: Guarantees that `y_pred` is exactly 2D (`N × S`) with
-  `N > 0` and `S ≥ 1`.
-- **Identifier completeness**: Guarantees that `identifiers` contains at minimum
-  `{"time", "unit"}`, and that every identifier array has exactly `N` entries.
-- **No NaN in identifiers**: Guarantees that no identifier array contains NaN.
-- **Minimal operations**: Primarily a read-only container. Supports `collapse()` for sample aggregation and `save()`/`load()` for numpy-native persistence. No DataFrame/Arrow conversion (that is `PredictionFrameConverter`'s job).
+- **Shape**: `.values` is 2D (`N × S`), **float32** (the leaf coerces on construction).
+- **Index**: construction takes a `SpatioTemporalIndex(time, unit, level: SpatialLevel)`;
+  identifiers are exposed as `.identifiers == {"time", "unit"}` (integer arrays of length `N`).
+- **Integer identifiers**: the leaf requires integer-dtype `time`/`unit` (so NaN in an
+  identifier is impossible by construction — stricter than the retired local NaN check).
+- **Read-only container**: `.values`, `.n_rows`, `.sample_count`, `.index`, `.metadata`.
+- **Sample-axis reduction is NOT a method here** — use `views_frames_summarize`
+  (`collapse(frame, np.mean)`, `map_estimate`, `hdi`, `quantiles`).
+
+> **Weakened vs the retired local class:** the leaf does **not** reject `N == 0` / `S == 0`
+> at construction (it lets numpy reject them downstream). pipeline-core re-establishes the
+> non-empty guarantee at its **load boundary** — see §6.
 
 ---
 
 ## 4. Inputs and Assumptions
 
-- `y_pred: np.ndarray` — 2D array of shape `(N, S)`. Row `i` is the vector of
-  `S` posterior samples for observation `i`. Must be provided by the model.
-- `identifiers: Dict[str, np.ndarray]` — must contain at minimum:
-  - `"time"`: 1D array of `month_id` integer values (length `N`). The model must
-    derive these from `X.index` (the input data's time axis); they are not
-    inferred by PredictionFrame.
-  - `"unit"`: 1D array of `priogrid_gid` (for `level="pgm"`) or `country_id`
-    (for `level="cm"`) integer values (length `N`). Same source: `X.index`.
-  Additional identifier keys (e.g. `"origin"`) may be present and are preserved.
+- `y_pred: np.ndarray` — 2D `(N, S)`; coerced to float32. Provided by the model.
+- `index: SpatioTemporalIndex` — `time` (`month_id`), `unit` (`priogrid_id` for pgm /
+  `country_id` for cm), both integer length-`N`; `level: SpatialLevel` (cm/pgm).
+- `metadata: FrameMetadata | None` — optional provenance (model/run_type/timestamp/seed).
 
 ---
 
 ## 5. Outputs and Side Effects
 
-- Provides clean, read-only access via properties:
-  - `y_pred` — the raw NumPy prediction array
-  - `identifiers` — the identifier dictionary
-  - `n_rows` — `y_pred.shape[0]`
-  - `sample_count` — `y_pred.shape[1]`
-  - `identifier_keys` — `set(identifiers.keys())`
-- **`collapse(method="arithmetic_mean")`**: Returns a new `PredictionFrame` with `y_pred` reduced to shape `(N, 1)` by aggregating across the sample axis. Supported methods listed in class constant `SUPPORTED_AGGREGATE_METHODS` (currently `{"arithmetic_mean"}`). Raises `ValueError` for unsupported methods.
-- **`save(path)`**: Persists to disk as two files: `{path}/y_pred.npy` (numpy binary) and `{path}/identifiers.npz` (compressed numpy archive). Creates the directory if it does not exist.
-- **`load(path, mmap_mode=None)`** (classmethod): Reconstructs a `PredictionFrame` from the two-file format written by `save()`. Optional `mmap_mode` (e.g., `"r"`) enables memory-mapped loading for large arrays.
-- `__repr__` returns a summary string for logging.
+- Properties: `.values` (the `(N, S)` float32 array — **note: not `.y_pred`**),
+  `.identifiers` (`{"time","unit"}`), `.n_rows`, `.sample_count`, `.index`, `.metadata`.
+- **Persistence is pipeline-core's, not the leaf's `.save`.** Use
+  `views_pipeline_core.managers.prediction.prediction_frame_io`:
+  - **`save_pf(frame, dir)`** → writes `{dir}/y_pred.npy` + `{dir}/identifiers.npz`
+    (the cross-repo layout views-reporting's loader reads — deliberately NOT the leaf's
+    `values.npy`+`header.json`).
+  - **`load_pf(dir, level, mmap=False)`** → reads that layout into a leaf `PredictionFrame`;
+    `level` is supplied (the layout does not persist it); `mmap` preserves the memmap.
 
 ---
 
 ## 6. Failure Modes and Loudness
 
-- `ValueError` — `y_pred` is not 2D; `y_pred.shape[0] == 0`; `y_pred.shape[1]
-  < 1`; required identifier key missing; identifier array length ≠ `n_rows`;
-  NaN present in any identifier array.
-- All validation fires at construction time — there is no deferred or lazy check.
+- **Leaf construction** raises on: non-2D values; row count ≠ index length; non-integer
+  identifiers; missing/short identifiers (the leaf's `_validation`).
+- **`load_pf` (pipeline-core)** raises `ValueError` on an empty/corrupted saved frame
+  (`ndim != 2`, `N == 0`, or `S == 0`) — re-establishing the retired local class's
+  non-empty guarantee at the load boundary (Fail Loud and Proud), so an empty frame never
+  propagates silently into eval/ensemble.
 
 ---
 
 ## 7. Boundaries and Interactions
 
-- **Created by**: `ModelManager` subclasses via `_forecast_model_artifact()`,
-  `_evaluate_model_artifact()`, or `_evaluate_sweep()` when
-  `configs["prediction_format"] == "prediction_frame"` (ADR-042).
-- **Consumed by**: `EvaluationAdapter.from_prediction_frame()` /
-  `from_prediction_frames()` (converts to `EvaluationFrame` for evaluation)
-  and by the `ModelManager` persistence shim (converts to DataFrame for storage
-  during the migration window).
-- **Not consumed by**: `CorePredictionSniffer` — PredictionFrame is
-  self-validating at construction; the sniffer audits only `pd.DataFrame`
-  outputs (see `CorePredictionSniffer.md` Section 11 for the migration path).
+- **Created by**: engine repos (e.g. views-hydranet, views-baseline) returning
+  `Dict[str, (List[)]PredictionFrame(])` from `_forecast_/_evaluate_model_artifact`, and by
+  `PredictionFrameEnsembleManager._aggregate_prediction_frames` (reuses the reference
+  frame's index). Construction uses the leaf constructor (`SpatioTemporalIndex`+`level`).
+- **Persisted by**: `prediction_frame_io.save_pf` (and `NpzSaver`, which delegates to it);
+  reloaded via `load_pf` (incl. the mmap metrics-reload path).
+- **Consumed by**: `EvaluationAdapter.from_prediction_frame[s]()` (reads `.values` +
+  `.identifiers`), `PredictionFrameConverter` (`.values` → Arrow/list-in-cell), and
+  views-reporting's `PredictionFrameLoader` (reads `y_pred.npy`).
+- **Not consumed by**: `CorePredictionSniffer` (audits `pd.DataFrame` outputs only).
 
 ---
 
 ## 8. Examples of Correct Usage
 
 ```python
-# Created by a model returning PredictionFrame
-# X is the input DataFrame with MultiIndex (unit, time)
-time_vals = X.index.get_level_values("month_id").values
-unit_vals = X.index.get_level_values("priogrid_gid").values  # or country_id
+from views_frames import PredictionFrame, SpatioTemporalIndex, SpatialLevel
 
-pf = PredictionFrame(
-    y_pred=np.stack([samples_draw_1, samples_draw_2], axis=1),  # (N, S)
-    identifiers={"time": time_vals, "unit": unit_vals},
+index = SpatioTemporalIndex(
+    time=time_vals.astype(np.int64),   # month_id values from X.index
+    unit=unit_vals.astype(np.int64),   # priogrid_id / country_id from X.index
+    level=SpatialLevel.PGM,
 )
+pf = PredictionFrame(np.stack([draw_1, draw_2], axis=1), index)   # (N, S)
 
-# Consumed by the adapter
-ef = EvaluationAdapter.from_prediction_frames(
-    actual=df_actual,
-    predictions=[pf],
-    target="ged_sb",
-    step_mapping=[{base_origin + s: s for s in steps}],
-)
+from views_pipeline_core.managers.prediction.prediction_frame_io import save_pf, load_pf
+save_pf(pf, out_dir)
+pf2 = load_pf(out_dir, level="pgm", mmap=True)
 ```
 
 ---
@@ -123,59 +116,54 @@ ef = EvaluationAdapter.from_prediction_frames(
 ## 9. Examples of Incorrect Usage
 
 ```python
-# WRONG: inferring time from position
-pf = PredictionFrame(
-    y_pred=predictions,
-    identifiers={"time": np.arange(len(predictions)), "unit": unit_vals},
-)
-# time must be actual month_id values from X.index, not positional indices
+# WRONG: the old kwargs constructor — removed in #188 (TypeError).
+pf = PredictionFrame(y_pred=preds, identifiers={"time": t, "unit": u})
 
-# WRONG: adding y_true to PredictionFrame
-pf = PredictionFrame(
-    y_pred=predictions,
-    identifiers={"time": time_vals, "unit": unit_vals, "y_true": actuals},
-)
-# ground truth belongs in EvaluationFrame, not here
+# WRONG: reading .y_pred — the leaf exposes .values.
+arr = pf.y_pred
+
+# WRONG: inferring time from position (time must be real month_id values).
+PredictionFrame(preds, SpatioTemporalIndex(np.arange(len(preds)), u, SpatialLevel.PGM))
 ```
 
 ---
 
 ## 10. Test Alignment
 
-- Covered by `tests/test_data/test_prediction_frame.py`.
-- Tests must cover: correct construction; shape mismatch raises; missing
-  required identifier raises; identifier length mismatch raises; NaN in
-  identifier raises; properties return correct values.
+- `tests/test_data/test_prediction_frame.py` — re-export identity + collapse-via-summarize.
+- `tests/test_data/test_prediction_frame_persistence.py` — `save_pf`/`load_pf` round-trip + mmap.
+- `tests/test_modules/test_evaluation_adapter_golden.py` — golden-output net for the adapter
+  hot path (pins eval numerics across the migration; register C-189).
 
 ---
 
 ## 11. Evolution Notes
 
-- **Active migration in progress.** Per ADR-042, `PredictionFrame` is being
-  adopted as the primary model output format via the Strangler Fig pattern.
-  Migration sequence: forecast → calibration/validation → sweep. See ADR-042
-  for the full migration contract and parity requirements.
-- **Persistence format.** During the migration window, `ModelManager` converts
-  PredictionFrame to DataFrame for storage (downstream compatibility). When
-  `views_evaluation` and `views_hydranet` complete their own migration, the
-  storage format moves to a dense binary format (e.g. NumPy `.npz`). This is a
-  single-point change in `ModelManager`.
-- **`CorePredictionSniffer` extension.** When PredictionFrame is fully adopted,
-  `CorePredictionSniffer` will add a PF branch with level-range validation
-  (`unit` values in the valid `priogrid_gid` / `country_id` range). See
-  `CorePredictionSniffer.md` Section 11 for the two-precondition migration path.
+- **#188 complete:** the local class is retired; pipeline-core re-exports the leaf
+  (`views_frames.PredictionFrame`). The Strangler-Fig migration (ADR-042) for the *type*
+  is done; the leaf is the single canonical frame.
+- **On-disk format:** pipeline-core keeps `y_pred.npy` + `identifiers.npz` (`prediction_frame_io`)
+  because it is a cross-repo contract (views-reporting reads `y_pred.npy`). Moving to the
+  leaf's `values.npy`+`header.json` is a separate, coordinated change (needs a views-reporting
+  update) — out of scope for #188.
+- **Producer coupling (C-193):** engine repos construct PredictionFrames; the leaf-constructor
+  change is breaking → pipeline-core 3.0.0 + lockstep engine migration (views-hydranet#137,
+  views-baseline#21). A leaf-level `build_prediction_frame` factory is proposed (views-frames#113, D-38).
+- **`CorePredictionSniffer` extension** (level-range validation of `unit`) remains future work.
 
 ## 12. Known Deviations
 
-- **No NaN validation at construction:** `_validate_input()` checks shape and identifiers but does not reject arrays containing NaN or Inf values. NaN handling is left to downstream consumers.
-- **Storage format is split files:** Currently saves as `y_pred.npy` + `identifiers.npz` (two files). Evolution Notes document planned migration to single `.npz` file.
-- **No metadata beyond identifiers:** PredictionFrame carries only `time` and `unit` identifiers. It does not carry model name, run type, or timestamp — these are managed externally by the orchestrator.
+- **Empty frames not rejected at construction:** the leaf accepts `N == 0` / `S == 0`;
+  pipeline-core re-guards only at `load_pf` (§6), not at every construction site.
+- **`level` not persisted:** the `y_pred.npy` layout stores only `time`/`unit`; `level` is
+  supplied to `load_pf` by the caller (from `config["level"]`).
+- **No `.y_pred` / `.collapse` / `.identifier_keys`:** these existed on the retired local
+  class; callers use `.values`, `views_frames_summarize.collapse`, and `set(.identifiers)`.
 
 ---
 
 ## End of Contract
 
-This document defines the **intended meaning** of `PredictionFrame`.
-
-Changes to behaviour that violate this intent are bugs.
+This document defines the **intended meaning** of pipeline-core's use of the leaf
+`PredictionFrame`. Changes to behaviour that violate this intent are bugs.
 Changes to intent must update this contract.

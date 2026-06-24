@@ -40,6 +40,16 @@ def load_pf(directory: Path, level: str, mmap: bool = False) -> PredictionFrame:
     directory = Path(directory)
     mmap_mode = "r" if mmap else None
     y_pred = np.load(directory / "y_pred.npy", mmap_mode=mmap_mode)
+    # Fail loud on an empty/corrupted saved frame at the load boundary. The leaf
+    # PredictionFrame accepts 0-row / 0-sample arrays (it lets numpy reject them
+    # downstream); pipeline-core's retired local class rejected them at construction
+    # (n_rows>0, sample_count>=1). Re-establish that guarantee here rather than let
+    # an empty frame propagate silently into eval/ensemble (Fail Loud and Proud).
+    if y_pred.ndim != 2 or y_pred.shape[0] == 0 or y_pred.shape[1] == 0:
+        raise ValueError(
+            f"Loaded PredictionFrame at {directory} has invalid shape {y_pred.shape}; "
+            f"expected a non-empty 2D (N>0, S>0) y_pred.npy."
+        )
     with np.load(directory / "identifiers.npz") as f:
         ids = dict(f)
     index = SpatioTemporalIndex(
