@@ -20,6 +20,33 @@ from views_pipeline_core.types import BaseStageContext
 logger = logging.getLogger(__name__)
 
 
+def _require_dense_report_consumer() -> None:
+    """Fail loud if the installed views-reporting cannot consume the dense
+    ``prediction_format="prediction_frame"`` report path (register C-190).
+
+    pipeline-core declares no pin on views-reporting and consumes whatever is
+    installed; the dense report path dereferences views-reporting's consumer by
+    faith. Probe a **public** capability — ``views_reporting.statistics.calculate_map_frame``,
+    the bounded ``views_frames_summarize``-backed MAP the dense path relies on and
+    that the pre-migration (OOM-prone) views-reporting lacks. This is a capability
+    probe, not a version check (views-reporting is not yet meaningfully versioned),
+    and it touches only a public symbol (not private internals — avoids the C-135
+    coupling). Raises with an actionable remediation rather than letting an
+    AttributeError surface deep inside the template.
+    """
+    try:
+        from views_reporting.statistics import calculate_map_frame  # noqa: F401
+    except ImportError as e:
+        raise RuntimeError(
+            "The installed views-reporting cannot consume the dense "
+            "prediction_frame report path: 'views_reporting.statistics.calculate_map_frame' "
+            "is missing. Upgrade views-reporting to a build with the views-frames dense "
+            "consumer (the migrated report path), or run the report with "
+            "prediction_format='dataframe'. "
+            f"Underlying import error: {e}"
+        ) from e
+
+
 @dataclass(frozen=True)
 class ReportingContext(BaseStageContext):
     """Immutable context for report generation.
@@ -80,6 +107,9 @@ class ReportingStage:
         )
 
         if context.prediction_format == "prediction_frame":
+            # C-190: fail loud at the boundary if the installed views-reporting
+            # can't consume the dense path, rather than crash deep in the template.
+            _require_dense_report_consumer()
             try:
                 prediction_path = (
                     context.model_path._get_generated_pf_prediction_paths(
