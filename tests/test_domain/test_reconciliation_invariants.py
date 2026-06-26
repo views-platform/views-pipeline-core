@@ -3,7 +3,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from views_pipeline_core.domain.reconciliation import ReconciliationInvariants
+from views_pipeline_core.domain.reconciliation_invariants import ReconciliationInvariants
 
 
 class TestDefaults:
