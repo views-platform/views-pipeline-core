@@ -9,8 +9,6 @@ Covers the two functions in `modules/reconciliation/reconcile_frames.py`:
 Orchestration is checked with fakes (no geography needed); parity is checked with the real
 injected reconciler (geography map), mirroring the proven spike.
 """
-import logging
-
 import numpy as np
 import pytest
 from views_frames import FrameMetadata, PredictionFrame, SpatialLevel, SpatioTemporalIndex
@@ -147,14 +145,16 @@ def test_reconcile_frames_carries_metadata():
     assert out.metadata is not None and out.metadata.model == "rusty_sibling"
 
 
-def test_reconcile_frames_logs_mode(caplog):
+def test_reconcile_frames_logs_mode(monkeypatch):
+    # Verify the mode is logged by capturing the logger.info call directly — robust to any
+    # ambient logging config (caplog capture proved environment-fragile across CI).
+    import views_pipeline_core.modules.reconciliation.reconcile_frames as rf
+
+    captured: list[tuple] = []
+    monkeypatch.setattr(rf.logger, "info", lambda *args, **kwargs: captured.append(args))
     pgm, cm, _, _ = _build_case(times=[1], n_samples=4, cm_point=True, seed=4)
-    # Target the module logger explicitly: a bare at_level(INFO) does not lower this
-    # logger's effective level, so an ambient WARNING config (as in CI) would filter the
-    # INFO record before caplog sees it.
-    with caplog.at_level(logging.INFO, logger="views_pipeline_core.modules.reconciliation.reconcile_frames"):
-        reconcile_frames(_ReorderingReconciler(), cm, pgm)
-    assert any("mode=point-broadcast" in r.getMessage() for r in caplog.records)
+    reconcile_frames(_ReorderingReconciler(), cm, pgm)
+    assert any(POINT_BROADCAST in args for args in captured)
 
 
 # --------------------------------------------------------------------------- real substrate (parity)
