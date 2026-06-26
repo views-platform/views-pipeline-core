@@ -2,8 +2,9 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-05-21
+**Last reviewed:** 2026-06-26
 **Related ADRs:** ADR-042 (PredictionFrame), ADR-045 (Stage Pattern), ADR-051 (Composition-Based Ensemble Architecture)
+**Related epics:** #233 (frames-native reconciliation, #236) — this contract was revised when PFE gained a reconciliation path.
 
 ---
 
@@ -32,9 +33,11 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   classes coexist (Strangler Fig pattern). Existing ensembles continue unchanged.
 - Does **not** support the DataFrame/parquet code path. That belongs to
   `DataFrameEnsembleManager`.
-- Does **not** implement reconciliation. Reconciliation is a point-prediction
-  operation; PredictionFrame carries posterior samples where reconciliation has
-  no defined semantics.
+- Does **not** build geography or construct the concrete reconciler. Reconciliation
+  IS supported (frames-native, #236): when `reconciliation` is configured PFE calls
+  the injected `Reconciler` port via `reconcile_frames`. But the `(time, priogrid) ->
+  country` map and the concrete `views_frames_reconcile.ReconciliationModule` are built
+  at the composition root (views-models) and injected — never here (ADP, no cycle).
 - Does **not** implement model-specific training or inference. Sub-models are
   invoked via shell subprocesses.
 - Does **not** own complex aggregation logic (`AggregationModule`). Uses pure
@@ -55,8 +58,8 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   model execution.
 - Guarantees that an immutable `EnsembleContext` (frozen dataclass, imported from
   `dataframe_ensemble.py`) is built once in `execute_single_run()` and threaded to
-  every method. Context always has `prediction_format="prediction_frame"` and
-  `reconciliation=None`.
+  every method. Context always has `prediction_format="prediction_frame"`;
+  `reconciliation`/`reconcile_with` are read from config (default `None`).
 - Guarantees that `EvaluationStage` and `ReportingStage` are used via composition
   (injected at construction), not via inheritance.
 - Guarantees that all sub-models in `configs["models"]` are trained, evaluated,
@@ -171,9 +174,13 @@ PredictionFrameEnsembleManager (composition, no inheritance)
 - **Depends on:** `ForecastingModelManager._resolve_evaluation_sequence_number()`
   (static method) for determining evaluation sequence count.
 - **Depends on:** `EnsembleContext` (frozen dataclass from `dataframe_ensemble.py`).
+- **Depends on (reconciliation, #236):** the `Reconciler` port
+  (`domain.reconciliation_port`), `modules.reconciliation.reconcile_frames`, and
+  `cm_forecast_loader.load_cm_frame` — all frames-native.
 - **Does not depend on:** `ForecastingModelManager` instance state, `ViewsDataLoader`,
-  `ForecastingStage`, `PredictionIOManager`, `AggregationModule`,
-  `ReconciliationModule`, or any DataFrame conversion.
+  `ForecastingStage`, `PredictionIOManager`, `AggregationModule`, the **concrete**
+  `views_frames_reconcile.ReconciliationModule` (injected via the port), the DataFrame
+  path's `reconcile_datasets` adapter, or any DataFrame conversion.
 
 ---
 
@@ -212,9 +219,10 @@ manager = PredictionFrameEnsembleManager(ensemble_path=ModelPathManager("purple_
 # -> PredictionFrameEnsembleManager only handles PredictionFrame (numpy) outputs.
 #    Use DataFrameEnsembleManager for point-prediction ensembles.
 
-# WRONG: expecting reconciliation to work
-# -> reconciliation is always None. PredictionFrame carries posterior samples;
-#    hierarchical reconciliation has no defined semantics for sample arrays.
+# WRONG: configuring reconciliation without injecting a Reconciler
+# -> reconciliation="pgm_cm" + reconcile_with set, but the manager was constructed
+#    without a `reconciler`. Fails loud at apply time (RECONCILER_NOT_INJECTED_MSG):
+#    the composition root (views-models) must inject the concrete reconciler.
 
 # WRONG: calling methods directly without execute_single_run()
 manager._evaluate_ensemble(ctx)
@@ -243,7 +251,12 @@ manager._evaluate_ensemble(ctx)
   - `TestPredictionFrameEvaluationFlow` (2 tests) -- verifies aggregation per
     sequence and prediction_format propagation to EvaluationStage.
   - `TestPredictionFrameForecastingFlow` (4 tests) -- verifies aggregation across
-    models, PF save, no reconciliation method, return type is Dict[str, PF].
+    models, PF save, return type is Dict[str, PF].
+  - `TestPredictionFrameReconciliationWiring` + `TestPredictionFrameReconciliationEndToEnd`
+    (#236/#238) -- verify `_build_context` reads `reconciliation`/`reconcile_with`,
+    fail-loud without an injected reconciler, the loader+port wiring, and end-to-end
+    parity against the real `views_frames_reconcile` substrate (grid sums to country
+    totals per draw; reconciliation-off leaves the aggregate untouched).
   - `TestPredictionFrameTrainingFlow` (2 tests) -- verifies subprocess dispatch per
     model and train flag passthrough.
   - `TestPredictionFrameEntryPoint` (11 tests) -- verifies args validation, sniffer
@@ -275,9 +288,13 @@ manager._evaluate_ensemble(ctx)
 
 ## 12. Known Deviations
 
-- **No reconciliation:** Unlike `DataFrameEnsembleManager`, this class has no
-  reconciliation path. The `reconciliation` field in `EnsembleContext` is always
-  set to `None`.
+- **Reconciliation is a per-draw approximation (C-200b):** in `aligned-draws` mode
+  (a country forecast that carries S draws), `reconcile_frames` scales grid-draw `s`
+  to country-draw `s`. That pairing is only meaningful when the two share a draw
+  identity; for independently-trained models it is a documented approximation (logged
+  by `reconcile_frames`). `point-broadcast` mode (a single country number copied across
+  draws) has no such caveat. The principled joint upgrade is tracked in the views-frames
+  "reconciliation right-home" epic (views-platform/views-frames#142, #145).
 - **No `PredictionIOManager`:** `EvaluationStage` is constructed with
   `io_manager=None`. All persistence is via `PredictionFrame.save()` directly.
 - **Subprocess stderr not captured:** Sub-models invoked via `subprocess.run()`
