@@ -37,19 +37,18 @@ class TestSoftF1_ReportingStageImportableWithoutViewsReporting:
 
 class TestSoftF2_ReconciliationGuardedByCoreConfigSniffer:
     """
-    P2: The reconciliation hard imports (ensemble.py:733, dataframe_ensemble.py:909)
-    are architecturally unreachable when views-reporting is absent, because
-    CoreConfigSniffer.sniff_all() fires first and raises ImportError via find_spec.
+    P2: ORIGINALLY — the reconciliation hard imports of `views_reporting.reconciliation`
+    were guarded by `CoreConfigSniffer`'s `find_spec("views_reporting")` check.
 
-    Severity: Soft falsification — claim treats reconciliation imports as unguarded.
+    RESOLVED by #195: reconciliation no longer imports views-reporting at all (DIP
+    injection — the ensemble managers call an injected `Reconciler` port + a
+    views-frames-only adapter). The sniffer's find_spec guard was removed; pipeline-core
+    has zero `views_reporting.reconciliation` references. This stub is retained as a
+    historical record of the resolved coupling.
     """
 
-    @pytest.mark.skip(reason="Falsification stub — observation, not a defect to fix")
+    @pytest.mark.skip(reason="Resolved by #195 — reconciliation decoupled from views-reporting")
     def test_sniffer_blocks_reconciliation_when_views_reporting_absent(self):
-        # CoreConfigSniffer._check_reconciliation_config() at line 319 does:
-        #   if importlib.util.find_spec("views_reporting") is None: raise ImportError
-        # This fires BEFORE EnsembleManager._apply_reconciliation() → __reconcile_pg_with_c()
-        # So the hard import at ensemble.py:733 is never reached.
         pass
 
 

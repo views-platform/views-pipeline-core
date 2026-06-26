@@ -26,6 +26,7 @@ import wandb
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset, _ViewsDataset
+from views_pipeline_core.domain.reconciliation import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.files.utils import (
     handle_ensemble_log_creation,
@@ -95,6 +96,7 @@ class DataFrameEnsembleManager:
         ensemble_path: EnsemblePathManager,
         wandb_notifications: bool = False,
         use_prediction_store: bool = False,
+        reconciler: Optional[Reconciler] = None,
     ) -> None:
         from views_pipeline_core.managers.configuration import ConfigurationManager
         from views_pipeline_core.managers.evaluation.stage import EvaluationStage
@@ -106,6 +108,7 @@ class DataFrameEnsembleManager:
         self._ensemble_path = ensemble_path
         self._wandb_notifications = wandb_notifications
         self._use_prediction_store = use_prediction_store
+        self._reconciler = reconciler
         self._entity = "views_pipeline"
         self._args: Optional[ForecastingModelArgs] = None
 
@@ -906,6 +909,13 @@ class DataFrameEnsembleManager:
             )
             return None
 
+        # Fail loud (no silent-off): configured but no Reconciler injected (#194/#195).
+        if self._reconciler is None:
+            raise PipelineException(
+                RECONCILER_NOT_INJECTED_MSG,
+                wandb_module=self._wandb_module,
+            )
+
         latest_c_dataset = self._load_c_dataset(cm_model, c_dataframe, ctx)
         if latest_c_dataset is None:
             return None
@@ -918,11 +928,11 @@ class DataFrameEnsembleManager:
             )
             return None
 
-        from views_reporting.reconciliation import ReconciliationModule
-        reconciliation_manager = ReconciliationModule(
-            c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset
-        )
-        return reconciliation_manager.reconcile()
+        # Reconcile via the injected port + the dataset↔frame adapter (no
+        # views_reporting / views_postprocessing import here — ADP, no cycle).
+        from views_pipeline_core.modules.reconciliation.adapter import reconcile_datasets
+
+        return reconcile_datasets(self._reconciler, latest_c_dataset, latest_pg_dataset)
 
     def _load_c_dataset(
         self,

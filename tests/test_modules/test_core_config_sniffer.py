@@ -412,7 +412,8 @@ class TestReconciliationConfigValidation:
         CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
 
     def test_pgm_cm_point_with_reconcile_with_passes(self):
-        pytest.importorskip("views_reporting")
+        # #195: reconciliation config no longer requires views-reporting installed
+        # (the sniffer's find_spec guard was removed), so this runs everywhere.
         configs = {
             **_valid_configs(),
             "reconciliation": "pgm_cm_point",
@@ -543,7 +544,7 @@ class TestEnsembleConfigValidation:
         CoreConfigSniffer(configs, {}, target="ensemble").sniff_all("forecasting")
 
     def test_ensemble_with_reconciliation_passes(self):
-        pytest.importorskip("views_reporting")
+        # #195: reconciliation config no longer requires views-reporting installed.
         configs = {
             **_valid_ensemble_configs(),
             "reconciliation": "pgm_cm_point",
