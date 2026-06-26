@@ -26,7 +26,7 @@ import wandb
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset, _ViewsDataset
-from views_pipeline_core.domain.reconciliation import Reconciler, RECONCILER_NOT_INJECTED_MSG
+from views_pipeline_core.domain.reconciliation_port import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.files.utils import (
     handle_ensemble_log_creation,

@@ -18,7 +18,7 @@ from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfi
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
-from views_pipeline_core.domain.reconciliation import Reconciler, RECONCILER_NOT_INJECTED_MSG
+from views_pipeline_core.domain.reconciliation_port import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.modules.aggregation.aggregator import (
     AggregationModule,

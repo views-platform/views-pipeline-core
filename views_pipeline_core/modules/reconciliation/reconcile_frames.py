@@ -31,7 +31,7 @@ import numpy as np
 from views_frames import PredictionFrame, SpatioTemporalIndex
 
 if TYPE_CHECKING:  # the port is a lightweight Protocol; keep imports frames-only at runtime
-    from views_pipeline_core.domain.reconciliation import Reconciler
+    from views_pipeline_core.domain.reconciliation_port import Reconciler
 
 logger = logging.getLogger(__name__)
 

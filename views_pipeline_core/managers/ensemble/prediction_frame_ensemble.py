@@ -23,7 +23,7 @@ import wandb
 
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.data.prediction_frame import PredictionFrame
-from views_pipeline_core.domain.reconciliation import Reconciler
+from views_pipeline_core.domain.reconciliation_port import Reconciler
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.files.utils import handle_ensemble_log_creation

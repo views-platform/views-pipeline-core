@@ -23,7 +23,7 @@ from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
 
 if TYPE_CHECKING:  # avoid importing the dataset god-class at module load (SDP)
     from views_pipeline_core.data.handlers import _CDataset, _PGDataset
-    from views_pipeline_core.domain.reconciliation import Reconciler
+    from views_pipeline_core.domain.reconciliation_port import Reconciler
 
 
 def _stack_cells(column: pd.Series) -> np.ndarray:
