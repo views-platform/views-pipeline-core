@@ -67,6 +67,17 @@ def test_load_cm_frame_no_forecast_fails_loud(monkeypatch):
         cfl.load_cm_frame("cruel_summer", "sb", "forecasting")
 
 
+def test_load_cm_frame_locate_error_fails_loud_friendly(monkeypatch):
+    # model dir / data_generated absent → EnsemblePathManager raises FileNotFoundError
+    # (an OSError); it must be wrapped in the friendly fail-loud ValueError, not leak raw.
+    def _raises(name):
+        raise FileNotFoundError("Ensemble directory ... does not exist")
+
+    monkeypatch.setattr(cfl, "EnsemblePathManager", _raises)
+    with pytest.raises(ValueError, match="could not locate a forecast"):
+        cfl.load_cm_frame("cruel_summer", "sb", "forecasting")
+
+
 def test_load_cm_frame_missing_column_fails_loud(monkeypatch):
     monkeypatch.setattr(cfl, "EnsemblePathManager", _fake_epm(["latest.parquet"]))
     monkeypatch.setattr(cfl, "read_dataframe", lambda p: _cm_df(point=True))

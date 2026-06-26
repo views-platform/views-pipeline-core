@@ -27,10 +27,15 @@ from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
 from views_pipeline_core.files.utils import read_dataframe
 from views_pipeline_core.managers.ensemble.ensemble import EnsemblePathManager
 
+#: Prefix marking a DataFrame's prediction columns (e.g. ``pred_sb``).
+PREDICTION_COLUMN_PREFIX = "pred_"
+
 
 def _prediction_column(target: str) -> str:
     """The `pred_*` column for a target (idempotent if already prefixed)."""
-    return target if target.startswith("pred_") else f"pred_{target}"
+    if target.startswith(PREDICTION_COLUMN_PREFIX):
+        return target
+    return f"{PREDICTION_COLUMN_PREFIX}{target}"
 
 
 def load_cm_frame(cm_model: str, target: str, run_type: str) -> PredictionFrame:
@@ -45,9 +50,19 @@ def load_cm_frame(cm_model: str, target: str, run_type: str) -> PredictionFrame:
         ValueError: no local forecast for `cm_model`, or it lacks the target column. Both are
             fail-loud — reconciliation cannot proceed without the country totals.
     """
-    paths = EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(
-        run_type=run_type
-    )
+    # Locating the forecast can raise before we reach the `not paths` guard: constructing
+    # EnsemblePathManager validates the model dir (FileNotFoundError if absent), and the
+    # path scan does an unguarded `data_generated.iterdir()` (FileNotFoundError if the model
+    # has never produced a forecast). Wrap both so the failure is loud AND actionable.
+    try:
+        paths = EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(
+            run_type=run_type
+        )
+    except OSError as e:
+        raise ValueError(
+            f"Cannot reconcile: could not locate a forecast for country model '{cm_model}' "
+            f"(run_type={run_type}): {e}. Run the country model before reconciling."
+        ) from e
     if not paths:
         raise ValueError(
             f"Cannot reconcile: no local forecast found for country model '{cm_model}' "
@@ -57,7 +72,7 @@ def load_cm_frame(cm_model: str, target: str, run_type: str) -> PredictionFrame:
 
     column = _prediction_column(target)
     if column not in df.columns:
-        available = sorted(c for c in df.columns if c.startswith("pred_"))
+        available = sorted(c for c in df.columns if c.startswith(PREDICTION_COLUMN_PREFIX))
         raise ValueError(
             f"Country model '{cm_model}' forecast has no '{column}' column; "
             f"available prediction columns: {available}."
