@@ -23,13 +23,18 @@ import wandb
 
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.data.prediction_frame import PredictionFrame
-from views_pipeline_core.domain.reconciliation_port import Reconciler
+from views_pipeline_core.domain.reconciliation_port import (
+    RECONCILER_NOT_INJECTED_MSG,
+    Reconciler,
+)
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.files.utils import handle_ensemble_log_creation
+from views_pipeline_core.modules.reconciliation.reconcile_frames import reconcile_frames
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
 
+from .cm_forecast_loader import load_cm_frame
 from .dataframe_ensemble import EnsembleContext
 from .ensemble import EnsemblePathManager
 
@@ -275,17 +280,10 @@ class PredictionFrameEnsembleManager:
 
     def _build_context(self, args: ForecastingModelArgs) -> EnsembleContext:
         c = self.configs
-        # Fail loud (no silent-off): PFE has no reconciliation path yet (#200).
-        # If a config requests reconciliation, refuse it rather than silently
-        # dropping it to None below. The injected `reconciler` is accepted for
-        # uniform composition-root construction but is not wired here yet.
-        if c.get("reconciliation") is not None:
-            raise PipelineException(
-                "Reconciliation is configured but prediction_frame ensembles do not "
-                "support reconciliation yet (probabilistic PFE reconciliation is #200). "
-                "Remove 'reconciliation' from the config, or run a DataFrame ensemble.",
-                wandb_module=self._wandb_module,
-            )
+        # Reconciliation is read from config and applied in `_forecast_ensemble` via the
+        # injected `Reconciler` port (#236, epic #233). A configured reconciliation with no
+        # injected reconciler fails loud at apply time (RECONCILER_NOT_INJECTED_MSG) — no
+        # silent-off.
         return EnsembleContext(
             configs=c,
             model_path=self._ensemble_path,
@@ -296,8 +294,8 @@ class PredictionFrameEnsembleManager:
             models=c["models"],
             aggregation=c["aggregation"],
             targets=c.get("targets", c.get("regression_targets", [])),
-            reconciliation=None,
-            reconcile_with=None,
+            reconciliation=c.get("reconciliation"),
+            reconcile_with=c.get("reconcile_with"),
             use_weights=c.get("use_weights", False),
             weights=c.get("weights", {}),
             timestamp=c.get("timestamp", ""),
@@ -572,6 +570,8 @@ class PredictionFrameEnsembleManager:
             agg_pf = _aggregate_prediction_frames(
                 frames, method=ctx.aggregation
             )
+            if ctx.reconciliation:
+                agg_pf = self._reconcile_forecast(agg_pf, target, ctx)
             save_dir = (
                 self._ensemble_path.data_generated
                 / f"predictions_{ctx.run_type}_{ctx.timestamp}"
@@ -581,6 +581,22 @@ class PredictionFrameEnsembleManager:
             forecasts[target] = agg_pf
 
         return forecasts
+
+    def _reconcile_forecast(
+        self, agg_pf: PredictionFrame, target: str, ctx: EnsembleContext
+    ) -> PredictionFrame:
+        """Reconcile one aggregated grid forecast to its country (cm) totals.
+
+        Fail loud (no silent-off) if reconciliation is configured but no concrete
+        `Reconciler` was injected at the composition root. Geography is held by the
+        injected reconciler (views-models) — pipeline-core builds no map here.
+        """
+        if self._reconciler is None:
+            raise PipelineException(
+                RECONCILER_NOT_INJECTED_MSG, wandb_module=self._wandb_module
+            )
+        cm_frame = load_cm_frame(ctx.reconcile_with, target, ctx.run_type)
+        return reconcile_frames(self._reconciler, cm_frame, agg_pf)
 
     # ------------------------------------------------------------------
     # Model artifact execution (subprocess delegation)

@@ -444,6 +444,24 @@ class TestReconciliationConfigValidation:
         with pytest.raises(ValueError, match="reconcile_with"):
             CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
 
+    def test_pgm_cm_frames_type_with_reconcile_with_passes(self):
+        # "pgm_cm" = the frames-native PFE reconciliation path (#236, epic #233).
+        configs = {
+            **_valid_configs(),
+            "reconciliation": "pgm_cm",
+            "reconcile_with": "cruel_summer",
+        }
+        CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+    def test_pgm_cm_frames_type_without_reconcile_with_raises(self):
+        configs = {
+            **_valid_configs(),
+            "reconciliation": "pgm_cm",
+            "reconcile_with": None,
+        }
+        with pytest.raises(ValueError, match="reconcile_with"):
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
 
 # ---------------------------------------------------------------------------
 # Ensemble-aware validation — universal vs model-only mandatory keys

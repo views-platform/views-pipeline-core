@@ -383,22 +383,9 @@ class TestPredictionFrameEnsembleConstants:
             ctx.prediction_format = "dataframe"
 
 
-class TestPredictionFrameReconciliationFailsLoud:
-    """#195 review: PFE has no reconciliation path yet (#200). A configured
-    reconciliation must fail loud, not be silently dropped to None."""
-
-    def test_build_context_raises_when_reconciliation_configured(self, pf_manager, sample_args):
-        cfg = COMBINED_CONFIGS.copy()
-        cfg["reconciliation"] = "pgm_cm_point"
-        cfg["reconcile_with"] = "some_cm_model"
-        pf_manager._config_manager.get_combined_config.return_value = cfg
-        with pytest.raises(PipelineException, match="#200"):
-            pf_manager._build_context(sample_args)
-
-    def test_build_context_ok_when_reconciliation_none(self, pf_manager, sample_args):
-        # reconciliation=None (the norm for PFE) builds a context with reconciliation off.
-        ctx = pf_manager._build_context(sample_args)
-        assert ctx.reconciliation is None
+# NOTE: PFE's former "refuse reconciliation" guard (#200) was removed in #236 when the
+# frames-native reconciliation path landed; its characterization tests are superseded by
+# TestPredictionFrameReconciliationWiring (below).
 
 
 # ============================================================================
@@ -880,3 +867,87 @@ class TestConfigModelsetMerge:
             "models": ["old"],
             "description": "Test",
         }
+
+
+# ============================================================================
+# Reconciliation wiring (#236, epic #233)
+# ============================================================================
+
+import views_pipeline_core.managers.ensemble.prediction_frame_ensemble as _pfe_mod  # noqa: E402
+
+
+def _recon_context(mock_ensemble_path):
+    """An EnsembleContext that requests frames-native reconciliation."""
+    return EnsembleContext(
+        configs=COMBINED_CONFIGS.copy(),
+        model_path=mock_ensemble_path,
+        run_type="forecasting",
+        project="p",
+        eval_type="standard",
+        args=ForecastingModelArgs(
+            run_type="forecasting", train=False, evaluate=False,
+            forecast=True, saved=True, eval_type="standard",
+        ),
+        models=["hydra_alpha"],
+        aggregation="concat",
+        targets=["ged_sb"],
+        reconciliation="pgm_cm",
+        reconcile_with="cm_model",
+        use_weights=False,
+        weights={},
+        timestamp="20241105_120000",
+        deployment_status="deployed",
+        prediction_format="prediction_frame",
+        partition_dict=PARTITION_DICT,
+    )
+
+
+class TestPredictionFrameReconciliationWiring:
+    def test_build_context_reads_reconciliation(self, pf_manager, sample_args):
+        cfg = COMBINED_CONFIGS.copy()
+        cfg["reconciliation"] = "pgm_cm"
+        cfg["reconcile_with"] = "cm_model"
+        pf_manager._config_manager.get_combined_config.return_value = cfg
+        ctx = pf_manager._build_context(sample_args)
+        assert ctx.reconciliation == "pgm_cm"
+        assert ctx.reconcile_with == "cm_model"
+
+    def test_build_context_no_reconciliation_does_not_raise(self, pf_manager, sample_args):
+        # default config has reconciliation=None — the old refusal guard is gone.
+        ctx = pf_manager._build_context(sample_args)
+        assert ctx.reconciliation is None
+        assert ctx.reconcile_with is None
+
+    def test_reconcile_forecast_fails_loud_without_reconciler(self, pf_manager, mock_ensemble_path):
+        pf_manager._reconciler = None
+        ctx = _recon_context(mock_ensemble_path)
+        with pytest.raises(PipelineException, match="no Reconciler was injected"):
+            pf_manager._reconcile_forecast(_make_pf(n_rows=2, n_samples=4), "ged_sb", ctx)
+
+    def test_reconcile_forecast_wires_loader_and_port(self, pf_manager, mock_ensemble_path, monkeypatch):
+        # Verify _reconcile_forecast integrates: inject reconciler, load the cm frame for the
+        # right (model, target, run_type), and pass (reconciler, cm, agg) to reconcile_frames.
+        fake_reconciler = object()
+        pf_manager._reconciler = fake_reconciler
+        agg = _make_pf(n_rows=2, n_samples=4)
+        cm_sentinel = _make_pf(n_rows=2, n_samples=4)
+        out_sentinel = _make_pf(n_rows=2, n_samples=4)
+        seen = {}
+
+        def _fake_load(cm_model, target, run_type):
+            seen["load"] = (cm_model, target, run_type)
+            return cm_sentinel
+
+        def _fake_reconcile(reconciler, cm_frame, pgm_frame):
+            seen["reconcile"] = (reconciler is fake_reconciler, cm_frame is cm_sentinel, pgm_frame is agg)
+            return out_sentinel
+
+        monkeypatch.setattr(_pfe_mod, "load_cm_frame", _fake_load)
+        monkeypatch.setattr(_pfe_mod, "reconcile_frames", _fake_reconcile)
+
+        ctx = _recon_context(mock_ensemble_path)
+        result = pf_manager._reconcile_forecast(agg, "ged_sb", ctx)
+
+        assert result is out_sentinel
+        assert seen["load"] == ("cm_model", "ged_sb", "forecasting")
+        assert seen["reconcile"] == (True, True, True)

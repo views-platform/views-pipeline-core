@@ -41,8 +41,10 @@ SUPPORTED_PREDICTION_FORMATS = frozenset({"dataframe", "prediction_frame"})
 SUPPORTED_EVALUATION_MODES  = frozenset({"stochastic", "point"})
 SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
 
-# Reconciliation — optional config key; controls hierarchical prediction reconciliation
-SUPPORTED_RECONCILIATION_TYPES = frozenset({"pgm_cm_point"})
+# Reconciliation — optional config key; controls hierarchical prediction reconciliation.
+# "pgm_cm_point" = the DataFrame ensemble path; "pgm_cm" = the frames-native PFE path
+# (point + probabilistic, mode auto-detected at runtime — epic #233).
+SUPPORTED_RECONCILIATION_TYPES = frozenset({"pgm_cm_point", "pgm_cm"})
 
 # Output scale — optional config key; declares whether model returns log-scale or natural-scale predictions
 SUPPORTED_OUTPUT_SCALES = frozenset({"log", "natural"})
@@ -311,11 +313,12 @@ class CoreConfigSniffer:
                 f"Supported: {sorted(SUPPORTED_RECONCILIATION_TYPES)}. "
                 f"Update SUPPORTED_RECONCILIATION_TYPES in core_config_sniffer.py when ready."
             )
-        if recon == "pgm_cm_point":
+        # All pgm→cm reconciliation types (point or frames-native) require the CM model.
+        if recon.startswith("pgm_cm"):
             recon_with = self._c.get("reconcile_with")
             if not recon_with:
                 raise ValueError(
-                    "CoreConfigSniffer: reconciliation='pgm_cm_point' requires "
+                    f"CoreConfigSniffer: reconciliation='{recon}' requires "
                     "'reconcile_with' to specify the CM model for reconciliation. "
                     "Add reconcile_with to config_meta.py."
                 )
