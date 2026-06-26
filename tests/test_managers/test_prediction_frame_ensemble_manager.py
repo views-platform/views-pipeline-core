@@ -875,8 +875,8 @@ class TestConfigModelsetMerge:
 # ============================================================================
 
 
-def _recon_context(mock_ensemble_path):
-    """An EnsembleContext that requests frames-native reconciliation."""
+def _recon_context(mock_ensemble_path, reconciliation="pgm_cm"):
+    """An EnsembleContext for the frames path (reconciliation on by default)."""
     return EnsembleContext(
         configs=COMBINED_CONFIGS.copy(),
         model_path=mock_ensemble_path,
@@ -890,7 +890,7 @@ def _recon_context(mock_ensemble_path):
         models=["hydra_alpha"],
         aggregation="concat",
         targets=["ged_sb"],
-        reconciliation="pgm_cm",
+        reconciliation=reconciliation,
         reconcile_with="cm_model",
         use_weights=False,
         weights={},
@@ -950,3 +950,119 @@ class TestPredictionFrameReconciliationWiring:
         assert result is out_sentinel
         assert seen["load"] == ("cm_model", "ged_sb", "forecasting")
         assert seen["reconcile"] == (True, True, True)
+
+
+# ============================================================================
+# End-to-end reconciliation against the REAL substrate (#238, epic #233)
+# ============================================================================
+# Faithfulness gate: S1 tests reconcile_frames in isolation and S3 tests the wiring with
+# stubs; here we drive the manager's reconciliation path with the REAL
+# views_frames_reconcile.ReconciliationModule + real reconcile_frames, asserting the
+# reconciled grid sums to country totals per draw — the integration nothing else covers.
+
+try:
+    import views_frames_reconcile as _vfr
+except ImportError:  # pragma: no cover
+    _vfr = None
+
+_requires_vfr = pytest.mark.skipif(_vfr is None, reason="views_frames_reconcile not installed")
+
+_E2E_GRIDS = {1: [11, 12], 2: [21, 22, 23]}  # country -> grid cells
+
+
+def _e2e_frames(times, n_samples, seed):
+    """Consistent (pgm grid, cm country, geography map) for the given times."""
+    grids = [g for gs in _E2E_GRIDS.values() for g in gs]
+    countries = sorted(_E2E_GRIDS)
+    rng = np.random.default_rng(seed)
+
+    pg_time = np.array([t for t in times for _ in grids], dtype=np.int64)
+    pg_unit = np.array([g for _ in times for g in grids], dtype=np.int64)
+    pgm = PredictionFrame(
+        rng.uniform(0, 10, size=(pg_unit.size, n_samples)).astype(np.float32),
+        SpatioTemporalIndex(pg_time, pg_unit, SpatialLevel.PGM),
+    )
+
+    cm_time = np.array([t for t in times for _ in countries], dtype=np.int64)
+    cm_unit = np.array([c for _ in times for c in countries], dtype=np.int64)
+    cm = PredictionFrame(
+        rng.uniform(40, 120, size=(cm_unit.size, 1)).astype(np.float32),
+        SpatioTemporalIndex(cm_time, cm_unit, SpatialLevel.CM),
+    )
+
+    country_of = {g: c for c, gs in _E2E_GRIDS.items() for g in gs}
+    map_keys = np.array([[t, g] for t in times for g in grids], dtype=np.int64)
+    map_vals = np.array([country_of[g] for _ in times for g in grids], dtype=np.int64)
+    return pgm, cm, map_keys, map_vals
+
+
+def _assert_sums_to_country(out, cm, map_keys, map_vals, n_samples):
+    country_of = {(int(t), int(g)): int(c) for (t, g), c in zip(map_keys, map_vals)}
+    cm_lookup = {
+        (int(t), int(u)): cm.values[i]
+        for i, (t, u) in enumerate(zip(cm.index.time, cm.index.unit))
+    }
+    sums = {}
+    for i, (t, u) in enumerate(zip(out.index.time, out.index.unit)):
+        key = (int(t), country_of[(int(t), int(u))])
+        sums[key] = sums.get(key, 0.0) + out.values[i]
+    for (t, c), grid_sum in sums.items():
+        np.testing.assert_allclose(
+            grid_sum, np.repeat(cm_lookup[(t, c)], n_samples), rtol=1e-4, atol=1e-2
+        )
+
+
+@_requires_vfr
+class TestPredictionFrameReconciliationEndToEnd:
+    def test_reconcile_forecast_real_substrate_sums_to_country(
+        self, pf_manager, mock_ensemble_path, monkeypatch
+    ):
+        pgm, cm, mk, mv = _e2e_frames(times=[1, 2], n_samples=16, seed=11)
+        pf_manager._reconciler = _vfr.ReconciliationModule(mk, mv)
+        monkeypatch.setattr(_pfe_mod, "load_cm_frame", lambda *a: cm)
+
+        out = pf_manager._reconcile_forecast(pgm, "ged_sb", _recon_context(mock_ensemble_path))
+
+        assert out.sample_count == 16  # draws preserved
+        _assert_sums_to_country(out, cm, mk, mv, 16)
+
+    def test_forecast_ensemble_applies_reconciliation_end_to_end(
+        self, pf_manager, mock_ensemble_path, monkeypatch
+    ):
+        # Full forecast path: aggregate (single model = passthrough) → reconcile (real) → save.
+        pgm, cm, mk, mv = _e2e_frames(times=[1], n_samples=8, seed=12)
+        pf_manager._reconciler = _vfr.ReconciliationModule(mk, mv)
+        monkeypatch.setattr(_pfe_mod, "load_cm_frame", lambda *a: cm)
+        saved = {}
+        monkeypatch.setattr(_pfe_mod, "save_pf", lambda frame, d: saved.__setitem__("frame", frame))
+        monkeypatch.setattr(
+            pf_manager, "_forecast_model_artifact", lambda model_name, ctx: {"ged_sb": pgm}
+        )
+
+        forecasts = pf_manager._forecast_ensemble(_recon_context(mock_ensemble_path))
+
+        out = forecasts["ged_sb"]
+        assert out is saved["frame"]  # the reconciled frame is what gets saved
+        assert out.sample_count == 8
+        _assert_sums_to_country(out, cm, mk, mv, 8)
+
+    def test_forecast_ensemble_no_reconciliation_leaves_aggregate_unreconciled(
+        self, pf_manager, mock_ensemble_path, monkeypatch
+    ):
+        pgm, cm, mk, mv = _e2e_frames(times=[1], n_samples=8, seed=13)
+        pf_manager._reconciler = _vfr.ReconciliationModule(mk, mv)
+        called = {"load": False}
+        monkeypatch.setattr(
+            _pfe_mod, "load_cm_frame",
+            lambda *a: called.__setitem__("load", True) or cm,
+        )
+        monkeypatch.setattr(_pfe_mod, "save_pf", lambda frame, d: None)
+        monkeypatch.setattr(
+            pf_manager, "_forecast_model_artifact", lambda model_name, ctx: {"ged_sb": pgm}
+        )
+
+        ctx = _recon_context(mock_ensemble_path, reconciliation=None)  # reconciliation off
+        forecasts = pf_manager._forecast_ensemble(ctx)
+
+        assert called["load"] is False  # reconciliation skipped
+        np.testing.assert_array_equal(forecasts["ged_sb"].values, pgm.values)  # untouched
