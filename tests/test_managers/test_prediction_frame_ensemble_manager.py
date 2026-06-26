@@ -19,6 +19,7 @@ from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.managers.ensemble import EnsemblePathManager
 from views_pipeline_core.managers.ensemble.dataframe_ensemble import EnsembleContext
+import views_pipeline_core.managers.ensemble.prediction_frame_ensemble as _pfe_mod
 from views_pipeline_core.managers.ensemble.prediction_frame_ensemble import (
     SUPPORTED_PF_AGGREGATION_METHODS,
     _aggregate_prediction_frames,
@@ -872,8 +873,6 @@ class TestConfigModelsetMerge:
 # ============================================================================
 # Reconciliation wiring (#236, epic #233)
 # ============================================================================
-
-import views_pipeline_core.managers.ensemble.prediction_frame_ensemble as _pfe_mod  # noqa: E402
 
 
 def _recon_context(mock_ensemble_path):

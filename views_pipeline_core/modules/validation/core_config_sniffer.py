@@ -45,6 +45,9 @@ SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
 # "pgm_cm_point" = the DataFrame ensemble path; "pgm_cm" = the frames-native PFE path
 # (point + probabilistic, mode auto-detected at runtime — epic #233).
 SUPPORTED_RECONCILIATION_TYPES = frozenset({"pgm_cm_point", "pgm_cm"})
+# Reconciliation types that require a CM model (`reconcile_with`). Explicit membership, not a
+# prefix match, so a future self-contained type can be supported without demanding reconcile_with.
+RECONCILIATION_TYPES_REQUIRING_CM = frozenset({"pgm_cm_point", "pgm_cm"})
 
 # Output scale — optional config key; declares whether model returns log-scale or natural-scale predictions
 SUPPORTED_OUTPUT_SCALES = frozenset({"log", "natural"})
@@ -313,8 +316,7 @@ class CoreConfigSniffer:
                 f"Supported: {sorted(SUPPORTED_RECONCILIATION_TYPES)}. "
                 f"Update SUPPORTED_RECONCILIATION_TYPES in core_config_sniffer.py when ready."
             )
-        # All pgm→cm reconciliation types (point or frames-native) require the CM model.
-        if recon.startswith("pgm_cm"):
+        if recon in RECONCILIATION_TYPES_REQUIRING_CM:
             recon_with = self._c.get("reconcile_with")
             if not recon_with:
                 raise ValueError(

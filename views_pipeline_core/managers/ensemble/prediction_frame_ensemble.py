@@ -596,7 +596,14 @@ class PredictionFrameEnsembleManager:
                 RECONCILER_NOT_INJECTED_MSG, wandb_module=self._wandb_module
             )
         cm_frame = load_cm_frame(ctx.reconcile_with, target, ctx.run_type)
-        return reconcile_frames(self._reconciler, cm_frame, agg_pf)
+        reconciled = reconcile_frames(self._reconciler, cm_frame, agg_pf)
+        logger.info(
+            "Reconciled '%s' to country totals from '%s' (%s).",
+            target,
+            ctx.reconcile_with,
+            ctx.reconciliation,
+        )
+        return reconciled
 
     # ------------------------------------------------------------------
     # Model artifact execution (subprocess delegation)

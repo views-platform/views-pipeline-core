@@ -36,7 +36,7 @@ class Reconciler(Protocol):
 #: was injected at the composition root. Single source of truth for both ensemble
 #: managers (no silent-off — see #194/#195).
 RECONCILER_NOT_INJECTED_MSG = (
-    "Reconciliation 'pgm_cm_point' is configured but no Reconciler was injected. "
+    "Reconciliation is configured but no Reconciler was injected. "
     "The composition root (the views-models ensemble main) must inject a concrete "
     "Reconciler. See issue #195."
 )
