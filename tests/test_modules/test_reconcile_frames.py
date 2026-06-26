@@ -149,9 +149,12 @@ def test_reconcile_frames_carries_metadata():
 
 def test_reconcile_frames_logs_mode(caplog):
     pgm, cm, _, _ = _build_case(times=[1], n_samples=4, cm_point=True, seed=4)
-    with caplog.at_level(logging.INFO):
+    # Target the module logger explicitly: a bare at_level(INFO) does not lower this
+    # logger's effective level, so an ambient WARNING config (as in CI) would filter the
+    # INFO record before caplog sees it.
+    with caplog.at_level(logging.INFO, logger="views_pipeline_core.modules.reconciliation.reconcile_frames"):
         reconcile_frames(_ReorderingReconciler(), cm, pgm)
-    assert any("mode=point-broadcast" in r.message for r in caplog.records)
+    assert any("mode=point-broadcast" in r.getMessage() for r in caplog.records)
 
 
 # --------------------------------------------------------------------------- real substrate (parity)
