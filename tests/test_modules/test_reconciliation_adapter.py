@@ -1,8 +1,8 @@
 """#195 (epic #193) — the dataset↔frame reconciliation adapter.
 
 Verifies the conversion contract with a FAKE Reconciler (the real frames-native
-reconciler is views-postprocessing, injected at the composition root — out of scope
-here). The adapter must: build cm/pgm frames from datasets, call the port, and write
+reconciler is views_frames_reconcile.ReconciliationModule, injected at the composition
+root — out of scope here). The adapter must: build cm/pgm frames from datasets, call the port, and write
 the reconciled grid values back into a DataFrame matching the pg dataset, with the
 `ReconciliationInvariants` (sum tolerance, zero preservation, non-negativity) holding.
 """

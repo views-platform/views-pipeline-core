@@ -383,6 +383,24 @@ class TestPredictionFrameEnsembleConstants:
             ctx.prediction_format = "dataframe"
 
 
+class TestPredictionFrameReconciliationFailsLoud:
+    """#195 review: PFE has no reconciliation path yet (#200). A configured
+    reconciliation must fail loud, not be silently dropped to None."""
+
+    def test_build_context_raises_when_reconciliation_configured(self, pf_manager, sample_args):
+        cfg = COMBINED_CONFIGS.copy()
+        cfg["reconciliation"] = "pgm_cm_point"
+        cfg["reconcile_with"] = "some_cm_model"
+        pf_manager._config_manager.get_combined_config.return_value = cfg
+        with pytest.raises(PipelineException, match="#200"):
+            pf_manager._build_context(sample_args)
+
+    def test_build_context_ok_when_reconciliation_none(self, pf_manager, sample_args):
+        # reconciliation=None (the norm for PFE) builds a context with reconciliation off.
+        ctx = pf_manager._build_context(sample_args)
+        assert ctx.reconciliation is None
+
+
 # ============================================================================
 # Phase 3: Manager Construction
 # ============================================================================

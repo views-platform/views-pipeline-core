@@ -275,6 +275,17 @@ class PredictionFrameEnsembleManager:
 
     def _build_context(self, args: ForecastingModelArgs) -> EnsembleContext:
         c = self.configs
+        # Fail loud (no silent-off): PFE has no reconciliation path yet (#200).
+        # If a config requests reconciliation, refuse it rather than silently
+        # dropping it to None below. The injected `reconciler` is accepted for
+        # uniform composition-root construction but is not wired here yet.
+        if c.get("reconciliation") is not None:
+            raise PipelineException(
+                "Reconciliation is configured but prediction_frame ensembles do not "
+                "support reconciliation yet (probabilistic PFE reconciliation is #200). "
+                "Remove 'reconciliation' from the config, or run a DataFrame ensemble.",
+                wandb_module=self._wandb_module,
+            )
         return EnsembleContext(
             configs=c,
             model_path=self._ensemble_path,

@@ -4,8 +4,9 @@ Two tightly-coupled pieces of one concept — "what reconciliation must satisfy 
 how it is invoked":
   * `Reconciler` — the injection **port** (DIP). Ensemble managers depend on this
     abstraction, never on a concrete reconciliation package. The concrete,
-    frames-native reconciler (views-postprocessing) is injected at the composition
-    root; pipeline-core never imports it (ADP — no cycle). Geography (the
+    frames-native reconciler (`views_frames_reconcile.ReconciliationModule`, the
+    views-frames v1.7.0 sibling) is injected at the composition root (views-models);
+    pipeline-core never imports it (ADP — no cycle). Geography (the
     `(time, priogrid) -> country` mapping) is baked into the injected instance
     (views-frames ADR-014), so this port is frames-only.
   * `ReconciliationInvariants` — the named mathematical constraints the reconciled

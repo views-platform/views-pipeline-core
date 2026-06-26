@@ -728,8 +728,9 @@ class EnsembleManager(ForecastingModelManager):
             return None
 
         # Fail loud (no silent-off): reconciliation is configured but no Reconciler
-        # was injected. The concrete frames-native reconciler (views-postprocessing's
-        # ReconciliationModule) is injected at the composition root (#194/#195).
+        # was injected. The concrete frames-native reconciler
+        # (views_frames_reconcile.ReconciliationModule) is injected at the composition
+        # root by views-models (#194/#195, Decision K).
         if self._reconciler is None:
             raise PipelineException(
                 RECONCILER_NOT_INJECTED_MSG,
