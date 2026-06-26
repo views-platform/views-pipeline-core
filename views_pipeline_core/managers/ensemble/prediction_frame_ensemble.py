@@ -23,6 +23,7 @@ import wandb
 
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.data.prediction_frame import PredictionFrame
+from views_pipeline_core.domain.reconciliation import Reconciler
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.files.utils import handle_ensemble_log_creation
@@ -122,6 +123,7 @@ class PredictionFrameEnsembleManager:
         ensemble_path: EnsemblePathManager,
         wandb_notifications: bool = False,
         use_prediction_store: bool = False,
+        reconciler: Optional[Reconciler] = None,
     ) -> None:
         from views_pipeline_core.managers.configuration import ConfigurationManager
         from views_pipeline_core.managers.evaluation.stage import EvaluationStage
@@ -132,6 +134,9 @@ class PredictionFrameEnsembleManager:
         self._ensemble_path = ensemble_path
         self._wandb_notifications = wandb_notifications
         self._use_prediction_store = use_prediction_store
+        # Accepted for uniform composition-root injection; PFE has no point
+        # reconciliation path yet (probabilistic PFE reconciliation is #200).
+        self._reconciler = reconciler
         self._entity = "views_pipeline"
         self._args: Optional[ForecastingModelArgs] = None
 

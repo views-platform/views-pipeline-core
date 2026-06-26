@@ -18,6 +18,7 @@ from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfi
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
+from views_pipeline_core.domain.reconciliation import Reconciler
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.modules.aggregation.aggregator import (
     AggregationModule,
@@ -101,6 +102,7 @@ class EnsembleManager(ForecastingModelManager):
         ensemble_path: EnsemblePathManager,
         wandb_notifications: bool = False,
         use_prediction_store: bool = False,
+        reconciler: Optional[Reconciler] = None,
     ) -> None:
         """
         Initialize the EnsembleManager.
@@ -109,8 +111,12 @@ class EnsembleManager(ForecastingModelManager):
             ensemble_path (EnsemblePathManager): The EnsemblePathManager object.
             wandb_notifications (bool, optional): Flag to enable/disable W&B notifications. Defaults to False.
             use_prediction_store (bool, optional): Flag to enable/disable prediction store. Defaults to False.
+            reconciler (Reconciler, optional): Injected reconciliation port (DIP). When
+                None, reconciliation cannot run — a run that configures it fails loud.
+                The concrete reconciler is injected at the composition root (#194/#195).
         """
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
+        self._reconciler = reconciler
         self.__activate_reconciliation = True
 
         # Name-mangled access: ModelManager.__load_config is private (double underscore)
@@ -721,6 +727,17 @@ class EnsembleManager(ForecastingModelManager):
             logger.info("No reconciliation model specified. Skipping reconciliation.")
             return None
 
+        # Fail loud (no silent-off): reconciliation is configured but no Reconciler
+        # was injected. The concrete frames-native reconciler (views-postprocessing's
+        # ReconciliationModule) is injected at the composition root (#194/#195).
+        if self._reconciler is None:
+            raise PipelineException(
+                "Reconciliation 'pgm_cm_point' is configured but no Reconciler was "
+                "injected. The composition root (the views-models ensemble main) must "
+                "inject a concrete Reconciler. See issue #195.",
+                wandb_module=self._wandb_module,
+            )
+
         # Load C dataset
         latest_c_dataset = self._load_c_dataset(cm_model, c_dataframe)
         if latest_c_dataset is None:
@@ -743,12 +760,11 @@ class EnsembleManager(ForecastingModelManager):
             )
             return None
 
-        # Perform reconciliation
-        from views_reporting.reconciliation import ReconciliationModule
-        reconciliation_manager = ReconciliationModule(
-            c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset
-        )
-        return reconciliation_manager.reconcile()
+        # Reconcile via the injected port + the dataset↔frame adapter (no
+        # views_reporting / views_postprocessing import here — ADP, no cycle).
+        from views_pipeline_core.modules.reconciliation.adapter import reconcile_datasets
+
+        return reconcile_datasets(self._reconciler, latest_c_dataset, latest_pg_dataset)
 
     def _load_c_dataset(
         self, cm_model: str, c_dataframe: Optional[pd.DataFrame]

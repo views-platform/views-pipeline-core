@@ -319,13 +319,10 @@ class CoreConfigSniffer:
                     "'reconcile_with' to specify the CM model for reconciliation. "
                     "Add reconcile_with to config_meta.py."
                 )
-        import importlib.util
-        if importlib.util.find_spec("views_reporting") is None:
-            raise ImportError(
-                "CoreConfigSniffer: reconciliation is configured but views-reporting "
-                "is not installed. Reconciliation requires views-reporting. "
-                "Install it with: pip install -e /path/to/views-reporting"
-            )
+        # NOTE (#195): reconciliation no longer requires views-reporting installed.
+        # pipeline-core depends only on the injected `Reconciler` port; whether a
+        # concrete reconciler is actually wired is enforced at runtime (fail-loud in
+        # the ensemble manager) by the composition root, not by this static check.
 
     def _check_output_scale(self) -> None:
         scale = self._c.get("output_scale")
