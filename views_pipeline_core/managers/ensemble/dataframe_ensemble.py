@@ -26,7 +26,7 @@ import wandb
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset, _ViewsDataset
-from views_pipeline_core.domain.reconciliation import Reconciler
+from views_pipeline_core.domain.reconciliation import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.files.utils import (
     handle_ensemble_log_creation,
@@ -912,9 +912,7 @@ class DataFrameEnsembleManager:
         # Fail loud (no silent-off): configured but no Reconciler injected (#194/#195).
         if self._reconciler is None:
             raise PipelineException(
-                "Reconciliation 'pgm_cm_point' is configured but no Reconciler was "
-                "injected. The composition root (the views-models ensemble main) must "
-                "inject a concrete Reconciler. See issue #195.",
+                RECONCILER_NOT_INJECTED_MSG,
                 wandb_module=self._wandb_module,
             )
 

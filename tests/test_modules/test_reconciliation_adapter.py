@@ -11,7 +11,7 @@ import types
 import numpy as np
 import pandas as pd
 import pytest
-from views_frames import PredictionFrame
+from views_frames import PredictionFrame, SpatioTemporalIndex
 
 from views_pipeline_core.domain.reconciliation import ReconciliationInvariants
 from views_pipeline_core.modules.reconciliation.adapter import reconcile_datasets
@@ -72,3 +72,43 @@ def test_reconcile_datasets_raises_on_no_common_targets():
     cm = _ds("country_id", ids=[100], values=[1.0], column="pred_ns")
     with pytest.raises(ValueError, match="no common targets"):
         reconcile_datasets(_FakeProportionalReconciler(), cm, pg)
+
+
+class _ReorderingReconciler:
+    """A correct reconciler that returns rows in a DIFFERENT order than it received
+    (e.g. grouped by country). The adapter must realign by (time, unit), not position."""
+
+    def __init__(self, drop_last: bool = False):
+        self._drop_last = drop_last
+
+    def reconcile(self, cm_frame: PredictionFrame, pgm_frame: PredictionFrame) -> PredictionFrame:
+        scaled = _FakeProportionalReconciler().reconcile(cm_frame, pgm_frame)
+        order = np.arange(scaled.values.shape[0])[::-1]  # reverse row order
+        if self._drop_last:
+            order = order[:-1]  # also drop a (time, unit) the pg dataframe still expects
+        rev_idx = SpatioTemporalIndex(
+            time=np.asarray(scaled.index.time)[order],
+            unit=np.asarray(scaled.index.unit)[order],
+            level=scaled.index.level,
+        )
+        return PredictionFrame(scaled.values[order].astype(np.float32), rev_idx)
+
+
+def test_reconcile_datasets_realigns_reordered_frame_by_index():
+    # Reconciler returns reversed rows; values must still land on the right grid cell.
+    pg = _ds("priogrid_id", ids=[10, 11, 12], values=[1.0, 2.0, 0.0])  # grid sum 3
+    cm = _ds("country_id", ids=[100], values=[6.0])                    # country total 6
+
+    out = reconcile_datasets(_ReorderingReconciler(), cm, pg)
+
+    assert list(out.index) == list(pg.dataframe.index)
+    reconciled = np.array([c[0] for c in out["pred_sb"]])
+    # Same answer as the in-order case — proves alignment by (time, unit), not position.
+    np.testing.assert_allclose(reconciled, [2.0, 4.0, 0.0])
+
+
+def test_reconcile_datasets_fails_loud_when_frame_drops_a_grid_cell():
+    pg = _ds("priogrid_id", ids=[10, 11, 12], values=[1.0, 2.0, 0.0])
+    cm = _ds("country_id", ids=[100], values=[6.0])
+    with pytest.raises(ValueError, match="row alignment broken"):
+        reconcile_datasets(_ReorderingReconciler(drop_last=True), cm, pg)

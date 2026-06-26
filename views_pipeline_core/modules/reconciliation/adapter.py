@@ -6,7 +6,7 @@ The ensemble managers hold pipeline-core datasets (`_CDataset`/`_PGDataset`, pan
 This module is the only place that bridges the two: it converts the datasets to
 `views_frames.PredictionFrame`s, calls the injected reconciler once per shared target,
 and writes the reconciled grid values back into a fresh DataFrame matching the input
-pg dataset (de-mutated, register C-184).
+pg dataset (de-mutated, register C-182).
 
 Single responsibility: dataset↔frame conversion + per-target orchestration. It imports
 **only views-frames** for the frame types — never `views_reporting` or
@@ -36,8 +36,9 @@ def _stack_cells(column: pd.Series) -> np.ndarray:
 def _frame_from_dataset(dataset: Any, column: str, level: SpatialLevel) -> PredictionFrame:
     """Build a `PredictionFrame` for one target column from a dataset's dataframe.
 
-    Rows follow the dataframe's own order, so the reconciled frame's rows align
-    back to the dataframe positionally.
+    Rows follow the dataframe's own order. The reconciled frame is realigned to the
+    dataframe **by `(time, unit)` index** on write-back (see `reconcile_datasets`), so
+    a reconciler that reorders rows cannot silently corrupt the result.
     """
     df = dataset.dataframe
     y_pred = _stack_cells(df[column])
@@ -47,6 +48,47 @@ def _frame_from_dataset(dataset: Any, column: str, level: SpatialLevel) -> Predi
         level=level,
     )
     return PredictionFrame(y_pred, index)
+
+
+def _align_to_dataframe(reconciled: PredictionFrame, result_df: pd.DataFrame, column: str) -> list:
+    """Realign a reconciled frame's rows to `result_df`'s `(time, unit)` index.
+
+    The injected `Reconciler` is free to return rows in any order (e.g. grouped by
+    country); `PredictionFrame` preserves whatever order it is handed, so we must NOT
+    assume positional correspondence. We key both sides by `(time, unit)` and reorder
+    the reconciled values to the dataframe's row order — failing loud on a missing or
+    duplicated key rather than silently scattering values to the wrong grid cell.
+    """
+    values = reconciled.values
+    rec_keys = list(
+        zip(
+            np.asarray(reconciled.index.time).tolist(),
+            np.asarray(reconciled.index.unit).tolist(),
+        )
+    )
+    if values.shape[0] != len(result_df):
+        raise ValueError(
+            f"Reconciled frame for '{column}' has {values.shape[0]} rows but the pg "
+            f"dataframe has {len(result_df)} — row alignment broken."
+        )
+    pos_by_key = {key: i for i, key in enumerate(rec_keys)}
+    if len(pos_by_key) != len(rec_keys):
+        raise ValueError(
+            f"Reconciled frame for '{column}' has duplicate (time, unit) keys — "
+            "cannot align reconciled values back to the pg dataframe."
+        )
+    df_keys = zip(
+        result_df.index.get_level_values(0).tolist(),
+        result_df.index.get_level_values(1).tolist(),
+    )
+    try:
+        order = [pos_by_key[key] for key in df_keys]
+    except KeyError as e:
+        raise ValueError(
+            f"Reconciled frame for '{column}' is missing grid cell {e.args[0]} present "
+            "in the pg dataframe — cannot align reconciled values back (row alignment broken)."
+        ) from e
+    return list(values[order])
 
 
 def reconcile_datasets(
@@ -77,14 +119,9 @@ def reconcile_datasets(
         pgm_frame = _frame_from_dataset(pg_dataset, column, SpatialLevel.PGM)
         reconciled = reconciler.reconcile(cm_frame, pgm_frame)
 
-        values = reconciled.values
-        if values.shape[0] != len(result_df):
-            raise ValueError(
-                f"Reconciled frame for '{column}' has {values.shape[0]} rows but the "
-                f"pg dataframe has {len(result_df)} — row alignment broken."
-            )
+        # Realign by (time, unit) — never trust positional row order from the port.
         # Write back as per-row sample arrays (object cells), matching the layout the
         # legacy reconcile() produced and that downstream consumers expect.
-        result_df[column] = list(values)
+        result_df[column] = _align_to_dataframe(reconciled, result_df, column)
 
     return result_df
