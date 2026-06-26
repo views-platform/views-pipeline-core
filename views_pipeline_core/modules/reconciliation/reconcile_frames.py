@@ -92,6 +92,13 @@ def reconcile_frames(
     """
     if pgm_frame.n_rows == 0:
         raise ValueError("Cannot reconcile an empty grid frame (pgm_frame has 0 rows).")
+    if not pgm_frame.index.has_unique_rows():
+        # The per-time chunk reassembly realigns by (time, unit) via reindex/searchsorted,
+        # which silently misbehave on duplicate keys (register C-21). Fail loud instead.
+        raise ValueError(
+            "reconcile_frames requires unique (time, unit) grid rows; the pgm frame has "
+            "duplicates, which would corrupt row realignment."
+        )
 
     aligned, mode = align_country_to_grid(cm_frame, pgm_frame.sample_count)
     logger.info(

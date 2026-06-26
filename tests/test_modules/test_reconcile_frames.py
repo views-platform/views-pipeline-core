@@ -95,40 +95,24 @@ def test_align_mismatch_fails_loud():
 
 
 class _ReorderingReconciler:
-    """Correct per-(time,country) scaler that returns rows in REVERSED order — exercises the
-    realign-by-index safety in reconcile_frames. Single-time inputs only (chunk slices)."""
-
-    def __init__(self, map_keys, map_vals):
-        self._country = {(int(t), int(g)): int(c) for (t, g), c in zip(map_keys, map_vals)}
+    """Pass-through port that returns rows in REVERSED order — exercises only the
+    realign-by-index safety in reconcile_frames. Value correctness (proportional scaling)
+    is covered by the real-substrate parity tests below, so this fake does no scaling."""
 
     def reconcile(self, cm_frame, pgm_frame):
         pg = np.asarray(pgm_frame.values, dtype=np.float32)
-        out = np.empty_like(pg)
-        cm_lookup = {
-            (int(t), int(u)): cm_frame.values[i]
-            for i, (t, u) in enumerate(zip(cm_frame.index.time, cm_frame.index.unit))
-        }
-        # proportional per (time, country) per draw — every row lands in exactly one group
-        groups = {}
-        for i, (t, u) in enumerate(zip(pgm_frame.index.time, pgm_frame.index.unit)):
-            groups.setdefault((int(t), self._country[(int(t), int(u))]), []).append(i)
-        for (t, c), idxs in groups.items():
-            sub = pg[idxs]
-            total = cm_lookup[(t, c)]
-            scale = total / (sub.sum(axis=0, keepdims=True) + 1e-12)
-            out[idxs] = sub * scale
         order = np.arange(pg.shape[0])[::-1]
         rev = SpatioTemporalIndex(
             np.asarray(pgm_frame.index.time)[order],
             np.asarray(pgm_frame.index.unit)[order],
             pgm_frame.index.level,
         )
-        return PredictionFrame(out[order].astype(np.float32), rev)
+        return PredictionFrame(pg[order].copy(), rev)
 
 
 def test_reconcile_frames_realigns_reordered_port_output():
-    pgm, cm, mk, mv = _build_case(times=[1], n_samples=4, cm_point=True, seed=1)
-    out = reconcile_frames(_ReorderingReconciler(mk, mv), cm, pgm)
+    pgm, cm, _, _ = _build_case(times=[1], n_samples=4, cm_point=True, seed=1)
+    out = reconcile_frames(_ReorderingReconciler(), cm, pgm)
     # despite the port reversing rows, output is realigned to the input grid index
     np.testing.assert_array_equal(np.asarray(out.index.unit), np.asarray(pgm.index.unit))
     np.testing.assert_array_equal(np.asarray(out.index.time), np.asarray(pgm.index.time))
@@ -138,33 +122,47 @@ def test_reconcile_frames_empty_fails_loud():
     empty = _pf(np.empty((0, 4), dtype=np.float32), time=[], unit=[], level=SpatialLevel.PGM)
     cm = _pf([[1.0]], time=[1], unit=[1], level=SpatialLevel.CM)
     with pytest.raises(ValueError, match="empty grid frame"):
-        reconcile_frames(_ReorderingReconciler(np.empty((0, 2), np.int64), np.empty((0,), np.int64)), cm, empty)
+        reconcile_frames(_ReorderingReconciler(), cm, empty)
+
+
+def test_reconcile_frames_duplicate_rows_fails_loud():
+    # two identical (time, unit) grid rows → must fail loud, not silently mis-realign
+    pgm = _pf(np.ones((2, 4), dtype=np.float32), time=[1, 1], unit=[11, 11], level=SpatialLevel.PGM)
+    cm = _pf([[10.0]], time=[1], unit=[1], level=SpatialLevel.CM)
+    with pytest.raises(ValueError, match="unique"):
+        reconcile_frames(_ReorderingReconciler(), cm, pgm)
 
 
 def test_reconcile_frames_does_not_mutate_input():
-    pgm, cm, mk, mv = _build_case(times=[1], n_samples=4, cm_point=True, seed=2)
+    pgm, cm, _, _ = _build_case(times=[1], n_samples=4, cm_point=True, seed=2)
     before = np.array(pgm.values, copy=True)
-    reconcile_frames(_ReorderingReconciler(mk, mv), cm, pgm)
+    reconcile_frames(_ReorderingReconciler(), cm, pgm)
     np.testing.assert_array_equal(pgm.values, before)
 
 
 def test_reconcile_frames_carries_metadata():
-    pgm, cm, mk, mv = _build_case(times=[1], n_samples=4, cm_point=True, seed=3)
+    pgm, cm, _, _ = _build_case(times=[1], n_samples=4, cm_point=True, seed=3)
     pgm = pgm.with_metadata(FrameMetadata(model="rusty_sibling", run_type="forecasting"))
-    out = reconcile_frames(_ReorderingReconciler(mk, mv), cm, pgm)
+    out = reconcile_frames(_ReorderingReconciler(), cm, pgm)
     assert out.metadata is not None and out.metadata.model == "rusty_sibling"
 
 
 def test_reconcile_frames_logs_mode(caplog):
-    pgm, cm, mk, mv = _build_case(times=[1], n_samples=4, cm_point=True, seed=4)
+    pgm, cm, _, _ = _build_case(times=[1], n_samples=4, cm_point=True, seed=4)
     with caplog.at_level(logging.INFO):
-        reconcile_frames(_ReorderingReconciler(mk, mv), cm, pgm)
+        reconcile_frames(_ReorderingReconciler(), cm, pgm)
     assert any("mode=point-broadcast" in r.message for r in caplog.records)
 
 
 # --------------------------------------------------------------------------- real substrate (parity)
+# Skip ONLY the substrate-dependent tests if views_frames_reconcile is absent (PyPI-only CI);
+# the orchestration tests above must always run.
+try:
+    import views_frames_reconcile as vfr
+except ImportError:  # pragma: no cover
+    vfr = None
 
-vfr = pytest.importorskip("views_frames_reconcile")
+_requires_vfr = pytest.mark.skipif(vfr is None, reason="views_frames_reconcile not installed")
 
 
 def _country_sums(frame, map_keys, map_vals):
@@ -177,6 +175,7 @@ def _country_sums(frame, map_keys, map_vals):
     return sums
 
 
+@_requires_vfr
 @pytest.mark.parametrize("cm_point", [True, False])
 def test_point_and_versions_sum_to_country_totals(cm_point):
     pgm, cm, mk, mv = _build_case(times=[1, 2], n_samples=16, cm_point=cm_point, seed=5)
@@ -194,6 +193,7 @@ def test_point_and_versions_sum_to_country_totals(cm_point):
         np.testing.assert_allclose(grid_sum, expected, rtol=1e-4, atol=1e-2)
 
 
+@_requires_vfr
 def test_chunk_by_time_equals_whole_frame():
     pgm, cm, mk, mv = _build_case(times=[1, 2, 3], n_samples=8, cm_point=True, seed=6)
     rec = vfr.ReconciliationModule(mk, mv)
@@ -203,6 +203,7 @@ def test_chunk_by_time_equals_whole_frame():
     np.testing.assert_array_equal(np.asarray(chunked.index.unit), np.asarray(whole.index.unit))
 
 
+@_requires_vfr
 def test_zeros_preserved():
     pgm, cm, mk, mv = _build_case(times=[1], n_samples=8, cm_point=True, seed=7)
     vals = np.array(pgm.values, copy=True)
