@@ -436,6 +436,25 @@ class TestEvaluationReport:
 
     @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
     @patch("views_reporting.sources.MetricFrameFileSource")
+    def test_frame_load_error_propagates(
+        self, mock_source_cls, mock_template_cls,
+    ):
+        """A present-but-unreadable MetricFrame fails loud — not silently skipped or
+        degraded (Fail Loud; re-establishes the C-180 no-swallow contract for the
+        MetricFrame path, replacing the retired get_latest_run transient-error test).
+        Absent frame -> None -> skip; corrupt frame -> raise."""
+        stage = _make_stage()
+        ctx = _make_context()
+        mock_source_cls.return_value.metric_frame.side_effect = OSError("corrupt frame")
+
+        with pytest.raises(OSError):
+            stage.generate_evaluation_report(ctx)
+
+        mock_template_cls.assert_not_called()
+        stage._wandb_module.send_alert.assert_not_called()
+
+    @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
+    @patch("views_reporting.sources.MetricFrameFileSource")
     def test_sends_wandb_alert_on_success(
         self, mock_source_cls, mock_template_cls,
     ):

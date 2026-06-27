@@ -7,7 +7,8 @@ ReportingContext rather than reaching into a parent class's internals.
 
 Responsibilities:
   - Load historical + forecast data for forecast reports
-  - Fetch latest WandB run for evaluation reports
+  - Render evaluation reports from the persisted MetricFrame via an injected
+    EvaluationSource (ADR-018 / C-108) — not a render-time WandB scrape
   - Delegate to ForecastReportTemplate / EvaluationReportTemplate
   - Publish completion alerts via WandB
 """
@@ -73,7 +74,8 @@ class ReportingContext(BaseStageContext):
     Extends BaseStageContext (configs, model_path, run_type) with
     reporting-specific fields.
     """
-    entity: str  # WandB entity (forecast-report alerts; no longer used by the eval path)
+    entity: str  # WandB entity; set at wandb.init() upstream. No stage method reads it now
+    # (the eval path retired get_latest_run); retained for call-site/back-compat.
     prediction_format: str = "dataframe"
 
 
