@@ -20,6 +20,13 @@ from views_pipeline_core.types import BaseStageContext
 
 logger = logging.getLogger(__name__)
 
+#: Per-target MetricFrame directory prefix. **Cross-repo contract** with views-reporting's
+#: ``MetricFrameFileSource._frame_dir`` (``root / model / run_type / metricframe_<target>``):
+#: both repos must use this exact prefix + layout or reporting silently finds no frame
+#: (registered as a Tier-2 path-drift risk). Changing it here requires the matching change
+#: in views-reporting.
+METRICFRAME_DIR_PREFIX = "metricframe_"
+
 
 @dataclass(frozen=True)
 class EvaluationContext(BaseStageContext):
@@ -276,14 +283,16 @@ class EvaluationStage:
         metric_frame = report.to_metric_frame(
             model_id=context.model_path.model_name,
             run_type=run_type,
-            partition=str(context.partition_dict.get(run_type)),
+            # Direct index (not .get): a run_type absent from partition_dict is a fail-loud
+            # bug, consistent with _get_evaluation_step_mappings — never record "None".
+            partition=str(context.partition_dict[run_type]),
             level=context.configs.get("level"),
         )
         frame_dir = (
             context.model_path.data_generated
             / context.model_path.model_name
             / run_type
-            / f"metricframe_{target_identifier}"
+            / f"{METRICFRAME_DIR_PREFIX}{target_identifier}"
         )
         metric_frame.save(frame_dir)
         logger.info(

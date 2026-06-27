@@ -480,8 +480,20 @@ class TestMetricFrameEmit:
             partition=str(ctx.partition_dict["calibration"]),
             level="pgm",
         )
+        # CROSS-REPO CONTRACT: this path must equal views-reporting's
+        # MetricFrameFileSource._frame_dir = root / model / run_type / metricframe_<target>
+        # (root=<data_generated>). If this changes, views-reporting must change in lockstep
+        # or reporting silently finds no frame.
         expected = tmp_path / "my_model" / "calibration" / "metricframe_lr_sb"
         report.to_metric_frame.return_value.save.assert_called_once_with(expected)
+
+    def test_missing_partition_fails_loud(self, tmp_path):
+        # A run_type absent from partition_dict must raise, not record partition="None".
+        stage = _make_stage()
+        ctx = self._ctx(tmp_path, run_type="forecasting")  # not in the default partition_dict
+        report = _make_mock_report()
+        with pytest.raises(KeyError):
+            stage._save_metric_frame(report, "lr_sb", ctx)
 
     def test_metric_frame_emitted_even_when_io_none(self, tmp_path):
         # PFE ensembles run with io_manager=None: legacy parquet is skipped but the
