@@ -8,6 +8,7 @@ These tests verify that ReportingStage:
 4. Sends WandB alerts on success
 5. Raises appropriate errors for missing data
 """
+import importlib.util
 import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -17,16 +18,54 @@ import pytest
 
 pytest.importorskip("views_reporting")
 
-sys.modules["wandb"] = MagicMock()
-sys.modules["views_evaluation"] = MagicMock()
-sys.modules["views_evaluation.evaluation"] = MagicMock()
-sys.modules["views_evaluation.evaluation.evaluation_frame"] = MagicMock()
-sys.modules["art"] = MagicMock()
+# The MetricFrame EvaluationSource consumer (views-reporting #173) may be absent in an older
+# released views-reporting; the source-based eval-report tests skip there (the producer epic
+# #224 integrates against the dev-installed consumer; publish is the final step).
+_HAS_EVAL_SOURCE = importlib.util.find_spec("views_reporting.sources") is not None
+if _HAS_EVAL_SOURCE:
+    # Cache views_reporting.sources (real) once so @patch("...MetricFrameFileSource") resolves.
+    # It imports views_evaluation.evaluation.metric_frame, but several other test modules poison
+    # sys.modules["views_evaluation*"] with MagicMocks at collection; temporarily restore the
+    # real package for this one import, then put their mocks back exactly as they were.
+    _ve_saved = {
+        k: sys.modules.pop(k)
+        for k in [
+            k for k in list(sys.modules)
+            if k == "views_evaluation" or k.startswith("views_evaluation.")
+        ]
+    }
+    try:
+        import views_reporting.sources  # noqa: F401
+    finally:
+        sys.modules.update(_ve_saved)
 
 from views_pipeline_core.managers.reporting.stage import (  # noqa: E402
     ReportingContext,
     ReportingStage,
 )
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _mock_optional_deps():
+    """Mock heavy/optional deps the stage imports lazily (wandb, views_evaluation, art) for
+    this module's tests only, restoring sys.modules on teardown so the mocks never leak into
+    other modules (the reporting stage imports none of them at module load)."""
+    names = [
+        "wandb",
+        "views_evaluation",
+        "views_evaluation.evaluation",
+        "views_evaluation.evaluation.evaluation_frame",
+        "art",
+    ]
+    saved = {n: sys.modules.get(n) for n in names}
+    for n in names:
+        sys.modules[n] = MagicMock()
+    yield
+    for n, mod in saved.items():
+        if mod is None:
+            sys.modules.pop(n, None)
+        else:
+            sys.modules[n] = mod
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -326,54 +365,52 @@ class TestForecastReportPredictionFrame:
 # ── GREEN: Evaluation report ────────────────────────────────────────────────
 
 
+@pytest.mark.skipif(
+    not _HAS_EVAL_SOURCE,
+    reason="views-reporting lacks the EvaluationSource consumer (#173)",
+)
 class TestEvaluationReport:
-    """Verify evaluation report generation."""
+    """Eval report renders from the persisted MetricFrame via MetricFrameFileSource
+    (ADR-018 / C-108) — no render-time WandB scrape (the retired C-48/C-110 path)."""
 
-    @patch("views_pipeline_core.modules.wandb.get_latest_run")
-    @patch(
-        "views_reporting.templates.reports.evaluation.EvaluationReportTemplate"
-    )
-    def test_evaluation_report_calls_template_per_target(
-        self, mock_template_cls, mock_get_run,
+    @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
+    @patch("views_reporting.sources.MetricFrameFileSource")
+    def test_renders_from_source_at_locked_path_per_target(
+        self, mock_source_cls, mock_template_cls,
     ):
-        """Must create one EvaluationReportTemplate per target."""
+        """One source + template per target; the source is built at the locked
+        cross-repo path (root=<data_generated>, primary_model=<model>)."""
         stage = _make_stage()
         ctx = _make_context(
-            configs={
-                "name": "test",
-                "targets": ["lr_sb", "lr_ns"],
-                "run_type": "calibration",
-            },
+            configs={"name": "test", "targets": ["lr_sb", "lr_ns"], "run_type": "calibration"},
         )
-
-        mock_get_run.return_value = MagicMock()
-        mock_template_cls.return_value.generate.return_value = Path(
-            "/tmp/eval_report.html"
-        )
+        ctx.model_path.data_generated = Path("/tmp/dg")
+        mock_source_cls.return_value.metric_frame.return_value = MagicMock()  # frame present
+        mock_template_cls.return_value.generate.return_value = Path("/tmp/eval_report.html")
 
         stage.generate_evaluation_report(ctx)
 
-        # Template instantiated twice — once per target
-        assert mock_template_cls.call_count == 2
-        # get_latest_run called with correct entity
-        mock_get_run.assert_called_once_with(
-            entity="views_pipeline",
-            model_name="test_model",
+        assert mock_source_cls.call_count == 2
+        mock_source_cls.assert_any_call(
+            root=Path("/tmp/dg"),
             run_type="calibration",
+            target="lr_sb",
+            primary_model="test_model",
+        )
+        assert mock_template_cls.call_count == 2
+        mock_template_cls.return_value.generate.assert_called_with(
+            source=mock_source_cls.return_value, target="lr_ns",
         )
 
-    @patch("views_pipeline_core.modules.wandb.get_latest_run")
-    @patch(
-        "views_reporting.templates.reports.evaluation.EvaluationReportTemplate"
-    )
-    def test_evaluation_report_skips_when_no_run(
-        self, mock_template_cls, mock_get_run,
+    @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
+    @patch("views_reporting.sources.MetricFrameFileSource")
+    def test_skips_target_without_persisted_frame(
+        self, mock_source_cls, mock_template_cls,
     ):
-        """None from get_latest_run -> skip report, return None, do not crash (issue #177)."""
+        """No MetricFrame for the target -> skip it, render nothing, no alert."""
         stage = _make_stage()
         ctx = _make_context()
-
-        mock_get_run.return_value = None
+        mock_source_cls.return_value.metric_frame.return_value = None  # absent
 
         result = stage.generate_evaluation_report(ctx)
 
@@ -382,45 +419,52 @@ class TestEvaluationReport:
         stage._wandb_module.send_alert.assert_not_called()
 
     @patch("views_pipeline_core.modules.wandb.get_latest_run")
-    @patch(
-        "views_reporting.templates.reports.evaluation.EvaluationReportTemplate"
-    )
-    def test_evaluation_report_propagates_transient_error(
-        self, mock_template_cls, mock_get_run,
+    @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
+    @patch("views_reporting.sources.MetricFrameFileSource")
+    def test_no_wandb_scrape_on_eval_path(
+        self, mock_source_cls, mock_template_cls, mock_get_run,
     ):
-        """Transient errors from get_latest_run must NOT be swallowed — they
-        propagate so a flaky fetch stays visible (issue #177, register C-180)."""
+        """The render-time get_latest_run scrape is retired (C-48/C-110)."""
         stage = _make_stage()
         ctx = _make_context()
+        mock_source_cls.return_value.metric_frame.return_value = MagicMock()
+        mock_template_cls.return_value.generate.return_value = Path("/tmp/eval_report.html")
 
-        mock_get_run.side_effect = ConnectionError("wandb unreachable")
+        stage.generate_evaluation_report(ctx)
 
-        with pytest.raises(ConnectionError):
+        mock_get_run.assert_not_called()
+
+    @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
+    @patch("views_reporting.sources.MetricFrameFileSource")
+    def test_frame_load_error_propagates(
+        self, mock_source_cls, mock_template_cls,
+    ):
+        """A present-but-unreadable MetricFrame fails loud — not silently skipped or
+        degraded (Fail Loud; re-establishes the C-180 no-swallow contract for the
+        MetricFrame path, replacing the retired get_latest_run transient-error test).
+        Absent frame -> None -> skip; corrupt frame -> raise."""
+        stage = _make_stage()
+        ctx = _make_context()
+        mock_source_cls.return_value.metric_frame.side_effect = OSError("corrupt frame")
+
+        with pytest.raises(OSError):
             stage.generate_evaluation_report(ctx)
 
-        # A transient fetch error is exceptional, not a normal "no run" — the
-        # report must not be generated and no "success" alert must fire.
         mock_template_cls.assert_not_called()
         stage._wandb_module.send_alert.assert_not_called()
 
-    @patch("views_pipeline_core.modules.wandb.get_latest_run")
-    @patch(
-        "views_reporting.templates.reports.evaluation.EvaluationReportTemplate"
-    )
-    def test_evaluation_report_sends_wandb_alert(
-        self, mock_template_cls, mock_get_run,
+    @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
+    @patch("views_reporting.sources.MetricFrameFileSource")
+    def test_sends_wandb_alert_on_success(
+        self, mock_source_cls, mock_template_cls,
     ):
-        """Evaluation report must send WandB alert on success."""
+        """Evaluation report sends a WandB alert when a report is rendered."""
         stage = _make_stage()
         ctx = _make_context()
-
-        mock_get_run.return_value = MagicMock()
-        mock_template_cls.return_value.generate.return_value = Path(
-            "/tmp/eval_report.html"
-        )
+        mock_source_cls.return_value.metric_frame.return_value = MagicMock()
+        mock_template_cls.return_value.generate.return_value = Path("/tmp/eval_report.html")
 
         stage.generate_evaluation_report(ctx)
 
         stage._wandb_module.send_alert.assert_called_once()
-        call_kwargs = stage._wandb_module.send_alert.call_args[1]
-        assert "Evaluation Report Generated" in call_kwargs["title"]
+        assert "Evaluation Report Generated" in stage._wandb_module.send_alert.call_args[1]["title"]
