@@ -23,6 +23,15 @@ class WandBModule:
         self.models_path = models_path
         self._active_run = None
 
+    @property
+    def run_id(self) -> Optional[str]:
+        """The active WandB run's id, or None if no run is initialized.
+
+        The provenance discriminator stamped onto the evaluation-of-record MetricFrame
+        (#228, closes C-110 — which run produced this artifact).
+        """
+        return self._active_run.id if self._active_run is not None else None
+
     def initialize_run(
         self,
         project: str,

@@ -486,10 +486,26 @@ class TestMetricFrameEmit:
         ctx = _make_context(configs=cfg, **over)
         ctx.model_path.data_generated = tmp_path
         ctx.model_path.model_name = "my_model"
+        if ctx.data_loader is not None:
+            ctx.data_loader.month_last = 540  # data-vintage marker (data_version, S4)
         return ctx
+
+    def test_provenance_none_when_no_active_run_or_loader(self, tmp_path):
+        # run_id None when no active WandB run; data_version None when no data_loader (S4).
+        stage = _make_stage()
+        stage._wandb_module.run_id = None
+        ctx = self._ctx(tmp_path, data_loader=None)
+        report = _make_mock_report()
+
+        stage._save_metric_frame(report, "lr_sb", ctx)
+
+        _, kwargs = report.to_metric_frame.call_args
+        assert kwargs["run_id"] is None
+        assert kwargs["data_version"] is None
 
     def test_emits_to_metric_frame_with_provenance_and_locked_path(self, tmp_path):
         stage = _make_stage()
+        stage._wandb_module.run_id = "run-abc"  # active WandB run (S4)
         ctx = self._ctx(tmp_path)
         report = _make_mock_report()
 
@@ -500,6 +516,8 @@ class TestMetricFrameEmit:
             run_type="calibration",
             partition=str(ctx.partition_dict["calibration"]),
             level="pgm",
+            run_id="run-abc",
+            data_version="540",
         )
         # CROSS-REPO CONTRACT: this path must equal views-reporting's
         # MetricFrameFileSource._frame_dir = root / model / run_type / metricframe_<target>

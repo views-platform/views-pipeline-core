@@ -107,8 +107,9 @@ class TestProvenance:
     def test_scoring_code_version_defaulted(self):
         assert _mf().metadata.scoring_code_version  # non-empty default (installed pkg version)
 
-    def test_run_id_and_data_version_none_until_s4(self):
-        # S2 emits partial provenance; run_id/data_version are plumbed in S4 (#228, C-110).
+    def test_omitted_provenance_defaults_to_none(self):
+        # to_metric_frame leaves run_id/data_version None when the caller omits them; the
+        # eval stage now supplies both (S4/#228), but the producer default is still None.
         p = _mf().metadata.provenance
         assert p.run_id is None
         assert p.data_version is None

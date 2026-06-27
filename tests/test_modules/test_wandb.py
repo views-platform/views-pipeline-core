@@ -36,6 +36,15 @@ class TestWandBModule:
         assert module.models_path == Path("/models")
         assert module._active_run is None
 
+    def test_run_id_none_without_active_run(self, wandb_module):
+        """run_id is None when no run has been initialized (#228)."""
+        assert wandb_module.run_id is None
+
+    def test_run_id_returns_active_run_id(self, wandb_module):
+        """run_id surfaces the active run's id — the MetricFrame provenance discriminator (#228)."""
+        wandb_module._active_run = Mock(id="run-xyz")
+        assert wandb_module.run_id == "run-xyz"
+
     @patch('views_pipeline_core.modules.wandb.wandb.wandb.define_metric')
     @patch('views_pipeline_core.modules.wandb.wandb.wandb.init')
     def test_initialize_run(self, mock_init, mock_define_metric, wandb_module, mock_wandb_run):

@@ -280,6 +280,17 @@ class EvaluationStage:
             return
 
         run_type = context.run_type
+        # Provenance (#228, closes C-110): run_id is the wrong-run discriminator (which WandB
+        # run produced this artifact); data_version marks the data vintage. data_version uses
+        # the loader's month_last — the available data-recency marker; a precise viewser
+        # snapshot id is a future refinement. Both may be None (no active run / no loader).
+        run_id = self._wandb_module.run_id if self._wandb_module is not None else None
+        data_version = (
+            str(context.data_loader.month_last)
+            if context.data_loader is not None
+            and getattr(context.data_loader, "month_last", None) is not None
+            else None
+        )
         metric_frame = report.to_metric_frame(
             model_id=context.model_path.model_name,
             run_type=run_type,
@@ -287,6 +298,8 @@ class EvaluationStage:
             # bug, consistent with _get_evaluation_step_mappings — never record "None".
             partition=str(context.partition_dict[run_type]),
             level=context.configs.get("level"),
+            run_id=run_id,
+            data_version=data_version,
         )
         frame_dir = (
             context.model_path.data_generated
