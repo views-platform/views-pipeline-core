@@ -284,7 +284,8 @@ class EvaluationStage:
         # run produced this artifact); data_version marks the data vintage. data_version uses
         # the loader's month_last — the available data-recency marker; a precise viewser
         # snapshot id is a future refinement. Both may be None (no active run / no loader).
-        run_id = self._wandb_module.run_id if self._wandb_module is not None else None
+        # _wandb_module is always present here (_publish_results already used it above).
+        run_id = self._wandb_module.run_id
         data_version = (
             str(context.data_loader.month_last)
             if context.data_loader is not None
