@@ -15,16 +15,37 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-sys.modules["wandb"] = MagicMock()
-sys.modules["views_evaluation"] = MagicMock()
-sys.modules["views_evaluation.evaluation"] = MagicMock()
-sys.modules["views_evaluation.evaluation.evaluation_frame"] = MagicMock()
-sys.modules["art"] = MagicMock()
-
-from views_pipeline_core.managers.evaluation.stage import (  # noqa: E402
+from views_pipeline_core.managers.evaluation.stage import (
     EvaluationContext,
     EvaluationStage,
 )
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _mock_optional_deps():
+    """Mock the heavy/optional deps the stage imports **lazily** (wandb, views_evaluation,
+    art) for this module's tests only, restoring sys.modules on teardown.
+
+    Module-scoped + restored so the mock never leaks into other test modules — e.g.
+    test_metric_frame_faithfulness.py needs the REAL views_evaluation. (Previously these were
+    permanent module-level sys.modules mutations that poisoned later modules.)
+    """
+    names = [
+        "wandb",
+        "views_evaluation",
+        "views_evaluation.evaluation",
+        "views_evaluation.evaluation.evaluation_frame",
+        "art",
+    ]
+    saved = {n: sys.modules.get(n) for n in names}
+    for n in names:
+        sys.modules[n] = MagicMock()
+    yield
+    for n, mod in saved.items():
+        if mod is None:
+            sys.modules.pop(n, None)
+        else:
+            sys.modules[n] = mod
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
