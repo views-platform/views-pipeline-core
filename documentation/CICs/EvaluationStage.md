@@ -3,7 +3,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-05-22
+**Last reviewed:** 2026-06-27 (epic #224 — MetricFrame evaluation-of-record)
 **Related ADRs:** ADR-040 (Authority over Inference), ADR-045 (Stage Pattern, E2)
 
 ---
@@ -86,9 +86,18 @@ class.
 - **Primary output:** `None`. Results are published as side effects.
 - **Side effects:**
   - Logs evaluation metrics to WandB via `log_evaluation_results()`.
+  - **Persists the evaluation-of-record `MetricFrame`** per target (epic #224, `_save_metric_frame`):
+    `report.to_metric_frame(...).save(<data_generated>/<model>/<run_type>/metricframe_<target>)`.
+    This is the typed, provenance-stamped artifact views-reporting renders from (ADR-018 /
+    C-108) — emitted **independent of `io_manager`** (PFE ensembles have `io_manager=None`
+    but still get a frame). Provenance: model/run_type/partition/level + `run_id` (active
+    WandB run) + `data_version` (`data_loader.month_last`). The save path is a **locked
+    cross-repo contract** with `MetricFrameFileSource._frame_dir` (register C-202).
+    Capability-skipped (loud-but-soft) if `to_metric_frame` is unavailable.
   - Saves step-wise, time-series-wise, and month-wise evaluation DataFrames to
-    `data_generated/` via `PredictionIOManager.save_evaluations()` (skipped when
-    `io_manager` is `None`; an info log is emitted instead).
+    `data_generated/` via `PredictionIOManager.save_evaluations()` (legacy parquet, kept
+    until reporting fully migrates; skipped when `io_manager` is `None`; an info log is
+    emitted instead).
   - Sends a WandB summary alert with the evaluation table (via
     `PredictionIOManager.generate_evaluation_table` as a `@staticmethod` — does not
     require an `io_manager` instance).
