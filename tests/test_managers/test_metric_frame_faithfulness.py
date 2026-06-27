@@ -93,6 +93,29 @@ class TestRoundTrip:
         assert _row_value(loaded, eval_type=MONTH, metric="MSE", group_id=MEAN_GROUP_ID) == pytest.approx(3.0)
 
 
+class TestCrossRepoPathContract:
+    """C-202 durable guard: the producer's save path (pipeline-core) must be exactly where
+    views-reporting's MetricFrameFileSource reads. Ties the producer prefix constant to the
+    real consumer loader, so a prefix/layout change on either side fails this round-trip."""
+
+    def test_producer_path_is_readable_by_metricframe_file_source(self, tmp_path):
+        sources = pytest.importorskip("views_reporting.sources")
+        from views_pipeline_core.managers.evaluation.stage import METRICFRAME_DIR_PREFIX
+
+        model, run_type, target = "my_model", "calibration", "lr_sb"
+        mf = _mf(model_id=model, run_type=run_type)
+        # Mirror EvaluationStage._save_metric_frame's layout: root/<model>/<run_type>/<prefix><target>
+        frame_dir = tmp_path / model / run_type / f"{METRICFRAME_DIR_PREFIX}{target}"
+        mf.save(frame_dir)
+
+        source = sources.MetricFrameFileSource(
+            root=tmp_path, run_type=run_type, target=target, primary_model=model
+        )
+        loaded = source.metric_frame(model)
+        assert loaded is not None, "consumer could not find the producer-written frame (path drift)"
+        np.testing.assert_array_equal(loaded.values, mf.values)
+
+
 class TestProvenance:
     def test_generic_provenance_present(self):
         p = _mf().metadata.provenance

@@ -47,6 +47,25 @@ def _require_dense_report_consumer() -> None:
         ) from e
 
 
+def _require_evaluation_source_consumer() -> None:
+    """Fail loud if the installed views-reporting lacks the MetricFrame ``EvaluationSource``
+    consumer (ADR-018 / C-108, views-reporting #173) — the typed eval-of-record report path
+    this stage now requires. Mirrors :func:`_require_dense_report_consumer` (C-190): probe a
+    public capability with an actionable remediation rather than letting an ImportError
+    surface deep in report generation.
+    """
+    try:
+        from views_reporting.sources import MetricFrameFileSource  # noqa: F401
+    except ImportError as e:
+        raise RuntimeError(
+            "The installed views-reporting lacks the MetricFrame EvaluationSource consumer "
+            "('views_reporting.sources.MetricFrameFileSource'). The evaluation report now "
+            "renders from the persisted MetricFrame (ADR-018 / C-108), not a render-time "
+            "WandB scrape. Upgrade views-reporting to a build with EvaluationSource (#173). "
+            f"Underlying import error: {e}"
+        ) from e
+
+
 @dataclass(frozen=True)
 class ReportingContext(BaseStageContext):
     """Immutable context for report generation.
@@ -54,7 +73,7 @@ class ReportingContext(BaseStageContext):
     Extends BaseStageContext (configs, model_path, run_type) with
     reporting-specific fields.
     """
-    entity: str  # WandB entity for get_latest_run(), e.g. "views_pipeline"
+    entity: str  # WandB entity (forecast-report alerts; no longer used by the eval path)
     prediction_format: str = "dataframe"
 
 
@@ -163,52 +182,59 @@ class ReportingStage:
         return report_path
 
     def generate_evaluation_report(self, context: ReportingContext) -> Optional[Path]:
-        """Fetch latest WandB run, generate HTML evaluation report per target.
+        """Generate HTML evaluation report(s) from the persisted MetricFrame(s).
+
+        Renders from the typed evaluation-of-record MetricFrame via an injected
+        ``MetricFrameFileSource`` (ADR-018 / C-108) — **not** a render-time WandB scrape
+        (``get_latest_run``), which was the C-48/C-110 wrong-run failure class. One report
+        per target; a target with no persisted frame is skipped (its eval may have been
+        capability-skipped or not run).
 
         Args:
             context: Frozen ReportingContext with configuration, paths, run type.
 
         Returns:
-            Path to the last generated HTML report file.
+            Path to the last generated HTML report, or None if nothing was rendered.
         """
-        from views_pipeline_core.modules.wandb import get_latest_run
+        _require_evaluation_source_consumer()
+        from views_reporting.sources import MetricFrameFileSource
         from views_reporting.templates.reports.evaluation import (
             EvaluationReportTemplate,
         )
-
-        latest_run = get_latest_run(
-            entity=context.entity,
-            model_name=context.model_path.model_name,
-            run_type=context.run_type,
-        )
-        # get_latest_run returns None when the run is genuinely absent (no cloud
-        # project, or no finished metrics-bearing run — see issue #177). The
-        # downstream template dereferences wandb_run.summary unconditionally, so
-        # we degrade here rather than crash. Transient errors are NOT swallowed:
-        # they propagate from get_latest_run so a flaky fetch stays visible.
-        if latest_run is None:
-            logger.warning(
-                f"No finished WandB run with metrics found for "
-                f"{context.model_path.model_name} ({context.run_type}); "
-                f"skipping evaluation report generation."
-            )
-            return None
 
         targets = context.configs["targets"]
         if not targets:
             logger.warning("No targets configured — skipping evaluation report generation.")
             return None
 
+        model_name = context.model_path.model_name
         report_path = None
         for target in targets:
+            # LOCKED cross-repo path contract (C-202): root=<data_generated> matches the
+            # producer's <data_generated>/<model>/<run_type>/metricframe_<target> layout
+            # (EvaluationStage._save_metric_frame ↔ MetricFrameFileSource._frame_dir).
+            source = MetricFrameFileSource(
+                root=context.model_path.data_generated,
+                run_type=context.run_type,
+                target=target,
+                primary_model=model_name,
+            )
+            if source.metric_frame(model_name) is None:
+                logger.warning(
+                    "No MetricFrame for %s (%s, target=%s) at the eval-of-record path; "
+                    "skipping evaluation report for this target.",
+                    model_name, context.run_type, target,
+                )
+                continue
             evaluation_template = EvaluationReportTemplate(
                 config=context.configs,
                 model_path=context.model_path,
                 run_type=context.run_type,
             )
-            report_path = evaluation_template.generate(
-                wandb_run=latest_run, target=target,
-            )
+            report_path = evaluation_template.generate(source=source, target=target)
+
+        if report_path is None:
+            return None
 
         self._wandb_module.send_alert(
             title="Evaluation Report Generated",
