@@ -445,3 +445,87 @@ class TestContextContract:
         assert expected.issubset(members), (
             f"Protocol missing members: {expected - members}"
         )
+
+
+# ── S2 (#226): MetricFrame evaluation-of-record emit ─────────────────────────
+
+
+class TestMetricFrameEmit:
+    """_publish_results persists a typed MetricFrame per target at the locked
+    cross-repo path (data_generated/<model>/<run_type>/metricframe_<target>),
+    independent of the legacy parquet IO manager."""
+
+    def _ctx(self, tmp_path, **over):
+        cfg = {
+            "regression_targets": ["lr_sb"], "classification_targets": [],
+            "regression_point_metrics": ["MSE"], "steps": list(range(1, 37)),
+            "sweep": False, "run_type": "calibration", "level": "pgm",
+        }
+        cfg.update(over.pop("configs", {}))
+        ctx = _make_context(configs=cfg, **over)
+        ctx.model_path.data_generated = tmp_path
+        ctx.model_path.model_name = "my_model"
+        return ctx
+
+    def test_emits_to_metric_frame_with_provenance_and_locked_path(self, tmp_path):
+        stage = _make_stage()
+        ctx = self._ctx(tmp_path)
+        report = _make_mock_report()
+
+        stage._save_metric_frame(report, "lr_sb", ctx)
+
+        report.to_metric_frame.assert_called_once_with(
+            model_id="my_model",
+            run_type="calibration",
+            partition=str(ctx.partition_dict["calibration"]),
+            level="pgm",
+        )
+        # CROSS-REPO CONTRACT: this path must equal views-reporting's
+        # MetricFrameFileSource._frame_dir = root / model / run_type / metricframe_<target>
+        # (root=<data_generated>). If this changes, views-reporting must change in lockstep
+        # or reporting silently finds no frame.
+        expected = tmp_path / "my_model" / "calibration" / "metricframe_lr_sb"
+        report.to_metric_frame.return_value.save.assert_called_once_with(expected)
+
+    def test_missing_partition_fails_loud(self, tmp_path):
+        # A run_type absent from partition_dict must raise, not record partition="None".
+        stage = _make_stage()
+        ctx = self._ctx(tmp_path, run_type="forecasting")  # not in the default partition_dict
+        report = _make_mock_report()
+        with pytest.raises(KeyError):
+            stage._save_metric_frame(report, "lr_sb", ctx)
+
+    def test_metric_frame_emitted_even_when_io_none(self, tmp_path):
+        # PFE ensembles run with io_manager=None: legacy parquet is skipped but the
+        # eval-of-record MetricFrame must still be persisted.
+        stage = EvaluationStage(wandb_module=MagicMock(), io_manager=None)
+        ctx = self._ctx(tmp_path)
+        report = _make_mock_report()
+
+        stage._publish_results(report, "lr_sb", ctx)
+
+        report.to_metric_frame.return_value.save.assert_called_once()
+
+    def test_capability_absent_skips_without_error(self, tmp_path):
+        # An older views-evaluation (no to_metric_frame) must not break the eval run.
+        stage = _make_stage()
+        ctx = self._ctx(tmp_path)
+
+        class _OldReport:  # lacks to_metric_frame
+            def to_dict(self):
+                return {"schemas": {"step": {}, "time_series": {}, "month": {}}}
+
+            def to_dataframe(self, _schema):
+                return pd.DataFrame()
+
+        stage._save_metric_frame(_OldReport(), "lr_sb", ctx)  # must not raise
+        assert not any(tmp_path.iterdir())  # nothing written
+
+    def test_sweep_run_skips_metric_frame(self, tmp_path):
+        stage = _make_stage()
+        ctx = self._ctx(tmp_path, configs={"sweep": True})
+        report = _make_mock_report()
+
+        stage._publish_results(report, "lr_sb", ctx)
+
+        report.to_metric_frame.assert_not_called()
