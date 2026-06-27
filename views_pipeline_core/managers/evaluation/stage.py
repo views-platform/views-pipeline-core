@@ -228,6 +228,11 @@ class EvaluationStage:
         )
 
         if not context.configs.get("sweep", False):
+            # Evaluation-of-record: persist a typed MetricFrame per target (#226, epic #224).
+            # Deliberately OUTSIDE the `self._io is not None` branch — PFE ensembles run with
+            # _io=None (skipping the legacy parquet save) but still need the frame, and
+            # MetricFrame.save() writes directly, not through the IO manager.
+            self._save_metric_frame(report, target_identifier, context)
             if self._io is not None:
                 self._io.save_evaluations(
                     df_step, df_ts, df_month,
@@ -241,6 +246,51 @@ class EvaluationStage:
                     "Skipping evaluation file save — no io_manager configured "
                     "(expected for PredictionFrame ensembles)."
                 )
+
+    def _save_metric_frame(self, report, target_identifier, context):
+        """Persist the typed MetricFrame for one target — the evaluation-of-record (#226).
+
+        **Locked cross-repo path contract** with views-reporting's `MetricFrameFileSource`
+        (`_frame_dir = root / model / run_type / metricframe_<target>`): the frame is saved
+        under ``<data_generated> / <model> / <run_type> / metricframe_<target>``, and the
+        reporting stage (S5/#229) constructs ``MetricFrameFileSource(root=<data_generated>)``
+        to read it. The two repos MUST agree on this layout — a mismatch is a silent
+        "frame not found" (registered as a Tier-2 cross-repo path-drift risk).
+
+        Provenance is intentionally partial here (model/run_type/partition/level);
+        ``run_id``/``data_version`` are plumbed in S4 (#228), closing C-110.
+        """
+        if not hasattr(report, "to_metric_frame"):
+            # Capability skip for the develop-on-branches-first window: the dev/integration
+            # env has `to_metric_frame` (views-frames ^1.7 substrate, #232); an isolated
+            # PyPI-only install of an older views-evaluation does not. Loud-but-soft so a
+            # real eval run is never broken by the cross-repo timing.
+            logger.warning(
+                "EvaluationReport.to_metric_frame unavailable; skipping MetricFrame emit "
+                "for '%s' (views-evaluation predates to_metric_frame).",
+                target_identifier,
+            )
+            return
+
+        run_type = context.run_type
+        metric_frame = report.to_metric_frame(
+            model_id=context.model_path.model_name,
+            run_type=run_type,
+            partition=str(context.partition_dict.get(run_type)),
+            level=context.configs.get("level"),
+        )
+        frame_dir = (
+            context.model_path.data_generated
+            / context.model_path.model_name
+            / run_type
+            / f"metricframe_{target_identifier}"
+        )
+        metric_frame.save(frame_dir)
+        logger.info(
+            "Persisted MetricFrame (evaluation-of-record) for '%s' -> %s",
+            target_identifier,
+            frame_dir,
+        )
 
     @staticmethod
     def _get_evaluation_step_mappings(
