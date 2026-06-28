@@ -13,8 +13,8 @@ country forecast is located the same way. The DataFrame `EnsembleManager`'s pred
 path is intentionally out of scope here: it needs a generated pred-store name + run creation
 (`_get_pred_store_name`), which PFE has no counterpart for. Today's cm models are **point**
 DataFrame forecasts, so the parquet's `pred_{target}` column is stacked into a `(N, S)` array
-(S=1 for a point model, S>1 for a draws-emitting one) and wrapped as a cm frame;
-`reconcile_frames.align_country_to_grid` then matches it to the grid's draw count.
+(S=1 for a point model, S>1 for a draws-emitting one) and wrapped as a cm frame; the
+reconciler broadcasts a point cm across the grid's draws natively (views-frames ≥1.8).
 
 Missing rows are **not** filled (unlike `_CDataset` preprocessing): a country absent from the
 forecast must surface as the reconciler's fail-loud "missing country", not a silent zero total.
