@@ -33,6 +33,38 @@ _LOA_TO_OUTPUT_FORMAT = {
     "country_month": "country_month",
 }
 
+#: Grid-entity index-name consolidation (views-frames ADR-015). RAW sources (viewser,
+#: datafactory's legacy pandas path, synthetic) still emit the legacy ``priogrid_gid``;
+#: ``_normalize_grid_index`` is the single seam that rewrites it to the canonical
+#: ``priogrid_id`` so the on-disk cache and every downstream consumer see one name.
+#: Remove this seam (and its call sites in ``_fetch_data`` / ``get_data``) once all
+#: sources emit ``priogrid_id`` natively.
+_LEGACY_GRID_ID = "priogrid_gid"
+_CANONICAL_GRID_ID = "priogrid_id"
+
+
+def _normalize_grid_index(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """Rename a legacy ``priogrid_gid`` index level to the canonical ``priogrid_id``.
+
+    No-op when the level is absent or already canonical, or when ``df`` is not a MultiIndex
+    frame. Renames the index only (no data copy); callers own the frame they pass in.
+    """
+    if df is None or not isinstance(df.index, pd.MultiIndex):
+        return df
+    names = list(df.index.names)
+    if _LEGACY_GRID_ID in names and _CANONICAL_GRID_ID in names:
+        # A frame carrying BOTH names is malformed; renaming would create two levels
+        # named priogrid_id (duplicate). Fail loud rather than silently corrupt.
+        raise ValueError(
+            f"DataFrame index carries both '{_LEGACY_GRID_ID}' and '{_CANONICAL_GRID_ID}' "
+            f"levels: {names}. Cannot normalize an ambiguous grid index."
+        )
+    if _LEGACY_GRID_ID in names:
+        df.index = df.index.set_names(
+            [_CANONICAL_GRID_ID if n == _LEGACY_GRID_ID else n for n in names]
+        )
+    return df
+
 # Ingester dependent imports. Breaks tests on github because no certs
 def _get_splag_country(*args, **kwargs):
     import views_transformation_library.splag_country as splag_country
@@ -1198,8 +1230,14 @@ class ViewsDataLoader:
         if feature_rename:
             df = df.rename(columns=feature_rename)
 
-        if loa == "priogrid_month" and "priogrid_gid" in df.index.names:
-            pgids = df.index.get_level_values("priogrid_gid")
+        # Resolve the grid level by alias, not a hardcoded literal, so this still derives
+        # row/col when datafactory emits the canonical priogrid_id (this runs before the
+        # _fetch_data normalization seam). See _LEGACY_GRID_ID / _CANONICAL_GRID_ID.
+        _grid_level = next(
+            (n for n in df.index.names if n in (_LEGACY_GRID_ID, _CANONICAL_GRID_ID)), None
+        )
+        if loa == "priogrid_month" and _grid_level is not None:
+            pgids = df.index.get_level_values(_grid_level)
             if "row" not in df.columns:
                 df["row"] = ((pgids - 1) // _PRIOGRID_NCOL + 1).astype(float)
             if "col" not in df.columns:
@@ -1293,16 +1331,20 @@ class ViewsDataLoader:
             ValueError: If source is not recognized.
         """
         if source == "viewser":
-            return self._fetch_data_from_viewser(self_test)
+            df, alerts = self._fetch_data_from_viewser(self_test)
         elif source == "datafactory":
-            return self._fetch_data_from_datafactory(self_test)
+            df, alerts = self._fetch_data_from_datafactory(self_test)
         elif source == "synthetic":
-            return self._fetch_data_from_synthetic(self_test)
+            df, alerts = self._fetch_data_from_synthetic(self_test)
         else:
             raise ValueError(
                 f"Unknown data source '{source}' for model {self._model_name}. "
                 f"Expected 'viewser', 'datafactory', or 'synthetic'."
             )
+        # Single normalization seam: every RAW source funnels through here, so the cache
+        # written by get_data() and all downstream consumers carry the canonical
+        # priogrid_id (views-frames ADR-015). See _normalize_grid_index.
+        return _normalize_grid_index(df), alerts
 
     def _get_month_range(self) -> tuple[int, int]:
         """
@@ -1498,6 +1540,9 @@ class ViewsDataLoader:
             if path_cached_df.exists():
                 try:
                     df = read_dataframe(path_cached_df)
+                    # Upgrade legacy caches written before the consolidation: an on-disk
+                    # priogrid_gid cache is normalized to priogrid_id on read (ADR-015).
+                    df = _normalize_grid_index(df)
                     logger.info(f"Reading saved data from {path_cached_df}")
                 except Exception as e:
                     raise RuntimeError(

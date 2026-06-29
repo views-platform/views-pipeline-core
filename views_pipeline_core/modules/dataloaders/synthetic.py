@@ -60,7 +60,7 @@ def generate_synthetic_data(
         month_last: Last month_id (inclusive).
 
     Returns:
-        DataFrame with MultiIndex [month_id, priogrid_gid],
+        DataFrame with MultiIndex [month_id, priogrid_id],
         feature columns, and derived row/col columns. All float64.
 
     Raises:
@@ -107,7 +107,7 @@ def generate_synthetic_data(
 
     index = pd.MultiIndex.from_arrays(
         [all_month_ids, all_entity_ids],
-        names=["month_id", "priogrid_gid"],
+        names=["month_id", "priogrid_id"],
     )
 
     tiled_values = np.tile(base_values, n_months)
