@@ -66,7 +66,7 @@ class TestGenerateSyntheticData:
     def test_returns_dataframe_with_correct_multiindex_pgm(self, vertical_descriptor):
         df = generate_synthetic_data(vertical_descriptor, month_first=445, month_last=448)
         assert isinstance(df.index, pd.MultiIndex)
-        assert list(df.index.names) == ["month_id", "priogrid_gid"]
+        assert list(df.index.names) == ["month_id", "priogrid_id"]
 
     def test_feature_columns_match_descriptor(self, vertical_descriptor):
         df = generate_synthetic_data(vertical_descriptor, month_first=445, month_last=448)
@@ -91,7 +91,7 @@ class TestGenerateSyntheticData:
         df = generate_synthetic_data(vertical_descriptor, month_first=445, month_last=448)
         assert "row" in df.columns
         assert "col" in df.columns
-        gids = df.index.get_level_values("priogrid_gid")
+        gids = df.index.get_level_values("priogrid_id")
         expected_row = ((gids - 1) // _PRIOGRID_NCOL + 1).astype(float)
         expected_col = ((gids - 1) % _PRIOGRID_NCOL + 1).astype(float)
         pd.testing.assert_series_equal(
@@ -135,13 +135,13 @@ class TestGenerateSyntheticData:
             "seed": 42,
         }
         df = generate_synthetic_data(desc, month_first=445, month_last=446)
-        n_entities = df.index.get_level_values("priogrid_gid").nunique()
+        n_entities = df.index.get_level_values("priogrid_id").nunique()
         assert n_entities == DEFAULT_N_ENTITIES_PGM
 
     def test_custom_entity_count(self, vertical_descriptor):
         vertical_descriptor["n_entities"] = 50
         df = generate_synthetic_data(vertical_descriptor, month_first=445, month_last=446)
-        n_entities = df.index.get_level_values("priogrid_gid").nunique()
+        n_entities = df.index.get_level_values("priogrid_id").nunique()
         assert n_entities == 50
 
     def test_total_rows_equals_months_times_entities(self, vertical_descriptor):
@@ -179,7 +179,7 @@ class TestVerticalStripePattern:
 
     def test_pattern_static_across_time(self, vertical_descriptor):
         df = generate_synthetic_data(vertical_descriptor, month_first=445, month_last=448)
-        entity_1_vals = df.xs(1, level="priogrid_gid")["synth_target"]
+        entity_1_vals = df.xs(1, level="priogrid_id")["synth_target"]
         assert entity_1_vals.nunique() == 1
 
 
@@ -211,7 +211,7 @@ class TestHorizontalStripePattern:
 
     def test_pattern_static_across_time(self, horizontal_descriptor):
         df = generate_synthetic_data(horizontal_descriptor, month_first=445, month_last=448)
-        entity_1_vals = df.xs(1, level="priogrid_gid")["synth_target"]
+        entity_1_vals = df.xs(1, level="priogrid_id")["synth_target"]
         assert entity_1_vals.nunique() == 1
 
 
@@ -233,7 +233,7 @@ class TestDiagonalGradientPattern:
 
     def test_pattern_static_across_time(self, diagonal_descriptor):
         df = generate_synthetic_data(diagonal_descriptor, month_first=445, month_last=448)
-        entity_1_vals = df.xs(1, level="priogrid_gid")["synth_target"]
+        entity_1_vals = df.xs(1, level="priogrid_id")["synth_target"]
         assert entity_1_vals.nunique() == 1
 
 

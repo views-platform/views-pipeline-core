@@ -29,7 +29,7 @@ def _pgm_df(first: int, last: int) -> pd.DataFrame:
     months = list(range(first, last + 1))
     idx = pd.MultiIndex.from_arrays(
         [[100] * len(months), months],
-        names=["priogrid_gid", "month_id"],
+        names=["priogrid_id", "month_id"],
     )
     return pd.DataFrame({"value": np.zeros(len(months))}, index=idx)
 
@@ -64,12 +64,18 @@ class TestMultiIndexStructure:
         with pytest.raises(ValueError, match="flat index"):
             CoreDataSniffer(calibration_partition, "calibration", level="pgm").sniff_loaded_data(df)
 
+    def test_legacy_grid_name_accepted_transitionally(self, calibration_partition):
+        """priogrid_id is canonical; the legacy priogrid_gid is still accepted (ADR-015)."""
+        df = _pgm_df(121, 444)  # same valid frame as the happy path...
+        df.index = df.index.set_names(["priogrid_gid", "month_id"])  # ...but legacy name
+        CoreDataSniffer(calibration_partition, "calibration", level="pgm").sniff_loaded_data(df)
+
     def test_wrong_index_name_pgm_raises(self, calibration_partition):
-        """priogrid_id (legacy) is NOT accepted; priogrid_gid is canonical."""
+        """A non-grid entity name (neither priogrid_id nor the legacy alias) is rejected."""
         months = [121, 122]
         idx = pd.MultiIndex.from_arrays(
             [[100, 100], months],
-            names=["priogrid_id", "month_id"],
+            names=["grid_cell", "month_id"],
         )
         df = pd.DataFrame({"value": [0.0, 0.0]}, index=idx)
         with pytest.raises(ValueError, match="do not match"):
@@ -98,7 +104,7 @@ class TestMultiIndexStructure:
             CoreDataSniffer(calibration_partition, "calibration", level="pgm").sniff_loaded_data(df)
 
     def test_cm_level_rejects_pgm_index(self, calibration_partition):
-        """cm level must reject a pgm-format DataFrame (priogrid_gid/month_id)."""
+        """cm level must reject a pgm-format DataFrame (priogrid_id/month_id)."""
         df = _pgm_df(121, 444)
         with pytest.raises(ValueError, match="do not match"):
             CoreDataSniffer(calibration_partition, "calibration", level="cm").sniff_loaded_data(df)

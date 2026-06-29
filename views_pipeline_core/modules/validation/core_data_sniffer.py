@@ -13,14 +13,24 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Canonical MultiIndex layouts for RAW VIEWSER data (before dataset construction).
-# Uses priogrid_gid because CoreDataSniffer audits data BEFORE the _PGDataset
-# rename boundary (see ADR-034). Downstream code uses priogrid_id.
+# Canonical MultiIndex layouts for RAW data. The grid entity is the canonical
+# ``priogrid_id`` (views-frames ADR-015); the dataloader normalizes the legacy
+# ``priogrid_gid`` to it at a single seam before this audit runs.
 # Extend these constants (not inline checks) when new levels are added.
 EXPECTED_INDEX_NAMES: Dict[str, tuple] = {
-    "pgm": ("priogrid_gid", "month_id"),
-    "cm":  ("country_id",   "month_id"),
+    "pgm": ("priogrid_id", "month_id"),
+    "cm":  ("country_id",  "month_id"),
 }
+
+# Transitional: a grid frame may still carry the legacy name (an old on-disk cache, or a
+# source not yet normalized). Treat both as the canonical name for structure validation.
+# Remove this alias (id-only) once the legacy name is fully retired (consolidation PR-3).
+_GRID_ID_ALIASES = frozenset({"priogrid_gid", "priogrid_id"})
+
+
+def _canonical_index_name(name: str) -> str:
+    """Map a legacy grid-entity name to its canonical form; pass other names through."""
+    return "priogrid_id" if name in _GRID_ID_ALIASES else name
 
 # Partition dict structural keys — internal; not part of the public API.
 _PARTITION_TRAIN = "train"
@@ -44,15 +54,16 @@ def _check_multiindex(df: pd.DataFrame, level: str, source: str) -> None:
             f"Supported layouts: {list(EXPECTED_INDEX_NAMES.values())}."
         )
 
-    actual = set(df.index.names)
-
     if level not in EXPECTED_INDEX_NAMES:
         raise NotImplementedError(
             f"{source}: level='{level}' is not supported. "
             f"Supported: {list(EXPECTED_INDEX_NAMES)}. "
             f"Update EXPECTED_INDEX_NAMES in core_data_sniffer.py when ready."
         )
-    expected = set(EXPECTED_INDEX_NAMES[level])
+    # Canonicalize the grid-entity name on both sides so the legacy priogrid_gid still
+    # passes transitionally (see _GRID_ID_ALIASES).
+    actual = {_canonical_index_name(n) for n in df.index.names}
+    expected = {_canonical_index_name(n) for n in EXPECTED_INDEX_NAMES[level]}
     if actual != expected:
         raise ValueError(
             f"{source}: MultiIndex names {tuple(df.index.names)} do not match "

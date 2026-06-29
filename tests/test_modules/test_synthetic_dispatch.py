@@ -94,7 +94,7 @@ class TestFetchFromSynthetic:
         df, alerts = loader._fetch_data_from_synthetic(self_test=False)
         assert isinstance(df, pd.DataFrame)
         assert isinstance(df.index, pd.MultiIndex)
-        assert list(df.index.names) == ["month_id", "priogrid_gid"]
+        assert list(df.index.names) == ["month_id", "priogrid_id"]
 
     def test_returns_alerts_none(self, loader):
         _, alerts = loader._fetch_data_from_synthetic(self_test=False)
