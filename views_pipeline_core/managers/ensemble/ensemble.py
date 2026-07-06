@@ -20,7 +20,7 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
 from views_pipeline_core.domain.reconciliation_port import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
-from views_pipeline_core.modules.aggregation.aggregator import (
+from views_pipeline_core.modules.aggregation.aggregation import (
     AggregationModule,
 )
 
