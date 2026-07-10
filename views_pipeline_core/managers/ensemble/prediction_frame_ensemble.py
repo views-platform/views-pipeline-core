@@ -58,16 +58,17 @@ def _aggregate_prediction_frames(
     """Aggregate multiple PredictionFrame outputs into one.
 
     Args:
-        frames: Non-empty list of PredictionFrames with identical n_rows
-                and identical identifiers (time/unit arrays).
+        frames: Non-empty list of PredictionFrames with identical n_rows,
+                identical identifiers (time/unit arrays), and identical
+                sample_count (#160 — no silent unbalanced pooling).
         method: Aggregation method — "concat" or "arithmetic_mean".
 
     Returns:
         New PredictionFrame with aggregated y_pred and shared identifiers.
 
     Raises:
-        ValueError: If frames is empty, rows/identifiers mismatch, or
-                    method is unsupported.
+        ValueError: If frames is empty, rows/identifiers/sample_count mismatch,
+                    or method is unsupported.
     """
     if not frames:
         raise ValueError(
@@ -87,6 +88,18 @@ def _aggregate_prediction_frames(
                 f"n_rows mismatch: frame[0] has {reference.n_rows} rows, "
                 f"frame[{i}] has {pf.n_rows} rows. "
                 f"All PredictionFrames must have the same number of rows."
+            )
+        if pf.sample_count != reference.sample_count:
+            # #160: np.concatenate(axis=1) accepts differing widths, so without this
+            # guard `concat` would pool constituents into a silently UNBALANCED draw
+            # pool, biasing downstream quantiles/metrics with no error signal
+            # (register C-205). Fail loud; deliberate weighted pooling is a future
+            # feature, never a silent default.
+            raise ValueError(
+                f"sample_count mismatch: frame[0] has {reference.sample_count} "
+                f"samples, frame[{i}] has {pf.sample_count}. All constituent "
+                f"PredictionFrames must carry the same number of samples — a mixed "
+                f"pool would be silently unbalanced (issue #160)."
             )
         for key in reference.identifiers:
             if key not in pf.identifiers:

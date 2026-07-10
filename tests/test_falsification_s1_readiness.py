@@ -36,17 +36,25 @@ def _pf(n_rows, n_samples, seed=0):
     )
 
 
-# --- SOFT #1 (issue #160, probe P3): concat silently pools heterogeneous S ---
-@pytest.mark.xfail(
-    strict=False,
-    reason="#160 open: _aggregate_prediction_frames validates rows+identifiers "
-    "but NOT sample_count; np.concatenate(axis=1) silently pools a 128-draw "
-    "constituent with an 8-draw one, biasing the pool. RED until the guard lands.",
-)
+# --- RESOLVED (issue #160, probe P3, register C-205): guard landed ---
 def test_pfe_concat_rejects_heterogeneous_sample_counts():
     frames = [_pf(10, 128, seed=1), _pf(10, 8, seed=2)]
-    with pytest.raises(ValueError, match="sample"):
+    with pytest.raises(ValueError, match="sample_count mismatch"):
         _aggregate_prediction_frames(frames, "concat")
+
+
+def test_pfe_mean_rejects_heterogeneous_sample_counts():
+    # The mean path previously crashed cryptically inside np.stack; now it fails
+    # with the same clear guard message as concat.
+    frames = [_pf(10, 16, seed=3), _pf(10, 8, seed=4)]
+    with pytest.raises(ValueError, match="sample_count mismatch"):
+        _aggregate_prediction_frames(frames, "arithmetic_mean")
+
+
+def test_pfe_concat_homogeneous_still_pools():
+    frames = [_pf(10, 8, seed=5), _pf(10, 8, seed=6), _pf(10, 8, seed=7)]
+    out = _aggregate_prediction_frames(frames, "concat")
+    assert out.sample_count == 24  # 3 × 8, nothing dropped
 
 
 # --- HARD #1 (probe P4): disk headroom for the S1 run ---
@@ -78,13 +86,9 @@ def test_s1_hydranet_worktree_on_development():
     )
 
 
-# --- SOFT #2 (probe P7): S1 has no defined pass criterion beyond 'no OOM' ---
-@pytest.mark.xfail(
-    strict=False,
-    reason="Epic #261 S1 says 'metrics sane' without defining sane. Define the "
-    "acceptance contract (exit 0; pooled sample_count == sum of constituent "
-    "samples; all-finite values; MetricFrame persisted per target) before the "
-    "run, then encode it here.",
-)
+# --- RESOLVED (probe P7, register C-208): the contract is encoded ---
 def test_s1_acceptance_criteria_are_encoded():
-    from views_pipeline_core.managers.ensemble import s1_acceptance  # noqa: F401 — does not exist yet
+    """The publish-gate acceptance contract lives in tests/test_s1_publish_gate.py
+    (executable, env-gated); criteria 4-5 (exit 0, peak RSS) are runner-recorded."""
+    contract = os.path.join(os.path.dirname(__file__), "test_s1_publish_gate.py")
+    assert os.path.exists(contract), "S1 acceptance contract file is missing."
