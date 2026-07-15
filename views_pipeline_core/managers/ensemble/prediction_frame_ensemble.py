@@ -152,6 +152,7 @@ class PredictionFrameEnsembleManager:
         self._ensemble_path = ensemble_path
         self._wandb_notifications = wandb_notifications
         self._use_prediction_store = use_prediction_store
+        self._datastore = None  # built lazily by _build_datastore (#269)
         # Accepted for uniform composition-root injection; PFE has no point
         # reconciliation path yet (probabilistic PFE reconciliation is #200).
         self._reconciler = reconciler
@@ -592,8 +593,46 @@ class PredictionFrameEnsembleManager:
             )
             save_pf(agg_pf, save_dir)
             forecasts[target] = agg_pf
+            if self._use_prediction_store:
+                # #269 / ADR-013 §3: the Hop-A publish leg — Track A archives +
+                # manifest-last, per (run, target). Runs only under the flag; child
+                # runs never reach here with it set (prediction_store=False forcing).
+                self._publish_sampled_forecast(agg_pf, target, ctx)
 
         return forecasts
+
+    def _publish_sampled_forecast(
+        self, agg_pf: PredictionFrame, target: str, ctx: EnsembleContext
+    ) -> None:
+        """Publish one (run, target) to the prediction store (ADR-013 §3, #269)."""
+        from views_pipeline_core.managers.ensemble.sampled_forecast_publisher import (
+            publish_sampled_forecast,
+        )
+
+        publish_sampled_forecast(
+            self._build_datastore(),
+            agg_pf,
+            ensemble_name=ctx.configs["name"],
+            internal_target=target,
+            run_id=f"{ctx.configs['name']}_{ctx.run_type}_{ctx.timestamp}",
+            level=ctx.configs["level"],
+            reconciled=bool(ctx.reconciliation),
+        )
+
+    def _build_datastore(self):
+        """Lazily construct the store uploader (same pattern as model.py's publish path:
+        `PredictionStoreConfig.from_environment()` fails loud on missing credentials)."""
+        if self._datastore is None:
+            from views_pipeline_core.configs.prediction_store import PredictionStoreConfig
+            from views_pipeline_core.modules.datastore import DatastoreModule
+
+            config = PredictionStoreConfig.from_environment()
+            self._datastore = DatastoreModule(
+                appwrite_file_manager_config=config.to_appwrite_config(
+                    self._ensemble_path
+                )
+            )
+        return self._datastore
 
     def _reconcile_forecast(
         self, agg_pf: PredictionFrame, target: str, ctx: EnsembleContext
