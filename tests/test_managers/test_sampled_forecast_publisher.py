@@ -143,7 +143,7 @@ def test_header_bytes_are_stable_given_injected_provenance():
         '    "index": 0,\n'
         '    "count": 2\n'
         "  }\n"
-        "}\n"
+        "}"  # no trailing newline — §10 fixture canon
     ).encode("utf-8")
     assert header_bytes(header) == expected
 
