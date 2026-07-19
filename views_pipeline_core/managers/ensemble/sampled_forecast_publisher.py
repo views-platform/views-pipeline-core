@@ -26,6 +26,7 @@ Contract obligations implemented here:
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import tempfile
@@ -58,6 +59,10 @@ MANIFEST_NAME_TEMPLATE = "{run_id}__{target}__manifest.json"
 
 #: ADR-013 §7a — THE internal→wire target mapping (one shared constant, cited by the golden
 #: fixture). Wire vocabulary is canonical `lr_ged_*`; no `_best` on a draws wire.
+#: Extension procedure (Amendment A1, 2026-07-19, MINOR): a new target joins the wire by
+#: (1) the maintainer deciding its canonical wire name, (2) one entry added HERE, and
+#: (3) views-postprocessing's expected-target-set config (§4.2a). Nothing else changes —
+#: the target list travels as data. The current three are the vocabulary, not a closed set.
 INTERNAL_TO_WIRE_TARGET: Dict[str, str] = {
     "lr_sb_best": "lr_ged_sb",
     "lr_ns_best": "lr_ged_ns",
@@ -129,10 +134,32 @@ def build_header(
     }
 
 
+#: Pinned member timestamp for wire zips (§10 fixture canon): emissions are
+#: byte-reproducible, so identical content → identical bytes → the store's hash-dedup
+#: and the golden-fixture parity test are both meaningful.
+_ZIP_MEMBER_EPOCH = (1980, 1, 1, 0, 0, 0)
+
+
 def header_bytes(header: Dict[str, Any]) -> bytes:
-    """Serialize the §2 header. One serializer for every emission — this is what makes the
-    byte-pinned fixture meaningful (§10)."""
-    return (json.dumps(header, indent=2) + "\n").encode("utf-8")
+    """Serialize the §2 header. One serializer for every emission, byte-matched to the
+    golden fixture (§10 pins the header JSON byte-for-byte — no trailing newline)."""
+    return json.dumps(header, indent=2).encode("utf-8")
+
+
+def _pinned_zip_bytes(members: Dict[str, bytes]) -> bytes:
+    """A byte-reproducible zip (ZIP_STORED, pinned member timestamps) — the wire archive
+    serialization the golden fixture canonizes. Member order = insertion order."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for name, data in members.items():
+            zf.writestr(zipfile.ZipInfo(name, date_time=_ZIP_MEMBER_EPOCH), data)
+    return buf.getvalue()
+
+
+def _npy_bytes(arr: np.ndarray) -> bytes:
+    buf = io.BytesIO()
+    np.save(buf, arr)
+    return buf.getvalue()
 
 
 def _assert_staged_emission(
@@ -268,10 +295,30 @@ def publish_sampled_forecast(
             shard_name = SHARD_NAME_TEMPLATE.format(
                 run_id=run_id, target=target, time_id=time_id
             )
+            # The WIRE archive uses the fixture-canonized pinned serialization (§10):
+            # ZIP_STORED + pinned member timestamps + a hand-pinned identifiers.npz —
+            # byte-reproducible, unlike np.savez/file-mtime zips. The payload content is
+            # exactly the staged (§3.4-asserted) content; only the container is canonical.
+            # (The LOCAL save_pf layout is a separate contract (#207) and is untouched.)
             zip_path = tmp_path / shard_name
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for member in ("y_pred.npy", "identifiers.npz", "metadata.json"):
-                    zf.write(stage_dir / member, arcname=member)
+            zip_path.write_bytes(
+                _pinned_zip_bytes(
+                    {
+                        "y_pred.npy": (stage_dir / "y_pred.npy").read_bytes(),
+                        "identifiers.npz": _pinned_zip_bytes(
+                            {
+                                "time.npy": _npy_bytes(
+                                    np.asarray(month_pf.identifiers["time"])
+                                ),
+                                "unit.npy": _npy_bytes(
+                                    np.asarray(month_pf.identifiers["unit"])
+                                ),
+                            }
+                        ),
+                        "metadata.json": header_bytes(header),
+                    }
+                )
+            )
 
             sha256 = hashlib.sha256(zip_path.read_bytes()).hexdigest()
             file_id = _upload(
