@@ -167,6 +167,26 @@ def _assert_expected_sample_count(
     return produced
 
 
+def _cached_sample_count(pf_dir: Path) -> Optional[int]:
+    """The sample width (axis 1) of a cached ``y_pred.npy`` without loading it,
+    or None if the file is absent or not a 2-D (N, S) array.
+
+    Reads the array's own shape header via mmap — cheap, and it reports what the
+    cache ACTUALLY contains rather than a self-reported metadata value that could
+    itself drift. Used to detect a sample-count-stale cache (register C-85).
+    """
+    y_pred_path = Path(pf_dir) / "y_pred.npy"
+    if not y_pred_path.exists():
+        return None
+    try:
+        arr = np.load(y_pred_path, mmap_mode="r")
+    except Exception:  # noqa: BLE001 — an unreadable peek must never break the
+        # load path; returning None defers to load_pf (and S1 still guards the
+        # produced count downstream).
+        return None
+    return int(arr.shape[1]) if arr.ndim == 2 else None
+
+
 # ---------------------------------------------------------------------------
 # PredictionFrameEnsembleManager
 # ---------------------------------------------------------------------------
@@ -875,15 +895,31 @@ class PredictionFrameEnsembleManager:
     ) -> PredictionFrame:
         y_pred_path = pf_dir / "y_pred.npy"
         if y_pred_path.exists():
+            # Config-aware cache (register C-85): the cache dir is keyed on the
+            # sample-agnostic model-artifact timestamp, so a sample-count config
+            # change leaves the stale y_pred.npy in place and it would be reused
+            # silently. Peek the cached array's ACTUAL sample width (it cannot lie
+            # about itself) and regenerate when it no longer matches the ensemble's
+            # expected count, instead of blindly reloading.
+            cached = _cached_sample_count(pf_dir)
+            expected = ctx.expected_samples_per_model
+            if expected is not None and cached is not None and cached != expected:
+                logger.warning(
+                    "Stale cached forecast at %s: cached sample_count=%s but the "
+                    "ensemble config expects %s — regenerating instead of reusing "
+                    "(register C-85).",
+                    pf_dir,
+                    cached,
+                    expected,
+                )
+            else:
+                logger.info(f"Loading existing PredictionFrame from {pf_dir}")
+                return load_pf(pf_dir, ctx.configs["level"], mmap=mmap)
+        else:
             logger.info(
-                f"Loading existing PredictionFrame from {pf_dir}"
+                f"No existing PredictionFrame at {pf_dir}. "
+                f"Generating new predictions..."
             )
-            return load_pf(pf_dir, ctx.configs["level"], mmap=mmap)
-
-        logger.info(
-            f"No existing PredictionFrame at {pf_dir}. "
-            f"Generating new predictions..."
-        )
         model_args = self._create_model_args(
             ctx, evaluate=evaluate, forecast=forecast
         )
