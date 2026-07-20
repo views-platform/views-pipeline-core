@@ -124,6 +124,49 @@ def _aggregate_prediction_frames(
     return PredictionFrame(y_agg, reference.index)
 
 
+def _assert_expected_sample_count(
+    model_results: Dict[str, Dict[str, PredictionFrame]],
+    expected_samples_per_model: Optional[int],
+    models: List[str],
+    targets: List[str],
+) -> Dict[str, int]:
+    """Fail loud when a constituent's PRODUCED sample count is not what the config
+    expects, and return the produced counts for logging.
+
+    The #160 balance guard (`_aggregate_prediction_frames`) rejects constituents
+    whose sample counts differ FROM EACH OTHER. It cannot see the case where every
+    constituent reloaded a stale cached forecast at the same wrong count
+    (all-equal-but-wrong) — the failure that silently discarded a sample-count
+    config change during the 2026-07-20 FAO delivery (register C-85). This compares
+    the produced `pf.sample_count` against the ensemble config's declared
+    `expected_samples_per_model`; when that is undeclared the check is a no-op and
+    only reports the produced counts.
+    """
+    produced: Dict[str, int] = {}
+    for model_name in models:
+        target_pfs = model_results.get(model_name, {})
+        pf = next(
+            (target_pfs[t] for t in targets if target_pfs.get(t) is not None), None
+        )
+        if pf is None:
+            continue
+        produced[model_name] = pf.sample_count
+        if (
+            expected_samples_per_model is not None
+            and pf.sample_count != expected_samples_per_model
+        ):
+            raise ValueError(
+                f"Constituent '{model_name}' produced {pf.sample_count} samples but "
+                f"the ensemble config expects {expected_samples_per_model} "
+                f"(expected_samples_per_model). A stale or mismatched cached forecast "
+                f"is being reused: clear models/{model_name}/data/generated/"
+                f"predictions_* and re-run, or fix the constituent's sample-count "
+                f"config. (This is the all-equal-but-wrong case the #160 balance "
+                f"guard cannot detect — register C-85.)"
+            )
+    return produced
+
+
 # ---------------------------------------------------------------------------
 # PredictionFrameEnsembleManager
 # ---------------------------------------------------------------------------
@@ -316,6 +359,7 @@ class PredictionFrameEnsembleManager:
             deployment_status=c.get("deployment_status", "shadow"),
             prediction_format="prediction_frame",
             partition_dict=self._partition_dict or {},
+            expected_samples_per_model=c.get("expected_samples_per_model"),
         )
 
     # ------------------------------------------------------------------
@@ -568,6 +612,24 @@ class PredictionFrameEnsembleManager:
             model_results[model_name] = self._forecast_model_artifact(
                 model_name, ctx
             )
+
+        # Fail loud if a constituent's PRODUCED sample count is not what the config
+        # expects, and record the produced counts (register C-85): the only visible
+        # signal that a stale cached forecast was reloaded used to be progress-bar
+        # duration. The #160 balance guard cannot catch all-equal-but-wrong.
+        produced_counts = _assert_expected_sample_count(
+            model_results,
+            ctx.expected_samples_per_model,
+            ctx.models,
+            ctx.targets,
+        )
+        logger.info(
+            "Ensemble '%s' forecast sample counts per constituent: %s "
+            "(expected_samples_per_model=%s)",
+            ctx.configs["name"],
+            produced_counts,
+            ctx.expected_samples_per_model,
+        )
 
         forecasts: Dict[str, PredictionFrame] = {}
         for target in ctx.targets:

@@ -72,6 +72,7 @@ class EnsembleContext(BaseStageContext):
     deployment_status: str
     prediction_format: str
     partition_dict: Dict[str, Any]
+    expected_samples_per_model: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
