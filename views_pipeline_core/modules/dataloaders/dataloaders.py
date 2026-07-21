@@ -28,17 +28,24 @@ _PRIOGRID_NCOL = 720
 _DATAFACTORY_REQUIRED_KEYS = {"region", "features", "zarr_url", "loa"}
 _SYNTHETIC_REQUIRED_KEYS = {"pattern", "level", "features"}
 
+#: LOA → ``load_dataset(output_format=...)``. The values are datafactory's consumer
+#: contract vocabulary (their ADR-050 ``OutputFormat``): validated at fetch time via
+#: ``is_valid_output_format`` (datafactory is importable there by construction) and in
+#: CI against the vendored contract fixture (tests/fixtures/feature_frame_contract/,
+#: tests/test_modules/test_datafactory_contract_conformance.py). Extend only with
+#: strings the upstream vocabulary defines (e.g. ``feature_frame`` for #161).
 _LOA_TO_OUTPUT_FORMAT = {
     "priogrid_month": "dataframe",
     "country_month": "country_month",
 }
 
-#: Grid-entity index-name consolidation (views-frames ADR-015). RAW sources (viewser,
-#: datafactory's legacy pandas path, synthetic) still emit the legacy ``priogrid_gid``;
-#: ``_normalize_grid_index`` is the single seam that rewrites it to the canonical
-#: ``priogrid_id`` so the on-disk cache and every downstream consumer see one name.
-#: Remove this seam (and its call sites in ``_fetch_data`` / ``get_data``) once all
-#: sources emit ``priogrid_id`` natively.
+#: Grid-entity index-name consolidation (views-frames ADR-015). viewser and old
+#: on-disk caches still carry the legacy ``priogrid_gid`` (datafactory retired it in
+#: their #316; synthetic emits ``priogrid_id`` natively); ``_normalize_grid_index`` is
+#: the single seam that rewrites it to the canonical ``priogrid_id`` so the on-disk
+#: cache and every downstream consumer see one name. Remove this seam (and its call
+#: sites in ``_fetch_data`` / ``get_data``) once viewser emits ``priogrid_id`` and the
+#: legacy caches have aged out (#259).
 _LEGACY_GRID_ID = "priogrid_gid"
 _CANONICAL_GRID_ID = "priogrid_id"
 
@@ -1164,8 +1171,10 @@ class ViewsDataLoader:
             Tuple of (dataframe, None). Alerts are always None.
 
         Raises:
-            RuntimeError: If descriptor is invalid or load_dataset() fails.
-            ImportError: If datafactory_query is not installed.
+            RuntimeError: If descriptor is invalid, the resolved output_format is not
+                in the datafactory consumer contract, or load_dataset() fails.
+            ImportError: If datafactory_query is not installed or predates the
+                ADR-050 contract exports (views-datafactory >= 1.8.0).
         """
         if descriptor is None:
             descriptor = self._model_path.get_queryset()
@@ -1200,14 +1209,28 @@ class ViewsDataLoader:
         )
 
         try:
-            from datafactory_query import load_dataset
+            from datafactory_query import (
+                CONTRACT_VERSION,
+                is_valid_output_format,
+                load_dataset,
+            )
         except ImportError as e:
             raise ImportError(
-                f"datafactory_query is required for model {self._model_name} "
-                f"(source='views-datafactory') but is not installed. "
-                f"Install via: pip install 'views-datafactory @ "
+                f"datafactory_query with the ADR-050 consumer-contract exports "
+                f"(views-datafactory >= 1.8.0) is required for model {self._model_name} "
+                f"(source='views-datafactory') but is not installed or too old. "
+                f"Install/upgrade via: pip install 'views-datafactory @ "
                 f"git+https://github.com/views-platform/views-datafactory.git@development'"
             ) from e
+
+        if not is_valid_output_format(output_format):
+            raise RuntimeError(
+                f"output_format '{output_format}' (from loa='{loa}') is not in the "
+                f"datafactory consumer contract (CONTRACT_VERSION={CONTRACT_VERSION}). "
+                f"_LOA_TO_OUTPUT_FORMAT is out of step with datafactory's OutputFormat "
+                f"vocabulary — reconcile against the vendored contract fixture "
+                f"(tests/fixtures/feature_frame_contract/contract.json)."
+            )
 
         try:
             df = load_dataset(

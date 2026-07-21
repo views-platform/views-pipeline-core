@@ -241,6 +241,18 @@ class TestFetchFromDatafactory:
         call_kwargs = mock_datafactory_module.load_dataset.call_args[1]
         assert call_kwargs["output_format"] == "country_month"
 
+    @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
+    def test_contract_invalid_output_format_fails_loud(
+        self, mock_f64, datafactory_loader, sample_factory_df, mock_datafactory_module
+    ):
+        """A format outside datafactory's contract vocabulary aborts before fetch (#162)."""
+        mock_datafactory_module.load_dataset = MagicMock(return_value=sample_factory_df)
+        mock_datafactory_module.is_valid_output_format = lambda value: False
+
+        with pytest.raises(RuntimeError, match="consumer contract"):
+            datafactory_loader._fetch_data_from_datafactory(self_test=False)
+        mock_datafactory_module.load_dataset.assert_not_called()
+
     def test_unsupported_loa_raises(self, datafactory_loader, mock_datafactory_module):
         """Unsupported loa value raises RuntimeError."""
         datafactory_loader._model_path.get_queryset.return_value = {
