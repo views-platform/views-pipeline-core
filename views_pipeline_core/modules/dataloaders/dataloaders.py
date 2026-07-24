@@ -1354,6 +1354,12 @@ class ViewsDataLoader:
             month_first, month_last = resolve_month_range(
                 partition, partition_dict, override_month
             )
+            # Operational warning lives here at the fetch layer (#288): the
+            # resolver itself is pure and silent (sniffers call it too).
+            if partition == "forecasting" and override_month is not None:
+                logger.warning(
+                    f"Overriding end month in forecasting partition to {month_last}\n"
+                )
         else:
             month_first, month_last = self.month_first, self.month_last
 

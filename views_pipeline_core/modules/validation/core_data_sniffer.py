@@ -11,6 +11,8 @@ from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 
+from views_pipeline_core.data.partitions import resolve_month_range
+
 logger = logging.getLogger(__name__)
 
 # Canonical MultiIndex layouts for RAW data. The grid entity is the canonical
@@ -32,17 +34,9 @@ def _canonical_index_name(name: str) -> str:
     """Map a legacy grid-entity name to its canonical form; pass other names through."""
     return "priogrid_id" if name in _GRID_ID_ALIASES else name
 
-# Partition dict structural keys and run-type sets — legacy aliases; the
-# canonical (stdlib-pure) home is data/constants.py so import-light modules can
-# use them (#286).
-from views_pipeline_core.data.constants import (  # noqa: E402
-    PARTITION_TRAIN as _PARTITION_TRAIN,
-    PARTITION_TEST as _PARTITION_TEST,
-    TRAINING_RUN_TYPES as _TRAINING_RUN_TYPES,
-)
+# Partition keys / run-type sets live in data/constants.py (stdlib-pure home);
+# the month-range rule itself is fetch_context.resolve_month_range (C-209).
 
-# _TRAINING_RUN_TYPES (train+test bounds, vs forecasting's train-only) is
-# aliased from data/constants.py above.
 
 
 def _check_multiindex(df: pd.DataFrame, level: str, source: str) -> None:
@@ -102,15 +96,21 @@ class CoreDataSniffer:
     ) -> None:
         # Pre-compute the expected bounds from the partition context.
         # Nothing is modified — these are read-only expected values.
-        if partition in _TRAINING_RUN_TYPES:
-            self._first_expected: int = partition_dict[_PARTITION_TRAIN][0]
-            self._last_expected:  int = partition_dict[_PARTITION_TEST][1]
-        else:  # forecasting
-            self._first_expected = partition_dict[_PARTITION_TRAIN][0]
-            self._last_expected  = (
-                override_month
-                if override_month is not None
-                else partition_dict[_PARTITION_TRAIN][1]
+        # Shared rule with the fetch path and CoreFrameSniffer (C-209): one
+        # derivation (data/partitions.resolve_month_range — pure, silent),
+        # several consumers. Fails loud on unknown partitions (tightened from
+        # the legacy silent forecasting fallback, #288).
+        self._first_expected, self._last_expected = resolve_month_range(
+            partition, partition_dict, override_month
+        )
+        # Level validated eagerly (#288): a misconfigured level fails at
+        # construction, matching CoreFrameSniffer's lifecycle contract.
+        # _check_multiindex re-validates at sniff time (belt and braces).
+        if level not in EXPECTED_INDEX_NAMES:
+            raise NotImplementedError(
+                f"CoreDataSniffer: level='{level}' is not supported. "
+                f"Supported: {list(EXPECTED_INDEX_NAMES)}. "
+                f"Update EXPECTED_INDEX_NAMES in core_data_sniffer.py when ready."
             )
         self._partition = partition  # kept only for error messages
         self._level     = level      # kept only for error messages / logging
@@ -139,16 +139,28 @@ class CoreDataSniffer:
         _check_multiindex(df, self._level, self.__class__.__name__)
 
     def _check_partition_compatibility(self, df: pd.DataFrame) -> None:
-        """Loaded DataFrame must exactly cover the expected month range."""
+        """Loaded DataFrame must completely cover the expected month range —
+        every month present, none outside (endpoint equality alone would pass
+        frames with interior holes; tightened in #288, in step with
+        CoreFrameSniffer)."""
         time_units = df.index.get_level_values("month_id").values
 
-        actual_first = int(np.min(time_units))
-        actual_last  = int(np.max(time_units))
-
-        if actual_first != self._first_expected or actual_last != self._last_expected:
+        months_present = np.unique(time_units)
+        months_expected = np.arange(self._first_expected, self._last_expected + 1)
+        if not np.array_equal(months_present, months_expected):
+            actual_first = int(months_present.min())
+            actual_last  = int(months_present.max())
+            missing = np.setdiff1d(months_expected, months_present)
+            detail = (
+                f" Missing months within range: {missing[:5].tolist()}"
+                f"{'…' if missing.size > 5 else ''} ({missing.size} total)."
+                if missing.size
+                else ""
+            )
             raise ValueError(
                 f"CoreDataSniffer: Loaded DataFrame incompatible with "
                 f"partition '{self._partition}'. "
-                f"Expected month range [{self._first_expected}, {self._last_expected}], "
-                f"got [{actual_first}, {actual_last}]."
+                f"Expected complete coverage of month range "
+                f"[{self._first_expected}, {self._last_expected}], "
+                f"got [{actual_first}, {actual_last}].{detail}"
             )

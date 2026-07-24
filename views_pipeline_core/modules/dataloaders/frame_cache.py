@@ -33,6 +33,7 @@ from pathlib import Path
 from views_frames import FeatureFrame
 
 from views_pipeline_core.data.constants import FRAME_CACHE_DIRNAME_TEMPLATE
+from views_pipeline_core.data.frame_invariants import assert_frame_nonempty
 
 logger = logging.getLogger(__name__)
 
@@ -59,15 +60,6 @@ def _remove(path: Path) -> None:
         shutil.rmtree(path)
 
 
-def _assert_nonempty(frame: FeatureFrame, context: str) -> None:
-    if frame.n_rows == 0 or frame.n_features == 0:
-        raise ValueError(
-            f"Empty FeatureFrame ({frame.n_rows} rows, {frame.n_features} features) "
-            f"{context}. Fail Loud and Proud: an empty frame must never sit in or be "
-            f"served from the cache (policy shared with prediction_frame_io.load_pf)."
-        )
-
-
 def save_frame_cache(frame: FeatureFrame, cache_dir: Path) -> None:
     """Write ``frame`` to ``cache_dir`` via the leaf's ``save()``, stage → retire-swap.
 
@@ -75,7 +67,7 @@ def save_frame_cache(frame: FeatureFrame, cache_dir: Path) -> None:
     renamed aside — not deleted — before the swap, so at no point is a completed
     cache destroyed while its replacement is uncommitted. Refuses empty frames.
     """
-    _assert_nonempty(frame, "refused for caching")
+    assert_frame_nonempty(frame, "refused for caching")
     cache_dir = Path(cache_dir)
     cache_dir.parent.mkdir(parents=True, exist_ok=True)
 
@@ -133,6 +125,6 @@ def load_frame_cache(cache_dir: Path) -> FeatureFrame:
             f"Deleting the directory forces a refetch; it is never refetched "
             f"silently."
         ) from e
-    _assert_nonempty(frame, f"loaded from cache {cache_dir}")
+    assert_frame_nonempty(frame, f"loaded from cache {cache_dir}")
     logger.info("Frame cache read from %s", cache_dir)
     return frame
