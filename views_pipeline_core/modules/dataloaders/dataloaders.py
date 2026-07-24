@@ -9,13 +9,26 @@ from views_pipeline_core.files.utils import create_data_fetch_log_file
 from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.data.constants import CACHE_FILENAME_TEMPLATE
+from views_pipeline_core.data.constants import (
+    CACHE_FILENAME_TEMPLATE,
+    PARTITION_TEST,
+    PARTITION_TRAIN,
+)
 from views_pipeline_core.data.model_path import ModelPathManager
 from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
 from views_pipeline_core.modules.dataloaders.fetch_context import (
     FetchContext,
     resolve_default_partition_dict,
     resolve_month_range,
+)
+from views_pipeline_core.modules.dataloaders.frame_cache import frame_cache_path
+from views_pipeline_core.modules.dataloaders.feature_frame_path import (
+    fetch_feature_frame,
+)
+from views_pipeline_core.modules.dataloaders.datafactory_contract import (
+    DATAFACTORY_REQUIRED_KEYS,
+    import_datafactory_contract,
+    require_descriptor_keys,
 )
 
 import views_transformation_library.views_2 as views2
@@ -29,8 +42,49 @@ import argparse
 logger = logging.getLogger(__name__)
 
 _PRIOGRID_NCOL = 720
-_DATAFACTORY_REQUIRED_KEYS = {"region", "features", "zarr_url", "loa"}
+_DATAFACTORY_REQUIRED_KEYS = DATAFACTORY_REQUIRED_KEYS  # canonical home: datafactory_contract.py
 _SYNTHETIC_REQUIRED_KEYS = {"pattern", "level", "features"}
+# A FLAT (already-resolved) partition dict is recognized by these keys (C-210).
+_PARTITION_KEYS = {PARTITION_TRAIN, PARTITION_TEST}
+
+
+def detect_data_source(queryset: Any, model_name: str) -> str:
+    """Determine the data source type from a queryset/descriptor value (pure).
+
+    The single-read contract (#289): callers read get_queryset() ONCE, detect
+    the source from that snapshot, and pass the same snapshot onward — source
+    detection and the fetch can never describe different querysets.
+
+    Returns:
+        'viewser', 'datafactory', or 'synthetic'.
+
+    Raises:
+        RuntimeError: If the queryset is None.
+        TypeError: If the type/source is not recognized.
+    """
+    if queryset is None:
+        raise RuntimeError(f"Could not find queryset for {model_name}")
+
+    if isinstance(queryset, dict):
+        source = queryset.get("source")
+        if source == "views-datafactory":
+            return "datafactory"
+        if source == "synthetic":
+            return "synthetic"
+        raise TypeError(
+            f"Dict queryset for {model_name} has unrecognized "
+            f"source='{source}'. Expected 'views-datafactory' or 'synthetic'."
+        )
+
+    if hasattr(queryset, "publish"):
+        return "viewser"
+
+    raise TypeError(
+        f"Unrecognized queryset type for {model_name}: "
+        f"{type(queryset).__name__}. Expected viewser Queryset "
+        f"(with .publish() method) or datafactory dict descriptor "
+        f"(with 'source': 'views-datafactory')."
+    )
 
 #: LOA → ``load_dataset(output_format=...)``. The values are datafactory's consumer
 #: contract vocabulary (their ADR-050 ``OutputFormat``): validated at fetch time via
@@ -1067,40 +1121,9 @@ class ViewsDataLoader:
     def _detect_data_source(self) -> str:
         """Inspect get_queryset() return to determine the data source type.
 
-        Returns:
-            'viewser' or 'datafactory'
-
-        Raises:
-            RuntimeError: If get_queryset() returns None.
-            TypeError: If the return type is not recognized.
+        Delegates to the pure detect_data_source() (single-read contract, #289).
         """
-        queryset = self._model_path.get_queryset()
-
-        if queryset is None:
-            raise RuntimeError(
-                f"Could not find queryset for {self._model_name}"
-            )
-
-        if isinstance(queryset, dict):
-            source = queryset.get("source")
-            if source == "views-datafactory":
-                return "datafactory"
-            if source == "synthetic":
-                return "synthetic"
-            raise TypeError(
-                f"Dict queryset for {self._model_name} has unrecognized "
-                f"source='{source}'. Expected 'views-datafactory' or 'synthetic'."
-            )
-
-        if hasattr(queryset, "publish"):
-            return "viewser"
-
-        raise TypeError(
-            f"Unrecognized queryset type for {self._model_name}: "
-            f"{type(queryset).__name__}. Expected viewser Queryset "
-            f"(with .publish() method) or datafactory dict descriptor "
-            f"(with 'source': 'views-datafactory')."
-        )
+        return detect_data_source(self._model_path.get_queryset(), self._model_name)
 
     def _fetch_data_from_datafactory(
         self, self_test: bool, descriptor: Optional[dict] = None,
@@ -1134,12 +1157,7 @@ class ViewsDataLoader:
                 f"got {type(descriptor).__name__}"
             )
 
-        missing = _DATAFACTORY_REQUIRED_KEYS - descriptor.keys()
-        if missing:
-            raise RuntimeError(
-                f"Datafactory descriptor for {self._model_name} is missing "
-                f"required keys: {sorted(missing)}"
-            )
+        require_descriptor_keys(descriptor, self._model_name)
 
         loa = descriptor["loa"]
         if loa not in _LOA_TO_OUTPUT_FORMAT:
@@ -1157,25 +1175,13 @@ class ViewsDataLoader:
             f"months={self.month_first}-{self.month_last})"
         )
 
-        try:
-            from datafactory_query import (
-                CONTRACT_VERSION,
-                is_valid_output_format,
-                load_dataset,
-            )
-        except ImportError as e:
-            raise ImportError(
-                f"datafactory_query with the ADR-050 consumer-contract exports "
-                f"(views-datafactory >= 1.8.0) is required for model {self._model_name} "
-                f"(source='views-datafactory') but is not installed or too old. "
-                f"Install/upgrade via: pip install 'views-datafactory @ "
-                f"git+https://github.com/views-platform/views-datafactory.git@development'"
-            ) from e
+        contract = import_datafactory_contract(self._model_name)
+        load_dataset = contract.load_dataset
 
-        if not is_valid_output_format(output_format):
+        if not contract.is_valid_output_format(output_format):
             raise RuntimeError(
                 f"output_format '{output_format}' (from loa='{loa}') is not in the "
-                f"datafactory consumer contract (CONTRACT_VERSION={CONTRACT_VERSION}). "
+                f"datafactory consumer contract (CONTRACT_VERSION={contract.CONTRACT_VERSION}). "
                 f"_LOA_TO_OUTPUT_FORMAT is out of step with datafactory's OutputFormat "
                 f"vocabulary — reconcile against the vendored contract fixture "
                 f"(tests/fixtures/feature_frame_contract/contract.json)."
@@ -1330,6 +1336,34 @@ class ViewsDataLoader:
             self.partition, self.partition_dict, self.override_month
         )
 
+    def _select_partition_dict(self, partition: str) -> Optional[Dict]:
+        """Select this partition's bounds from the loader's stored dict.
+
+        Handles both shapes the attribute legitimately holds: the NESTED form
+        callers provide at construction ({"calibration": {train, test}, ...})
+        and the FLAT form a previous get_data/get_feature_frame call stored
+        back ({train, test} — the legacy attribute contract). Re-running the
+        same partition reuses the flat dict; asking for a DIFFERENT partition
+        against a flat dict is ambiguous and fails loud (this crash used to
+        surface as a bare TypeError deep in the month-range rule — C-210).
+        """
+        stored = self.partition_dict
+        if stored is None:
+            return resolve_default_partition_dict(partition, self.steps)
+        if partition in stored:
+            return stored[partition]
+        if _PARTITION_KEYS <= set(stored):
+            if self.partition == partition:
+                return stored  # same partition re-run: already resolved
+            raise ValueError(
+                f"ViewsDataLoader holds flat train/test bounds "
+                f"(for partition '{self.partition}') but '{partition}' was "
+                f"requested. Provide a per-partition partition_dict "
+                f"({{'{partition}': {{'train': ..., 'test': ...}}}}) or use a "
+                f"fresh loader when switching partitions."
+            )
+        return stored.get(partition, None)  # legacy fallthrough (unknown shape)
+
     def _resolve_fetch_context(
         self, partition: str, override_month: Optional[int]
     ) -> FetchContext:
@@ -1340,11 +1374,7 @@ class ViewsDataLoader:
         get_data() assigns the result to the legacy attributes; the FeatureFrame
         path (#289) consumes the returned value directly.
         """
-        partition_dict = (
-            resolve_default_partition_dict(partition, self.steps)
-            if self.partition_dict is None
-            else self.partition_dict.get(partition, None)
-        )
+        partition_dict = self._select_partition_dict(partition)
         drift_config_dict = (
             drift_detection.drift_detection_partition_dict[partition]
             if self.drift_config_dict is None
@@ -1363,7 +1393,10 @@ class ViewsDataLoader:
         else:
             month_first, month_last = self.month_first, self.month_last
 
-        source = self._detect_data_source()
+        # Single-read contract (#289): one get_queryset() snapshot feeds both
+        # source detection and (via ctx.queryset) any downstream fetch.
+        queryset = self._model_path.get_queryset()
+        source = detect_data_source(queryset, self._model_name)
         df_cache_filename = CACHE_FILENAME_TEMPLATE.format(
             partition=partition, source=source, ext=PipelineConfig.dataframe_format,
         )
@@ -1376,7 +1409,20 @@ class ViewsDataLoader:
             month_last=month_last,
             source=source,
             df_cache_filename=df_cache_filename,
+            queryset=queryset,
         )
+
+    def _apply_context(self, ctx: FetchContext) -> None:
+        """Assign the resolved context to the legacy loader attributes (#286).
+
+        The single write-back both entry points share — extend HERE if the
+        legacy attribute contract ever grows.
+        """
+        self.partition = ctx.partition
+        self.partition_dict = ctx.partition_dict
+        self.drift_config_dict = ctx.drift_config_dict
+        self.override_month = ctx.override_month
+        self.month_first, self.month_last = ctx.month_first, ctx.month_last
 
 
     # @staticmethod
@@ -1489,14 +1535,10 @@ class ViewsDataLoader:
             - Drift config from drift_detection module
             - Alerts logged even if no drift detected
         """
-        # Resolution is value-based (#286); the assignments below keep the legacy
+        # Resolution is value-based (#286); _apply_context keeps the legacy
         # attribute contract for every existing reader of loader state.
         ctx = self._resolve_fetch_context(partition, override_month)
-        self.partition = ctx.partition
-        self.partition_dict = ctx.partition_dict
-        self.drift_config_dict = ctx.drift_config_dict
-        self.override_month = ctx.override_month
-        self.month_first, self.month_last = ctx.month_first, ctx.month_last
+        self._apply_context(ctx)
 
         source = ctx.source
         path_cached_df = self._path_raw / ctx.df_cache_filename
@@ -1550,4 +1592,55 @@ class ViewsDataLoader:
                 logger.warning({f"{partition} data alert {ialert}": str(alert)})
 
         return df, alerts
-    
+
+    def get_feature_frame(
+        self,
+        partition: str,
+        use_saved: bool,
+        level: str,
+        validate: bool = True,
+        override_month: Optional[int] = None,
+    ):
+        """Fetch or load a validated ``views_frames.FeatureFrame`` — no pandas.
+
+        The FeatureFrame counterpart of :meth:`get_data` (#289, epic #285):
+        datafactory-only, cache-first on ``use_saved`` (directory cache via
+        ``frame_cache``, exposed as :attr:`cached_frame_path`), frame-native
+        audit (``CoreFrameSniffer``) on every delivery, bare frame returned
+        (no ``(frame, alerts)`` tuple — alerts are a viewser concept, always
+        ``None`` for datafactory, C-52). ``level`` is required — no permissive
+        mode. Deliberate differences from the pandas path are documented in
+        ``feature_frame_path``'s module docstring (no row/col derivation, no
+        silent NaN fill, no drift detection).
+
+        End-state note (epic #285 condition 5): this method is the successor
+        of the pandas input path, not a sibling — ``get_data`` deprecates at
+        Epic C close-out (#267).
+        """
+        ctx = self._resolve_fetch_context(partition, override_month)
+        self._apply_context(ctx)
+
+        # Artifact handle set BEFORE the fetch (mirrors get_data's
+        # _cached_data_path contract): on failure, callers still see where the
+        # cache lives/would live.
+        cache_dir = frame_cache_path(self._path_raw, ctx.partition, ctx.source)
+        self._cached_frame_path = cache_dir
+
+        def _write_fetch_log() -> None:
+            # Invoked by fetch_feature_frame exactly when a fresh fetch
+            # succeeded — provenance decision and fetch decision are one event.
+            data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            create_data_fetch_log_file(
+                self._path_raw, ctx.partition, self._model_name, data_fetch_timestamp
+            )
+
+        return fetch_feature_frame(
+            ctx,
+            ctx.queryset,
+            level,
+            cache_dir,
+            use_saved=use_saved,
+            validate=validate,
+            model_name=self._model_name,
+            on_fetch=_write_fetch_log,
+        )

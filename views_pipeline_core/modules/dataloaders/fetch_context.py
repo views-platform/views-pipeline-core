@@ -11,7 +11,7 @@ This module must stay import-light: stdlib + ``data`` submodules only.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from views_pipeline_core.data.partitions import (
     resolve_default_partition_dict as resolve_default_partition_dict,
@@ -37,3 +37,8 @@ class FetchContext:
     #: Filename of the pandas-parquet cache specifically ("{partition}_{source}_df.parquet").
     #: The FeatureFrame path derives its own artifact name (directory cache, #287).
     df_cache_filename: str
+    #: The queryset/descriptor ``source`` was detected from — captured in the SAME
+    #: get_queryset() read (#289): source detection and the fetch always describe
+    #: one snapshot, and consumers need no second read. Opaque here: a viewser
+    #: Queryset object or a datafactory dict descriptor.
+    queryset: Any = None
