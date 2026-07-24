@@ -60,9 +60,9 @@ def test_p2_manager_dispatch_to_frame_path_is_explicit():
     to get_feature_frame; until then this stub fails, keeping the displaced
     decision on the books (P2).
     """
-    from views_pipeline_core.managers.model.model import ModelManager
+    from views_pipeline_core.managers.model.model import ForecastingModelManager
 
-    src = inspect.getsource(ModelManager._execute_data_fetching)
+    src = inspect.getsource(ForecastingModelManager._execute_data_fetching)
     assert "get_feature_frame" in src, (
         "ModelManager._execute_data_fetching has no dispatch to the frame path — "
         "the displaced mode decision (P2) is still unanswered."

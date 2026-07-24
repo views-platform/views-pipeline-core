@@ -22,6 +22,10 @@ from views_pipeline_core.exceptions import (
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
+from views_pipeline_core.modules.dataloaders.datafactory_contract import (
+    DATA_FORMAT_FEATURE_FRAME,
+    declared_data_format,
+)
 
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
@@ -193,6 +197,8 @@ class ModelManager:
         # called after CoreConfigSniffer.sniff_all() guarantees configs are valid.
         self._data_loader = None
         self._cached_data_path = None
+        # Set when the model declares data_format: feature_frame (#290).
+        self._cached_frame_path = None
 
         if use_prediction_store:
             from views_pipeline_core.configs.prediction_store import PredictionStoreConfig
@@ -915,6 +921,22 @@ class ForecastingModelManager(ModelManager):
             )
         return path
 
+    def _get_cached_frame_path(self):
+        """Return the FeatureFrame cache directory for the current partition.
+
+        Engine subclasses call this instead of hardcoding the directory
+        convention (C-59 lesson). Only set for models declaring
+        data_format: feature_frame (#290).
+        """
+        path = self._cached_frame_path
+        if path is None:
+            raise RuntimeError(
+                "No cached frame path available — the model must declare "
+                "data_format: feature_frame and _execute_data_fetching() must "
+                "run before engines access the frame cache."
+            )
+        return path
+
     def execute_single_run(self, args: ForecastingModelArgs) -> None:
         """
         Execute single pipeline run with given arguments.
@@ -1137,21 +1159,41 @@ class ForecastingModelManager(ModelManager):
             - Updates viewser if args.update_viewser=True
         """
 
+        # Explicit df-vs-ff dispatch (#290, epic #285): the model's queryset
+        # descriptor declares its input shape; absent → dataframe, byte-identical
+        # legacy behavior. Resolved BEFORE the wandb run/try block so a config
+        # typo fails as a crisp ValueError with no spurious fetch-failure alert.
+        # This is a second get_queryset() read (the loader takes its own #289
+        # snapshot for the fetch): deliberate — if a regenerated queryset were
+        # to diverge between the reads, the loader's fail-loud gates (dict
+        # check, frame-capable source check) catch the contradiction loudly.
+        data_format = declared_data_format(self._model_path.get_queryset())
+
         with self._wandb_module.initialize_run(
             project=self._project,
             config={},
             job_type="fetch_data",
         ):
             try:
-                self._data_loader.get_data(
-                    use_saved=self.args.saved,
-                    validate=True,
-                    self_test=self.args.drift_self_test,
-                    partition=self.args.run_type,
-                    override_month=self.args.override_timestep,
-                    level=self.configs["level"],
-                )
-                self._cached_data_path = self._data_loader.cached_data_path
+                if data_format == DATA_FORMAT_FEATURE_FRAME:
+                    self._data_loader.get_feature_frame(
+                        partition=self.args.run_type,
+                        use_saved=self.args.saved,
+                        level=self.configs["level"],
+                        validate=True,
+                        override_month=self.args.override_timestep,
+                    )
+                    self._cached_frame_path = self._data_loader.cached_frame_path
+                else:
+                    self._data_loader.get_data(
+                        use_saved=self.args.saved,
+                        validate=True,
+                        self_test=self.args.drift_self_test,
+                        partition=self.args.run_type,
+                        override_month=self.args.override_timestep,
+                        level=self.configs["level"],
+                    )
+                    self._cached_data_path = self._data_loader.cached_data_path
 
                 self._wandb_module.send_alert(
                     title=f"Queryset Fetch Complete ({str(self.args.run_type)})",
