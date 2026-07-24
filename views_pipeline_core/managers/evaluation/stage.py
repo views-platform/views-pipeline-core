@@ -14,8 +14,15 @@ Responsibilities:
 import gc
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import numpy as np
+
+from views_pipeline_core.modules.dataloaders.datafactory_contract import (
+    DATA_FORMAT_DATAFRAME,
+    DATA_FORMAT_FEATURE_FRAME,
+)
 from views_pipeline_core.types import BaseStageContext
 
 logger = logging.getLogger(__name__)
@@ -40,6 +47,13 @@ class EvaluationContext(BaseStageContext):
     partition_dict: Dict[str, Any]
     data_loader: Any  # ViewsDataLoader or None
     prepare_actuals_df: Callable  # (pd.DataFrame) -> pd.DataFrame
+    #: Input-shape of the evaluated model (#302, epic #300): dataframe (legacy,
+    #: default — ensemble contexts never set it) or feature_frame (actuals come
+    #: from the frame cache; legacy pandas egress is skipped).
+    data_format: str = DATA_FORMAT_DATAFRAME
+    #: The model's FeatureFrame cache directory (loader-assembled — C-59: never
+    #: rebuilt here). Required when data_format == feature_frame.
+    frame_cache_path: Optional[Path] = None
 
 
 class EvaluationStage:
@@ -76,10 +90,28 @@ class EvaluationStage:
         from views_evaluation import NativeEvaluator
         from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
 
-        # --- Load actuals ---
-        df_actual = self._load_actuals(context, ensemble)
-        if df_actual is None:
-            return
+        # --- Load actuals (frame-native or pandas path, #302) ---
+        frame_actuals: Optional[Dict[str, Tuple]] = None
+        df_actual = None
+        if context.data_format == DATA_FORMAT_FEATURE_FRAME:
+            if context.prediction_format != "prediction_frame":
+                raise ValueError(
+                    "data_format=feature_frame requires prediction_format="
+                    "'prediction_frame' — a frame-fed model with DataFrame "
+                    "predictions is an unsupported combination."
+                )
+            if ensemble:
+                raise ValueError(
+                    "Frame-fed ensemble constituents are not supported yet "
+                    "(epic #300 follow-up) — evaluate the model standalone."
+                )
+            frame_actuals = self._load_actuals_frame(context)
+            if frame_actuals is None:
+                return
+        else:
+            df_actual = self._load_actuals(context, ensemble)
+            if df_actual is None:
+                return
 
         # --- Task/target structure ---
         tasks = {
@@ -98,12 +130,18 @@ class EvaluationStage:
             for target in targets:
                 logger.info(f"Calculating {task_type} evaluation metrics for {target}")
                 target_identifier = target
-                actual_slice = df_actual[[target]]
 
-                # --- Build EvaluationFrame (PF or DF path) ---
-                ef = self._build_evaluation_frame(
-                    df_predictions, actual_slice, target, context, EvaluationAdapter,
-                )
+                # --- Build EvaluationFrame (frame-native, PF, or DF path) ---
+                if frame_actuals is not None:
+                    ef = self._build_evaluation_frame_from_arrays(
+                        frame_actuals[target], df_predictions, target, context,
+                        EvaluationAdapter,
+                    )
+                else:
+                    actual_slice = df_actual[[target]]
+                    ef = self._build_evaluation_frame(
+                        df_predictions, actual_slice, target, context, EvaluationAdapter,
+                    )
                 if ef is None:
                     continue
 
@@ -128,6 +166,95 @@ class EvaluationStage:
             text=f"{PredictionIOManager.generate_evaluation_table(wandb.summary._as_dict())}",
             notifications_enabled=self._wandb_notifications,
         )
+
+    def _load_actuals_frame(
+        self, context: EvaluationContext
+    ) -> Optional[Dict[str, Tuple]]:
+        """Frame-native actuals (#302): per-target numpy triples from the frame cache.
+
+        The cached FeatureFrame contains the targets (datafactory fetches targets
+        as features); the same-invocation fetch audited the cache. Fail Loud and
+        Proud on every unexpected shape — never a silent squeeze or fallback.
+        """
+        from views_pipeline_core.modules.dataloaders.frame_cache import load_frame_cache
+
+        if context.frame_cache_path is None:
+            raise ValueError(
+                "data_format=feature_frame but no frame_cache_path on the "
+                "EvaluationContext — the manager must pass the loader's "
+                "cached_frame_path."
+            )
+
+        all_targets = (
+            context.configs.get("regression_targets", [])
+            + context.configs.get("classification_targets", [])
+        )
+        if not all_targets:
+            return None
+
+        frame = load_frame_cache(Path(context.frame_cache_path))
+        feature_names = list(frame.feature_names)
+        missing = [t for t in all_targets if t not in feature_names]
+        if missing:
+            raise ValueError(
+                f"Targets {missing} not present in the cached FeatureFrame "
+                f"(features: {feature_names}). Add them to the descriptor's "
+                f"'features' mapping — the frame path has no pandas actuals to "
+                f"fall back to."
+            )
+        if frame.sample_count != 1:
+            raise ValueError(
+                f"Actuals frame carries sample_count={frame.sample_count}; observed "
+                f"data must have S=1 (datafactory contract). Refusing to squeeze "
+                f"silently."
+            )
+        if not frame.index.has_unique_rows:
+            raise ValueError(
+                "Actuals frame has duplicate (time, unit) rows — the evaluation "
+                "key intersection would be ambiguous."
+            )
+
+        act_time = np.asarray(frame.index.time)
+        act_unit = np.asarray(frame.index.unit)
+        actuals = {
+            target: (
+                act_time,
+                act_unit,
+                frame.values[:, feature_names.index(target), 0].astype(np.float64),
+            )
+            for target in all_targets
+        }
+        del frame
+        gc.collect()
+        return actuals
+
+    def _build_evaluation_frame_from_arrays(
+        self, actual_triple, df_predictions, target, context, EvaluationAdapter,
+    ):
+        """Frame-native EF build (#302): mirrors the PF branch of
+        _build_evaluation_frame with the numpy actuals entry (#301)."""
+        act_time, act_unit, act_values = actual_triple
+        raw_preds = df_predictions.pop(target, None)
+        if raw_preds is None:
+            logger.warning(
+                f"Frame path: target '{target}' not found in predictions dict "
+                f"(keys: {list(df_predictions.keys())}). Skipping."
+            )
+            return None
+        step_mappings = self._get_evaluation_step_mappings(
+            n_sequences=len(raw_preds), context=context,
+        )
+        ef = EvaluationAdapter.from_actual_arrays(
+            act_time=act_time,
+            act_unit=act_unit,
+            act_values=act_values,
+            predictions=raw_preds,
+            target=target,
+            step_mapping=step_mappings,
+        )
+        del raw_preds
+        gc.collect()
+        return ef
 
     def _load_actuals(self, context: EvaluationContext, ensemble: bool):
         """Load and prepare actuals DataFrame from raw data."""
@@ -226,10 +353,6 @@ class EvaluationStage:
         time_series_wise = schemas.get("time_series", {})
         month_wise = schemas.get("month", {})
 
-        df_step = report.to_dataframe("step")
-        df_ts = report.to_dataframe("time_series")
-        df_month = report.to_dataframe("month")
-
         self._wandb_module.log_evaluation_results(
             step_wise, month_wise, time_series_wise, target_identifier,
         )
@@ -240,7 +363,18 @@ class EvaluationStage:
             # _io=None (skipping the legacy parquet save) but still need the frame, and
             # MetricFrame.save() writes directly, not through the IO manager.
             self._save_metric_frame(report, target_identifier, context)
-            if self._io is not None:
+            if context.data_format == DATA_FORMAT_FEATURE_FRAME:
+                # Frame-native run (#302): the MetricFrame + dict-based wandb logging
+                # above ARE the record; the legacy pandas eval files are skipped.
+                logger.info(
+                    "Skipping legacy evaluation dataframes for '%s' — frame-native run.",
+                    target_identifier,
+                )
+            elif self._io is not None:
+                # to_dataframe is computed only where it is consumed (pandas egress).
+                df_step = report.to_dataframe("step")
+                df_ts = report.to_dataframe("time_series")
+                df_month = report.to_dataframe("month")
                 self._io.save_evaluations(
                     df_step, df_ts, df_month,
                     context.model_path.data_generated,
