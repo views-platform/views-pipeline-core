@@ -9,9 +9,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from views_pipeline_core.modules.validation.core_data_sniffer import (
-    _PARTITION_TRAIN,
-    _PARTITION_TEST,
+from views_pipeline_core.data.constants import (
+    PARTITION_TRAIN as _PARTITION_TRAIN,
+    PARTITION_TEST as _PARTITION_TEST,
 )
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,12 @@ logger = logging.getLogger(__name__)
 # Extend these constants (not inline checks) when new values are supported.
 SUPPORTED_TIME_STEPS = {36}
 SUPPORTED_STRIDES    = {1}
-SUPPORTED_LEVELS     = {"cm", "pgm"}
+# Level vocabulary: views_frames.SpatialLevel is the platform's canonical enum
+# (#288) — derive, don't re-spell, so a new level can't produce contradictory
+# verdicts across sniffers.
+from views_frames import SpatialLevel as _SpatialLevel  # noqa: E402
+
+SUPPORTED_LEVELS     = frozenset(lv.value for lv in _SpatialLevel)
 
 DEPRECATED_STATUS             = "deprecated"    # must be defined before SUPPORTED_DEPLOYMENT_STATUSES
 SUPPORTED_DEPLOYMENT_STATUSES = {"shadow", "deployed", "baseline", DEPRECATED_STATUS}

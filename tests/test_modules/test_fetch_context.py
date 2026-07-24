@@ -85,10 +85,12 @@ class TestResolveMonthRange:
     def test_forecasting_spans_train_only(self):
         assert resolve_month_range("forecasting", self.PD, None) == (121, 444)
 
-    def test_forecasting_override_wins_and_warns(self, caplog):
+    def test_forecasting_override_wins_silently(self, caplog):
+        # Pure resolver (#288): the operator-facing warning moved to the fetch
+        # layer; the rule itself is silent so auditors can call it freely.
         with caplog.at_level(logging.WARNING):
             assert resolve_month_range("forecasting", self.PD, 530) == (121, 530)
-        assert "530" in caplog.text
+        assert "Overriding" not in caplog.text
 
     def test_override_ignored_outside_forecasting(self):
         assert resolve_month_range("calibration", self.PD, 530) == (121, 492)

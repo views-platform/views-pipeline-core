@@ -6,7 +6,7 @@ fail loud, never silently refetched.
 """
 import numpy as np
 import pytest
-from views_frames import FeatureFrame, SpatialLevel, SpatioTemporalIndex
+from views_frames import FeatureFrame
 
 from views_pipeline_core.data.constants import FRAME_CACHE_DIRNAME_TEMPLATE
 from views_pipeline_core.modules.dataloaders.frame_cache import (
@@ -19,30 +19,6 @@ from views_pipeline_core.modules.dataloaders.frame_cache import (
 @pytest.fixture(scope="module")
 def canon_frame(contract_frame_dir) -> FeatureFrame:
     return FeatureFrame.load(contract_frame_dir)
-
-
-def _small_frame(n_rows: int = 2, n_features: int = 1) -> FeatureFrame:
-    return FeatureFrame(
-        y_features=np.ones((n_rows, n_features, 1), dtype=np.float32),
-        index=SpatioTemporalIndex(
-            time=np.full(n_rows, 600, dtype=np.int64),
-            unit=np.arange(1, n_rows + 1, dtype=np.int64),
-            level=SpatialLevel.PGM,
-        ),
-        feature_names=[f"x{i}" for i in range(n_features)],
-    )
-
-
-def _empty_frame() -> FeatureFrame:
-    return FeatureFrame(
-        y_features=np.zeros((0, 1, 1), dtype=np.float32),
-        index=SpatioTemporalIndex(
-            time=np.array([], dtype=np.int64),
-            unit=np.array([], dtype=np.int64),
-            level=SpatialLevel.PGM,
-        ),
-        feature_names=["x"],
-    )
 
 
 def _assert_frames_equal(a: FeatureFrame, b: FeatureFrame) -> None:
@@ -87,12 +63,12 @@ def test_load_reads_the_vendored_fixture_directly(contract_frame_dir):
     assert loaded.values.dtype == np.float32
 
 
-def test_save_overwrites_previous_cache(tmp_path, canon_frame):
+def test_save_overwrites_previous_cache(tmp_path, canon_frame, make_frame):
     cache = tmp_path / "c_ff"
     save_frame_cache(canon_frame, cache)
-    save_frame_cache(_small_frame(), cache)
+    save_frame_cache(make_frame([600]), cache)
     loaded = load_frame_cache(cache)
-    assert loaded.values.shape == (2, 1, 1)
+    assert loaded.values.shape == (3, 1, 1)
     assert list(loaded.feature_names) == ["x0"]
     # no staging/retired residue after a completed save
     assert sorted(p.name for p in tmp_path.iterdir()) == ["c_ff"]
@@ -169,17 +145,17 @@ def test_empty_dir_is_corrupt_not_miss(tmp_path):
 # --------------------------------------------------------- empty-frame poison
 
 
-def test_save_refuses_empty_frame(tmp_path):
+def test_save_refuses_empty_frame(tmp_path, empty_frame):
     with pytest.raises(ValueError, match="Empty FeatureFrame"):
-        save_frame_cache(_empty_frame(), tmp_path / "c_ff")
+        save_frame_cache(empty_frame, tmp_path / "c_ff")
     assert not (tmp_path / "c_ff").exists()
 
 
-def test_load_rejects_empty_frame_planted_in_cache(tmp_path):
+def test_load_rejects_empty_frame_planted_in_cache(tmp_path, empty_frame):
     """A validly-serialized empty frame must not be served on cache hits
     (policy shared with prediction_frame_io.load_pf)."""
     planted = tmp_path / "c_ff"
-    _empty_frame().save(planted)
+    empty_frame.save(planted)
     with pytest.raises(ValueError, match="Empty FeatureFrame"):
         load_frame_cache(planted)
 
