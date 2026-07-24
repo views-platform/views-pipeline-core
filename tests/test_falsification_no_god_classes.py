@@ -74,24 +74,10 @@ def test_P3_views_dataset_loc():
 
 
 # ---------------------------------------------------------------------------
-# P4 — HARD: DatasetTransformationModule is 1,410 LOC
+# P4 — RETIRED (2026-07-24, #183): DatasetTransformationModule was extracted to
+# views-reporting (ADR-054, C-37 resolved) and later deleted upstream (their
+# #119); the re-export shim was removed in #183. Nothing remains to audit.
 # ---------------------------------------------------------------------------
-
-@pytest.mark.xfail(reason="C-37: DatasetTransformationModule god class — known risk, not yet resolved")
-def test_P4_dataset_transformation_module_loc():
-    """DatasetTransformationModule must be below god-class LOC threshold.
-
-    At 1,410 LOC with 19 methods (13 public) spanning 8 responsibilities.
-    Not tracked in any governance document.
-    """
-    loc, methods, public = _class_metrics(
-        "views_pipeline_core/modules/transformations/transformations.py",
-        "DatasetTransformationModule",
-    )
-    assert loc <= GOD_CLASS_THRESHOLD_LOC, (
-        f"DatasetTransformationModule is {loc} LOC with {methods} methods "
-        f"({public} public). Exceeds god-class threshold of {GOD_CLASS_THRESHOLD_LOC} LOC."
-    )
 
 
 # ---------------------------------------------------------------------------

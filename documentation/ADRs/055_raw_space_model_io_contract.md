@@ -105,7 +105,7 @@ The column-name prefix scheme implemented by `DatasetTransformationModule` (`ln_
 **What this means in practice:**
 - No code — new or existing — should depend on a column-name prefix to determine numerical scale. A column named `ln_ged_sb` is **not evidence** that the values are in log-space.
 - Existing code that reads prefixes for **identity** purposes (e.g., `pred_` output prefix, `lr_` as a target name component) is unaffected — the prefix remains part of the column's identity, just not a scale signal.
-- The `DatasetTransformationModule` continues to function for its current consumers (forecast reporting in views-reporting). Its prefix-renaming behavior is not removed; the **treatment of those prefixes as authoritative scale evidence** is what this ADR prohibits.
+- *(Update 2026-07-24, #183: `DatasetTransformationModule` has since been deleted upstream — views-reporting #119 — and the pipeline-core shim removed; this consequence is historical.)* At adoption, the `DatasetTransformationModule` continued to function for its then-consumers; its prefix-renaming behavior was not removed — the **treatment of those prefixes as authoritative scale evidence** is what this ADR prohibits.
 - Model repos that have adopted config-declared transforms (hydranet, stepshifter) already do not depend on the prefix as a scale signal.
 
 ### Clause 6 — Scope: targets; queryset transforms are non-compliant
@@ -154,7 +154,7 @@ This ADR does not replace or retire that infrastructure — it provides the gove
 
 - **Every model repo must be verifiably compliant.** Hydranet and stepshifter (post-mechanism) are. R2darts2 and baseline need explicit confirmation or local documentation.
 - **Frozen artifacts from non-compliant windows.** Artifacts trained during the `5fcfe43` window (2025-11 → 2026-04) in views-stepshifter may emit log-space predictions when loaded under current raw-output code. These must be audited and retrained. This is the open thread of the 2026-06-08 investigation (views-models #111).
-- **Prefix deprecation requires downstream awareness.** Any external consumer that parses `ln_`/`lx_` prefixes to infer scale must be migrated. Within the platform, the primary consumer is views-reporting's `DatasetTransformationModule`, which is unaffected (it operates on its own undo logic, not cross-boundary inference).
+- **Prefix deprecation requires downstream awareness.** Any external consumer that parses `ln_`/`lx_` prefixes to infer scale must be migrated. Within the platform, the primary consumer at adoption time was views-reporting's `DatasetTransformationModule` (since deleted — their #119; see the #183 update above), which was unaffected (it operated on its own undo logic, not cross-boundary inference).
 - **Ensemble-level enforcement exists; single-model enforcement does not.** `validate_output_scale_consistency()` catches mixed-scale ensembles (Clause 8). Per-repo mechanisms enforce individual model compliance (Clause 7). There is no pipeline-core check that a single model's predictions are in raw space — this relies on per-repo discipline. A future scale-plausibility sniffer at the model→evaluation handoff (cf. hydranet ADR-028's clamping strategy) could close this gap but is not required by this ADR.
 
 ---
@@ -184,7 +184,7 @@ The prefixes remain useful as **identity** markers (the `lr_` in `lr_ged_sb` is 
 | Document | Amendment |
 |---|---|
 | `CICs/ForecastingModelManager.md` §3 | Add: *"Guarantees that predictions received from abstract methods are in raw target space (ADR-055). Pipeline-core does not apply inverse transforms."* |
-| `CICs/DatasetTransformationModule.md` §1 | Add deprecation note: *"The prefix-renaming behavior (`ln_`/`lx_`/`lr_`) is deprecated as a cross-boundary scale signal (ADR-055). It remains functional for in-module undo operations. The `ln_`/`lx_`/`lr_` prefix names are legacy identity conventions retained for backward compatibility — they do not indicate the current numerical scale of the data."* |
+| `CICs/DatasetTransformationModule.md (removed, #183; git history)` §1 | Add deprecation note: *"The prefix-renaming behavior (`ln_`/`lx_`/`lr_`) is deprecated as a cross-boundary scale signal (ADR-055). It remains functional for in-module undo operations. The `ln_`/`lx_`/`lr_` prefix names are legacy identity conventions retained for backward compatibility — they do not indicate the current numerical scale of the data."* |
 | `CICs/CoreConfigSniffer.md` | Note that `_check_output_scale()` is positioned under ADR-055 Clause 8 as transitional enforcement. `output_scale: "log"` is a self-declaration of non-compliance; `"natural"` is compliant. |
 | ADR-009 §Boundary Types in This Project | Add row: **Model output scale** boundary, enforced by `validate_output_scale_consistency()` (ensemble) + per-repo mechanisms (single model), validates raw target space (ADR-055). |
 | ADR-011 §Optional Config Keys in `config_meta.py` | Add note to `output_scale` row: *"Positioned under ADR-055 Clause 8 as transitional enforcement. `"natural"` = compliant (model returns raw). `"log"` = transitional non-compliance (model does not undo transforms internally). Once all models comply with ADR-055, `"log"` becomes an invalid value."* |
@@ -213,7 +213,7 @@ The prefixes remain useful as **identity** markers (the `lr_` in `lr_ged_sb` is 
 - [ADR-003: Authority of Declarations over Inference](003_authority_of_declarations_over_inference.md) — The governing principle. Scale is declared in config, not inferred from column names.
 - [ADR-042: PredictionFrame Adoption](042_prediction_frame_adoption.md) — PredictionFrame has no column names and no scale metadata. The structural forcing function.
 - [CIC: ForecastingModelManager](../CICs/ForecastingModelManager.md) — Governs return type/format; this ADR adds return scale.
-- [CIC: DatasetTransformationModule](../CICs/DatasetTransformationModule.md) — The `lr_`/`ln_`/`lx_` prefix + in-memory history machinery. Documents silent-corruption modes.
+- CIC: DatasetTransformationModule *(CIC removed with the module, #183; see git history)* — The `lr_`/`ln_`/`lx_` prefix + in-memory history machinery. Documents silent-corruption modes.
 - [CIC: PredictionFrame](../CICs/PredictionFrame.md) — Column-name-free, scale-metadata-free transport.
 - Plans: `plans/2026-03-15_prediction_frame_two_track_status.md` Item 3; `plans/2026-06-01_pfe_production_roadmap.md` §7 / risk C-140.
 - Investigation: views-models #111 (frozen artifact audit); GitHub #174 (this ADR's story issue).

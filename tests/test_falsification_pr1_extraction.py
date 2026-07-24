@@ -30,6 +30,7 @@ class TestF1_TestImportBypassesShim:
     file to the PR plan's "Files Changed" table with an import update.
     """
 
+    @pytest.mark.skip(reason="RETIRED (#183, 2026-07-24): the audited artifact (test_transformations.py shim-bypass import) was deleted with the shim; the extraction era is closed (ADR-054 update block).")
     def test_test_file_uses_package_import_not_file_import(self):
         """
         test_transformations.py must import via the package path (covered
@@ -89,6 +90,7 @@ class TestF2_PrivateAttributeCoupling:
     or a CIC), or add public accessors to _ViewsDataset.
     """
 
+    @pytest.mark.skip(reason="RETIRED (#183, 2026-07-24): transformations.py no longer exists anywhere (upstream deleted it, their #119; shim removed here) — the probe's subject is gone. The private-attribute coupling concern lives on as register C-135.")
     def test_pr_plan_acknowledges_private_attr_coupling(self):
         """
         PR 1 plan must acknowledge that transformations.py accesses

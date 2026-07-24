@@ -177,3 +177,20 @@ All 11 extraction PRs merged into `integration/views-reporting-extraction`.
 - **ADR-053:** Eval-path Track B Retirement — Track B data sources consumed by report templates
 - **Investigation:** `reports/views_reporting_extraction/architectural_misplacement_investigation.md`
 - **PR Plans:** `reports/views_reporting_extraction/extraction_pr_plans.md`
+
+## Update — transformations shim removed (2026-07-24, #183)
+
+views-reporting deleted `DatasetTransformationModule` entirely (their #119,
+2026-06-22), which turned this repo's `modules/transformations/` re-export shim
+from a bridge into a guaranteed `ImportError` (its remedy — "install
+views-reporting" — could no longer work). Cross-repo qualification (recorded on
+views-platform/views-reporting#126, 2026-07-24): org-wide code search found no
+external code importer of the symbol or path (views-stepshifter references it
+in documentation only), and the last published pipeline-core (2.3.0,
+2026-05-18) predates the extraction — published consumers still carry the full
+legacy module, so removal from development cannot break them. The shim, its
+orphaned test file, and the DatasetTransformationModule CIC were removed in
+#183. This is the first of the ADR-054 shims to be retired; the per-shim
+removal policy for the remaining set is recorded via #184. Note: `main` still
+carries the pre-extraction legacy module — reconciled at the next publish, not
+by this change.

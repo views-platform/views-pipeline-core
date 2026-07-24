@@ -30,7 +30,7 @@ Layer 2: Validators (Sniffers), File I/O
 
 Layer 3: Domain Logic Modules
          modules/dataloaders/
-         modules/statistics/, modules/transformations/,
+         modules/statistics/,
          modules/reconciliation/, modules/reports/,
          modules/mapping/, modules/visualizations/
            (above 6 extracted to views-reporting, ADR-054;

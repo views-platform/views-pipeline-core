@@ -53,7 +53,6 @@ Files must be located in directories that match their **functional category** (A
 | `modules/dataloaders/` | Data Loading | VIEWSER data fetching, partition splitting, drift detection |
 | `modules/reconciliation/` | Aggregation | Hierarchical forecast reconciliation |
 | `modules/statistics/` | Analysis | MAP, HDI, posterior distributions |
-| `modules/transformations/` | Transformations | Data transforms with undo |
 | `modules/reports/` | Reporting | HTML report generation |
 | `modules/mapping/` | Reporting | Geographic visualization |
 | `modules/visualizations/` | Reporting | Distribution and historical plots |

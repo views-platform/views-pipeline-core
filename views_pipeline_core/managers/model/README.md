@@ -315,7 +315,6 @@ See **ADR-038** (`documentation/ADRs/038_model_actuals_preparation_hook.md`) for
 - Configuration merging: `ConfigurationManager`
 - Data ingestion: `ViewsDataLoader`
 - Validation: `validate_prediction_dataframe`
-- Transformation handling: `DatasetTransformationModule`
 - Metrics: `NativeEvaluator` (external dependency from `views-evaluation`)
 - Alerting & artifacts: `WandBModule`
 - ADR coverage: evaluation scope, artifact naming, reporting templates (internal repo docs)
