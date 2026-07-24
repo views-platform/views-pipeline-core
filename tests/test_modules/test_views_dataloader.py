@@ -492,3 +492,10 @@ class TestDtypeGuarantee:
                 f"Column '{col}' in sample fixture is {sample_dataframe[col].dtype}, "
                 f"expected float64."
             )
+
+
+class TestCachedFramePath:
+    """#287: the frame-cache path handle exists on the loader, unset by default."""
+
+    def test_cached_frame_path_none_until_frame_path_runs(self, data_loader):
+        assert data_loader.cached_frame_path is None

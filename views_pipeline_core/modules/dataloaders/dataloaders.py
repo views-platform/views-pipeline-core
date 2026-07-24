@@ -793,6 +793,9 @@ class ViewsDataLoader:
         self.month_first, self.month_last = None, None
         self.steps = steps
         self._cached_data_path = None
+        # Set by the FeatureFrame path when it materializes its directory cache
+        # (#287/#289); mirrors _cached_data_path for the pandas parquet cache.
+        self._cached_frame_path = None
 
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -800,6 +803,15 @@ class ViewsDataLoader:
     @property
     def cached_data_path(self) -> Optional[Path]:
         return self._cached_data_path
+
+    @property
+    def cached_frame_path(self) -> Optional[Path]:
+        """Path of the FeatureFrame directory cache (None until the frame path runs).
+
+        Engines must consume this attribute rather than rebuilding the cache
+        name (C-59 lesson: five hardcoded cache-name sites across three repos).
+        """
+        return self._cached_frame_path
 
     def _get_partition_dict(self, steps) -> Dict:
         """Thin backward-compat wrapper over fetch_context.resolve_default_partition_dict.

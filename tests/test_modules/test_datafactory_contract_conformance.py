@@ -33,11 +33,13 @@ CONTRACT_PATH = FIXTURE_DIR / "contract.json"
 # member meanings never change; rename/removal = MAJOR, addition = MINOR).
 SUPPORTED_CONTRACT_MAJOR = "1"
 
-# Pinned fixture content, from the upstream fixture README (2 months x 3 PGM cells
-# x 2 features x 1 sample).
-EXPECTED_TIME = [541, 541, 541, 542, 542, 542]
-EXPECTED_UNIT = [149426, 150146, 150866, 149426, 150146, 150866]
-EXPECTED_FEATURES = ["ged_sb_best", "acled_fatalities"]
+# Pinned fixture content: the shared canon lives in contract_canon.py (one
+# source for this suite and test_frame_cache.py); shape/values stay local here.
+from contract_canon import CONTRACT_CANON  # noqa: E402
+
+EXPECTED_TIME = CONTRACT_CANON["time"]
+EXPECTED_UNIT = CONTRACT_CANON["unit"]
+EXPECTED_FEATURES = CONTRACT_CANON["features"]
 EXPECTED_SHAPE = (6, 2, 1)
 EXPECTED_VALUES_FLAT = [
     1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0, 5.0, 50.0, 6.0, 60.0,
