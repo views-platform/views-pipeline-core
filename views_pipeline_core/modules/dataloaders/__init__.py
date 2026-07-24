@@ -18,7 +18,7 @@ _LAZY_EXPORTS = {
     "ViewsDataLoader": "dataloaders",
     "UpdateViewser": "dataloaders",
 }
-_LAZY_SUBMODULES = {"dataloaders", "fetch_context", "frame_cache"}
+_LAZY_SUBMODULES = {"dataloaders", "fetch_context", "feature_frame_path", "frame_cache"}
 
 __all__ = sorted(_LAZY_EXPORTS)
 
