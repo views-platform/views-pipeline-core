@@ -11,8 +11,12 @@ from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.constants import CACHE_FILENAME_TEMPLATE
 from views_pipeline_core.data.model_path import ModelPathManager
-from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer, _PARTITION_TRAIN, _PARTITION_TEST
-from ingester3.ViewsMonth import ViewsMonth
+from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
+from views_pipeline_core.modules.dataloaders.fetch_context import (
+    FetchContext,
+    resolve_default_partition_dict,
+    resolve_month_range,
+)
 
 import views_transformation_library.views_2 as views2
 import views_transformation_library.missing as missing
@@ -798,81 +802,14 @@ class ViewsDataLoader:
         return self._cached_data_path
 
     def _get_partition_dict(self, steps) -> Dict:
+        """Thin backward-compat wrapper over fetch_context.resolve_default_partition_dict.
+
+        Reads self.partition (callers/tests set it first). get_data() itself no
+        longer calls this — it resolves via _resolve_fetch_context (#286). The
+        partition definitions and the config_partitions.py warning live on the
+        pure resolver; see fetch_context.py for the authoritative docs.
         """
-        Generate default partition dictionary for data splitting.
-
-        Creates standard time ranges for calibration, validation, and
-        forecasting partitions. Uses fixed historical ranges for
-        calibration/validation and dynamic ranges for forecasting.
-
-        Internal Use:
-            Called by get_data() when partition_dict not provided.
-
-        Args:
-            steps: Forecast horizon in months for forecasting partition.
-                Determines how far into future the test range extends.
-
-        Returns:
-            Dictionary with train/test ranges for requested partition:
-                {
-                    'train': (start_month_id, end_month_id),
-                    'test': (start_month_id, end_month_id)
-                }
-
-        Partition Definitions:
-            calibration:
-                Train: 121-396 (1990-01 to 2012-12)
-                Test: 397-444 (2013-01 to 2015-12)
-
-            validation:
-                Train: 121-444 (1990-01 to 2015-12)
-                Test: 445-492 (2016-01 to 2018-12)
-
-            forecasting:
-                Train: 121 to (current_month - 2)
-                Test: (current_month - 1) to (current_month + steps)
-
-        Example:
-            >>> # Current month is 530 (2024-02)
-            >>> part_dict = loader._get_partition_dict(steps=36)
-            >>> print(part_dict)
-            {
-                'train': (121, 528),
-                'test': (529, 565)
-            }
-
-        Raises:
-            ValueError: If partition not in ('calibration', 'validation', 'forecasting')
-
-        Note:
-            - Month IDs are months since 1980-01
-            - Forecasting uses ViewsMonth.now() for current time
-            - Warns about using default instead of config file
-        """
-        logger.warning("Did not use config_partitions.py, using default partition dictionary instead...")
-        match self.partition:
-            case "calibration":
-                return {
-                    "train": (121, 396),
-                    "test": (397, 444),
-                    }  # calib_partitioner_dict - (01/01/1990 - 12/31/2012) : (01/01/2013 - 31/12/2015)
-            case "validation":
-                return {
-                    "train": (121, 444), 
-                    "test": (445, 492)
-                    }
-            case "forecasting":
-                month_last = (
-                    ViewsMonth.now().id - 1
-                )  # minus 1 because the current month is not yet available. Verified but can be tested by changing this and running the check_data notebook.
-                return {
-                    "train": (121, month_last),
-                    "test": (month_last + 1, month_last + 1 + steps),
-                }  
-            case _:
-                raise ValueError(
-                    'partition should be either "calibration", "validation" or "forecasting"'
-                )
+        return resolve_default_partition_dict(self.partition, steps)
 
     def _get_viewser_update_config(self, queryset_base: Queryset) -> tuple[int, str]:
         """
@@ -1370,65 +1307,58 @@ class ViewsDataLoader:
         return _normalize_grid_index(df), alerts
 
     def _get_month_range(self) -> tuple[int, int]:
+        """Thin backward-compat wrapper over fetch_context.resolve_month_range.
+
+        Reads self.partition/self.partition_dict/self.override_month (callers/
+        tests set them first). get_data() itself no longer calls this — it
+        resolves via _resolve_fetch_context (#286); see fetch_context.py for the
+        authoritative range semantics.
         """
-        Determine month range based on partition type.
+        return resolve_month_range(
+            self.partition, self.partition_dict, self.override_month
+        )
 
-        Calculates start and end month IDs from partition configuration,
-        with optional override for forecasting runs.
+    def _resolve_fetch_context(
+        self, partition: str, override_month: Optional[int]
+    ) -> FetchContext:
+        """Resolve everything a fetch needs, without mutating loader state.
 
-        Internal Use:
-            Called by get_data() to set month_first and month_last.
-
-        Returns:
-            Tuple of (month_first, month_last):
-                - month_first: Start month ID from partition train range
-                - month_last: End month ID based on partition type:
-                    - calibration/validation: End of test range
-                    - forecasting: End of train range (or override)
-
-        Example:
-            >>> loader.partition = 'calibration'
-            >>> loader.partition_dict = {
-            ...     'train': (121, 396),
-            ...     'test': (397, 444)
-            ... }
-            >>> first, last = loader._get_month_range()
-            >>> print(first, last)
-            121 444
-
-            >>> # Forecasting with override
-            >>> loader.partition = 'forecasting'
-            >>> loader.override_month = 530
-            >>> first, last = loader._get_month_range()
-            WARNING: Overriding end month in forecasting partition to 530
-            >>> print(first, last)
-            121 530
-
-        Raises:
-            ValueError: If partition not in ('calibration', 'validation', 'forecasting')
-
-        Note:
-            - Forecasting range includes only training data (test is future)
-            - Override only applies to forecasting partition
-            - Logs warning when override is used
+        Pure with respect to the loader: reads current attributes as fallbacks
+        (preserving get_data's legacy resolution rules) but writes nothing.
+        get_data() assigns the result to the legacy attributes; the FeatureFrame
+        path (#289) consumes the returned value directly.
         """
-        month_first = self.partition_dict[_PARTITION_TRAIN][0]
-
-        if self.partition == "forecasting":
-            month_last = self.partition_dict[_PARTITION_TRAIN][1]
-        elif self.partition in ["calibration", "validation"]:
-            month_last = self.partition_dict[_PARTITION_TEST][1]
+        partition_dict = (
+            resolve_default_partition_dict(partition, self.steps)
+            if self.partition_dict is None
+            else self.partition_dict.get(partition, None)
+        )
+        drift_config_dict = (
+            drift_detection.drift_detection_partition_dict[partition]
+            if self.drift_config_dict is None
+            else self.drift_config_dict
+        )
+        if self.month_first is None or self.month_last is None:
+            month_first, month_last = resolve_month_range(
+                partition, partition_dict, override_month
+            )
         else:
-            raise ValueError(
-                'partition should be either "calibration", "validation" or "forecasting"'
-            )
-        if self.partition == "forecasting" and self.override_month is not None:
-            month_last = self.override_month
-            logger.warning(
-                f"Overriding end month in forecasting partition to {month_last}\n"
-            )
+            month_first, month_last = self.month_first, self.month_last
 
-        return month_first, month_last
+        source = self._detect_data_source()
+        df_cache_filename = CACHE_FILENAME_TEMPLATE.format(
+            partition=partition, source=source, ext=PipelineConfig.dataframe_format,
+        )
+        return FetchContext(
+            partition=partition,
+            partition_dict=partition_dict,
+            drift_config_dict=drift_config_dict,
+            override_month=override_month,
+            month_first=month_first,
+            month_last=month_last,
+            source=source,
+            df_cache_filename=df_cache_filename,
+        )
 
 
     # @staticmethod
@@ -1541,21 +1471,17 @@ class ViewsDataLoader:
             - Drift config from drift_detection module
             - Alerts logged even if no drift detected
         """
-        self.partition = partition #if self.partition is None else self.partition
-        self.partition_dict = self._get_partition_dict(steps=self.steps) if self.partition_dict is None else self.partition_dict.get(partition, None)
-        self.drift_config_dict = drift_detection.drift_detection_partition_dict[
-            partition
-        ] if self.drift_config_dict is None else self.drift_config_dict
-        self.override_month = override_month if self.override_month is None else override_month
-        if self.month_first is None or self.month_last is None:
-            self.month_first, self.month_last = self._get_month_range()
+        # Resolution is value-based (#286); the assignments below keep the legacy
+        # attribute contract for every existing reader of loader state.
+        ctx = self._resolve_fetch_context(partition, override_month)
+        self.partition = ctx.partition
+        self.partition_dict = ctx.partition_dict
+        self.drift_config_dict = ctx.drift_config_dict
+        self.override_month = ctx.override_month
+        self.month_first, self.month_last = ctx.month_first, ctx.month_last
 
-        source = self._detect_data_source()
-        cache_label = source
-        filename = CACHE_FILENAME_TEMPLATE.format(
-            partition=self.partition, source=cache_label, ext=PipelineConfig.dataframe_format,
-        )
-        path_cached_df = self._path_raw / filename
+        source = ctx.source
+        path_cached_df = self._path_raw / ctx.df_cache_filename
         self._cached_data_path = path_cached_df
         alerts = None
 

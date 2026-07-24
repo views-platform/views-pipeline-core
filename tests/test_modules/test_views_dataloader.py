@@ -169,7 +169,9 @@ class TestGetPartitionDict:
         assert part_dict["train"] == (121, 444)
         assert part_dict["test"] == (445, 492)
         
-    @patch("views_pipeline_core.modules.dataloaders.dataloaders.ViewsMonth")
+    # Patch target follows the moved import (#286): the forecasting branch now
+    # lazy-imports ViewsMonth inside fetch_context.resolve_default_partition_dict.
+    @patch("ingester3.ViewsMonth.ViewsMonth")
     def test_forecasting_partition(self, mock_views_month, data_loader):
         """Test forecasting partition dict"""
         # Mock current month
