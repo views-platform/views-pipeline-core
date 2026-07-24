@@ -6,6 +6,24 @@ from views_evaluation.evaluation.evaluation_frame import EvaluationFrame
 
 logger = logging.getLogger(__name__)
 
+
+def _identifier_has_nan(values) -> bool:
+    """NaN check for identifier arrays without pandas (#301).
+
+    Integer arrays cannot hold NaN; float-castable arrays are checked with
+    np.isnan; anything non-numeric is treated as invalid (as bad as NaN —
+    the subsequent int64 cast could only produce garbage).
+    """
+    arr = np.asarray(values)
+    if arr.dtype.kind in ("i", "u"):
+        return False
+    if arr.dtype.kind in ("M", "m"):  # datetime64/timedelta64: NaT ≠ nan after cast
+        return bool(np.any(np.isnat(arr)))
+    try:
+        return bool(np.any(np.isnan(arr.astype(np.float64))))
+    except (TypeError, ValueError):
+        return True
+
 class EvaluationAdapter:
     """
     Adapter to convert Pandas DataFrames into the native EvaluationFrame.
@@ -298,6 +316,10 @@ class EvaluationAdapter:
         EvaluationFrame. Mirrors from_dataframes() exactly but uses the dense
         PredictionFrame arrays directly, bypassing list-in-cell explosion.
 
+        The pandas entry point: reduces the actuals DataFrame to numpy arrays and
+        delegates to the shared numpy core (also exposed as from_actual_arrays for
+        the frame-native path, #301).
+
         Args:
             actual: DataFrame with MultiIndex [time, unit]
             predictions: List of PredictionFrames, one per rolling-origin sequence.
@@ -310,6 +332,82 @@ class EvaluationAdapter:
         if target not in actual.columns:
             raise KeyError(f"Target column '{target}' not found in actuals.")
 
+        # ── Reduce pandas to numpy once; everything downstream is pandas-free ──
+        act_time = actual.index.get_level_values(0).values.astype(np.int64)
+        act_unit = actual.index.get_level_values(1).values.astype(np.int64)
+        act_y_true_vals = actual[target].values
+
+        # Coerce object-dtype actuals once (legacy list-in-cell support — pandas-side only)
+        if act_y_true_vals.dtype == object:
+            act_y_true_vals = np.array([
+                x[0] if isinstance(x, (list, np.ndarray)) and len(x) > 0 else x
+                for x in act_y_true_vals
+            ], dtype=np.float64)
+
+        return EvaluationAdapter._from_actual_arrays(
+            act_time, act_unit, act_y_true_vals, predictions, target, step_mapping
+        )
+
+    @staticmethod
+    def from_actual_arrays(
+        act_time: np.ndarray,
+        act_unit: np.ndarray,
+        act_values: np.ndarray,
+        predictions: List[Any],  # List[PredictionFrame]
+        target: str,
+        step_mapping: Optional[List[Dict[int, int]]] = None,
+    ) -> EvaluationFrame:
+        """
+        Frame-native entry (#301, epic #300): identical semantics and guards as
+        from_prediction_frames, taking the actuals as three aligned numpy arrays
+        (time ids, unit ids, values) instead of a pandas DataFrame — the exact
+        representation the pandas entry reduces to internally.
+
+        ``target`` is metadata only here (stamped on the EvaluationFrame); the
+        caller has already selected the target's values.
+        """
+        act_time_raw = np.asarray(act_time)
+        act_unit_raw = np.asarray(act_unit)
+        for name, raw in (("time", act_time_raw), ("unit", act_unit_raw)):
+            if raw.dtype.kind == "f" and not np.all(raw == np.floor(raw)):
+                raise ValueError(
+                    f"Actual '{name}' ids contain non-integer values — an int64 "
+                    f"cast would silently truncate them."
+                )
+        act_time = act_time_raw.astype(np.int64)
+        act_unit = act_unit_raw.astype(np.int64)
+        act_values = np.asarray(act_values)
+        if act_values.dtype == object:
+            raise ValueError(
+                "Object-dtype actuals are not supported by the array entry — "
+                "coerce to a numeric array first (the pandas entry's legacy "
+                "list-in-cell coercion is deliberately pandas-side only)."
+            )
+        if not (act_time.ndim == act_unit.ndim == act_values.ndim == 1):
+            raise ValueError(
+                "Actuals arrays must be 1-D (time ids, unit ids, values)."
+            )
+        if not (len(act_time) == len(act_unit) == len(act_values)):
+            raise ValueError(
+                f"Actuals arrays must be aligned: len(time)={len(act_time)}, "
+                f"len(unit)={len(act_unit)}, len(values)={len(act_values)}."
+            )
+        if len(act_time) == 0:
+            raise ValueError("Actuals arrays are empty — nothing to evaluate against.")
+        return EvaluationAdapter._from_actual_arrays(
+            act_time, act_unit, act_values, predictions, target, step_mapping
+        )
+
+    @staticmethod
+    def _from_actual_arrays(
+        act_time: np.ndarray,
+        act_unit: np.ndarray,
+        act_y_true_vals: np.ndarray,
+        predictions: List[Any],
+        target: str,
+        step_mapping: Optional[List[Dict[int, int]]],
+    ) -> EvaluationFrame:
+        """Shared numpy core for both entries. All guards live here."""
         if not predictions:
             raise ValueError("No objects to concatenate")
 
@@ -320,18 +418,6 @@ class EvaluationAdapter:
                 f"of prediction sequences ({len(predictions)}). Each sequence requires "
                 f"its own explicit origin-anchored mapping."
             )
-
-        # ── Pre-compute actual-index lookup (once, numpy — no pandas objects in loop) ──
-        act_time = actual.index.get_level_values(0).values.astype(np.int64)
-        act_unit = actual.index.get_level_values(1).values.astype(np.int64)
-        act_y_true_vals = actual[target].values
-
-        # Coerce object-dtype actuals once (legacy list-in-cell support)
-        if act_y_true_vals.dtype == object:
-            act_y_true_vals = np.array([
-                x[0] if isinstance(x, (list, np.ndarray)) and len(x) > 0 else x
-                for x in act_y_true_vals
-            ], dtype=np.float64)
 
         # Compound key: time × scale + unit  (unique as long as unit_id < scale)
         _scale = int(act_unit.max()) + 1
@@ -363,12 +449,13 @@ class EvaluationAdapter:
                         f"model's actual forecast origin for this sequence."
                     )
 
-            # NaN check before int64 cast (NaN silently becomes a garbage int64 value)
+            # NaN check before int64 cast (NaN silently becomes a garbage int64 value).
+            # numpy-based (#301): the shared core must not require pandas.
             pf_time_raw = pf.identifiers['time']
             pf_unit_raw = pf.identifiers['unit']
-            if np.any(pd.isna(pf_time_raw)):
+            if _identifier_has_nan(pf_time_raw):
                 raise ValueError(f"NaN detected in 'time' identifiers of sequence {i}.")
-            if np.any(pd.isna(pf_unit_raw)):
+            if _identifier_has_nan(pf_unit_raw):
                 raise ValueError(f"NaN detected in 'unit' identifiers of sequence {i}.")
 
             pf_time = pf_time_raw.astype(np.int64)
