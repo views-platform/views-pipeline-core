@@ -6,6 +6,8 @@ sufficient for a developer to execute the full extraction effort.
 """
 from pathlib import Path
 
+import pytest
+
 REPORTS_DIR = Path(__file__).resolve().parents[1] / "reports" / "views_reporting_extraction"
 INVESTIGATION = REPORTS_DIR / "architectural_misplacement_investigation.md"
 PR_PLANS = REPORTS_DIR / "extraction_pr_plans.md"
@@ -175,6 +177,7 @@ class TestF6TestFileMigrationInventory:
         "from views_pipeline_core.modules.transformations",
     ]
 
+    @pytest.mark.skip(reason="RETIRED (#183, 2026-07-24): the extraction is executed and finalized (ADR-054 update block); planning-doc sufficiency is a historical audit and its inventory shrank when the shim-era test file was deleted.")
     def test_affected_test_files_listed(self):
         affected_tests = []
         for py in TESTS_DIR.rglob("*.py"):
