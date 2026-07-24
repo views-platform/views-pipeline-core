@@ -23,6 +23,7 @@ from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.modules.dataloaders.datafactory_contract import (
+    DATA_FORMAT_DATAFRAME,
     DATA_FORMAT_FEATURE_FRAME,
     declared_data_format,
 )
@@ -1168,6 +1169,9 @@ class ForecastingModelManager(ModelManager):
         # to diverge between the reads, the loader's fail-loud gates (dict
         # check, frame-capable source check) catch the contradiction loudly.
         data_format = declared_data_format(self._model_path.get_queryset())
+        # Remembered for the evaluation stage (#302): actuals sourcing and
+        # legacy-egress gating dispatch on the same declaration.
+        self._data_format = data_format
 
         with self._wandb_module.initialize_run(
             project=self._project,
@@ -1766,6 +1770,10 @@ class ForecastingModelManager(ModelManager):
             run_type=self.args.run_type,
             data_loader=getattr(self, '_data_loader', None),
             prepare_actuals_df=self.prepare_actuals_df,
+            # #302: frame-fed models evaluate against the frame cache; defaults
+            # keep every dataframe-path and ensemble construction unchanged.
+            data_format=getattr(self, "_data_format", DATA_FORMAT_DATAFRAME),
+            frame_cache_path=getattr(self, "_cached_frame_path", None),
         )
         self._evaluation_stage.evaluate(df_predictions, context, ensemble=ensemble)
 

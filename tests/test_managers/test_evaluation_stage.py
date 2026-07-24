@@ -568,3 +568,112 @@ class TestMetricFrameEmit:
         stage._publish_results(report, "lr_sb", ctx)
 
         report.to_metric_frame.assert_not_called()
+
+
+# ── #302: frame-native actuals (epic #300) ───────────────────────────────────
+
+
+class TestFrameNativeActuals:
+    """Frame-fed evaluate: actuals from the frame cache, zero pandas touches.
+
+    The pandas-free proof (promoted falsify H4): read_dataframe is patched to
+    explode and prepare_actuals_df is a tripwire — a completed evaluate proves
+    the frame path never touches pandas actuals.
+    """
+
+    @staticmethod
+    def _cache_frame(tmp_path, features=("lr_sb",), months=(445, 446), n_samples=1):
+        import numpy as np
+        from views_frames import FeatureFrame, SpatialLevel, SpatioTemporalIndex
+
+        from views_pipeline_core.modules.dataloaders.frame_cache import save_frame_cache
+
+        n_units = 3
+        time = np.repeat(np.asarray(months, dtype=np.int64), n_units)
+        unit = np.tile(np.arange(1, n_units + 1, dtype=np.int64), len(months))
+        frame = FeatureFrame(
+            y_features=np.arange(
+                len(time) * len(features) * n_samples, dtype=np.float32
+            ).reshape(len(time), len(features), n_samples),
+            index=SpatioTemporalIndex(time=time, unit=unit, level=SpatialLevel.PGM),
+            feature_names=list(features),
+        )
+        cache = tmp_path / "calibration_datafactory_ff"
+        save_frame_cache(frame, cache)
+        return cache
+
+    @staticmethod
+    def _pf(months=(445, 446), n_units=3, n_samples=4):
+        import numpy as np
+        from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
+
+        time = np.repeat(np.asarray(months, dtype=np.int64), n_units)
+        unit = np.tile(np.arange(1, n_units + 1, dtype=np.int64), len(months))
+        return PredictionFrame(
+            np.ones((len(time), n_samples), dtype=np.float32),
+            SpatioTemporalIndex(time, unit, SpatialLevel.PGM),
+        )
+
+    def _frame_context(self, cache, **overrides):
+        tripwire = MagicMock(
+            side_effect=AssertionError("prepare_actuals_df must not run on the frame path")
+        )
+        defaults = dict(
+            prediction_format="prediction_frame",
+            data_format="feature_frame",
+            frame_cache_path=cache,
+            prepare_actuals_df=tripwire,
+        )
+        defaults.update(overrides)
+        return _make_context(**defaults), tripwire
+
+    def test_frame_evaluate_is_pandas_free(self, tmp_path):
+        cache = self._cache_frame(tmp_path)
+        context, tripwire = self._frame_context(cache)
+        stage = _make_stage()
+        predictions = {"lr_sb": [self._pf()]}
+
+        with patch(
+            "views_pipeline_core.files.utils.read_dataframe",
+            side_effect=AssertionError("read_dataframe must not run on the frame path"),
+        ):
+            stage.evaluate(predictions, context, ensemble=False)
+
+        tripwire.assert_not_called()
+        stage._wandb_module.log_evaluation_results.assert_called_once()
+        stage._io.save_evaluations.assert_not_called()  # legacy egress gated off
+
+    def test_frame_requires_prediction_frame_format(self, tmp_path):
+        cache = self._cache_frame(tmp_path)
+        context, _ = self._frame_context(cache, prediction_format="dataframe")
+        with pytest.raises(ValueError, match="unsupported combination"):
+            _make_stage().evaluate({}, context, ensemble=False)
+
+    def test_frame_ensemble_unsupported(self, tmp_path):
+        cache = self._cache_frame(tmp_path)
+        context, _ = self._frame_context(cache)
+        with pytest.raises(ValueError, match="ensemble constituents"):
+            _make_stage().evaluate({}, context, ensemble=True)
+
+    def test_missing_frame_cache_path_fails_loud(self):
+        context, _ = self._frame_context(None)
+        with pytest.raises(ValueError, match="no frame_cache_path"):
+            _make_stage().evaluate({}, context, ensemble=False)
+
+    def test_missing_target_fails_loud(self, tmp_path):
+        cache = self._cache_frame(tmp_path, features=("other_feature",))
+        context, _ = self._frame_context(cache)
+        with pytest.raises(ValueError, match=r"Targets \['lr_sb'\] not present"):
+            _make_stage().evaluate({"lr_sb": [self._pf()]}, context, ensemble=False)
+
+    def test_multi_sample_actuals_fail_loud(self, tmp_path):
+        cache = self._cache_frame(tmp_path, n_samples=3)
+        context, _ = self._frame_context(cache)
+        with pytest.raises(ValueError, match="sample_count=3"):
+            _make_stage().evaluate({"lr_sb": [self._pf()]}, context, ensemble=False)
+
+    def test_dataframe_default_still_uses_pandas_actuals(self):
+        """The legacy path is untouched: default context still calls read_dataframe."""
+        context = _make_context()
+        assert context.data_format == "dataframe"
+        assert context.frame_cache_path is None
