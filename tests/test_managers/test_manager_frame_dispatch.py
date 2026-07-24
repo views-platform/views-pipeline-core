@@ -147,3 +147,13 @@ def test_cached_frame_path_getter_contract():
         m._get_cached_frame_path()
     m._cached_frame_path = "/tmp/x/calibration_datafactory_ff"
     assert m._get_cached_frame_path() == "/tmp/x/calibration_datafactory_ff"
+
+
+def test_dispatch_is_greppable_at_the_choke_point():
+    """Promoted from the epic falsify stub (P2, #285): the df-vs-ff decision
+    must stay explicit and visible in _execute_data_fetching's source."""
+    import inspect
+
+    src = inspect.getsource(ForecastingModelManager._execute_data_fetching)
+    assert "get_feature_frame" in src
+    assert "declared_data_format" in src

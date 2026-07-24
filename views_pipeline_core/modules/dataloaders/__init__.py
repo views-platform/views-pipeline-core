@@ -5,6 +5,11 @@ so import-light submodules (fetch_context, frame_cache, and the FeatureFrame
 path, #289) can be imported without paying for the heavy legacy loader stack
 (viewser, ingester3, transformation library) that ``dataloaders`` pulls in at
 module level (#286).
+
+END-STATE (epic #285, condition 5): ``get_feature_frame`` is the SUCCESSOR of
+the pandas input path, not a sibling — ``get_data`` (and the pandas cache it
+writes) deprecates at Epic C close-out (#267), once the engines consume frames
+(#266, views-hydranet#157). New input-side work targets the frame path.
 """
 from typing import TYPE_CHECKING
 
