@@ -55,8 +55,10 @@ SUPPORTED_OUTPUT_SCALES = frozenset({"log", "natural"})
 # Fallback stride for ensembles (which omit rolling_origin_stride)
 _FALLBACK_STRIDE = 1
 
-# Run-type identifiers
-FORECASTING_RUN_TYPE = "forecasting"   # used in sniff_all() guard
+# Run-type identifiers — canonical spelling lives in data/constants.py (#286).
+from views_pipeline_core.data.constants import (  # noqa: E402
+    RUN_TYPE_FORECASTING as FORECASTING_RUN_TYPE,  # used in sniff_all() guard
+)
 
 _VALID_TARGETS = frozenset({"model", "ensemble"})
 

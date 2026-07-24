@@ -32,12 +32,17 @@ def _canonical_index_name(name: str) -> str:
     """Map a legacy grid-entity name to its canonical form; pass other names through."""
     return "priogrid_id" if name in _GRID_ID_ALIASES else name
 
-# Partition dict structural keys — internal; not part of the public API.
-_PARTITION_TRAIN = "train"
-_PARTITION_TEST  = "test"
+# Partition dict structural keys and run-type sets — legacy aliases; the
+# canonical (stdlib-pure) home is data/constants.py so import-light modules can
+# use them (#286).
+from views_pipeline_core.data.constants import (  # noqa: E402
+    PARTITION_TRAIN as _PARTITION_TRAIN,
+    PARTITION_TEST as _PARTITION_TEST,
+    TRAINING_RUN_TYPES as _TRAINING_RUN_TYPES,
+)
 
-# Run types that use train+test bounds (as opposed to forecasting, which is train-only).
-_TRAINING_RUN_TYPES = frozenset({"calibration", "validation"})
+# _TRAINING_RUN_TYPES (train+test bounds, vs forecasting's train-only) is
+# aliased from data/constants.py above.
 
 
 def _check_multiindex(df: pd.DataFrame, level: str, source: str) -> None:
