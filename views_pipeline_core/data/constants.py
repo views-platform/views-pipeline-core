@@ -9,6 +9,12 @@ CACHE_SOURCES = frozenset({"viewser", "datafactory", "synthetic"})
 
 CACHE_FILENAME_TEMPLATE = "{partition}_{source}_df{ext}"
 
+#: FeatureFrame cache artifact: a DIRECTORY (views-frames owns the byte layout via
+#: FeatureFrame.save/load — see tests/fixtures/feature_frame_contract/), sibling of
+#: the single-file pandas cache above. Engines must consume the loader's exposed
+#: ``cached_frame_path`` attribute, never rebuild this name (C-59 lesson). (#287)
+FRAME_CACHE_DIRNAME_TEMPLATE = "{partition}_{source}_ff"
+
 # Partition dict structural keys: {"train": (first, last), "test": (first, last)}.
 # Canonical home (stdlib-pure) so light modules can use them without pulling
 # pandas via the sniffers; core_data_sniffer re-exports its legacy aliases.

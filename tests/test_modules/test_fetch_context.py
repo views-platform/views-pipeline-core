@@ -176,19 +176,6 @@ class TestLazyPackageSurface:
         assert "ensure_float64" in vars(d)  # second access bypasses __getattr__
 
 
-def test_fetch_context_module_is_import_light():
+def test_fetch_context_module_is_import_light(assert_module_import_light):
     """The frame path (#289) imports this module; it must not drag pandas in."""
-    import subprocess
-    import sys
-
-    probe = (
-        "import sys; import views_pipeline_core.modules.dataloaders.fetch_context; "
-        "hits = [m for m in ('pandas', 'viewser', 'ingester3') if m in sys.modules]; "
-        "print(','.join(hits) or 'CLEAN')"
-    )
-    out = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
-    )
-    assert out.stdout.strip() == "CLEAN", (
-        f"fetch_context transitively imports heavy modules: {out.stdout.strip()}"
-    )
+    assert_module_import_light("views_pipeline_core.modules.dataloaders.fetch_context")
