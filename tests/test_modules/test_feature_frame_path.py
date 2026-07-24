@@ -228,3 +228,23 @@ def test_feature_frame_path_module_is_import_light(assert_module_import_light):
     assert_module_import_light(
         "views_pipeline_core.modules.dataloaders.feature_frame_path"
     )
+
+
+# ------------------------------------------------- design invariants (promoted)
+
+
+def test_frame_path_public_surface_is_loader_free():
+    """Promoted from the epic falsify stub (P1, #285): no public callable in
+    this module takes a ViewsDataLoader — the loader-free contract is permanent."""
+    import inspect
+
+    from views_pipeline_core.modules.dataloaders import feature_frame_path
+
+    fns = [
+        obj for name, obj in vars(feature_frame_path).items()
+        if callable(obj) and not name.startswith("_")
+    ]
+    assert fns
+    for fn in fns:
+        params = set(inspect.signature(fn).parameters)
+        assert not params & {"self", "loader", "data_loader"}, fn
