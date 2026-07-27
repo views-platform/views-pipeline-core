@@ -1,1 +1,4 @@
-from .aggregator import AggregationModule as AggregationModule, _ModelSpec as _ModelSpec
+from .aggregation import (
+    AggregationModule as AggregationModule,
+    _ModelSpec as _ModelSpec,
+)
