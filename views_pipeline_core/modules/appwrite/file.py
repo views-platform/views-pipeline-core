@@ -2529,7 +2529,24 @@ class AppWriteFileModule:
             
             # Download from remote
             file_bytes = self.storage.get_file_download(bucket_id, file_id)
-            
+            # The Appwrite SDK's Client.call() returns a PARSED DICT (response.json())
+            # for any file served with Content-Type: application/json — e.g. ADR-013
+            # wire *.json manifests — despite get_file_download's `-> bytes` annotation
+            # (#310). Every downstream use here expects raw bytes, so coerce JSON
+            # responses back to bytes. NOTE (byte-fidelity, register C-217): the
+            # re-serialization is compact JSON — NOT byte-identical to the stored
+            # artifact (e.g. the publisher writes manifests indent=2 + newline).
+            # Semantically equivalent for every parser; never byte-compare a JSON
+            # download against its shelf artifact.
+            if isinstance(file_bytes, dict):
+                logger.warning(
+                    "download_file: JSON payload for file_id=%s arrived SDK-parsed; "
+                    "re-serialized to bytes (compact form — not byte-identical to "
+                    "the stored artifact, see #310/C-217).",
+                    file_id,
+                )
+                file_bytes = json.dumps(file_bytes).encode("utf-8")
+
             # Determine filename for caching
             filename = file_metadata.get("name", file_id) if file_metadata else file_id
             cache_path = self.cache_manager._get_cache_path(bucket_id, file_id, filename)
