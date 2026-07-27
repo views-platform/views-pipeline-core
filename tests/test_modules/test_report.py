@@ -136,14 +136,20 @@ class TestAddHtml:
         assert 'visualization-card' in report.content[-1]
 
     def test_add_html_loads_plotly_once(self, report):
-        """Test that Plotly JS is loaded only once."""
-        report.add_html("<div>Plot 1</div>")
+        """Test that the inlined Plotly library is injected only once.
+
+        Injection is content-aware (views-reporting #258): it triggers on the
+        first fragment that actually calls ``Plotly.newPlot``, and later
+        plotly fragments must NOT add a second ~4 MB library copy.
+        """
+        report.add_html("<div>Plot 1</div><script>Plotly.newPlot('a', []);</script>")
         assert report._plotly_js_loaded is True
-        
-        report.add_html("<div>Plot 2</div>")
-        
-        # Should not add another Plotly script
-        plotly_script_count = sum(1 for item in report.content if 'plotly-latest.min.js' in item)
+
+        report.add_html("<div>Plot 2</div><script>Plotly.newPlot('b', []);</script>")
+
+        # "plotly.js v" is the version banner of the inlined library copy —
+        # exactly one per report, regardless of how many figures it carries.
+        plotly_script_count = sum(1 for item in report.content if 'plotly.js v' in item)
         assert plotly_script_count == 1
 
     def test_add_html_with_custom_height(self, report):
@@ -159,11 +165,12 @@ class TestAddHtml:
         assert '<a href="https://example.com"' in report.content[-1]
 
     def test_get_plotly_script(self, report):
-        """Test Plotly script generation."""
+        """Test Plotly script generation: one inlined library, never a CDN link."""
         script = report._get_plotly_script()
-        
-        assert 'plotly-latest.min.js' in script
+
         assert '<script' in script
+        assert 'plotly.js v' in script  # inlined library banner (views-reporting #258)
+        assert 'plotly-latest.min.js' not in script  # the retired CDN reference
 
 
 class TestAddKeyValueList:

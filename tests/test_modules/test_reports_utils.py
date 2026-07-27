@@ -314,12 +314,11 @@ class TestSearchForItemName:
         assert result is None
 
     def test_multiple_matches(self):
-        """Test when multiple matches are found."""
+        """Ambiguous matches fail loud (views-reporting C-116) — picking one
+        of several candidates silently would be a guess, not a lookup."""
         searchspace = ['accuracy_ns_test', 'accuracy_ns_validation']
-        result = search_for_item_name(searchspace, ['accuracy', 'ns'])
-        
-        # Should return first match and print warning
-        assert result in searchspace
+        with pytest.raises(ValueError, match="Ambiguous metric match"):
+            search_for_item_name(searchspace, ['accuracy', 'ns'])
 
     def test_empty_keywords(self):
         """Test with empty keywords list."""

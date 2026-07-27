@@ -165,7 +165,17 @@ fig = analyzer.plot_summary()  # Returns None (return fig is commented out)
 
 ## 10. Test Alignment
 
-Tests live in `tests/test_modules/test_statistics.py` (71 tests across `PosteriorDistributionAnalyzer` and `ForecastReconciler`). Coverage for `PosteriorDistributionAnalyzer` includes:
+> **Update (#316, 2026-07-27):** the pipeline-core suite `tests/test_modules/test_statistics.py`
+> was pruned — the class lives in views-reporting (ADR-054), and coverage
+> responsibility moved with it (views-reporting exercises the analyzer in its
+> own suite, e.g. `tests/test_c01_layer1_specification.py`,
+> `tests/test_c01_thread_safety.py`). Pipeline-core retains only the re-export
+> shim in `views_pipeline_core/modules/statistics/__init__.py`. `ForecastReconciler`
+> was deleted upstream entirely (views-reporting #72/#183; Decision K / #217).
+> The coverage inventory below is preserved as a historical record of the
+> extracted suite.
+
+Tests lived in `tests/test_modules/test_statistics.py` (71 tests across `PosteriorDistributionAnalyzer` and `ForecastReconciler`). Coverage for `PosteriorDistributionAnalyzer` included:
 
 - **`_validate_samples`**: Valid list, valid array, removes NaN, removes Inf, all-invalid raises `ValueError`, empty array raises `ValueError`, mixed valid/invalid.
 - **`_validate_credible_masses`**: Valid values, sorting, invalid zero, invalid one, negative, greater than one, single value.
