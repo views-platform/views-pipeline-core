@@ -70,8 +70,7 @@ def import_datafactory_contract(model_name: str) -> DatafactoryContract:
             f"datafactory_query with the ADR-050 consumer-contract exports "
             f"(views-datafactory >= 1.8.0) is required for model {model_name} "
             f"(source='views-datafactory') but is not installed or too old. "
-            f"Install/upgrade via: pip install 'views-datafactory @ "
-            f"git+https://github.com/views-platform/views-datafactory.git@development'"
+            f'Install/upgrade via: pip install "views-datafactory>=1.9.0"'
         ) from e
     return DatafactoryContract(
         load_dataset, OutputFormat, is_valid_output_format, CONTRACT_VERSION
