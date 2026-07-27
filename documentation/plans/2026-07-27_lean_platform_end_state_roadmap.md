@@ -4,14 +4,16 @@
 **Author:** pipeline-core agent (owner: Simon)
 **Branch:** development
 **Relationship to other documents:** This roadmap is the **owner of the convergence** that
-views-models **ADR-017 §1 "Direction of travel"** describes and explicitly does not decide
+views-models **vm-017 §1 "Direction of travel"** (their `017_source_composition_delivery.md`) describes and explicitly does not decide
 ("owned by the views-frames migration + vpp ADR-013"). It formalizes the retirement promises
 already made by **ADR-042** (DF path is temporary, named removal targets) under **ADR-004**'s
 rule ("No silent legacy retention"), and continues the **"Pure Math Engine" vision**
 (ADR-039, the 2026-02-27 Phase-3 purge roadmap). It supersedes no existing plan; the
 2026-06-01 PFE production roadmap remains authoritative for its own scope (shipping PFE).
 
-**Vocabulary (adopted verbatim from ADR-017 so the two documents read as one system):**
+> **Numbering note:** "vm-017" throughout = **views-models'** source/composition/delivery ADR (their repo, doc 017) (a different repo's ADR — pipeline-core has no ADR 017; spelled vm-017 so the local cross-ADR validator doesn't resolve it here, mirroring vm-017's own "vpp ADR-013" convention).
+
+**Vocabulary (adopted verbatim from vm-017 so the two documents read as one system):**
 the **store** = the legacy `views-forecasts` central store (VPN-only Postgres at PRIO,
 pandas-only door, feeds the public API). The **shelf** = the Appwrite `production_forecasts`
 bucket. Tags: **[LEGACY]** alive-until-retired · **[CURRENT]** the working present ·
@@ -28,7 +30,7 @@ converges on one shape:
 
 > **[TARGET]** FeatureFrame in → frames-native compute → PredictionFrame out → the shelf's
 > contract dialect → contract-reading consumers → one delivery declaration per consumer
-> (ADR-017) → pandas nowhere on any data path, and eventually not installed at all.
+> (vm-017) → pandas nowhere on any data path, and eventually not installed at all.
 
 What was missing was not direction but **ownership**: three demolitions had no issue
 anywhere, and no document stated the dependency order. This roadmap fixes that. It uses
@@ -48,7 +50,7 @@ The platform is *lean* when ALL of the following hold:
 - [ ] The **shelf speaks one dialect** (`type="sampled_forecast_*"`); the legacy
       `type=model/ensemble` documents and the legacy FAO leg are gone (vpp ADR-013 §11.4
       completes).
-- [ ] **Delivery is declared** per ADR-017 (maturity / composition / delivery axes;
+- [ ] **Delivery is declared** per vm-017 (maturity / composition / delivery axes;
       `is_in_production` derived; liveness observing every surface).
 - [ ] The **pandas ecosystem pins are lifted** (register C-112: 8 packages pin
       `pandas <2.0`; empirically pandas 3.0.3 passes 1385/1386 pipeline-core tests).
@@ -71,10 +73,10 @@ G6            Public-API re-point (prio-data/views_api, external) — the store 
               last consumer. MUST land before or with the END of G5 (see §4).
 G7            Store retirement (delete gen-1 io machinery + ViewsForecastsSaver +
               ViewsMetadata + the VPN Postgres estate) + C-112 coordinated pandas unpin
-              + ADR-017 Phases 2–4 land (rename, write-gate, guard re-home).
+              + vm-017 Phases 2–4 land (rename, write-gate, guard re-home).
 ```
 
-G2 and G3/G4 are parallel tracks to G0/G1; G5 needs G4; G7 needs G5+G6. ADR-017's Phase 2
+G2 and G3/G4 are parallel tracks to G0/G1; G5 needs G4; G7 needs G5+G6. vm-017's Phase 2
 (the maturity rename) explicitly cannot ride pipeline-core 3.0 (G1) — it lands post-3.0.
 
 ## 4. The load-bearing coupling (the trap this document exists to prevent)
@@ -97,7 +99,7 @@ Nobody should discover this mid-migration; it is now written down.
 
 **Existing owners (unchanged):** Epic B #261/#264 (G0–G1) · Epic C #265/#268 (input side,
 G3) · Epic #300/#303 (G2) · vpp ADR-013 + faoapi#184 (FAO contract-leg activation) ·
-views-models ADR-017 (delivery governance, Phases 1–4) · shim policy (#184-closed,
+views-models vm-017 (delivery governance, Phases 1–4) · shim policy (#184-closed,
 keep-until-qualified).
 
 **Filed WITH this roadmap (previously zero coverage):**
@@ -111,12 +113,12 @@ keep-until-qualified).
   simultaneous-release coordination issue.
 
 **Register entries added with this roadmap:** C-215 (ensemble guard's stale-log gap —
-requested by ADR-017 §12), C-216 (undeclared `views_forecasts` runtime dependency in
+requested by vm-017 §12), C-216 (undeclared `views_forecasts` runtime dependency in
 pipeline-core and views-models/liveness; stepshifter carries the only pin and doesn't use it).
 
 ## 6. Non-goals of this document
 
-No dates (gates only). No new architecture decisions (ADR-017 owns delivery governance;
+No dates (gates only). No new architecture decisions (vm-017 owns delivery governance;
 vpp ADR-013 owns the wire; this document owns *sequence and ownership*). No demolition
 starts early: G5 explicitly does NOT begin until G4's verification gate opens, and nothing
 here changes what today's monthly production run does.
@@ -124,6 +126,6 @@ here changes what today's monthly production run does.
 ## 7. Maintenance
 
 This document shrinks: when a gate closes, its line gains the merge/PR receipt; when a
-[LEGACY] element dies, ADR-017 §1 retires its line and this document strikes the gate.
+[LEGACY] element dies, vm-017 §1 retires its line and this document strikes the gate.
 Review trigger: any time a new epic touches delivery, input, or the stores, it must name
 its gate here — an epic with no gate is a sign this map has drifted.
