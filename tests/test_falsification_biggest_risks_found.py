@@ -150,10 +150,7 @@ def test_falsify_05_silent_level_override():
 
 
 # test_falsify_06_reconciliation_max_workers_ignored was RETIRED (#316):
-# its subject, views_reporting.reconciliation, was deleted upstream
-# (views-reporting #72/#183 — the subsystem was orphaned once reconciliation
-# moved to the injected views_frames_reconcile port, Decision K / #217).
-# The probed risk cannot recur in a module that no longer exists.
+# its subject, views_reporting.reconciliation, was deleted upstream.
 
 
 @pytest.mark.xfail(reason="C-26: EvaluationAdapter silent truncation — known risk, not yet resolved")

@@ -3,13 +3,9 @@ import pandas as pd
 import numpy as np
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
 
-# NOTE (#316): this suite used to importorskip views_reporting for two
-# statistical-integration tests (calculate_map/calculate_hdi consuming a
-# _ViewsDataset). Upstream deleted that dataset-consuming API (the survivors
-# take samples/frames), so those tests were relics of a dead integration —
-# removed. Dropping the importorskip means the _ViewsDataset suite itself now
-# RUNS in CI (views_reporting is not installed there) instead of silently
-# skipping.
+# NOTE (#316): the former views_reporting importorskip (needed only by two
+# tests of a dataset-consuming stats API deleted upstream) was removed, so
+# this suite now runs in CI instead of silently skipping.
 
 # Fixtures for test data
 @pytest.fixture
