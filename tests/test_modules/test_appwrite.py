@@ -1,3 +1,6 @@
+import json
+import logging
+
 import pytest
 from unittest.mock import Mock, patch
 from pathlib import Path
@@ -511,6 +514,55 @@ class TestAppWriteFileManager:
         assert result.success
         assert result.data["file_bytes"] == b"remote content"
         assert not result.data["from_cache"]
+
+
+    def test_download_file_json_dict_coerced_to_bytes(self, file_manager, caplog):
+        """#310: the Appwrite SDK returns a PARSED DICT for application/json
+        files (e.g. ADR-013 wire manifests); download_file must coerce to bytes
+        instead of crashing at the cache write — and must say, loudly, that the
+        re-serialized bytes are not byte-identical to the stored artifact."""
+        manifest = {
+            "contract_version": "1.5",
+            "run_id": "run0",
+            "shards": [{"name": "a.tap.zip", "sha256": "abc", "time_id": 543}],
+            "sidecar_sha256": None,
+        }
+        file_manager.storage.get_file_download.return_value = manifest
+        file_manager.get_file = Mock(
+            return_value=OperationResult(
+                success=True,
+                data={"name": "run0__lr_ged_sb__manifest.json",
+                      "$updatedAt": "2026-07-27T12:00:00Z"},
+            )
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = file_manager.download_file(
+                "bucket1", "manifest1", use_cache=False
+            )
+
+        assert result.success
+        payload = result.data["file_bytes"]
+        assert isinstance(payload, bytes)
+        assert json.loads(payload) == manifest  # semantic round-trip
+        assert "not byte-identical" in caplog.text  # fidelity caveat is loud
+
+    def test_download_file_bytes_payload_emits_no_fidelity_warning(
+        self, file_manager, caplog
+    ):
+        """The coercion branch must not touch the normal binary path."""
+        file_manager.storage.get_file_download.return_value = b"binary shard"
+        file_manager.get_file = Mock(
+            return_value=OperationResult(
+                success=True,
+                data={"name": "a.tap.zip", "$updatedAt": "2026-07-27T12:00:00Z"},
+            )
+        )
+        with caplog.at_level(logging.WARNING):
+            result = file_manager.download_file("bucket1", "shard1", use_cache=False)
+        assert result.success
+        assert result.data["file_bytes"] == b"binary shard"
+        assert "not byte-identical" not in caplog.text
 
     def test_list_files(self, file_manager):
         file_manager.storage.list_files.return_value = {
