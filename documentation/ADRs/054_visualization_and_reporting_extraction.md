@@ -167,7 +167,7 @@ All 11 extraction PRs merged into `integration/views-reporting-extraction`.
 
 **Dependencies removed from pyproject.toml:** properscoring, geopandas, seaborn, plotly, plotly-express, scipy, torch, markdown.
 
-**Re-export shims active in pipeline-core:** 7 `__init__.py` files (transformations, statistics, visualizations, mapping, reports, reconciliation, templates/reports). Shims use `try/except ImportError as e: raise ... from e` pattern per ADR-008. Remove after all downstream repos update imports.
+**Re-export shims active in pipeline-core:** ~~7 `__init__.py` files (transformations, statistics, visualizations, mapping, reports, reconciliation, templates/reports)~~ **ALL RETIRED as of 2026-07-28** (pre-release step of the 3.0.0 runbook, issue #313; register C-222). The removal condition — "after all downstream repos update imports" — was verified satisfied by the #316 audit: org-wide code search plus local greps of every platform checkout found zero consumers of any shim path, including views-reporting itself. transformations went with #183; statistics, visualizations, mapping, and reports went in the C-222 retirement PR. (`modules/reconciliation/` today is NOT a shim — it is the Decision K frames-native port, real code.) Shims used the `try/except ImportError as e: raise ... from e` pattern per ADR-008.
 
 **CIC ownership:** 8 CICs for extracted classes live in views-reporting (commit `06984b3`). Pipeline-core CICs are unaffected.
 

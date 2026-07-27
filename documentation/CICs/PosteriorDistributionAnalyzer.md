@@ -171,9 +171,10 @@ covers `analyze()`, the validators, and thread safety in its own suite
 (`tests/test_c01_layer1_specification.py`, `tests/test_c01_thread_safety.py`).
 **Known gap:** the presentation methods `print_summary()` and `plot_summary()`
 currently have no coverage in either repo (flagged to views-reporting when the
-suite was pruned). Pipeline-core retains only the re-export shim in
-`views_pipeline_core/modules/statistics/__init__.py`. `ForecastReconciler` was
-deleted upstream entirely (see the shim comment). The pruned suite's full
+suite was pruned). The re-export shim that remained after #316 was retired on
+2026-07-28 (C-222; pre-release step of the 3.0.0 runbook, #313) — pipeline-core
+now has no stake in this class beyond this historical contract. `ForecastReconciler`
+was deleted upstream entirely. The pruned suite's full
 coverage inventory is in git history (`git show <pre-#316>:tests/test_modules/test_statistics.py`).
 
 ---
