@@ -45,6 +45,15 @@ Typical usage example:
         save_path="/tmp/output.parquet",
         use_cache=True
     )
+
+SDK RETURN-SHAPE CONTRACT (C-219 audit, 2026-07-27, #310 post-incident):
+the Appwrite SDK dispatches on response Content-Type — application/json
+returns a PARSED DICT, everything else raw bytes (pinned by
+tests/test_modules/test_appwrite_sdk_contract.py). All API endpoints used
+here serve JSON and are consumed as dicts (a shape surprise fails loud on
+first subscript). The ONE bytes-expecting site platform-wide is
+download_file, which coerces SDK-parsed JSON back to bytes (#310, C-217).
+When adding a new SDK call, state its expected shape at the call site.
 """
 
 from appwrite.client import Client
