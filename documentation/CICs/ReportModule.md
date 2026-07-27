@@ -173,7 +173,14 @@ report.add_html("")  # Adds empty container, no error
 
 ## 10. Test Alignment
 
-Tests live in `tests/test_modules/test_report.py` (66 tests). Coverage includes:
+> **Update (#316, 2026-07-27):** `tests/test_modules/test_report.py` was pruned
+> from pipeline-core — `ReportModule` lives in views-reporting (ADR-054) and is
+> covered by its own suite there (`tests/test_reports.py`). The suite here never
+> ran in CI (`importorskip`; views-reporting is not a pipeline-core dependency)
+> and pinned upstream behavior from the wrong repo. The inventory below is the
+> historical record of the extracted suite.
+
+Tests lived in `tests/test_modules/test_report.py` (66 tests). Coverage included:
 
 - **`TestReportModuleInit`**: Content list initialization, Plotly JS not loaded, footer is None, header image added.
 - **`TestAddHeading`**: Level 1/2/3 headings, headings with links, special characters.

@@ -8,8 +8,6 @@ FAILS, documenting a real issue. Fix the underlying code, then the test passes.
 
 from pathlib import Path
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # F-1 (HARD): Nested ImportError masking — shim catches wrong ImportError
 # ---------------------------------------------------------------------------
@@ -129,53 +127,11 @@ class TestF3_MissingFromE:
 
 
 # ---------------------------------------------------------------------------
-# F-5 (SOFT): report.py silent degradation violates ADR-008
+# F-5 was RETIRED (#316): its subject, views_pipeline_core/modules/reports/
+# report.py, moved to views-reporting (ADR-054) and the concern transferred to
+# their register as C-107 (see the handoff table in
+# reports/technical_risk_register.md). The two xfail probes had gone
+# permanently dead: Path.read_text() on the deleted file raised
+# FileNotFoundError, which non-strict xfail swallowed — so they could never
+# signal resolution.
 # ---------------------------------------------------------------------------
-
-class TestF5_ReportSilentDegradation:
-    """
-    report.py:213 catches ImportError for the markdown module and falls back
-    to plain text without logging. ADR-008 requires 'Log at WARNING + document
-    scope of degradation' for degraded operations. The module doesn't even
-    import logging.
-    """
-
-    @pytest.mark.xfail(reason="C-133: report.py missing logging import")
-    def test_report_module_imports_logging(self):
-        """ReportModule must import logging to comply with ADR-008."""
-        report_path = Path(
-            "views_pipeline_core/modules/reports/report.py"
-        )
-        content = report_path.read_text()
-
-        assert "import logging" in content or "from logging" in content, (
-            "report.py does not import logging. ADR-008 requires all modules "
-            "that handle degraded operations to log at WARNING level."
-        )
-
-    @pytest.mark.xfail(reason="C-133: report.py fallback missing logger.warning")
-    def test_report_markdown_fallback_logs_warning(self):
-        """
-        The except ImportError block in add_markdown() must log a WARNING
-        before falling back to plain text. ADR-008 §Degraded Operation:
-        'Log at WARNING + document scope of degradation'.
-        """
-        report_path = Path(
-            "views_pipeline_core/modules/reports/report.py"
-        )
-        lines = report_path.read_text().splitlines(True)
-
-        # Find the except ImportError block
-        for i, line in enumerate(lines):
-            if "except ImportError:" in line and i > 190:
-                # Check next 5 lines for logger.warning
-                context = "".join(lines[i : i + 5])
-                assert "logger.warning" in context or "logging.warning" in context, (
-                    f"report.py:{i+1} catches ImportError for markdown module "
-                    f"without logging a WARNING. ADR-008 requires degraded "
-                    f"operations to 'Log at WARNING + document scope of degradation'. "
-                    f"Block:\n{context}"
-                )
-                return
-
-        pytest.fail("Could not find 'except ImportError:' block in report.py after line 190")

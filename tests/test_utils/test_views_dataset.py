@@ -3,12 +3,9 @@ import pandas as pd
 import numpy as np
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
 
-pytest.importorskip("views_reporting")
-
-from views_reporting.statistics import (  # noqa: E402
-    calculate_hdi,
-    calculate_map,
-)
+# NOTE (#316): the former views_reporting importorskip (needed only by two
+# tests of a dataset-consuming stats API deleted upstream) was removed, so
+# this suite now runs in CI instead of silently skipping.
 
 # Fixtures for test data
 @pytest.fixture
@@ -106,38 +103,6 @@ class TestTensorConversion:
         reconstructed = ds.to_dataframe(tensor)
         
         pd.testing.assert_frame_equal(ds.dataframe, reconstructed)
-
-class TestStatisticalMethods:
-    """Tests for statistical calculations (MAP, HDI)"""
-    
-    def test_map_df(self, sample_predictions_df):
-        """Test MAP estimation logic"""
-        ds = _ViewsDataset(sample_predictions_df)
-        map_df = calculate_map(ds)
-        
-        # Validate structure
-        assert map_df.shape == (4, 2)  # 4 observations, 2 variables
-        assert all(col.endswith('_map') for col in map_df.columns)
-        
-        # Validate MAP values are within sample ranges
-        for var in ds.targets:
-            samples = ds.dataframe[var].explode().astype(float)
-            map_values = map_df[f"{var}_map"]
-            assert (map_values >= samples.min()).all()
-            assert (map_values <= samples.max()).all()
-            
-    def test_hdi_calculation(self, sample_predictions_df):
-        """Test HDI interval calculation"""
-        ds = _ViewsDataset(sample_predictions_df)
-        hdi_df = calculate_hdi(ds, alpha=0.5)
-        
-        # Validate interval structure
-        assert hdi_df.shape == (4, 4)  # 4 observations, 2 vars × 2 bounds
-        for var in ds.targets:
-            lower = hdi_df[f"{var}_hdi_lower"]
-            upper = hdi_df[f"{var}_hdi_upper"]
-            assert (lower <= upper).all()
-    
 
 class TestSubclassValidation:
     """Tests for dataset subclass index validation"""

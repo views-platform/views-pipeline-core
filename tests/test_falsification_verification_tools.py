@@ -86,7 +86,7 @@ def test_v5_minimal_environment_ci_exists():
 
     assert found_minimal, (
         "No CI workflow runs tests without views-reporting installed. "
-        "The pytest.importorskip() guards in 5 test files have never been "
-        "exercised in an automated environment. A broken guard would not be "
-        "caught until a user installs pipeline-core without views-reporting."
+        "The pytest.importorskip() guards have never been exercised in an "
+        "automated environment. A broken guard would not be caught until a "
+        "user installs pipeline-core without views-reporting."
     )
