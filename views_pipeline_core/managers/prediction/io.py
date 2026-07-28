@@ -1,3 +1,4 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 """Prediction I/O — single-responsibility persistence for predictions and evaluations.
 
 Extracted from ForecastingModelManager to isolate I/O concerns from orchestration.

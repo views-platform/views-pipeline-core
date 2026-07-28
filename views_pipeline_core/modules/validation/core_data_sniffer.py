@@ -1,3 +1,4 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 """
 CoreDataSniffer: Audit-only validator for data loaded from VIEWSER.
 Called after data is fetched, before the model sees it.

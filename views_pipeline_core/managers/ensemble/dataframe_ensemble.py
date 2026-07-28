@@ -1,3 +1,4 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 """DataFrameEnsembleManager — composition-based ensemble orchestrator.
 
 Proves the ADR-045 stage composition pattern for ensembles without

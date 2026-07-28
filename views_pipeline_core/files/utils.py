@@ -1,8 +1,15 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307).
+# pandas is imported function-locally (#320, C-223) so this module can sit on the
+# frame-native import chain without loading it.
+from __future__ import annotations
+
 import logging
-import pandas as pd
 from pathlib import Path
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 from datetime import datetime
+
+if TYPE_CHECKING:  # annotation-only; never imported at runtime
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -214,8 +221,10 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
     - ValueError: If the file extension is not provided or is not supported.
     - Exception: If there is an error saving the DataFrame.
     """
+    import pandas as pd  # DataFrame path only (#320)
+
     FILE_EXTENSION_ERROR_MESSAGE = "A valid file extension must be provided.E.g. .pkl or .parquet"
-    
+
     # Checks
     if not isinstance(save_path, Path):
         save_path = Path(save_path)
@@ -271,8 +280,10 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     - ValueError: If the file extension is not provided or is not supported.
     - Exception: If there is an error reading the DataFrame.
     """
+    import pandas as pd  # DataFrame path only (#320)
+
     FILE_EXTENSION_ERROR_MESSAGE = "A valid extension must be provided. E.g. .pkl or .parquet"
-    
+
     # Checks
     if not isinstance(file_path, Path):
         file_path = Path(file_path)

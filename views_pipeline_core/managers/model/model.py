@@ -1,5 +1,13 @@
+# Import purity (#320, C-223/C-225): this module is the base of EVERY engine's
+# import chain, so it must not load pandas — or anything from the legacy
+# DataFrame tier — at module scope. pandas-typed signatures survive via PEP 563
+# (`from __future__ import annotations`); the DataFrame path imports pandas and
+# the dataset classes function-locally, guarded by `_require_dataframe_runtime`.
+# Tripwire: tests/test_import_purity.py.
+from __future__ import annotations
+
 import sys
-from typing import Callable, Union, Optional, List, Dict
+from typing import TYPE_CHECKING, Callable, Union, Optional, List, Dict
 import logging
 import importlib
 from abc import abstractmethod
@@ -7,20 +15,21 @@ from datetime import datetime
 import traceback
 from views_pipeline_core.cli import ForecastingModelArgs
 from views_pipeline_core.exceptions import ModelForecastingException
-import pandas as pd
 from pathlib import Path
 from functools import partial
 import random
 from views_pipeline_core.modules.wandb import WandBModule
-from views_pipeline_core.managers import ConfigurationManager
+from views_pipeline_core.managers.configuration.configuration import ConfigurationManager
 from views_pipeline_core.exceptions import (
     DataFetchException,
     ModelTrainingException,
     ModelEvaluationException,
     PipelineException,
 )
-from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+if TYPE_CHECKING:  # annotation-only; never imported at runtime
+    import pandas as pd
 from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.modules.dataloaders.datafactory_contract import (
     DATA_FORMAT_DATAFRAME,
@@ -32,6 +41,27 @@ from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
 
 logger = logging.getLogger(__name__)
+
+
+def _require_dataframe_runtime() -> None:
+    """Fail loud at run start if the legacy DataFrame path lacks pandas (C-224).
+
+    pandas is imported lazily since #320 so the frame-native path never loads
+    it; the cost is that a broken/missing pandas would otherwise surface at the
+    first DataFrame touch — potentially deep inside a run. Mirrors the
+    reporting stage's ``_require_*`` capability-preflight idiom: probe once,
+    fail with remediation, before any expensive work.
+    """
+    try:
+        import pandas  # noqa: F401
+    except ImportError as e:
+        raise RuntimeError(
+            "This model declares data_format='dataframe' (the legacy pandas "
+            "path), but pandas is not importable in this environment. Install "
+            "pandas, or migrate the model to data_format='feature_frame'. "
+            f"Underlying import error: {e}"
+        ) from e
+
 
 # ModelPathManager relocated to data/ layer per ADR-045 E6 (Root Cause #1:
 # inverted dependencies).  Re-exported here for backward compatibility.
@@ -829,6 +859,11 @@ class ForecastingModelManager(ModelManager):
     
     @staticmethod
     def dataset_class(loa: str) -> type:
+        # DataFrame-path only: the dataset classes live in the legacy tier
+        # (frozen handlers.py, pandas + files.utils chain), so importing them
+        # here — not at module scope — keeps the frame path pandas-free (#320).
+        from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+
         dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
         dataset_cls = dataset_classes.get(loa)
         if dataset_cls:
@@ -1172,6 +1207,13 @@ class ForecastingModelManager(ModelManager):
         # Remembered for the evaluation stage (#302): actuals sourcing and
         # legacy-egress gating dispatch on the same declaration.
         self._data_format = data_format
+        if data_format == DATA_FORMAT_DATAFRAME:
+            # Preflight (C-224): pandas is now imported lazily (#320), which
+            # moves a broken/missing install's failure from import-time to
+            # first DataFrame touch — potentially hours into a run. Fail here,
+            # at run start, with remediation instead (the reporting stage's
+            # _require_* preflight idiom).
+            _require_dataframe_runtime()
 
         with self._wandb_module.initialize_run(
             project=self._project,

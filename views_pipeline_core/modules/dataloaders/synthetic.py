@@ -1,3 +1,4 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 """Synthetic data generator for pipeline integration testing.
 
 Produces deterministic, spatially-patterned DataFrames that can be used
