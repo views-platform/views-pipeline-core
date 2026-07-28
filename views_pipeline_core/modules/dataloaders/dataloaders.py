@@ -1,3 +1,4 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 import os
 from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
