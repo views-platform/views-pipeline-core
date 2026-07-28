@@ -5,7 +5,7 @@ the class every engine must extend — does not load pandas. These tests are the
 permanent architectural tripwire: a future top-level import that re-couples the
 frame path to the legacy DataFrame tier turns them red in every CI job.
 
-Both tests run the probe in a SUBPROCESS: the pytest process itself has pandas
+All three probes run in a SUBPROCESS: the pytest process itself has pandas
 loaded (fixtures, other suites), so in-process assertions would be meaningless.
 They assert pandas is NOT loaded, so they need pandas installed only in the
 sense that any environment qualifies — no env gate, no importorskip.

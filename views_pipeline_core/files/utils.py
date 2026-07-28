@@ -1,4 +1,4 @@
-# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307).
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 # pandas is imported function-locally (#320, C-223) so this module can sit on the
 # frame-native import chain without loading it.
 from __future__ import annotations

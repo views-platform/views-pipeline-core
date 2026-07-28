@@ -1208,12 +1208,7 @@ class ForecastingModelManager(ModelManager):
         # legacy-egress gating dispatch on the same declaration.
         self._data_format = data_format
         if data_format == DATA_FORMAT_DATAFRAME:
-            # Preflight (C-224): pandas is now imported lazily (#320), which
-            # moves a broken/missing install's failure from import-time to
-            # first DataFrame touch — potentially hours into a run. Fail here,
-            # at run start, with remediation instead (the reporting stage's
-            # _require_* preflight idiom).
-            _require_dataframe_runtime()
+            _require_dataframe_runtime()  # C-224 preflight — see its docstring
 
         with self._wandb_module.initialize_run(
             project=self._project,

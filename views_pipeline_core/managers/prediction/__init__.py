@@ -7,8 +7,23 @@ import chain. Names resolve on first access via `_lazy.lazy_attach` (#288);
 every existing `from views_pipeline_core.managers.prediction import X` call
 site behaves identically. Guard: tests/test_import_purity.py (C-225).
 """
+from typing import TYPE_CHECKING
+
 from views_pipeline_core._lazy import lazy_attach
 
+if TYPE_CHECKING:  # pragma: no cover — static-analysis convenience only
+    from .file_namer import PredictionFileNamer  # noqa: F401
+    from .io import PredictionIOManager  # noqa: F401
+    from .savers import (  # noqa: F401
+        AppwriteSaver,
+        LocalParquetSaver,
+        NpzSaver,
+        PredictionMetadata,
+        PredictionSaver,
+        ViewsForecastsSaver,
+    )
+
+#: name → defining submodule. Single source of truth for __all__/__getattr__/__dir__.
 _LAZY_EXPORTS = {
     "PredictionFileNamer": "file_namer",
     "PredictionIOManager": "io",
@@ -19,6 +34,12 @@ _LAZY_EXPORTS = {
     "PredictionSaver": "savers",
     "ViewsForecastsSaver": "savers",
 }
-_LAZY_SUBMODULES = {"file_namer", "io", "savers", "prediction_frame_io"}
+_LAZY_SUBMODULES = {
+    "file_namer",
+    "io",
+    "prediction_frame_converter",
+    "prediction_frame_io",
+    "savers",
+}
 __all__ = sorted(_LAZY_EXPORTS)
 __getattr__, __dir__ = lazy_attach(__name__, _LAZY_EXPORTS, _LAZY_SUBMODULES)

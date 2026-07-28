@@ -10,8 +10,26 @@ so the facade is lazy: each name resolves on first access via `_lazy.lazy_attach
 call site behaves identically, just without the eager fan-out.
 Guard: tests/test_import_purity.py (C-225).
 """
+from typing import TYPE_CHECKING
+
 from views_pipeline_core._lazy import lazy_attach
 
+if TYPE_CHECKING:  # pragma: no cover — static-analysis convenience only
+    from .configuration.configuration import ConfigurationManager  # noqa: F401
+    from .ensemble.ensemble import EnsembleManager, EnsemblePathManager  # noqa: F401
+    from .extractor.extractor import ExtractorManager, ExtractorPathManager  # noqa: F401
+    from .model.model import (  # noqa: F401
+        ForecastingModelManager,
+        ModelManager,
+        ModelPathManager,
+    )
+    from .package.package import PackageManager  # noqa: F401
+    from .postprocessor.postprocessor import (  # noqa: F401
+        PostprocessorManager,
+        PostprocessorPathManager,
+    )
+
+#: name → defining submodule. Single source of truth for __all__/__getattr__/__dir__.
 _LAZY_EXPORTS = {
     "ConfigurationManager": "configuration.configuration",
     "ExtractorManager": "extractor.extractor",
@@ -27,11 +45,16 @@ _LAZY_EXPORTS = {
 }
 _LAZY_SUBMODULES = {
     "configuration",
-    "extractor",
-    "model",
-    "postprocessor",
     "ensemble",
+    "evaluation",
+    "extractor",
+    "forecasting",
+    "model",
     "package",
+    "postprocessor",
+    "prediction",
+    "reporting",
+    "training",
 }
 __all__ = sorted(_LAZY_EXPORTS)
 __getattr__, __dir__ = lazy_attach(__name__, _LAZY_EXPORTS, _LAZY_SUBMODULES)
