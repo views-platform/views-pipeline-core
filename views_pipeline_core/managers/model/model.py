@@ -561,7 +561,7 @@ class ModelPathManager:
             logger.error(f"Error checking if input is a path: {e}")
             return False
 
-    def _get_artifact_files(self, run_type: str) -> List[Path]:
+    def _get_artifact_files(self, run_type: str, suffix: str="") -> List[Path]:
         """
         Get artifact files for given run type.
 
@@ -601,6 +601,8 @@ class ModelPathManager:
             and f.stem.startswith(f"{run_type}_model_")
             and f.suffix in common_extensions
         ]
+        if suffix:
+            artifact_files = [f for f in artifact_files if suffix in f.stem]
         return artifact_files
 
     def _get_raw_data_file_paths(self, run_type: str) -> List[Path]:
@@ -628,7 +630,7 @@ class ModelPathManager:
         ]
         return sorted(paths, reverse=True)
     
-    def _get_processed_data_file_paths(self, run_type: str) -> List[Path]:
+    def _get_processed_data_file_paths(self, run_type: str, targets: list=[]) -> List[Path]:
         """
         Get processed data file paths for run type.
 
@@ -650,6 +652,9 @@ class ModelPathManager:
             and f.stem.startswith(f"{run_type}_viewser_df")
             and f.suffix == PipelineConfig().dataframe_format
         ]
+        if targets:
+            targets_str = "_".join(targets)
+            paths = [f for f in paths if targets_str in f.stem]
         return sorted(paths, reverse=True)
 
     def _get_generated_predictions_data_file_paths(self, run_type: str) -> List[Path]:
@@ -699,7 +704,7 @@ class ModelPathManager:
         ]
         return sorted(paths, reverse=True)
 
-    def get_latest_model_artifact_path(self, run_type: str) -> Path:
+    def get_latest_model_artifact_path(self, run_type: str, suffix: str="") -> Path:
         """
         Get path to latest model artifact for run type.
 
@@ -724,7 +729,7 @@ class ModelPathManager:
             - Timestamp format: YYYYMMDD_HHMMSS
         """
         # List all model files for the given specific run_type with the expected filename pattern
-        model_files = self._get_artifact_files(run_type=run_type)
+        model_files = self._get_artifact_files(run_type=run_type, suffix=suffix)
 
         if not model_files:
             raise FileNotFoundError(

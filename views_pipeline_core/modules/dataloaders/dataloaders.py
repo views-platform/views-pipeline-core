@@ -1225,6 +1225,7 @@ class ViewsDataLoader:
         use_saved: bool,
         validate: bool = True,
         override_month: int = None,
+        suffix: str = "",
     ) -> tuple[pd.DataFrame, list]:
         """
         Fetch or load model data for specified partition.
@@ -1320,9 +1321,8 @@ class ViewsDataLoader:
         if self.month_first is None or self.month_last is None:
             self.month_first, self.month_last = self._get_month_range()
 
-        path_viewser_df = Path(
-            os.path.join(str(self._path_raw), f"{self.partition}_viewser_df{PipelineConfig.dataframe_format}")
-        )  
+        suffix_str = f"_{suffix}" if suffix else ""
+        path_viewser_df = self._path_raw / f"{self.partition}_viewser_df{suffix_str}{PipelineConfig.dataframe_format}"
         alerts = None
 
         if use_saved:
