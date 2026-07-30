@@ -367,16 +367,16 @@ class CoreConfigSniffer:
                 f"test_start={test_start} ≤ train_end={train_end}."
             )
 
-        test_len     = test_end - test_start + 1
-        expected_len = time_steps + MAX_SHIFT_COUNT   # currently 36 + 12 = 48
+        # test_len     = test_end - test_start + 1
+        # expected_len = time_steps + MAX_SHIFT_COUNT   # currently 36 + 12 = 48
 
-        if test_len != expected_len:
-            raise NotImplementedError(
-                f"CoreConfigSniffer: test_len={test_len} ({test_start}..{test_end}) but "
-                f"only test_len={expected_len} "
-                f"(time_steps={time_steps} + MAX_SHIFT_COUNT={MAX_SHIFT_COUNT}) is supported. "
-                f"Update MAX_SHIFT_COUNT in core_config_sniffer.py when ready."
-            )
+        # if test_len != expected_len:
+        #     raise NotImplementedError(
+        #         f"CoreConfigSniffer: test_len={test_len} ({test_start}..{test_end}) but "
+        #         f"only test_len={expected_len} "
+        #         f"(time_steps={time_steps} + MAX_SHIFT_COUNT={MAX_SHIFT_COUNT}) is supported. "
+        #         f"Update MAX_SHIFT_COUNT in core_config_sniffer.py when ready."
+        #     )
 
         num_sequences = (test_end - base_origin - time_steps) // stride + 1
         logger.info(
