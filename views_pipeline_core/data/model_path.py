@@ -542,7 +542,7 @@ class ModelPathManager:
             logger.error(f"Error checking if input is a path: {e}")
             return False
 
-    def _get_artifact_files(self, run_type: str) -> List[Path]:
+    def _get_artifact_files(self, run_type: str, targets_suffix: str="") -> List[Path]:
         """
         Get artifact files for given run type.
 
@@ -583,6 +583,10 @@ class ModelPathManager:
             and f.suffix in common_extensions
             and len(f.suffixes) == 1
         ]
+        if targets_suffix:
+            artifact_files = [
+                f for f in artifact_files if targets_suffix in f.stem
+            ]
         return artifact_files
 
     def _get_raw_data_file_paths(self, run_type: str) -> List[Path]:
@@ -608,6 +612,33 @@ class ModelPathManager:
             and f.stem.startswith(prefixes)
             and f.suffix == PipelineConfig.dataframe_format
         ]
+        return sorted(paths, reverse=True)
+    
+    def _get_processed_data_file_paths(self, run_type: str, targets: list=[]) -> List[Path]:
+        """
+        Get processed data file paths for run type.
+
+        Retrieves processed dataframes for specified run type.
+
+        Internal Use:
+            Used by data loading methods.
+
+        Args:
+            run_type: Run type
+
+        Returns:
+            Sorted list of processed data file paths (newest first)
+        """
+        paths = [
+            f
+            for f in self.data_processed.iterdir()
+            if f.is_file()
+            and f.stem.startswith(f"{run_type}_viewser_df")
+            and f.suffix == PipelineConfig().dataframe_format
+        ]
+        if targets:
+            targets_str = "_".join(targets)
+            paths = [f for f in paths if targets_str in f.stem]
         return sorted(paths, reverse=True)
 
     def _get_generated_predictions_data_file_paths(self, run_type: str) -> List[Path]:
@@ -661,7 +692,7 @@ class ModelPathManager:
         ]
         return sorted(paths, key=lambda p: p.name, reverse=True)
 
-    def get_latest_model_artifact_path(self, run_type: str) -> Path:
+    def get_latest_model_artifact_path(self, run_type: str, targets_suffix: str="") -> Path:
         """
         Get path to latest model artifact for run type.
 
@@ -686,7 +717,7 @@ class ModelPathManager:
             - Timestamp format: YYYYMMDD_HHMMSS
         """
         # List all model files for the given specific run_type with the expected filename pattern
-        model_files = self._get_artifact_files(run_type=run_type)
+        model_files = self._get_artifact_files(run_type=run_type, targets_suffix=targets_suffix)
 
         if not model_files:
             raise FileNotFoundError(
