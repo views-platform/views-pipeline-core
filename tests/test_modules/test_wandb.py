@@ -36,6 +36,15 @@ class TestWandBModule:
         assert module.models_path == Path("/models")
         assert module._active_run is None
 
+    def test_run_id_none_without_active_run(self, wandb_module):
+        """run_id is None when no run has been initialized (#228)."""
+        assert wandb_module.run_id is None
+
+    def test_run_id_returns_active_run_id(self, wandb_module):
+        """run_id surfaces the active run's id — the MetricFrame provenance discriminator (#228)."""
+        wandb_module._active_run = Mock(id="run-xyz")
+        assert wandb_module.run_id == "run-xyz"
+
     @patch('views_pipeline_core.modules.wandb.wandb.wandb.define_metric')
     @patch('views_pipeline_core.modules.wandb.wandb.wandb.init')
     def test_initialize_run(self, mock_init, mock_define_metric, wandb_module, mock_wandb_run):
@@ -229,6 +238,48 @@ class TestWandBModule:
         data = {'custom': 42}
         wandb_module.log(data)
         mock_log.assert_called_once_with(data)
+
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.Artifact')
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.run')
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.define_metric')
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.init')
+    def test_log_artifact_reraises_on_failure(
+        self, mock_init, mock_define_metric, mock_run, mock_artifact_class,
+        wandb_module, mock_wandb_run,
+    ):
+        """C-90: log_artifact must re-raise exceptions (Fail Loud)."""
+        mock_init.return_value = mock_wandb_run
+        mock_artifact_class.side_effect = RuntimeError("WandB API down")
+        wandb_module.initialize_run("test-project", {}, "train")
+
+        with pytest.raises(RuntimeError, match="WandB API down"):
+            wandb_module.log_artifact(
+                artifact_path=Path("/test/model.pt"),
+                artifact_name="test-model",
+                artifact_type="model",
+            )
+
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.Artifact')
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.run')
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.define_metric')
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.init')
+    def test_log_artifact_reraises_on_upload_failure(
+        self, mock_init, mock_define_metric, mock_run, mock_artifact_class,
+        wandb_module, mock_wandb_run,
+    ):
+        """C-90: re-raise even when the artifact object is created but upload fails."""
+        mock_init.return_value = mock_wandb_run
+        mock_artifact = MagicMock()
+        mock_artifact_class.return_value = mock_artifact
+        mock_run.log_artifact.side_effect = OSError("Network timeout")
+        wandb_module.initialize_run("test-project", {}, "train")
+
+        with pytest.raises(OSError, match="Network timeout"):
+            wandb_module.log_artifact(
+                artifact_path=Path("/test/model.pt"),
+                artifact_name="test-model",
+                artifact_type="model",
+            )
 
     @patch('views_pipeline_core.modules.wandb.wandb.wandb.login')
     def test_login(self, mock_login):

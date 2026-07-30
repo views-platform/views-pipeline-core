@@ -10,6 +10,14 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _safe_wandb_log(data: dict) -> None:
+    """Log to WandB with error suppression. Never crash the pipeline for a logging failure."""
+    try:
+        wandb.log(data)
+    except Exception as e:
+        logger.error(f"Failed to log to WandB: {e}")
+
+
 def add_wandb_metrics():
     """
     Defines the WandB metrics for step-wise, month-wise, and time-series-wise evaluation.
@@ -57,14 +65,16 @@ def generate_wandb_step_wise_log_dict(
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
         dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
-            where the keys are steps and values are `EvaluationMetrics` instances.
+            where the keys are steps and values are `EvaluationMetrics` instances or plain dicts.
         step (str): The specific time step (month forecasted) for which metrics are logged (e.g., 'step01').
         target_identifier (str): The target identifier for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and step.
     """
-    for key, value in asdict(dict_of_eval_dicts[step]).items():
+    entry = dict_of_eval_dicts[step]
+    items = entry.items() if isinstance(entry, dict) else asdict(entry).items()
+    for key, value in items:
         if value is not None:
             log_dict[f"step-wise/{target_identifier}/{key}"] = value
 
@@ -83,14 +93,16 @@ def generate_wandb_month_wise_log_dict(
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
         dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
-            where the keys are months and values are `EvaluationMetrics` instances.
+            where the keys are months and values are `EvaluationMetrics` instances or plain dicts.
         month (str): The specific month for which metrics are logged (e.g., 'month501').
         target_identifier (str): The target identifier for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and month.
     """
-    for key, value in asdict(dict_of_eval_dicts[month]).items():
+    entry = dict_of_eval_dicts[month]
+    items = entry.items() if isinstance(entry, dict) else asdict(entry).items()
+    for key, value in items:
         if value is not None:
             log_dict[f"month-wise/{target_identifier}/{key}"] = value
 
@@ -109,14 +121,16 @@ def generate_wandb_time_series_wise_log_dict(
     Args:
         log_dict (dict): The log dictionary to be updated with new metrics.
         dict_of_eval_dicts (dict): A dictionary of evaluation metrics,
-            where the keys are time series and values are `EvaluationMetrics` instances.
+            where the keys are time series and values are `EvaluationMetrics` instances or plain dicts.
         time_series (str): The specific time series for which metrics are logged (e.g., 'ts01').
         target_identifier (str): The target identifier for which the evaluation metrics are logged.
 
     Returns:
         dict: The updated log dictionary with the evaluation metrics for the specified feature and time series
     """
-    for key, value in asdict(dict_of_eval_dicts[time_series]).items():
+    entry = dict_of_eval_dicts[time_series]
+    items = entry.items() if isinstance(entry, dict) else asdict(entry).items()
+    for key, value in items:
         if value is not None:
             log_dict[f"time-series-wise/{target_identifier}/{key}"] = value
 
@@ -129,7 +143,7 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
 
     Args:
         evaluation_dict (dict): A dictionary of evaluation metrics,
-            where the keys are time steps, months, or time series, and values are `EvaluationMetrics` instances.
+            where the keys are time steps, months, or time series, and values are `EvaluationMetrics` instances or plain dicts.
 
     Returns:
         dict: A dictionary of mean evaluation metrics for the input dictionary.
@@ -137,14 +151,20 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
     if not evaluation_dict:
         return {}
     mean_dict = {}
-    first_item = next(iter(evaluation_dict.values()))
-    metric_names = vars(first_item).keys()
+    # Collect the union of all metric keys across all items so that metrics
+    # present in later items but absent from the first are not silently dropped.
+    metric_names: set = set()
+    for item in evaluation_dict.values():
+        metric_names.update(item.keys() if isinstance(item, dict) else vars(item).keys())
 
     # Compute the mean for each metric, skipping metrics with None values
     for key in metric_names:
         valid_values = [
             value
-            for value in (vars(item).get(key) for item in evaluation_dict.values())
+            for value in (
+                (item.get(key) if isinstance(item, dict) else vars(item).get(key))
+                for item in evaluation_dict.values()
+            )
             if value is not None
         ]
         if valid_values:
@@ -178,7 +198,7 @@ def log_wandb_log_dict(
         step_wise_log_dict = generate_wandb_step_wise_log_dict(
             log_dict, step_wise_evaluation, step, target_identifier
         )
-        wandb.log(step_wise_log_dict)
+        _safe_wandb_log(step_wise_log_dict)
 
     for month in month_wise_evaluation.keys():
         m = int(re.search(r"\d+", month).group())
@@ -187,7 +207,7 @@ def log_wandb_log_dict(
         month_wise_log_dict = generate_wandb_month_wise_log_dict(
             log_dict, month_wise_evaluation, month, target_identifier
         )
-        wandb.log(month_wise_log_dict)
+        _safe_wandb_log(month_wise_log_dict)
 
     for time_series in time_series_wise_evaluation.keys():
         ts = int(re.search(r"\d+", time_series).group())
@@ -196,7 +216,7 @@ def log_wandb_log_dict(
         ts_wise_log_dict = generate_wandb_time_series_wise_log_dict(
             log_dict, time_series_wise_evaluation, time_series, target_identifier
         )
-        wandb.log(ts_wise_log_dict)
+        _safe_wandb_log(ts_wise_log_dict)
 
     # Calculate and log the mean evaluation metrics
     mean_step_wise = calculate_mean_evaluation_metrics(step_wise_evaluation)
@@ -206,13 +226,13 @@ def log_wandb_log_dict(
     )
 
     for key, value in mean_step_wise.items():
-        wandb.log({f"step-wise/{target_identifier}/{key}_mean": value})
+        _safe_wandb_log({f"step-wise/{target_identifier}/{key}_mean": value})
 
     for key, value in mean_month_wise.items():
-        wandb.log({f"month-wise/{target_identifier}/{key}_mean": value})
+        _safe_wandb_log({f"month-wise/{target_identifier}/{key}_mean": value})
 
     for key, value in mean_time_series_wise.items():
-        wandb.log({f"time-series-wise/{target_identifier}/{key}_mean": value})
+        _safe_wandb_log({f"time-series-wise/{target_identifier}/{key}_mean": value})
         
 
 def wandb_alert(
@@ -282,10 +302,6 @@ def format_evaluation_dict(evaluation_dict):
             key = key[1:]
 
         if key == "timestamp":
-            # try:
-            #     formatted_dict[key] = timestamp_to_date(float(value))
-            # except (ValueError, TypeError):
-            #     formatted_dict[key] = value
             continue
         elif key == "runtime":
             # convert seconds to hours, minutes, and seconds
@@ -339,24 +355,162 @@ def format_metadata_dict(metadata_dict):
     formatted_dict = dict(sorted(formatted_dict.items(), key=lambda item: item[0]))
     return formatted_dict
 
-def get_latest_run(entity: str, model_name: str, run_type: str) -> Optional['wandb.apis.public.runs.Run']:
-    """
-    Retrieves the latest WandB run from the current session.
+# Substring wandb embeds in the ValueError raised by ``Api().runs(...)`` when the
+# project does not exist (the normal state for WANDB_MODE=offline models). This is
+# wandb's undocumented, human-readable message text — verified against wandb 0.18.x
+# (pyproject: wandb = "^0.18.7"). If a wandb bump rewords this, get_latest_run stops
+# recognising project-not-found and re-raises instead of returning None — see
+# risk register C-179. The WARNING log on the re-raise path makes that drift visible.
+_PROJECT_NOT_FOUND_MARKER = "could not find project"
 
-    Returns:
-        Optional[wandb.Run]: The latest run object if available, otherwise None.
+
+def _fetch_qualifying_runs(
+    entity: str, model_name: str, run_type: str
+) -> list:
+    """
+    Return the finished, metrics-bearing runs for a model's WandB project,
+    newest first.
+
+    Shared fetch + filter for :func:`get_latest_run` and
+    :func:`get_run_by_timestamp` (keeps the fragile project-not-found handling
+    in one place — see C-179). A run "qualifies" when its state is ``"finished"``
+    and its summary carries more than one key (i.e. it holds metrics).
+
+    Returns an empty list when the project does not exist (the normal case for
+    models run with ``WANDB_MODE=offline``). Transient WandB/API errors are
+    propagated unchanged so callers can distinguish "not in the cloud" from
+    "WandB hiccupped".
     """
     from wandb import Api
+
+    project_path = f"{entity}/{model_name}_{run_type}"
     api = Api()
-    wandb_runs = sorted(
-        api.runs(f"{entity}/{model_name}_{run_type}", include_sweeps=False),
-        key=lambda run: run.created_at,
-        reverse=True,
-    )
-    # Pick the latest successfully finished run
-    latest_run = next(
+    try:
+        wandb_runs = sorted(
+            api.runs(project_path, include_sweeps=False),
+            key=lambda run: run.created_at,
+            reverse=True,
+        )
+    except ValueError as e:
+        # WandB raises ValueError("Could not find project ...") when the project
+        # does not exist — routine for offline-only models. Treat as "no run".
+        # Any other ValueError is unexpected and propagates (logged so a wandb
+        # message-text change that breaks the match above is observable — C-179).
+        if _PROJECT_NOT_FOUND_MARKER in str(e).lower():
+            logger.info(
+                f"WandB project '{project_path}' not found; treating as no run "
+                f"available (e.g. model run with WANDB_MODE=offline)."
+            )
+            return []
+        logger.warning(
+            f"Unexpected ValueError from WandB for '{project_path}' "
+            f"(not recognised as project-not-found): {e}. Re-raising."
+        )
+        raise
+
+    return [
         run
         for run in wandb_runs
         if run.state == "finished" and len(dict(run.summary)) > 1
+    ]
+
+
+def get_latest_run(
+    entity: str, model_name: str, run_type: str
+) -> Optional['wandb.apis.public.runs.Run']:
+    """
+    Retrieve the latest finished, metrics-bearing WandB run for a model.
+
+    Queries the WandB project ``f"{entity}/{model_name}_{run_type}"`` and returns
+    the most recently created run whose state is ``"finished"`` and whose summary
+    carries more than one key (i.e. it holds metrics).
+
+    Contract (see GitHub issue #177):
+        Returns the newest qualifying run, or ``None`` when the run is *genuinely
+        absent* — either the project does not exist (the normal case for models
+        run with ``WANDB_MODE=offline``, which never create a cloud project) or
+        the project exists but holds no finished, metrics-bearing run. "No run
+        available" is a normal state, not an error.
+
+        *Transient* failures (network/communication errors, or any other
+        unexpected WandB/API error) are propagated unchanged, so callers can
+        distinguish "this model is not in the cloud" (``None`` -> surface as
+        missing) from "WandB hiccupped" (exception -> retry or mark degraded).
+
+    Returns:
+        Optional[wandb.Run]: The latest qualifying run, or ``None`` if genuinely
+        absent.
+
+    Raises:
+        Exception: Transient WandB/API errors are propagated. Project-not-found
+            is NOT raised — it is reported as ``None``.
+    """
+    qualifying_runs = _fetch_qualifying_runs(entity, model_name, run_type)
+    if not qualifying_runs:
+        logger.info(
+            f"No finished, metrics-bearing WandB run found for "
+            f"'{entity}/{model_name}_{run_type}'."
+        )
+        return None
+    return qualifying_runs[0]
+
+
+def get_run_by_timestamp(
+    entity: str, model_name: str, run_type: str, timestamp: str
+) -> Optional['wandb.apis.public.runs.Run']:
+    """
+    Retrieve the finished, metrics-bearing WandB run that produced a specific
+    artifact, identified by its pipeline ``timestamp``.
+
+    Provenance-aware counterpart to :func:`get_latest_run` (see GitHub issue
+    #178). The pipeline stamps a single ``timestamp`` (``YYYYMMDD_HHMMSS``,
+    created at ``configuration.py``) into *both* the artifact filename and the
+    WandB run's config (``config=self.configs`` in the model manager). This
+    function selects the run whose ``config["timestamp"]`` matches the artifact's
+    timestamp, so a report can attach the metrics of the run that actually
+    produced the artifact under report — not merely the newest run in the
+    project.
+
+    Contract:
+        Returns the newest qualifying run whose ``config["timestamp"] ==
+        timestamp``, or ``None`` when no qualifying run carries that timestamp
+        (project absent, no qualifying run, or none match). ``None`` means
+        "the artifact's run could not be identified" — a caller that needs a
+        best-effort display should fall back to :func:`get_latest_run` and
+        *label* the metrics as not provenance-matched, never silently present a
+        non-matching run's metrics as the artifact's.
+
+        Transient WandB/API errors are propagated (same posture as
+        :func:`get_latest_run`).
+
+    Returns:
+        Optional[wandb.Run]: The run whose config timestamp matches, or ``None``.
+
+    Raises:
+        ValueError: If ``timestamp`` is empty/falsy. A blank timestamp is a
+            caller error, not a "no match" — without this guard it would
+            silently match a run whose config carries no timestamp
+            (``None == None``), returning a non-provenance-matched run.
+        Exception: Transient WandB/API errors are propagated. Project-not-found
+            is NOT raised — it is reported as ``None``.
+    """
+    if not timestamp:
+        raise ValueError(
+            "get_run_by_timestamp requires a non-empty timestamp "
+            "(the artifact's YYYYMMDD_HHMMSS stamp)."
+        )
+    qualifying_runs = _fetch_qualifying_runs(entity, model_name, run_type)
+    match = next(
+        (
+            run
+            for run in qualifying_runs
+            if dict(run.config).get("timestamp") == timestamp
+        ),
+        None,
     )
-    return latest_run if len(dict(latest_run.summary)) > 1 else None
+    if match is None:
+        logger.info(
+            f"No finished WandB run with config timestamp '{timestamp}' found "
+            f"for '{entity}/{model_name}_{run_type}'."
+        )
+    return match

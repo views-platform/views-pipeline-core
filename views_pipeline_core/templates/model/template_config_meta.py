@@ -32,7 +32,7 @@ def generate(script_path: Path, model_name: str, model_algorithm: str) -> bool:
     \"""
     
     meta_config = {{
-        "name": "{model_name}", 
+        "name": "{model_name}",
         "algorithm": "{model_algorithm}",
         # Uncomment and modify the following lines as needed for additional metadata:
         # "targets": ["ln_ged_sb_dep"],

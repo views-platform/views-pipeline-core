@@ -1,1 +1,1 @@
-from .args import ModelArgs, ForecastingModelArgs
+from .args import ModelArgs as ModelArgs, ForecastingModelArgs as ForecastingModelArgs

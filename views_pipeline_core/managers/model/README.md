@@ -130,7 +130,7 @@ This class is not directly instantiated; extend it to implement concrete trainin
 | `_save_model_artifact(run_type)` | Publish latest artifact to WandB. |
 
 ### Metrics Handling
-Uses `EvaluationManager` (external module) to compute:
+Uses `NativeEvaluator` (external module) to compute:
 - Step-wise metrics (per horizon)
 - Time-series metrics (per sequence)
 - Month-wise metrics (temporal slices)
@@ -276,7 +276,7 @@ Core responsibility:  load raw actuals → call hook → slice by targets → co
 Model responsibility: manufacture any derived columns the model invented
 ```
 
-See **ADR-029** (`documentation/ADRs/029_model_actuals_preparation_hook.md`) for the full architectural rationale and alternatives considered.
+See **ADR-038** (`documentation/ADRs/038_model_actuals_preparation_hook.md`) for the full architectural rationale and alternatives considered.
 
 ---
 
@@ -315,8 +315,7 @@ See **ADR-029** (`documentation/ADRs/029_model_actuals_preparation_hook.md`) for
 - Configuration merging: `ConfigurationManager`
 - Data ingestion: `ViewsDataLoader`
 - Validation: `validate_prediction_dataframe`
-- Transformation handling: `DatasetTransformationModule`
-- Metrics: `EvaluationManager` (external dependency from `views-evaluation`)
+- Metrics: `NativeEvaluator` (external dependency from `views-evaluation`)
 - Alerting & artifacts: `WandBModule`
 - ADR coverage: evaluation scope, artifact naming, reporting templates (internal repo docs)
 ---

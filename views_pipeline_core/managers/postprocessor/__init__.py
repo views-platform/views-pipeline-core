@@ -1,1 +1,1 @@
-from .postprocessor import PostprocessorManager, PostprocessorPathManager
+from .postprocessor import PostprocessorManager as PostprocessorManager, PostprocessorPathManager as PostprocessorPathManager

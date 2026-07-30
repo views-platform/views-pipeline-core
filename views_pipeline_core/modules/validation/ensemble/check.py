@@ -2,21 +2,25 @@ from datetime import datetime
 import logging
 from pathlib import Path
 from views_pipeline_core.files.utils import read_log_file
+from views_pipeline_core.modules.validation.core_config_sniffer import DEPRECATED_STATUS
 
 logger = logging.getLogger(__name__)
 
 
-def validate_model_conditions(path_generated, run_type):
+def validate_model_conditions(path_generated, run_type, saved=False):
     """
     Validate temporal requirements for model training and data freshness.
 
-    Checks that the model was trained in the current training cycle (after July)
-    and that both generated features and raw data were fetched in the current month.
+    Checks that the model was trained in the current training cycle (after July).
+    For forecasting runs with non-saved data, also checks that generated features
+    and raw data were fetched in the current month.
 
     Args:
         path_generated: Path to model's data_generated directory containing log files
         run_type: Type of run to validate: 'calibration' | 'forecasting' | 'validation'
             Determines which log file to read ({run_type}_log.txt)
+        saved: If True, skip data freshness checks (Conditions 2+3). Pre-computed
+            output means raw data fetch timing is irrelevant.
 
     Returns:
         True if all temporal conditions are met, False otherwise
@@ -24,23 +28,18 @@ def validate_model_conditions(path_generated, run_type):
     Raises:
         Exception: If log file cannot be read (logged but not raised)
 
-    Example:
-        >>> from pathlib import Path
-        >>> path = Path('models/conflict_model_v1/data/generated')
-        >>> is_valid = validate_model_conditions(path, 'forecasting')
-        >>> if not is_valid:
-        ...     print("Model does not meet temporal requirements")
-
     Note:
-        - Training cycle: July-June (models trained after July of previous year)
-        - Current month requirement ensures data freshness for production
-        - Logs detailed error messages before returning False
+        - Training cycle check (Condition 1) applies to all run types
+        - Data freshness checks (Conditions 2+3) only apply to forecasting
+          runs with non-saved data (see ADR-018 amendment)
+        - Calibration/validation runs use fixed historical partitions where
+          fetch timing is irrelevant
     """
     
     log_file_path = Path(path_generated) / f"{run_type}_log.txt"
     try:
         log_data = read_log_file(log_file_path)
-    except Exception as e:
+    except (FileNotFoundError, OSError, ValueError, KeyError) as e:
         logger.error(f"Error reading log file: {e}")
         return False
 
@@ -72,17 +71,34 @@ def validate_model_conditions(path_generated, run_type):
                          f"Please use the latest model that is trained after {current_year - 1}_07. Exiting.")
             return False
 
-    # Condition 2: Data generated in the current month
-    if data_generation_timestamp and not (
-            data_generation_timestamp.year == current_year and data_generation_timestamp.month == current_month):
-        logger.error(f"Data for model {model_name} was not generated in the current month. Exiting.")
-        return False
+    # Conditions 2+3: data freshness (ADR-018).
+    # Only enforced for forecasting runs with non-saved data.
+    # Calibration/validation use fixed historical partitions; saved runs
+    # consume pre-computed output — fetch timing is irrelevant in both cases.
+    # Guards are deliberately independent: run_type encodes domain knowledge
+    # (ADR-018), saved encodes CLI state (args.py:411). See C-146, D-23.
+    if run_type == "forecasting" and not saved:
+        # Condition 2: Data generated in the current month
+        if data_generation_timestamp and not (
+                data_generation_timestamp.year == current_year and data_generation_timestamp.month == current_month):
+            logger.error(f"Data for model {model_name} was not generated in the current month. Exiting.")
+            return False
 
-    # Condition 3: Raw data fetched in the current month
-    if data_fetch_timestamp and not (
-            data_fetch_timestamp.year == current_year and data_fetch_timestamp.month == current_month):
-        logger.error(f"Raw data for model {model_name} was not fetched in the current month. Exiting.")
-        return False
+        # Condition 3: Raw data fetched in the current month
+        if data_fetch_timestamp and not (
+                data_fetch_timestamp.year == current_year and data_fetch_timestamp.month == current_month):
+            logger.error(f"Raw data for model {model_name} was not fetched in the current month. Exiting.")
+            return False
+    elif run_type != "forecasting":
+        logger.info(
+            f"Skipping data freshness checks for model {model_name} "
+            f"(run_type={run_type} uses fixed historical partitions)."
+        )
+    elif saved:
+        logger.info(
+            f"Skipping data freshness checks for model {model_name} "
+            f"(--saved: using pre-computed output)."
+        )
 
     return True
 
@@ -124,7 +140,7 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     log_file_path = Path(path_generated) / f"{run_type}_log.txt"
     try:
         log_data = read_log_file(log_file_path)
-    except Exception as e:
+    except (FileNotFoundError, OSError, ValueError, KeyError) as e:
         logger.error(f"Error reading log file: {e}. Exiting.")
         return False
 
@@ -132,11 +148,11 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     single_model_dp_status = log_data["Deployment Status"]
 
     # More check conditions can be added here
-    if ensemble_deployment_status == 'Deprecated':
+    if ensemble_deployment_status == DEPRECATED_STATUS:
         logger.error("Deployment status is deprecated. Exiting.")
         return False
-    
-    if single_model_dp_status == 'Deprecated':
+
+    if single_model_dp_status == DEPRECATED_STATUS:
         logger.error(f"Model {model_name} deployment status is deprecated. Exiting.")
         return False
 
@@ -159,38 +175,135 @@ def validate_partition_config(ensemble_manager, model_manager, run_type):
         return False
     return True
 
-def validate_ensemble_model(config):
+def validate_ensemble_raw_data_alignment(model_names, run_type):
     """
-    Validate data partition compatibility between ensemble and constituent model.
+    Validate that all ensemble models have consistent raw data files.
 
-    Ensures that train/test splits match between the ensemble and individual
-    models to maintain evaluation integrity.
+    Compares file sizes of the raw viewser parquet across all models.
+    Different sizes indicate different querysets, which means models[0]
+    is not a reliable source for actuals (C-03).
 
     Args:
-        ensemble_manager: EnsembleManager instance containing partition configuration
-        model_manager: ModelManager instance containing partition configuration
-        run_type: Type of run to validate partition for:
-            'calibration' | 'forecasting' | 'validation'
+        model_names: List of model name strings in the ensemble
+        run_type: 'calibration' | 'validation' | 'forecasting'
 
     Returns:
-        True if partition configurations match, False otherwise
-
-    Example:
-        >>> from views_pipeline_core.managers.ensemble import EnsembleManager
-        >>> from views_pipeline_core.managers.model import ModelManager
-        >>> ensemble = EnsembleManager(ensemble_path)
-        >>> model = ModelManager(model_path)
-        >>> is_valid = validate_partition_config(ensemble, model, 'calibration')
-        >>> if not is_valid:
-        ...     print("Partition mismatch detected")
-
-    Note:
-        - Critical for fair ensemble evaluation
-        - Prevents data leakage between train/test sets
-        - Logs error with both partition configs on mismatch
+        True if all models have consistent raw data, False otherwise
     """
-    from views_pipeline_core.managers.model import ModelManager, ModelPathManager
+    from views_pipeline_core.data.model_path import ModelPathManager
+
+    if len(model_names) <= 1:
+        return True
+
+    sizes = {}
+    for name in model_names:
+        mp = ModelPathManager(name)
+        raw_paths = mp._get_raw_data_file_paths(run_type)
+        if not raw_paths:
+            logger.warning("Raw data file missing for model %s", name)
+            continue
+        sizes[name] = raw_paths[0].stat().st_size
+
+    if not sizes:
+        return True
+
+    unique_sizes = set(sizes.values())
+    if len(unique_sizes) > 1:
+        logger.warning(
+            "Ensemble raw data inconsistency: models have different file sizes "
+            "for run_type=%s. This may indicate different querysets. "
+            "Sizes: %s",
+            run_type,
+            sizes,
+        )
+        return False
+
+    return True
+
+
+def validate_output_scale_consistency(model_names):
+    """
+    Validate that all ensemble constituent models declare the same output_scale.
+
+    Raises ValueError if models declare conflicting scales. Warns if some declare
+    and some don't (gradual adoption). Passes silently if none declare.
+
+    Args:
+        model_names: List of model name strings in the ensemble
+    """
+    import importlib.util
+    import sys
+    from views_pipeline_core.data.model_path import ModelPathManager
+
+    if len(model_names) <= 1:
+        return
+
+    scales = {}
+    for name in model_names:
+        mp = ModelPathManager(name)
+        config_path = mp.configs / "config_meta.py"
+        if not config_path.exists():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"config_meta_{name}", config_path
+            )
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[f"config_meta_{name}"] = mod
+            spec.loader.exec_module(mod)
+        except (AttributeError, ImportError, SyntaxError) as e:
+            logger.error(f"Failed to load config_meta.py for model '{name}': {e}")
+            continue
+        if hasattr(mod, "get_meta_config"):
+            meta = mod.get_meta_config()
+            if not isinstance(meta, dict):
+                logger.error(f"get_meta_config() for model '{name}' returned {type(meta).__name__}, expected dict")
+                continue
+            scales[name] = meta.get("output_scale")
+
+    declared = {k: v for k, v in scales.items() if v is not None}
+    undeclared = {k for k, v in scales.items() if v is None}
+
+    if not declared:
+        return
+
+    unique_scales = set(declared.values())
+    if len(unique_scales) > 1:
+        raise ValueError(
+            f"Ensemble output_scale mismatch: constituent models declare "
+            f"different output scales — {declared}. All models in an ensemble "
+            f"must return predictions in the same scale."
+        )
+
+    if undeclared:
+        logger.warning(
+            "Ensemble output_scale partially declared: %s declare output_scale=%r "
+            "but %s do not. Add output_scale to all constituent model configs.",
+            sorted(declared.keys()),
+            next(iter(unique_scales)),
+            sorted(undeclared),
+        )
+
+
+def validate_ensemble_model(config, saved=False):
+    """
+    Validate ensemble constituent models against temporal, deployment, and
+    partition requirements.
+
+    Args:
+        config: Ensemble configuration dict with keys: 'name', 'models',
+            'run_type', 'deployment_status'
+        saved: If True, skip data freshness checks in validate_model_conditions
+            (pre-computed output means raw data fetch timing is irrelevant)
+
+    Raises:
+        ValueError: If any constituent model fails validation
+    """
+    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model import ModelManager
     from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
+
+    validate_output_scale_consistency(config["models"])
 
     ensemble_manager = EnsembleManager(EnsemblePathManager(config["name"]))
     for model_name in config["models"]:
@@ -199,9 +312,12 @@ def validate_ensemble_model(config):
         path_generated = model_path_manager.data_generated
 
         if (
-                (not validate_model_conditions(path_generated, config["run_type"])) or
+                (not validate_model_conditions(path_generated, config["run_type"], saved=saved)) or
                 (not validate_ensemble_model_deployment_status(path_generated, config["run_type"], config["deployment_status"])) or
                 (not validate_partition_config(ensemble_manager, model_manager, config["run_type"]))
         ):
-            exit(1)  # Shut down if conditions are not met
+            raise ValueError(
+                f"Ensemble '{config['name']}' failed validation for model '{model_name}'. "
+                f"Check logs for details."
+            )
     logger.info(f"Model {config['name']} meets the required conditions.")

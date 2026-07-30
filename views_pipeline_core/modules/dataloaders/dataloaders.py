@@ -1,6 +1,6 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 import os
-from typing import Dict
-import numpy as np
+from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import logging
 from pathlib import Path
@@ -10,25 +10,126 @@ from views_pipeline_core.files.utils import create_data_fetch_log_file
 from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.managers.model import ModelPathManager
-from ingester3.ViewsMonth import ViewsMonth
+from views_pipeline_core.data.constants import (
+    CACHE_FILENAME_TEMPLATE,
+    PARTITION_TEST,
+    PARTITION_TRAIN,
+)
+from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
+from views_pipeline_core.modules.dataloaders.fetch_context import (
+    FetchContext,
+    resolve_default_partition_dict,
+    resolve_month_range,
+)
+from views_pipeline_core.modules.dataloaders.frame_cache import frame_cache_path
+from views_pipeline_core.modules.dataloaders.feature_frame_path import (
+    fetch_feature_frame,
+)
+from views_pipeline_core.modules.dataloaders.datafactory_contract import (
+    DATAFACTORY_REQUIRED_KEYS,
+    import_datafactory_contract,
+    require_descriptor_keys,
+)
 
-# import views_transformation_library as vtl
 import views_transformation_library.views_2 as views2
-# import views_transformation_library.splag4d as splag4d
 import views_transformation_library.missing as missing
 from viewser import Queryset
 import traceback
-# import views_transformation_library.splag_country as splag_country
-# import views_transformation_library.spatial_tree as spatial_tree
-# import views_transformation_library.spacetime_distance as spacetime_distance
 from dotenv import load_dotenv
-from typing import Tuple, List, Any
 import ast
 import argparse
 
 logger = logging.getLogger(__name__)
 
+_PRIOGRID_NCOL = 720
+_DATAFACTORY_REQUIRED_KEYS = DATAFACTORY_REQUIRED_KEYS  # canonical home: datafactory_contract.py
+_SYNTHETIC_REQUIRED_KEYS = {"pattern", "level", "features"}
+# A FLAT (already-resolved) partition dict is recognized by these keys (C-210).
+_PARTITION_KEYS = {PARTITION_TRAIN, PARTITION_TEST}
+
+
+def detect_data_source(queryset: Any, model_name: str) -> str:
+    """Determine the data source type from a queryset/descriptor value (pure).
+
+    The single-read contract (#289): callers read get_queryset() ONCE, detect
+    the source from that snapshot, and pass the same snapshot onward — source
+    detection and the fetch can never describe different querysets.
+
+    Returns:
+        'viewser', 'datafactory', or 'synthetic'.
+
+    Raises:
+        RuntimeError: If the queryset is None.
+        TypeError: If the type/source is not recognized.
+    """
+    if queryset is None:
+        raise RuntimeError(f"Could not find queryset for {model_name}")
+
+    if isinstance(queryset, dict):
+        source = queryset.get("source")
+        if source == "views-datafactory":
+            return "datafactory"
+        if source == "synthetic":
+            return "synthetic"
+        raise TypeError(
+            f"Dict queryset for {model_name} has unrecognized "
+            f"source='{source}'. Expected 'views-datafactory' or 'synthetic'."
+        )
+
+    if hasattr(queryset, "publish"):
+        return "viewser"
+
+    raise TypeError(
+        f"Unrecognized queryset type for {model_name}: "
+        f"{type(queryset).__name__}. Expected viewser Queryset "
+        f"(with .publish() method) or datafactory dict descriptor "
+        f"(with 'source': 'views-datafactory')."
+    )
+
+#: LOA → ``load_dataset(output_format=...)``. The values are datafactory's consumer
+#: contract vocabulary (their ADR-050 ``OutputFormat``): validated at fetch time via
+#: ``is_valid_output_format`` (datafactory is importable there by construction) and in
+#: CI against the vendored contract fixture (tests/fixtures/feature_frame_contract/,
+#: tests/test_modules/test_datafactory_contract_conformance.py). Extend only with
+#: strings the upstream vocabulary defines (e.g. ``feature_frame`` for #161).
+_LOA_TO_OUTPUT_FORMAT = {
+    "priogrid_month": "dataframe",
+    "country_month": "country_month",
+}
+
+#: Grid-entity index-name consolidation (views-frames ADR-015). viewser and old
+#: on-disk caches still carry the legacy ``priogrid_gid`` (datafactory retired it in
+#: their #316; synthetic emits ``priogrid_id`` natively); ``_normalize_grid_index`` is
+#: the single seam that rewrites it to the canonical ``priogrid_id`` so the on-disk
+#: cache and every downstream consumer see one name. Remove this seam (and its call
+#: sites in ``_fetch_data`` / ``get_data``) once viewser emits ``priogrid_id`` and the
+#: legacy caches have aged out (#259).
+_LEGACY_GRID_ID = "priogrid_gid"
+_CANONICAL_GRID_ID = "priogrid_id"
+
+
+def _normalize_grid_index(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """Rename a legacy ``priogrid_gid`` index level to the canonical ``priogrid_id``.
+
+    No-op when the level is absent or already canonical, or when ``df`` is not a MultiIndex
+    frame. Renames the index only (no data copy); callers own the frame they pass in.
+    """
+    if df is None or not isinstance(df.index, pd.MultiIndex):
+        return df
+    names = list(df.index.names)
+    if _LEGACY_GRID_ID in names and _CANONICAL_GRID_ID in names:
+        # A frame carrying BOTH names is malformed; renaming would create two levels
+        # named priogrid_id (duplicate). Fail loud rather than silently corrupt.
+        raise ValueError(
+            f"DataFrame index carries both '{_LEGACY_GRID_ID}' and '{_CANONICAL_GRID_ID}' "
+            f"levels: {names}. Cannot normalize an ambiguous grid index."
+        )
+    if _LEGACY_GRID_ID in names:
+        df.index = df.index.set_names(
+            [_CANONICAL_GRID_ID if n == _LEGACY_GRID_ID else n for n in names]
+        )
+    return df
 
 # Ingester dependent imports. Breaks tests on github because no certs
 def _get_splag_country(*args, **kwargs):
@@ -579,9 +680,6 @@ class UpdateViewser:
             for transformation in transformations:
                 name = transformation["name"]
 
-                # args = list(map(int, transformation.get("arguments", [])))
-                # args = [smart_cast(arg) for arg in transformation.get("arguments", [])]
-                # args = transformation.get("arguments", [])
                 args = [
                     self._smart_cast(arg) for arg in transformation.get("arguments", [])
                 ]
@@ -749,87 +847,36 @@ class ViewsDataLoader:
         self.override_month = None
         self.month_first, self.month_last = None, None
         self.steps = steps
+        self._cached_data_path = None
+        # Set by the FeatureFrame path when it materializes its directory cache
+        # (#287/#289); mirrors _cached_data_path for the pandas parquet cache.
+        self._cached_frame_path = None
 
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+    @property
+    def cached_data_path(self) -> Optional[Path]:
+        return self._cached_data_path
+
+    @property
+    def cached_frame_path(self) -> Optional[Path]:
+        """Path of the FeatureFrame directory cache (None until the frame path runs).
+
+        Engines must consume this attribute rather than rebuilding the cache
+        name (C-59 lesson: five hardcoded cache-name sites across three repos).
+        """
+        return self._cached_frame_path
+
     def _get_partition_dict(self, steps) -> Dict:
+        """Thin backward-compat wrapper over fetch_context.resolve_default_partition_dict.
+
+        Reads self.partition (callers/tests set it first). get_data() itself no
+        longer calls this — it resolves via _resolve_fetch_context (#286). The
+        partition definitions and the config_partitions.py warning live on the
+        pure resolver; see fetch_context.py for the authoritative docs.
         """
-        Generate default partition dictionary for data splitting.
-
-        Creates standard time ranges for calibration, validation, and
-        forecasting partitions. Uses fixed historical ranges for
-        calibration/validation and dynamic ranges for forecasting.
-
-        Internal Use:
-            Called by get_data() when partition_dict not provided.
-
-        Args:
-            steps: Forecast horizon in months for forecasting partition.
-                Determines how far into future the test range extends.
-
-        Returns:
-            Dictionary with train/test ranges for requested partition:
-                {
-                    'train': (start_month_id, end_month_id),
-                    'test': (start_month_id, end_month_id)
-                }
-
-        Partition Definitions:
-            calibration:
-                Train: 121-396 (1990-01 to 2012-12)
-                Test: 397-444 (2013-01 to 2015-12)
-
-            validation:
-                Train: 121-444 (1990-01 to 2015-12)
-                Test: 445-492 (2016-01 to 2018-12)
-
-            forecasting:
-                Train: 121 to (current_month - 2)
-                Test: (current_month - 1) to (current_month + steps)
-
-        Example:
-            >>> # Current month is 530 (2024-02)
-            >>> part_dict = loader._get_partition_dict(steps=36)
-            >>> print(part_dict)
-            {
-                'train': (121, 528),
-                'test': (529, 565)
-            }
-
-        Raises:
-            ValueError: If partition not in ('calibration', 'validation', 'forecasting')
-
-        Note:
-            - Month IDs are months since 1980-01
-            - Forecasting uses ViewsMonth.now() for current time
-            - Warns about using default instead of config file
-        """
-        logger.warning("Did not use config_partitions.py, using default partition dictionary instead...")
-        match self.partition:
-            case "calibration":
-                return {
-                    "train": (121, 396),
-                    "test": (397, 444),
-                    }  # calib_partitioner_dict - (01/01/1990 - 12/31/2012) : (01/01/2013 - 31/12/2015)
-            case "validation":
-                return {
-                    "train": (121, 444), 
-                    "test": (445, 492)
-                    }
-            case "forecasting":
-                month_last = (
-                    ViewsMonth.now().id - 1
-                )  # minus 1 because the current month is not yet available. Verified but can be tested by changing this and running the check_data notebook.
-                return {
-                    "train": (121, month_last),
-                    "test": (month_last + 1, month_last + 1 + steps),
-                }  
-            case _:
-                raise ValueError(
-                    'partition should be either "calibration", "validation" or "forecasting"'
-                )
-        pass
+        return resolve_default_partition_dict(self.partition, steps)
 
     def _get_viewser_update_config(self, queryset_base: Queryset) -> tuple[int, str]:
         """
@@ -886,7 +933,7 @@ class ViewsDataLoader:
                 f".env file found but could not be loaded: {dotenv_path}"
             )
 
-        # months_to_update = PipelineConfig().months_to_update #read from .env
+        # months_to_update = PipelineConfig.months_to_update #read from .env
         months_to_update_str = os.getenv("month_to_update")
         if not months_to_update_str or months_to_update_str == "":
             raise ValueError("Could not find months to update in the .env file. Add the line: month_to_update=[123, 124, 125]")
@@ -1072,135 +1119,312 @@ class ViewsDataLoader:
         df = ensure_float64(df)
         return df, alerts
 
-    def _get_month_range(self) -> tuple[int, int]:
+    def _detect_data_source(self) -> str:
+        """Inspect get_queryset() return to determine the data source type.
+
+        Delegates to the pure detect_data_source() (single-read contract, #289).
         """
-        Determine month range based on partition type.
+        return detect_data_source(self._model_path.get_queryset(), self._model_name)
 
-        Calculates start and end month IDs from partition configuration,
-        with optional override for forecasting runs.
+    def _fetch_data_from_datafactory(
+        self, self_test: bool, descriptor: Optional[dict] = None,
+    ) -> tuple[pd.DataFrame, None]:
+        """Fetch data from views-datafactory using a dict descriptor.
 
-        Internal Use:
-            Called by get_data() to set month_first and month_last.
-
-        Returns:
-            Tuple of (month_first, month_last):
-                - month_first: Start month ID from partition train range
-                - month_last: End month ID based on partition type:
-                    - calibration/validation: End of test range
-                    - forecasting: End of train range (or override)
-
-        Example:
-            >>> loader.partition = 'calibration'
-            >>> loader.partition_dict = {
-            ...     'train': (121, 396),
-            ...     'test': (397, 444)
-            ... }
-            >>> first, last = loader._get_month_range()
-            >>> print(first, last)
-            121 444
-
-            >>> # Forecasting with override
-            >>> loader.partition = 'forecasting'
-            >>> loader.override_month = 530
-            >>> first, last = loader._get_month_range()
-            WARNING: Overriding end month in forecasting partition to 530
-            >>> print(first, last)
-            121 530
-
-        Raises:
-            ValueError: If partition not in ('calibration', 'validation', 'forecasting')
-
-        Note:
-            - Forecasting range includes only training data (test is future)
-            - Override only applies to forecasting partition
-            - Logs warning when override is used
-        """
-        month_first = self.partition_dict["train"][0]
-
-        if self.partition == "forecasting":
-            month_last = self.partition_dict["train"][1]
-        elif self.partition in ["calibration", "validation"]:
-            month_last = self.partition_dict["test"][1]
-        else:
-            raise ValueError(
-                'partition should be either "calibration", "validation" or "forecasting"'
-            )
-        if self.partition == "forecasting" and self.override_month is not None:
-            month_last = self.override_month
-            logger.warning(
-                f"Overriding end month in forecasting partition to {month_last}\n"
-            )
-
-        return month_first, month_last
-
-    def _validate_df_partition(
-        self, df: pd.DataFrame
-    ) -> bool:
-        """
-        Validate DataFrame temporal alignment with partition.
-
-        Checks that DataFrame's month range exactly matches the expected
-        range from partition configuration, ensuring data completeness.
-
-        Internal Use:
-            Called by get_data() when validate=True.
+        Counterpart to _fetch_data_from_viewser(). Lazy-imports datafactory_query,
+        renames columns to VIEWSER conventions, derives row/col for priogrid models,
+        fills NaN, and casts to float64. Does NOT support drift detection (C-52).
 
         Args:
-            df: DataFrame to validate.
-                Must have 'month_id' in index or columns
+            self_test: Whether drift detection self-testing was requested.
+                Logged as a warning since datafactory has no drift detection.
+            descriptor: Pre-fetched dict descriptor. If None, calls get_queryset().
 
         Returns:
-            True if month range matches partition, False otherwise
+            Tuple of (dataframe, None). Alerts are always None.
 
-        Validation Logic:
-            For calibration/validation:
-                - first_expected = partition['train'][0]
-                - last_expected = partition['test'][1]
-
-            For forecasting:
-                - first_expected = partition['train'][0]
-                - last_expected = partition['train'][1] or override_month
-
-        Example:
-            >>> loader.partition = 'calibration'
-            >>> loader.partition_dict = {
-            ...     'train': (121, 396),
-            ...     'test': (397, 444)
-            ... }
-            >>> # Valid DataFrame
-            >>> is_valid = loader._validate_df_partition(df)
-            >>> print(is_valid)
-            True
-            >>>
-            >>> # Invalid DataFrame (wrong range)
-            >>> is_valid = loader._validate_df_partition(df_wrong)
-            ERROR: Dataframe time units do not match partition time units...
-            >>> print(is_valid)
-            False
-
-        Note:
-            - Checks min and max month_id in DataFrame
-            - Logs detailed error if validation fails
-            - Override_month respected for forecasting
+        Raises:
+            RuntimeError: If descriptor is invalid, the resolved output_format is not
+                in the datafactory consumer contract, or load_dataset() fails.
+            ImportError: If datafactory_query is not installed or predates the
+                ADR-050 contract exports (views-datafactory >= 1.8.0).
         """
-        if "month_id" in df.columns:
-            df_time_units = df["month_id"].values
+        if descriptor is None:
+            descriptor = self._model_path.get_queryset()
+
+        if descriptor is None or not isinstance(descriptor, dict):
+            raise RuntimeError(
+                f"Expected dict descriptor for datafactory model {self._model_name}, "
+                f"got {type(descriptor).__name__}"
+            )
+
+        require_descriptor_keys(descriptor, self._model_name)
+
+        loa = descriptor["loa"]
+        if loa not in _LOA_TO_OUTPUT_FORMAT:
+            raise RuntimeError(
+                f"Unsupported loa '{loa}' in datafactory descriptor for "
+                f"{self._model_name}. Supported: {list(_LOA_TO_OUTPUT_FORMAT)}"
+            )
+        output_format = _LOA_TO_OUTPUT_FORMAT[loa]
+
+        logger.info(
+            f"Beginning data fetch from views-datafactory for {self._model_name} "
+            f"(zarr_url={descriptor.get('zarr_url', '?')}, "
+            f"region={descriptor.get('region', '?')}, "
+            f"loa={loa}, output_format={output_format}, "
+            f"months={self.month_first}-{self.month_last})"
+        )
+
+        contract = import_datafactory_contract(self._model_name)
+        load_dataset = contract.load_dataset
+
+        if not contract.is_valid_output_format(output_format):
+            raise RuntimeError(
+                f"output_format '{output_format}' (from loa='{loa}') is not in the "
+                f"datafactory consumer contract (CONTRACT_VERSION={contract.CONTRACT_VERSION}). "
+                f"_LOA_TO_OUTPUT_FORMAT is out of step with datafactory's OutputFormat "
+                f"vocabulary — reconcile against the vendored contract fixture "
+                f"(tests/fixtures/feature_frame_contract/contract.json)."
+            )
+
+        try:
+            df = load_dataset(
+                region=descriptor["region"],
+                start=self.month_first,
+                end=self.month_last,
+                features=list(descriptor["features"].keys()),
+                output_format=output_format,
+                data_dir=descriptor["zarr_url"],
+            )
+        except Exception as e:
+            logger.error(
+                f"Error fetching data from datafactory: {e}", exc_info=True
+            )
+            raise RuntimeError(
+                f"Error fetching data from datafactory for {self._model_name}: {e}"
+            ) from e
+
+        feature_rename = descriptor.get("features", {})
+        if feature_rename:
+            df = df.rename(columns=feature_rename)
+
+        # Resolve the grid level by alias, not a hardcoded literal, so this still derives
+        # row/col when datafactory emits the canonical priogrid_id (this runs before the
+        # _fetch_data normalization seam). See _LEGACY_GRID_ID / _CANONICAL_GRID_ID.
+        _grid_level = next(
+            (n for n in df.index.names if n in (_LEGACY_GRID_ID, _CANONICAL_GRID_ID)), None
+        )
+        if loa == "priogrid_month" and _grid_level is not None:
+            pgids = df.index.get_level_values(_grid_level)
+            if "row" not in df.columns:
+                df["row"] = ((pgids - 1) // _PRIOGRID_NCOL + 1).astype(float)
+            if "col" not in df.columns:
+                df["col"] = ((pgids - 1) % _PRIOGRID_NCOL + 1).astype(float)
+
+        df = df.fillna(0.0)
+        df = df.sort_index()
+        df = ensure_float64(df)
+
+        if self_test:
+            logger.warning(
+                f"Drift detection self-test requested for {self._model_name} "
+                f"but is not available for views-datafactory sources. "
+                f"Returning alerts=None. See risk register C-52."
+            )
+
+        logger.info(
+            f"Datafactory fetch complete for {self._model_name}: "
+            f"{len(df)} rows, {len(df.columns)} columns"
+        )
+
+        return df, None
+
+    def _fetch_data_from_synthetic(
+        self, self_test: bool, descriptor: Optional[dict] = None,
+    ) -> tuple[pd.DataFrame, None]:
+        """Generate synthetic data from a descriptor dict.
+
+        Args:
+            self_test: Whether drift detection self-testing was requested.
+                Logged as a warning since synthetic data has no drift detection.
+            descriptor: Pre-fetched dict descriptor. If None, calls get_queryset().
+
+        Returns:
+            Tuple of (dataframe, None). Alerts are always None.
+
+        Raises:
+            ValueError: If descriptor is invalid.
+        """
+        from views_pipeline_core.modules.dataloaders.synthetic import (
+            generate_synthetic_data,
+            SYNTHETIC_REQUIRED_KEYS,
+        )
+
+        if descriptor is None:
+            descriptor = self._model_path.get_queryset()
+
+        if descriptor is None or not isinstance(descriptor, dict):
+            raise RuntimeError(
+                f"Expected dict descriptor for synthetic model {self._model_name}, "
+                f"got {type(descriptor).__name__}"
+            )
+
+        missing = SYNTHETIC_REQUIRED_KEYS - descriptor.keys()
+        if missing:
+            raise ValueError(
+                f"Synthetic descriptor for {self._model_name} is missing "
+                f"required keys: {sorted(missing)}"
+            )
+
+        if self_test:
+            logger.warning(
+                f"Drift detection self_test requested for {self._model_name} "
+                f"but is not available for synthetic data sources. "
+                f"Returning alerts=None."
+            )
+
+        df = generate_synthetic_data(
+            descriptor, self.month_first, self.month_last
+        )
+
+        logger.info(
+            f"Synthetic fetch complete for {self._model_name}: "
+            f"{len(df)} rows, {len(df.columns)} columns"
+        )
+
+        return df, None
+
+    def _fetch_data(self, self_test: bool, source: str) -> tuple[pd.DataFrame, list | None]:
+        """Dispatch to the correct fetch strategy based on detected source.
+
+        Args:
+            self_test: Whether to perform drift detection self-testing.
+            source: Data source identifier ('viewser', 'datafactory', or 'synthetic')
+                as returned by _detect_data_source().
+
+        Returns:
+            Tuple of (dataframe, alerts_or_None).
+
+        Raises:
+            ValueError: If source is not recognized.
+        """
+        if source == "viewser":
+            df, alerts = self._fetch_data_from_viewser(self_test)
+        elif source == "datafactory":
+            df, alerts = self._fetch_data_from_datafactory(self_test)
+        elif source == "synthetic":
+            df, alerts = self._fetch_data_from_synthetic(self_test)
         else:
-            df_time_units = df.index.get_level_values("month_id").values
-        # partitioner_dict = get_partitioner_dict(partition)
-        if self.partition in ["calibration", "validation"]:
-            first_month = self.partition_dict["train"][0]
-            last_month = self.partition_dict["test"][1]
+            raise ValueError(
+                f"Unknown data source '{source}' for model {self._model_name}. "
+                f"Expected 'viewser', 'datafactory', or 'synthetic'."
+            )
+        # Single normalization seam: every RAW source funnels through here, so the cache
+        # written by get_data() and all downstream consumers carry the canonical
+        # priogrid_id (views-frames ADR-015). See _normalize_grid_index.
+        return _normalize_grid_index(df), alerts
+
+    def _get_month_range(self) -> tuple[int, int]:
+        """Thin backward-compat wrapper over fetch_context.resolve_month_range.
+
+        Reads self.partition/self.partition_dict/self.override_month (callers/
+        tests set them first). get_data() itself no longer calls this — it
+        resolves via _resolve_fetch_context (#286); see fetch_context.py for the
+        authoritative range semantics.
+        """
+        return resolve_month_range(
+            self.partition, self.partition_dict, self.override_month
+        )
+
+    def _select_partition_dict(self, partition: str) -> Optional[Dict]:
+        """Select this partition's bounds from the loader's stored dict.
+
+        Handles both shapes the attribute legitimately holds: the NESTED form
+        callers provide at construction ({"calibration": {train, test}, ...})
+        and the FLAT form a previous get_data/get_feature_frame call stored
+        back ({train, test} — the legacy attribute contract). Re-running the
+        same partition reuses the flat dict; asking for a DIFFERENT partition
+        against a flat dict is ambiguous and fails loud (this crash used to
+        surface as a bare TypeError deep in the month-range rule — C-210).
+        """
+        stored = self.partition_dict
+        if stored is None:
+            return resolve_default_partition_dict(partition, self.steps)
+        if partition in stored:
+            return stored[partition]
+        if _PARTITION_KEYS <= set(stored):
+            if self.partition == partition:
+                return stored  # same partition re-run: already resolved
+            raise ValueError(
+                f"ViewsDataLoader holds flat train/test bounds "
+                f"(for partition '{self.partition}') but '{partition}' was "
+                f"requested. Provide a per-partition partition_dict "
+                f"({{'{partition}': {{'train': ..., 'test': ...}}}}) or use a "
+                f"fresh loader when switching partitions."
+            )
+        return stored.get(partition, None)  # legacy fallthrough (unknown shape)
+
+    def _resolve_fetch_context(
+        self, partition: str, override_month: Optional[int]
+    ) -> FetchContext:
+        """Resolve everything a fetch needs, without mutating loader state.
+
+        Pure with respect to the loader: reads current attributes as fallbacks
+        (preserving get_data's legacy resolution rules) but writes nothing.
+        get_data() assigns the result to the legacy attributes; the FeatureFrame
+        path (#289) consumes the returned value directly.
+        """
+        partition_dict = self._select_partition_dict(partition)
+        drift_config_dict = (
+            drift_detection.drift_detection_partition_dict[partition]
+            if self.drift_config_dict is None
+            else self.drift_config_dict
+        )
+        if self.month_first is None or self.month_last is None:
+            month_first, month_last = resolve_month_range(
+                partition, partition_dict, override_month
+            )
+            # Operational warning lives here at the fetch layer (#288): the
+            # resolver itself is pure and silent (sniffers call it too).
+            if partition == "forecasting" and override_month is not None:
+                logger.warning(
+                    f"Overriding end month in forecasting partition to {month_last}\n"
+                )
         else:
-            first_month = self.partition_dict["train"][0]
-            last_month = self.partition_dict["train"][1]
-            if self.override_month is not None:
-                last_month = self.override_month
-        if [np.min(df_time_units), np.max(df_time_units)] != [first_month, last_month]:
-            logger.error(f"Dataframe time units do not match partition time units. Got {np.min(df_time_units)}, {np.max(df_time_units)} but expected {first_month}, {last_month}.")
-            return False
-        else:
-            return True
+            month_first, month_last = self.month_first, self.month_last
+
+        # Single-read contract (#289): one get_queryset() snapshot feeds both
+        # source detection and (via ctx.queryset) any downstream fetch.
+        queryset = self._model_path.get_queryset()
+        source = detect_data_source(queryset, self._model_name)
+        df_cache_filename = CACHE_FILENAME_TEMPLATE.format(
+            partition=partition, source=source, ext=PipelineConfig.dataframe_format,
+        )
+        return FetchContext(
+            partition=partition,
+            partition_dict=partition_dict,
+            drift_config_dict=drift_config_dict,
+            override_month=override_month,
+            month_first=month_first,
+            month_last=month_last,
+            source=source,
+            df_cache_filename=df_cache_filename,
+            queryset=queryset,
+        )
+
+    def _apply_context(self, ctx: FetchContext) -> None:
+        """Assign the resolved context to the legacy loader attributes (#286).
+
+        The single write-back both entry points share — extend HERE if the
+        legacy attribute contract ever grows.
+        """
+        self.partition = ctx.partition
+        self.partition_dict = ctx.partition_dict
+        self.drift_config_dict = ctx.drift_config_dict
+        self.override_month = ctx.override_month
+        self.month_first, self.month_last = ctx.month_first, ctx.month_last
+
 
     # @staticmethod
     # def filter_dataframe_by_month_range(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -1225,7 +1449,7 @@ class ViewsDataLoader:
         use_saved: bool,
         validate: bool = True,
         override_month: int = None,
-        suffix: str = "",
+        level: Optional[str] = None,
     ) -> tuple[pd.DataFrame, list]:
         """
         Fetch or load model data for specified partition.
@@ -1312,54 +1536,55 @@ class ViewsDataLoader:
             - Drift config from drift_detection module
             - Alerts logged even if no drift detected
         """
-        self.partition = partition #if self.partition is None else self.partition
-        self.partition_dict = self._get_partition_dict(steps=self.steps) if self.partition_dict is None else self.partition_dict.get(partition, None)
-        self.drift_config_dict = drift_detection.drift_detection_partition_dict[
-            partition
-        ] if self.drift_config_dict is None else self.drift_config_dict
-        self.override_month = override_month if self.override_month is None else override_month
-        if self.month_first is None or self.month_last is None:
-            self.month_first, self.month_last = self._get_month_range()
+        # Resolution is value-based (#286); _apply_context keeps the legacy
+        # attribute contract for every existing reader of loader state.
+        ctx = self._resolve_fetch_context(partition, override_month)
+        self._apply_context(ctx)
 
-        suffix_str = f"_{suffix}" if suffix else ""
-        path_viewser_df = self._path_raw / f"{self.partition}_viewser_df{suffix_str}{PipelineConfig.dataframe_format}"
+        source = ctx.source
+        path_cached_df = self._path_raw / ctx.df_cache_filename
+        self._cached_data_path = path_cached_df
         alerts = None
 
         if use_saved:
-            if path_viewser_df.exists():
+            if path_cached_df.exists():
                 try:
-                    df = read_dataframe(path_viewser_df)
-                    logger.info(f"Reading saved data from {path_viewser_df}")
+                    df = read_dataframe(path_cached_df)
+                    # Upgrade legacy caches written before the consolidation: an on-disk
+                    # priogrid_gid cache is normalized to priogrid_id on read (ADR-015).
+                    df = _normalize_grid_index(df)
+                    logger.info(f"Reading saved data from {path_cached_df}")
                 except Exception as e:
                     raise RuntimeError(
-                        f"Use of saved data was specified but getting {path_viewser_df} failed with: {e}"
+                        f"Use of saved data was specified but getting {path_cached_df} failed with: {e}"
                     )
             else:
-                logger.info(f"Saved data not found at {path_viewser_df}, fetching from viewser...")
-                df, alerts = self._fetch_data_from_viewser(self_test)
+                logger.info(f"Saved data not found at {path_cached_df}, fetching from {source}...")
+                df, alerts = self._fetch_data(self_test, source)
                 data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 create_data_fetch_log_file(
                     self._path_raw, self.partition, self._model_name, data_fetch_timestamp
                 )
-                logger.info(f"Saving data to {path_viewser_df}")
-                save_dataframe(df, path_viewser_df)
+                logger.info(f"Saving data to {path_cached_df}")
+                save_dataframe(df, path_cached_df)
         else:
-            logger.info("Fetching data from viewser...")
-            df, alerts = self._fetch_data_from_viewser(self_test) 
+            logger.info(f"Fetching data from {source}...")
+            df, alerts = self._fetch_data(self_test, source)
             data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             create_data_fetch_log_file(
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
-            logger.info(f"Saving data to {path_viewser_df}")
-            save_dataframe(df, path_viewser_df)
+            logger.info(f"Saving data to {path_cached_df}")
+            save_dataframe(df, path_cached_df)
             
         if validate:
-            if self._validate_df_partition(df=df):
-                return df, alerts
-            else:
-                raise RuntimeError(
-                    f"file {path_viewser_df.name} incompatible with partition {self.partition}"
-                )
+            CoreDataSniffer(
+                partition_dict=self.partition_dict,
+                partition=self.partition,
+                level=level,
+                override_month=self.override_month,
+            ).sniff_loaded_data(df)
+            return df, alerts
         logger.debug(f"DataFrame shape: {df.shape if df is not None else 'None'}")
         for ialert, alert in enumerate(
             str(alerts).strip("[").strip("]").split("Input")
@@ -1367,10 +1592,56 @@ class ViewsDataLoader:
             if "offender" in alert:
                 logger.warning({f"{partition} data alert {ialert}": str(alert)})
 
-        # df = df.reset_index()
-        # if "priogrid_gid" in df.columns():
-        #     df = df.rename(columns={"priogrid_gid": "priogrid_id"})
-        #     df = df.set_index(["month_id", "priogrid_id"])
-
         return df, alerts
-    
+
+    def get_feature_frame(
+        self,
+        partition: str,
+        use_saved: bool,
+        level: str,
+        validate: bool = True,
+        override_month: Optional[int] = None,
+    ):
+        """Fetch or load a validated ``views_frames.FeatureFrame`` — no pandas.
+
+        The FeatureFrame counterpart of :meth:`get_data` (#289, epic #285):
+        datafactory-only, cache-first on ``use_saved`` (directory cache via
+        ``frame_cache``, exposed as :attr:`cached_frame_path`), frame-native
+        audit (``CoreFrameSniffer``) on every delivery, bare frame returned
+        (no ``(frame, alerts)`` tuple — alerts are a viewser concept, always
+        ``None`` for datafactory, C-52). ``level`` is required — no permissive
+        mode. Deliberate differences from the pandas path are documented in
+        ``feature_frame_path``'s module docstring (no row/col derivation, no
+        silent NaN fill, no drift detection).
+
+        End-state note (epic #285 condition 5): this method is the successor
+        of the pandas input path, not a sibling — ``get_data`` deprecates at
+        Epic C close-out (#267).
+        """
+        ctx = self._resolve_fetch_context(partition, override_month)
+        self._apply_context(ctx)
+
+        # Artifact handle set BEFORE the fetch (mirrors get_data's
+        # _cached_data_path contract): on failure, callers still see where the
+        # cache lives/would live.
+        cache_dir = frame_cache_path(self._path_raw, ctx.partition, ctx.source)
+        self._cached_frame_path = cache_dir
+
+        def _write_fetch_log() -> None:
+            # Invoked by fetch_feature_frame exactly when a fresh fetch
+            # succeeded — provenance decision and fetch decision are one event.
+            data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            create_data_fetch_log_file(
+                self._path_raw, ctx.partition, self._model_name, data_fetch_timestamp
+            )
+
+        return fetch_feature_frame(
+            ctx,
+            ctx.queryset,
+            level,
+            cache_dir,
+            use_saved=use_saved,
+            validate=validate,
+            model_name=self._model_name,
+            on_fetch=_write_fetch_log,
+        )

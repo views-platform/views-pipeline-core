@@ -1,10 +1,16 @@
 import numpy as np
+import pandas as pd
 import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
-from views_pipeline_core.modules.ensemble_aggregator import (
-    AggregationManager,
+from views_pipeline_core.modules.aggregation.aggregator import (
+    AggregationModule,
     _ModelSpec,
+)
+from views_pipeline_core.modules.aggregation.aggregator import (
+    _arrow_series_to_numpy,
 )
 
 
@@ -45,7 +51,7 @@ def _df_dist_single_model(name: str, rows):
 
 
 def test_check_model_consistency_type_mismatch_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     # First model: point predictions
     mgr._check_model_consistency(pred_type="point", sample_size=1, model_name="m1")
@@ -58,7 +64,7 @@ def test_check_model_consistency_type_mismatch_raises():
 
 
 def test_check_model_consistency_sample_size_mismatch_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     # First model: distribution with sample_size=10
     mgr._check_model_consistency(
@@ -75,7 +81,7 @@ def test_check_model_consistency_sample_size_mismatch_raises():
 def test_inner_join_model_predictions_one_model_returns_same_df():
     import polars.testing as pl_testing
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_dist_single_model("m1", [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
     mgr.models = [_ModelSpec(name="m1", df=df_m1, weight=None)]
@@ -86,7 +92,7 @@ def test_inner_join_model_predictions_one_model_returns_same_df():
 
 
 def test_inner_join_model_predictions_no_models_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     mgr.models = []
 
     with pytest.raises(ValueError, match="No models to join"):
@@ -98,7 +104,7 @@ def test_inner_join_model_predictions_no_models_raises():
 
 def test_aggregate_point_mean_unweighted():
     """Unweighted mean across models for point predictions."""
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [3.0, 5.0])
@@ -120,7 +126,7 @@ def test_aggregate_point_mean_unweighted():
 
 def test_aggregate_point_mean_weighted():
     """Weighted mean across models for point predictions."""
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [2.0, 4.0])
@@ -144,7 +150,7 @@ def test_aggregate_point_mean_weighted():
 @pytest.mark.parametrize("agg_func", ["min", "max", "median"])
 def test_aggregate_point_non_mean_with_weights_raises(agg_func):
     """Using weights with non-mean aggregation should raise a ValueError."""
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [2.0, 4.0])
@@ -176,7 +182,7 @@ def test_aggregate_point_aggregation_functions_unweighted(agg_func, expected):
     """
     For point predictions, method controls how we combine across models.
     """
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [3.0, 5.0])
@@ -200,7 +206,7 @@ def test_aggregate_point_aggregation_functions_unweighted(agg_func, expected):
 
 def test_aggregate_point_invalid_aggregation_func_raises():
     """Unsupported method should raise a ValueError."""
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 2.0])
     mgr.models = [_ModelSpec(name="m1", df=df_m1, weight=None)]
@@ -216,7 +222,7 @@ def test_aggregate_point_use_weights_true_without_weights_raises(monkeypatch):
     If use_weights=True but no weights are set (all None),
     _normalized_weights_by_name() should still return equal weights, so no error.
     """
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_point_single_model("m1", [1.0, 3.0])
     df_m2 = _df_point_single_model("m2", [2.0, 4.0])
@@ -241,7 +247,7 @@ def test_aggregate_point_use_weights_true_without_weights_raises(monkeypatch):
 
 
 def test_normalize_weights_all_none_equal_weights():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     dummy_df = pl.DataFrame({"month_id": [1], "country_id": [1], "y_m1": [[1.0]]})
     mgr.models = [
@@ -256,7 +262,7 @@ def test_normalize_weights_all_none_equal_weights():
 
 
 def test_normalize_weights_mixed_and_unspecified():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     dummy_df = pl.DataFrame({"month_id": [1], "country_id": [1], "y_m1": [[1.0]]})
     mgr.models = [
@@ -271,7 +277,7 @@ def test_normalize_weights_mixed_and_unspecified():
 
 
 def test_normalize_weights_sum_greater_than_one_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     dummy_df = pl.DataFrame({"month_id": [1], "country_id": [1], "y_m1": [[1.0]]})
     mgr.models = [
@@ -286,7 +292,7 @@ def test_normalize_weights_sum_greater_than_one_raises():
 def test_add_model_rejects_weight_ge_1(monkeypatch):
     """Adding a model with weight >= 1.0 should raise a ValueError."""
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     # Monkeypatch _load_to_polars so we don't need real CMDataset/PGMDataset
     dummy_df = pl.DataFrame(
@@ -298,7 +304,7 @@ def test_add_model_rejects_weight_ge_1(monkeypatch):
     )
 
     monkeypatch.setattr(
-        AggregationManager, "_load_to_polars", lambda self, data: dummy_df
+        AggregationModule, "_load_to_polars", lambda self, data: dummy_df
     )
 
     # Now try to add the model with an invalid weight
@@ -312,7 +318,7 @@ def test_add_model_rejects_weight_ge_1(monkeypatch):
 def test_aggregate_distributions_concat_shape_and_support():
     np.random.seed(0)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 4
 
     # single row, two models, clearly distinct supports
@@ -337,7 +343,7 @@ def test_aggregate_distributions_concat_shape_and_support():
 
 
 def test_aggregate_distributions_concat_with_weights_picks_weighted_model():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 4
 
     # single row, two models with distinct supports
@@ -369,7 +375,7 @@ def test_aggregate_distributions_concat_with_weights_picks_weighted_model():
 def test_aggregate_distributions_concat_unweighted_proportion():
     np.random.seed(0)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 6  # larger sample for clearer ratio
 
     df_m1 = _df_dist_single_model("m1", [[1.0] * n_samples])
@@ -400,7 +406,7 @@ def test_aggregate_distributions_concat_unweighted_proportion():
 def test_aggregate_distributions_concat_weighted_proportional():
     np.random.seed(0)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 100
 
     df_m1 = _df_dist_single_model("m1", [[1.0] * n_samples])
@@ -427,7 +433,7 @@ def test_aggregate_distributions_concat_weighted_proportional():
 def test_concat_deterministic_with_seed():
     np.random.seed(42)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 5
 
     df_m1 = _df_dist_single_model("m1", [[1.0] * n_samples])
@@ -453,7 +459,7 @@ def test_concat_deterministic_with_seed():
 def test_concat_multiple_rows():
     np.random.seed(0)
 
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3
 
     df_m1 = _df_dist_single_model(
@@ -491,7 +497,7 @@ def test_concat_multiple_rows():
 
 
 def test_aggregate_distributions_vincentization_equal_weights():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3  # will use quantile levels [0.0, 0.5, 1.0]
 
     # one row: model 1 has [0,1,2], model 2 has [2,3,4]
@@ -515,7 +521,7 @@ def test_aggregate_distributions_vincentization_equal_weights():
 
 
 def test_aggregate_distributions_vincentization_weighted_vs_unweighted():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3  # quantile levels [0.0, 0.5, 1.0]
 
     # one row: model 1 always 0, model 2 always 2
@@ -548,7 +554,7 @@ def test_aggregate_distributions_vincentization_weighted_vs_unweighted():
 
 
 def test_aggregate_distributions_vincentization_quantiles_correct():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 5  # quantile levels [0.0, 0.25, 0.5, 0.75, 1.0]
 
     samples_m1 = [0.0, 1.0, 2.0, 3.0, 4.0]
@@ -579,7 +585,7 @@ def test_aggregate_distributions_vincentization_quantiles_correct():
 
 
 def test_aggregate_distributions_invalid_method_raises():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3
 
     df_m1 = _df_dist_single_model("m1", [[0.0, 1.0, 2.0]])
@@ -592,7 +598,7 @@ def test_aggregate_distributions_invalid_method_raises():
 
 
 def test_aggregate_distributions_requires_sample_size():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
 
     df_m1 = _df_dist_single_model("m1", [[0.0, 1.0, 2.0]])
     mgr.models = [_ModelSpec(name="m1", df=df_m1, weight=None)]
@@ -604,7 +610,7 @@ def test_aggregate_distributions_requires_sample_size():
 
 
 def test_aggregate_dispatch_distribution_rejects_aggregation_func():
-    mgr = AggregationManager(target_cols=["y"])
+    mgr = AggregationModule(target_cols=["y"])
     n_samples = 3
 
     df_m1 = _df_dist_single_model("m1", [[0.0, 1.0, 2.0]])
@@ -617,3 +623,265 @@ def test_aggregate_dispatch_distribution_rejects_aggregation_func():
         ValueError, match="Invalid method='mean' for distribution predictions"
     ):
         mgr.aggregate(method="mean")
+
+
+# ---------------------------------------------------------------------------
+# Helpers for Fix B / Fix C tests
+# ---------------------------------------------------------------------------
+
+
+def _make_arrow_parquet(tmp_path, filename, n_rows=4, n_samples=3, value=1.5):
+    """Write a minimal Arrow parquet file as produced by to_arrow_table()."""
+    y_pred = np.full((n_rows, n_samples), value, dtype=np.float32)
+    flat_values = pa.array(y_pred.reshape(-1), type=pa.float32())
+    offsets = pa.array(
+        np.arange(0, (n_rows + 1) * n_samples, n_samples, dtype=np.int32)
+    )
+    list_array = pa.ListArray.from_arrays(offsets, flat_values)
+    table = pa.table(
+        {
+            "month_id": np.arange(1, n_rows + 1, dtype=np.int64),
+            "country_id": np.arange(10, 10 + n_rows, dtype=np.int64),
+            "pred_sb": list_array,
+        }
+    )
+    path = tmp_path / filename
+    pq.write_table(table, path)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# TestArrowSeriesToNumpy  (Fix C — RED phase)
+# ---------------------------------------------------------------------------
+
+
+class TestArrowSeriesToNumpy:
+    """
+    Unit tests for the module-level helper _arrow_series_to_numpy().
+
+    RED  → ImportError: cannot import name '_arrow_series_to_numpy'
+    GREEN → all pass after implementation
+    """
+
+    def _make_series(self, n: int, s: int, value: float = 2.5) -> pl.Series:
+        """Build a Polars List(Float32) series with shape (n, s)."""
+        data = [[value] * s for _ in range(n)]
+        return pl.Series("pred_sb", data, dtype=pl.List(pl.Float32))
+
+    def test_values_correct(self):
+        """Roundtrip: Polars List series → numpy → values match original."""
+        n, s, v = 6, 4, 2.5
+        series = self._make_series(n, s, v)
+        arr = _arrow_series_to_numpy(series, n, s)
+        assert np.allclose(arr, v, atol=1e-4)
+
+    def test_shape(self):
+        """result.shape must be (N, S)."""
+        n, s = 5, 8
+        series = self._make_series(n, s)
+        arr = _arrow_series_to_numpy(series, n, s)
+        assert arr.shape == (n, s)
+
+    def test_dtype_float32(self):
+        """result.dtype must be float32."""
+        series = self._make_series(3, 4)
+        arr = _arrow_series_to_numpy(series, 3, 4)
+        assert arr.dtype == np.float32
+
+    def test_single_row(self):
+        """Edge case: N=1, S=4."""
+        series = self._make_series(1, 4, value=9.0)
+        arr = _arrow_series_to_numpy(series, 1, 4)
+        assert arr.shape == (1, 4)
+        assert np.allclose(arr, 9.0, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# TestLoadParquetDirect  (Fix B — RED phase)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadParquetDirect:
+    """
+    Unit tests for AggregationModule._load_parquet_direct().
+
+    RED  → AttributeError: 'AggregationModule' object has no attribute '_load_parquet_direct'
+    GREEN → all pass after implementation
+    """
+
+    def test_basic_read(self, tmp_path):
+        """Valid Arrow parquet → correct dtypes, row count, column names."""
+        path = _make_arrow_parquet(tmp_path, "m1.parquet", n_rows=4, n_samples=3)
+        mgr = AggregationModule(
+            index_cols=["month_id", "country_id"],
+            target_cols=["pred_sb"],
+        )
+        df = mgr._load_parquet_direct(path)
+        assert df.height == 4
+        assert "month_id" in df.columns
+        assert "country_id" in df.columns
+        assert "pred_sb" in df.columns
+        assert isinstance(df["month_id"].dtype, pl.datatypes.IntegerType)
+        assert isinstance(df["pred_sb"].dtype, pl.datatypes.List)
+
+    def test_missing_index_col_raises(self, tmp_path):
+        """Parquet missing an index column must raise ValueError."""
+        # Write a parquet without month_id
+        table = pa.table({"country_id": [1, 2], "pred_sb": pa.array([[1.0], [2.0]])})
+        path = tmp_path / "bad.parquet"
+        pq.write_table(table, path)
+
+        mgr = AggregationModule(
+            index_cols=["month_id", "country_id"],
+            target_cols=["pred_sb"],
+        )
+        with pytest.raises(ValueError, match="missing index"):
+            mgr._load_parquet_direct(path)
+
+    def test_missing_target_col_raises(self, tmp_path):
+        """Parquet missing a target column must raise ValueError."""
+        table = pa.table({"month_id": [1], "country_id": [10]})
+        path = tmp_path / "bad_target.parquet"
+        pq.write_table(table, path)
+
+        mgr = AggregationModule(
+            index_cols=["month_id", "country_id"],
+            target_cols=["pred_sb"],
+        )
+        with pytest.raises(ValueError, match="missing target"):
+            mgr._load_parquet_direct(path)
+
+    def test_wrong_index_dtype_raises(self, tmp_path):
+        """String index column must raise TypeError."""
+        list_array = pa.array([["a", "b"], ["c", "d"]])
+        table = pa.table(
+            {
+                "month_id": pa.array(["jan", "feb"]),  # string, not int
+                "country_id": pa.array([1, 2]),
+                "pred_sb": list_array,
+            }
+        )
+        path = tmp_path / "str_idx.parquet"
+        pq.write_table(table, path)
+
+        mgr = AggregationModule(
+            index_cols=["month_id", "country_id"],
+            target_cols=["pred_sb"],
+        )
+        with pytest.raises(TypeError, match="must be integer"):
+            mgr._load_parquet_direct(path)
+
+    def test_wrong_target_dtype_raises(self, tmp_path):
+        """Float (non-List) target column must raise TypeError."""
+        table = pa.table(
+            {
+                "month_id": pa.array([1, 2], type=pa.int64()),
+                "country_id": pa.array([10, 11], type=pa.int64()),
+                "pred_sb": pa.array([1.0, 2.0], type=pa.float32()),  # scalar, not List
+            }
+        )
+        path = tmp_path / "float_target.parquet"
+        pq.write_table(table, path)
+
+        mgr = AggregationModule(
+            index_cols=["month_id", "country_id"],
+            target_cols=["pred_sb"],
+        )
+        with pytest.raises(TypeError, match="must be List"):
+            mgr._load_parquet_direct(path)
+
+
+# ---------------------------------------------------------------------------
+# TestAddModelParquetDispatch  (Fix B — RED phase)
+# ---------------------------------------------------------------------------
+
+
+class TestAddModelParquetDispatch:
+    """
+    Unit tests verifying that add_model() dispatches correctly:
+      - parquet path → _load_parquet_direct()
+      - other inputs  → _load_to_polars()
+
+    RED  → add_model() always calls _load_to_polars(); mock assert_called fails
+    GREEN → dispatch logic added, all pass
+    """
+
+    def test_parquet_path_uses_direct_path(self, tmp_path):
+        """add_model(Path('.parquet')) must call _load_parquet_direct(), not _load_to_polars()."""
+        from unittest.mock import patch
+
+        path = _make_arrow_parquet(tmp_path, "m1.parquet", n_rows=4, n_samples=3)
+        dummy_df = pl.read_parquet(path)
+        mgr = AggregationModule(
+            index_cols=["month_id", "country_id"],
+            target_cols=["pred_sb"],
+        )
+
+        with (
+            patch.object(AggregationModule, "_load_parquet_direct", return_value=dummy_df) as mock_direct,
+            patch.object(AggregationModule, "_load_to_polars") as mock_legacy,
+        ):
+            mgr.add_model(data=path, name="m1")
+            mock_direct.assert_called_once()
+            mock_legacy.assert_not_called()
+
+    def test_csv_path_uses_legacy_path(self, tmp_path, monkeypatch):
+        """add_model(Path('.csv')) must call _load_to_polars(), not _load_parquet_direct()."""
+        from unittest.mock import patch
+
+        csv_path = tmp_path / "m1.csv"
+        csv_path.write_text("month_id,country_id,pred_sb\n1,10,[1.0]\n")
+
+        dummy_df = pl.DataFrame(
+            {"month_id": [1], "country_id": [10], "pred_sb": [[1.0]]}
+        )
+        mgr = AggregationModule(
+            index_cols=["month_id", "country_id"],
+            target_cols=["pred_sb"],
+        )
+
+        with (
+            patch.object(AggregationModule, "_load_to_polars", return_value=dummy_df) as mock_legacy,
+            patch.object(AggregationModule, "_load_parquet_direct") as mock_direct,
+        ):
+            mgr.add_model(data=csv_path, name="m1")
+            mock_legacy.assert_called_once()
+            mock_direct.assert_not_called()
+
+    def test_pandas_df_uses_legacy_path(self, monkeypatch):
+        """add_model(pd.DataFrame) must call _load_to_polars(), not _load_parquet_direct()."""
+        from unittest.mock import patch
+
+        pdf = pd.DataFrame({"month_id": [1], "country_id": [10], "pred_sb": [[1.0]]})
+        dummy_df = pl.from_pandas(pdf)
+        mgr = AggregationModule(
+            index_cols=["month_id", "country_id"],
+            target_cols=["pred_sb"],
+        )
+
+        with (
+            patch.object(AggregationModule, "_load_to_polars", return_value=dummy_df) as mock_legacy,
+            patch.object(AggregationModule, "_load_parquet_direct") as mock_direct,
+        ):
+            mgr.add_model(data=pdf, name="m1")
+            mock_legacy.assert_called_once()
+            mock_direct.assert_not_called()
+
+    def test_end_to_end_parquet_aggregation(self, tmp_path):
+        """Two Arrow parquets → add_model both → aggregate() → correct shape and values."""
+        path1 = _make_arrow_parquet(tmp_path, "m1.parquet", n_rows=3, n_samples=2, value=1.0)
+        path2 = _make_arrow_parquet(tmp_path, "m2.parquet", n_rows=3, n_samples=2, value=3.0)
+
+        mgr = AggregationModule(
+            index_cols=["month_id", "country_id"],
+            target_cols=["pred_sb"],
+        )
+        mgr.add_model(data=path1, name="m1")
+        mgr.add_model(data=path2, name="m2")
+
+        out = mgr.aggregate(method="vincentization", use_weights=False)
+        assert out.height == 3
+        assert "pred_sb" in out.columns
+        # mean of 1.0 and 3.0 samples = 2.0
+        first_cell = out["pred_sb"][0]
+        assert all(abs(v - 2.0) < 1e-4 for v in first_cell)

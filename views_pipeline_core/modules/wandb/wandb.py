@@ -23,6 +23,15 @@ class WandBModule:
         self.models_path = models_path
         self._active_run = None
 
+    @property
+    def run_id(self) -> Optional[str]:
+        """The active WandB run's id, or None if no run is initialized.
+
+        The provenance discriminator stamped onto the evaluation-of-record MetricFrame
+        (#228, closes C-110 — which run produced this artifact).
+        """
+        return self._active_run.id if self._active_run is not None else None
+
     def initialize_run(
         self,
         project: str,
@@ -116,7 +125,10 @@ class WandBModule:
             - Numeric values are tracked over time
         """
         if self._active_run:
-            wandb.log(metrics)
+            try:
+                wandb.log(metrics)
+            except Exception as e:
+                logger.error(f"Failed to log metrics to WandB: {e}")
 
     def log_evaluation_results(
         self,
@@ -343,7 +355,10 @@ class WandBModule:
             - More flexible than log_metrics() but less type-safe
             - See WandB docs for supported data types
         """
-        wandb.log(data)
+        try:
+            wandb.log(data)
+        except Exception as e:
+            logger.error(f"Failed to log data to WandB: {e}")
 
     @staticmethod
     def login() -> None:

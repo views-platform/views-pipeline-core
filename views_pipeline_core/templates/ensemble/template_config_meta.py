@@ -31,12 +31,13 @@ def generate(script_path: Path, model_name: str) -> bool:
     \"""
     meta_config = {{
         "name": "{model_name}", # Eg. "happy_kitten"
-        "models": [], # Eg. ["model1", "model2", "model3"]
-        "targets": ["ln_ged_sb_dep"],
+        "regression_targets": ["ln_ged_sb_dep"],
+        "classification_targets": [],
         "level": "pgm", # Eg. "pgm", "cm"
-        "aggregation": "median", # Eg. "median", "mean"
+        "prediction_format": "dataframe", # "dataframe" for parquet-based, "prediction_frame" for numpy
+        "aggregation": "median", # DataFrame: "median", "mean". PredictionFrame: "arithmetic_mean", "concat"
         "metrics": ["RMSLE", "CRPS", "MSE", "MSLE", "y_hat_bar"],
-        "creator": "Your name here" 
+        "creator": "Your name here"
     }}
     return meta_config
 """

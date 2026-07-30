@@ -51,7 +51,7 @@ def sample_dataframe():
     
     index = pd.MultiIndex.from_product(
         [month_ids, pg_ids],
-        names=["month_id", "priogrid_id"]
+        names=["month_id", "priogrid_gid"]
     )
     
     data = {
@@ -169,7 +169,9 @@ class TestGetPartitionDict:
         assert part_dict["train"] == (121, 444)
         assert part_dict["test"] == (445, 492)
         
-    @patch("views_pipeline_core.modules.dataloaders.dataloaders.ViewsMonth")
+    # Patch target follows the moved import (#286): the forecasting branch now
+    # lazy-imports ViewsMonth inside fetch_context.resolve_default_partition_dict.
+    @patch("ingester3.ViewsMonth.ViewsMonth")
     def test_forecasting_partition(self, mock_views_month, data_loader):
         """Test forecasting partition dict"""
         # Mock current month
@@ -250,55 +252,6 @@ class TestGetMonthRange:
         assert last == 520
 
 
-# ============================================================================
-# Test _validate_df_partition
-# ============================================================================
-
-class TestValidateDfPartition:
-    def test_valid_calibration_df(self, data_loader, sample_dataframe):
-        """Test validation of valid calibration DataFrame"""
-        data_loader.partition = "calibration"
-        data_loader.partition_dict = {
-            "train": (121, 396),
-            "test": (397, 444)
-        }
-        
-        # Create df with correct range
-        df = sample_dataframe.copy()
-        
-        is_valid = data_loader._validate_df_partition(df)
-        assert is_valid
-        
-    def test_invalid_month_range(self, data_loader):
-        """Test validation fails with wrong month range"""
-        data_loader.partition = "calibration"
-        data_loader.partition_dict = {
-            "train": (121, 396),
-            "test": (397, 444)
-        }
-        
-        # Create df with wrong range
-        index = pd.MultiIndex.from_product(
-            [range(100, 200), [1000, 1001]],
-            names=["month_id", "priogrid_id"]
-        )
-        df = pd.DataFrame({"feature": np.random.randn(200)}, index=index)
-        
-        is_valid = data_loader._validate_df_partition(df)
-        assert not is_valid
-        
-    def test_validation_with_override(self, data_loader, sample_dataframe):
-        """Test validation with override month"""
-        data_loader.partition = "forecasting"
-        data_loader.partition_dict = {
-            "train": (121, 529),
-            "test": (530, 565)
-        }
-        data_loader.override_month = 444  # Match sample df
-        
-        is_valid = data_loader._validate_df_partition(sample_dataframe)
-        assert is_valid
-
 
 # ============================================================================
 # Test _fetch_data_from_viewser
@@ -351,111 +304,6 @@ class TestFetchDataFromViewser:
         
         with pytest.raises(RuntimeError, match="Could not find queryset"):
             data_loader._fetch_data_from_viewser(self_test=False)
-
-
-# ============================================================================
-# Test get_data (main interface)
-# ============================================================================
-
-# class TestGetData:
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.parse_args")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.read_dataframe")
-#     def test_get_data_use_saved(self, mock_read_df, mock_parse_args, data_loader, sample_dataframe, tmp_path):
-#         """Test loading saved data"""
-#         # Setup parse_args mock to avoid SystemExit
-#         mock_args = MagicMock()
-#         mock_args.update_viewser = False
-#         mock_parse_args.return_value = mock_args
-        
-#         # Setup data loader
-#         data_loader._path_raw = tmp_path
-#         saved_file = tmp_path / "calibration_viewser_df.parquet"
-#         saved_file.touch()
-        
-#         mock_read_df.return_value = sample_dataframe
-        
-#         # Execute - should load from file, not call viewser
-#         df, alerts = data_loader.get_data(
-#             self_test=False,
-#             partition="calibration",
-#             use_saved=True,
-#             validate=False
-#         )
-        
-#         # Verify
-#         assert df is not None
-#         mock_read_df.assert_called_once()
-#         # Verify viewser was NOT called (use_saved=True with existing file)
-#         data_loader._model_path.get_queryset.assert_not_called()
-        
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.save_dataframe")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.create_data_fetch_log_file")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.parse_args")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64")
-#     def test_get_data_fetch_new(
-#         self, 
-#         mock_ensure_float,
-#         mock_parse_args,
-#         mock_create_log,
-#         mock_save_df,
-#         data_loader,
-#         sample_dataframe,
-#         sample_queryset,
-#         tmp_path
-#     ):
-#         """Test fetching new data"""
-#         # Setup
-#         data_loader._path_raw = tmp_path
-#         data_loader._model_path.get_queryset.return_value = sample_queryset
-        
-#         mock_args = MagicMock()
-#         mock_args.update_viewser = False
-#         mock_parse_args.return_value = mock_args
-#         mock_ensure_float.return_value = sample_dataframe
-        
-#         # Execute
-#         df, alerts = data_loader.get_data(
-#             self_test=False,
-#             partition="calibration",
-#             use_saved=False,
-#             validate=False
-#         )
-        
-#         # Verify
-#         assert df is not None
-#         mock_save_df.assert_called_once()
-#         mock_create_log.assert_called_once()
-        
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.parse_args")
-#     @patch("views_pipeline_core.modules.dataloaders.dataloaders.read_dataframe")
-#     def test_get_data_validation_failure(self, mock_read_df, mock_parse_args, data_loader, tmp_path):
-#         """Test validation failure raises error"""
-#         # Setup parse_args mock
-#         mock_args = MagicMock()
-#         mock_args.update_viewser = False
-#         mock_parse_args.return_value = mock_args
-        
-#         data_loader._path_raw = tmp_path
-        
-#         # Create invalid dataframe
-#         index = pd.MultiIndex.from_product(
-#             [range(100, 200), [1000]],
-#             names=["month_id", "priogrid_id"]
-#         )
-#         invalid_df = pd.DataFrame({"feature": np.random.randn(100)}, index=index)
-        
-#         # Mock saved file exists
-#         saved_file = tmp_path / "calibration_viewser_df.parquet"
-#         saved_file.touch()
-#         mock_read_df.return_value = invalid_df
-        
-#         with pytest.raises(RuntimeError, match="incompatible with partition"):
-#             data_loader.get_data(
-#                 self_test=False,
-#                 partition="calibration",
-#                 use_saved=True,
-#                 validate=True
-#             )
 
 
 # ============================================================================
@@ -594,3 +442,60 @@ class TestDataLoaderIntegration:
         assert loader.partition == "calibration"
         assert loader.month_first == 121
         assert loader.month_last == 444
+
+
+# ============================================================================
+# C-87: float64 dtype guarantee
+# ============================================================================
+
+class TestDtypeGuarantee:
+    """CIC §3: all numeric columns must be float64 after loading."""
+
+    def test_int32_columns_promoted_to_float64(self, data_loader, sample_dataframe, sample_queryset):
+        """int32 columns from upstream are promoted to float64 by the loader."""
+        df_int32 = sample_dataframe.copy()
+        df_int32["int_feature"] = np.array([1] * len(df_int32), dtype=np.int32)
+
+        mock_publish = sample_queryset.publish.return_value
+        mock_publish.fetch_with_drift_detection.return_value = (df_int32, [])
+        data_loader._model_path.get_queryset.return_value = sample_queryset
+        data_loader.month_first = 121
+        data_loader.month_last = 444
+
+        df, _ = data_loader._fetch_data_from_viewser(self_test=False)
+
+        assert df["int_feature"].dtype == np.float64, (
+            f"int32 column should be promoted to float64, got {df['int_feature'].dtype}"
+        )
+
+    def test_float32_columns_promoted_to_float64(self, data_loader, sample_dataframe, sample_queryset):
+        """float32 columns from upstream are promoted to float64 by the loader."""
+        df_f32 = sample_dataframe.copy()
+        df_f32["f32_feature"] = np.array([1.0] * len(df_f32), dtype=np.float32)
+
+        mock_publish = sample_queryset.publish.return_value
+        mock_publish.fetch_with_drift_detection.return_value = (df_f32, [])
+        data_loader._model_path.get_queryset.return_value = sample_queryset
+        data_loader.month_first = 121
+        data_loader.month_last = 444
+
+        df, _ = data_loader._fetch_data_from_viewser(self_test=False)
+
+        assert df["f32_feature"].dtype == np.float64, (
+            f"float32 column should be promoted to float64, got {df['f32_feature'].dtype}"
+        )
+
+    def test_sample_dataframe_fixture_uses_float64(self, sample_dataframe):
+        """Verify the test fixture itself uses float64 (baseline)."""
+        for col in sample_dataframe.columns:
+            assert sample_dataframe[col].dtype == np.float64, (
+                f"Column '{col}' in sample fixture is {sample_dataframe[col].dtype}, "
+                f"expected float64."
+            )
+
+
+class TestCachedFramePath:
+    """#287: the frame-cache path handle exists on the loader, unset by default."""
+
+    def test_cached_frame_path_none_until_frame_path_runs(self, data_loader):
+        assert data_loader.cached_frame_path is None

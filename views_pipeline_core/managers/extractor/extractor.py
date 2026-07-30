@@ -81,6 +81,7 @@ class ExtractorManager(ModelManager):
                 self._preprocess(args)
                 self._save(args)
             except Exception as e:
+                logger.error(f"Error occurred while saving to database. Error details: {e}", exc_info=True)
                 raise PipelineException(message=f"Error occurred while saving to database. Error details: {e}", wandb_module=self._wandb_module)
             finally:
                 self._wandb_module.finish_run()

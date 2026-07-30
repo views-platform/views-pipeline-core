@@ -3,7 +3,6 @@ import subprocess
 from pathlib import Path
 import re
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.managers.model import ModelPathManager
 import requests
 import logging
 import time
@@ -38,6 +37,7 @@ class PackageManager:
             latest_version (str): The latest release version of the package from GitHub (if initialized with package name).
         """
         self._validate = validate
+        from views_pipeline_core.data.model_path import ModelPathManager
         if ModelPathManager._is_path(path_input=package_path, validate=self._validate):
             if self._validate:
                 if not Path(package_path).is_dir():
@@ -55,7 +55,7 @@ class PackageManager:
                 self.manager = None
 
             # Get the main directory of the package inside the package
-            print("Initialized package manager with package path.")
+            logger.info("Initialized package manager with package path.")
             self._init_with_path = True
         else:
             if not PackageManager.validate_package_name(package_path):
@@ -64,7 +64,7 @@ class PackageManager:
             self.latest_version = self.get_latest_release_version_from_github(
                 self.package_name
             )
-            print("Initialized package manager with package name.")
+            logger.info("Initialized package manager with package name.")
             self._init_with_path = False
 
     # method to replace all special characters in a string with underscores
@@ -180,7 +180,7 @@ class PackageManager:
             )
             raise
 
-        except Exception as e:
+        except (KeyError, TypeError, ValueError) as e:
             logging.error(
                 f"An unexpected error occurred while getting the latest version from GitHub: {type(e).__name__} - {e}",
                 exc_info=True,
@@ -200,7 +200,7 @@ class PackageManager:
             bool: True if the name is valid, False otherwise.
         """
         # Define a regex pattern for names starting with "views_"
-        pattern = rf"^{PipelineConfig().organization_name}-.*$"
+        pattern = rf"^{PipelineConfig.organization_name}-.*$"
         # Check if the name matches the pattern
         if re.match(pattern, name):
             return True
@@ -239,7 +239,7 @@ class PackageManager:
             )
             self.add_dependency(
                 package_name="views-pipeline-core",
-                version=PipelineConfig().views_pipeline_core_version_range,
+                version=PipelineConfig.views_pipeline_core_version_range,
             )
             if result.returncode != 0:
                 logging.error(f"Poetry run failed with error: {result.stderr}")
@@ -317,7 +317,7 @@ class PackageManager:
             try:
                 subprocess.run(["poetry", "--version"], capture_output=True, check=True)
             except subprocess.CalledProcessError:
-                print(
+                logger.warning(
                     "Poetry is not installed or not found in the system PATH. Installing Poetry..."
                 )
                 subprocess.run(["pip", "install", "poetry"], check=True)

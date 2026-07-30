@@ -1,16 +1,14 @@
-import wandb
-from typing import Union
-from pathlib import Path
-
 import logging
 from abc import abstractmethod
+from argparse import Namespace
+from pathlib import Path
+from typing import Union
+
+import wandb
+
+from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.managers.model import ModelManager, ModelPathManager
 
-logger = logging.getLogger(__name__)
-
-import logging
-from views_pipeline_core.exceptions import PipelineException
-from argparse import Namespace
 logger = logging.getLogger(__name__)
 
 # ============================================================ Postprocessor Path Manager ============================================================
@@ -39,15 +37,10 @@ class PostprocessorPathManager(ModelPathManager):
 
     def _initialize_postprocessor_specific_directories(self) -> None:
         """Initialize postprocessor-specific directories."""
-        # self.docs = self._build_absolute_directory(Path("docs"))
         self.data_raw = self._build_absolute_directory(Path("data/raw"))
 
     def _initialize_postprocessor_specific_scripts(self) -> None:
         """Initialize and append postprocessor-specific script paths."""
-        # self.scripts += [
-        #     self._build_absolute_directory(Path("configs/config_postprocessor.py")),
-        #     self._build_absolute_directory(Path("app.py")),
-        # ]
         self.queryset_path = self._build_absolute_directory(
             Path("configs/config_queryset.py")
         )

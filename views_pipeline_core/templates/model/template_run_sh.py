@@ -78,11 +78,4 @@ echo "Running $script_path/main.py "
 python $script_path/main.py "$@"
 """
     
-    # try:
-    #   with open(script_path, "w", encoding="utf-8") as script_file:
-    #       script_file.write(code)
-    #       return True
-    # except IOError as e:
-    #     print(f"An error occurred while writing to {script_path}: {e}")
-    #     return False
     return save_shell_script(script_path, code)

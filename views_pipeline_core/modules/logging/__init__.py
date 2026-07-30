@@ -1,1 +1,1 @@
-from .logging import LoggingModule
+from .logging import LoggingModule as LoggingModule

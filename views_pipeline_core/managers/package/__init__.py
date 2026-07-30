@@ -1,1 +1,1 @@
-from .package import PackageManager
+from .package import PackageManager as PackageManager

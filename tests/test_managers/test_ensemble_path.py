@@ -20,6 +20,32 @@ def temp_dir(tmp_path):
     ensembles_dir.mkdir()
     ensemble_dir = ensembles_dir / "test_ensemble"
     ensemble_dir.mkdir()
+
+    for sub in (
+        "artifacts",
+        "configs",
+        "data",
+        "data/generated",
+        "data/processed",
+        "data/raw",
+        "reports",
+        "notebooks",
+    ):
+        (ensemble_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    for script in (
+        "configs/config_deployment.py",
+        "configs/config_hyperparameters.py",
+        "configs/config_meta.py",
+        "configs/config_modelset.py",
+        "configs/config_partitions.py",
+        "configs/config_queryset.py",
+        "configs/config_sweep.py",
+        "main.py",
+        "README.md",
+    ):
+        (ensemble_dir / script).touch()
+
     return project_root, ensemble_dir
 
 def test_initialization_with_valid_name(temp_dir):
@@ -40,6 +66,30 @@ def test_initialization_with_valid_name(temp_dir):
                 assert ensemble_path_instance.model_name == "test_ensemble"
                 assert ensemble_path_instance.root == project_root
                 assert ensemble_path_instance.model_dir == ensemble_dir
+
+def test_construction_succeeds_without_config_modelset(temp_dir):
+    """config_modelset.py is optional — construction must not crash when absent."""
+    project_root, ensemble_dir = temp_dir
+    (ensemble_dir / "configs" / "config_modelset.py").unlink()
+
+    with patch.object(EnsemblePathManager, '_root', project_root):
+        with patch.object(EnsemblePathManager, 'get_models', return_value=project_root / "ensembles"):
+            with patch('views_pipeline_core.managers.ensemble.EnsemblePathManager._get_model_dir', return_value=ensemble_dir):
+                ep = EnsemblePathManager(ensemble_name_or_path="test_ensemble", validate=True)
+                assert ep.model_name == "test_ensemble"
+                assert "config_modelset.py" not in ep.get_scripts()
+
+
+def test_config_modelset_in_scripts_when_present(temp_dir):
+    """When config_modelset.py exists, it must appear in get_scripts()."""
+    project_root, ensemble_dir = temp_dir
+
+    with patch.object(EnsemblePathManager, '_root', project_root):
+        with patch.object(EnsemblePathManager, 'get_models', return_value=project_root / "ensembles"):
+            with patch('views_pipeline_core.managers.ensemble.EnsemblePathManager._get_model_dir', return_value=ensemble_dir):
+                ep = EnsemblePathManager(ensemble_name_or_path="test_ensemble", validate=True)
+                assert "config_modelset.py" in ep.get_scripts()
+
 
 def test_initialization_with_invalid_name(temp_dir):
     """

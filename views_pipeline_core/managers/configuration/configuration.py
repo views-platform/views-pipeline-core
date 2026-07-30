@@ -1,9 +1,12 @@
-from typing import Dict, Optional, List, Any
+from __future__ import annotations
+
+from typing import Dict, Optional, List, Any, TYPE_CHECKING
 import logging
 from datetime import datetime
-from views_pipeline_core.modules.validation.model import validate_config
-from views_pipeline_core.exceptions import ConfigurationException
 from views_pipeline_core.cli.args import ForecastingModelArgs
+
+if TYPE_CHECKING:
+    from views_pipeline_core.modules.wandb import WandBModule
 
 logger = logging.getLogger(__name__)
 
@@ -408,22 +411,35 @@ class ConfigurationManager:
         """
         return list(self.get_combined_config().items())
 
+    # Keys where silent override between config sources could cause incorrect results.
+    _SAFETY_CRITICAL_KEYS = frozenset({"level", "run_type", "prediction_format"})
+
     def _get_raw_combined_config(self) -> Dict:
         """
         Get a pure merge of all configuration sources without normalization.
         Used for validation to check exactly what the user provided.
+
+        Logs a WARNING when a safety-critical key is overridden by a later
+        source (e.g., deployment overrides hyperparameters for 'level').
         """
         config = {}
-        if self.partition_dict:
-            config.update(self.partition_dict)
-        if self.config_hyperparameters:
-            config.update(self.config_hyperparameters)
-        if self.config_deployment:
-            config.update(self.config_deployment)
-        if self.config_meta:
-            config.update(self.config_meta)
-        if self._runtime_config:
-            config.update(self._runtime_config)
+        sources = [
+            ("partition_dict", self.partition_dict),
+            ("config_hyperparameters", self.config_hyperparameters),
+            ("config_deployment", self.config_deployment),
+            ("config_meta", self.config_meta),
+            ("_runtime_config", self._runtime_config),
+        ]
+        for source_name, source_dict in sources:
+            if not source_dict:
+                continue
+            for key, value in source_dict.items():
+                if key in config and key in self._SAFETY_CRITICAL_KEYS and config[key] != value:
+                    logger.warning(
+                        f"Safety-critical key '{key}' overridden: "
+                        f"'{config[key]}' → '{value}' (by {source_name})"
+                    )
+                config[key] = value
         return config
 
     def get_combined_config(self) -> Dict:
@@ -504,28 +520,9 @@ class ConfigurationManager:
         """
         config = self._get_raw_combined_config()
 
-        # 1. Map legacy keys (Tier 1) → legacy keys (Tier 2), only if Tier 2/3 absent
-        if "targets" in config and "regression_targets" not in config and "classification_targets" not in config:
-            config["regression_targets"] = config["targets"]
-        if "metrics" in config and "regression_metrics" not in config and "classification_metrics" not in config:
-            config["regression_metrics"] = config["metrics"]
-
-        # 1b. Map legacy metric keys (Tier 2) → explicit metric keys (Tier 3),
-        #     only if Tier 3 metric keys are absent.
-        _explicit_metric_keys = {
-            "regression_point_metrics", "regression_sample_metrics",
-            "classification_point_metrics", "classification_sample_metrics",
-        }
-        if not (config.keys() & _explicit_metric_keys):
-            if "regression_metrics" in config:
-                config["regression_point_metrics"] = config["regression_metrics"]
-            if "classification_metrics" in config:
-                config["classification_point_metrics"] = config["classification_metrics"]
-
-        # 2. Force all task keys to be lists (normalization)
+        # Force all task keys to be lists (normalization)
         task_keys = [
             "regression_targets", "classification_targets",
-            "regression_metrics", "classification_metrics",
             "regression_point_metrics", "regression_sample_metrics",
             "classification_point_metrics", "classification_sample_metrics",
         ]
@@ -538,55 +535,27 @@ class ConfigurationManager:
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
 
-        # 3. Sync back to unified 'targets' and 'metrics' for backward compatibility
-        all_targets = []
-        for t in config.get("regression_targets", []) + config.get("classification_targets", []):
-            if t not in all_targets:
-                all_targets.append(t)
-
-        if all_targets:
-            config["targets"] = all_targets
-
-        all_metrics = []
-        for m in (
-            config.get("regression_point_metrics", []) +
-            config.get("regression_sample_metrics", []) +
-            config.get("classification_point_metrics", []) +
-            config.get("classification_sample_metrics", [])
-        ):
-            if m not in all_metrics:
-                all_metrics.append(m)
-
-        if all_metrics:
-            config["metrics"] = all_metrics
+        # Synthesise "targets" from the task-split keys so all downstream code
+        # that reads config.get("targets") works regardless of whether the model
+        # uses the legacy "targets" key or the newer split convention.
+        # Existing "targets" key (legacy models) takes precedence.
+        if not config.get("targets"):
+            config["targets"] = (
+                config.get("regression_targets", []) +
+                config.get("classification_targets", [])
+            )
 
         return config
-    
+
     def get_combined_sweep_config(self) -> Dict:
         """
         Get merged configuration from all sources for sweep run.
         """
         config = self._get_raw_combined_config()
 
-        # Mirroring normalization from get_combined_config (identical logic)
-        if "targets" in config and "regression_targets" not in config and "classification_targets" not in config:
-            config["regression_targets"] = config["targets"]
-        if "metrics" in config and "regression_metrics" not in config and "classification_metrics" not in config:
-            config["regression_metrics"] = config["metrics"]
-
-        _explicit_metric_keys = {
-            "regression_point_metrics", "regression_sample_metrics",
-            "classification_point_metrics", "classification_sample_metrics",
-        }
-        if not (config.keys() & _explicit_metric_keys):
-            if "regression_metrics" in config:
-                config["regression_point_metrics"] = config["regression_metrics"]
-            if "classification_metrics" in config:
-                config["classification_point_metrics"] = config["classification_metrics"]
-
+        # Force all task keys to be lists (normalization)
         task_keys = [
             "regression_targets", "classification_targets",
-            "regression_metrics", "classification_metrics",
             "regression_point_metrics", "regression_sample_metrics",
             "classification_point_metrics", "classification_sample_metrics",
         ]
@@ -599,30 +568,16 @@ class ConfigurationManager:
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
 
-        all_targets = []
-        for t in config.get("regression_targets", []) + config.get("classification_targets", []):
-            if t not in all_targets:
-                all_targets.append(t)
-
-        if all_targets:
-            config["targets"] = all_targets
-
-        all_metrics = []
-        for m in (
-            config.get("regression_point_metrics", []) +
-            config.get("regression_sample_metrics", []) +
-            config.get("classification_point_metrics", []) +
-            config.get("classification_sample_metrics", [])
-        ):
-            if m not in all_metrics:
-                all_metrics.append(m)
-
-        if all_metrics:
-            config["metrics"] = all_metrics
+        # Synthesise "targets" from the task-split keys (mirrors get_combined_config).
+        if not config.get("targets"):
+            config["targets"] = (
+                config.get("regression_targets", []) +
+                config.get("classification_targets", [])
+            )
 
         return config
-        
-    
+
+
     def add_config(self, config: Dict) -> None:
         """
         Add runtime configuration values.
@@ -730,18 +685,9 @@ class ConfigurationManager:
             >>> config_mgr.update_for_single_run(args)
             INFO: Applied timestep override: train=(121, 530), test=(531, 567)
 
-        Validation Checks:
-            - Required keys present
-            - Correct types for all values
-            - Valid value ranges
-            - Consistent partition definitions
-            - Algorithm-specific requirements
-
         Notes:
             - Must be called before pipeline execution
-            - Validation happens after all updates applied
             - Override only applies to forecasting run type
-            - Configuration becomes read-only after validation
 
         See Also:
             - :class:`ForecastingModelArgs`: Arguments structure
@@ -757,17 +703,6 @@ class ConfigurationManager:
         # Handle override timestep
         if args.override_timestep is not None:
             self._apply_timestep_override(args)
-
-        # Validate configuration
-        try:
-            # Use raw merge for validation to check exactly what the user provided
-            # and avoid "self-fulfilling" conflict errors from normalization.
-            validate_config(self._get_raw_combined_config())
-        except Exception as e:
-            raise ConfigurationException(
-                f"Configuration validation failed: {e}",
-                wandb_module=wandb_module,
-            )
 
     def _apply_timestep_override(self, args: ForecastingModelArgs) -> None:
         """
@@ -900,17 +835,9 @@ class ConfigurationManager:
             >>> print(config['hyperparameters']['n_estimators'])
             200  # Sweep value takes priority
 
-        Validation Checks:
-            - All checks from validate_config()
-            - Sweep-specific parameter ranges
-            - Compatibility of hyperparameter combinations
-            - Resource constraints for sweep iterations
-
         Notes:
             - wandb_config has highest priority (overrides all sources)
             - Must be called within WandB sweep agent context
-            - Validation ensures sweep iteration is valid
-            - Configuration validated before sweep iteration starts
 
         Thread Safety:
             Not thread-safe (modifies instance state)
@@ -930,12 +857,3 @@ class ConfigurationManager:
         self._runtime_config["eval_type"] = args.eval_type
         self._runtime_config["sweep"] = args.sweep
 
-        # Validate configuration
-        try:
-            # Use raw merge for validation to check exactly what the user provided
-            validate_config(self._get_raw_combined_config())
-        except Exception as e:
-            raise ConfigurationException(
-                f"Sweep configuration validation failed: {e}",
-                wandb_module=wandb_module,
-            )

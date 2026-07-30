@@ -5,34 +5,36 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import sys
 
-from views_pipeline_core.modules.validation.model.check import validate_config
 from views_pipeline_core.managers.model.model import ForecastingModelManager
 
-# Realistic return value for EvaluationManager.evaluate
-MOCK_EVAL_RESULT = {
-    "step": ({}, pd.DataFrame()),
-    "time_series": ({}, pd.DataFrame()),
-    "month": ({}, pd.DataFrame())
-}
+def _make_mock_report():
+    """Build a mock EvaluationReport matching NativeEvaluator.evaluate() return."""
+    report = MagicMock()
+    report.to_dict.return_value = {
+        "target": "mock", "task": "regression", "pred_type": "point",
+        "schemas": {"step": {}, "time_series": {}, "month": {}},
+    }
+    report.to_dataframe.return_value = pd.DataFrame()
+    return report
 
 @pytest.fixture
 def mock_deps():
     """Setup safe mocks for external dependencies."""
-    mock_eval_mgr_cls = MagicMock()
-    mock_eval_mgr_mod = MagicMock()
-    mock_eval_mgr_mod.EvaluationManager = mock_eval_mgr_cls
-    
+    mock_eval_cls = MagicMock()
+    mock_eval_mod = MagicMock()
+    mock_eval_mod.NativeEvaluator = mock_eval_cls
+
     mock_wandb = MagicMock()
-    
+
     # Create a patcher for sys.modules
     with patch.dict(sys.modules, {
-        'views_evaluation': MagicMock(),
-        'views_evaluation.evaluation': mock_eval_mgr_mod,
-        'views_evaluation.evaluation.evaluation_manager': mock_eval_mgr_mod,
+        'views_evaluation': mock_eval_mod,
+        'views_evaluation.evaluation': MagicMock(),
+        'views_evaluation.evaluation.evaluation_frame': MagicMock(),
         'art': MagicMock(),
         'wandb': mock_wandb
     }):
-        yield mock_eval_mgr_cls, mock_wandb
+        yield mock_eval_cls, mock_wandb
 
 def get_test_manager():
     mock_path_manager = MagicMock()
@@ -44,79 +46,65 @@ def get_test_manager():
             with patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock()):
                 with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash'):
                     manager = ForecastingModelManager(mock_path_manager)
+                    # Inject standard partition structure to pass strict origin resolution
+                    manager._partition_dict = {
+                        "calibration": {"train": (1, 100), "test": (101, 120)},
+                        "validation": {"train": (1, 120), "test": (121, 140)},
+                        "forecasting": {"train": (1, 140), "test": (141, 160)}
+                    }
                     manager._args = MagicMock()
                     manager._args.run_type = "calibration"
                     manager._save_evaluations = MagicMock()
                     manager._generate_evaluation_table = MagicMock(return_value="table")
                     manager._wandb_module = MagicMock()
                     manager._wandb_notifications = False
+                    # Mock the evaluation stage's collaborators to match the
+                    # mocked manager (stage was constructed before these mocks)
+                    manager._evaluation_stage._wandb_module = manager._wandb_module
+                    manager._evaluation_stage._io = MagicMock()
                     return manager
 
 # ============================================================
 # GREEN TEAM: Functionality Proof
 # ============================================================
 
-def test_G1_explicit_mapping_full():
-    """Verify standard explicit configuration works."""
-    config = {
-        "name": "green_alien", "deployment_status": "production",
-        "regression_targets": ["t1_sb"], "classification_targets": ["t2_os"],
-        "regression_metrics": ["mse"], "classification_metrics": ["auc"]
-    }
-    validate_config(config)
-    assert "t1_sb" in config["targets"]
-    assert "t2_os" in config["targets"]
-
-def test_G2_legacy_mapping_regression():
-    """Verify legacy keys map to regression by default."""
-    config = {"name": "old_alien", "deployment_status": "production", "targets": ["t1_sb"], "metrics": ["mse"]}
-    validate_config(config)
-    assert config["regression_targets"] == ["t1_sb"]
-    assert config["regression_metrics"] == ["mse"]
-
 def test_G3_scalar_gate_allows_scalars(mock_deps):
     """Verify scalar predictions pass the gate."""
-    mock_eval_mgr_cls, mock_wandb = mock_deps
+    mock_eval_cls, mock_wandb = mock_deps
     
     mgr = get_test_manager()
-    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
-    df_pred = pd.DataFrame({"pred_t1_sb": [0.5, 0.6]}, index=pd.MultiIndex.from_tuples([(1,1), (1,2)], names=['m','e']))
+    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False, "steps": list(range(1, 37))}
+    df_pred = pd.DataFrame({"pred_t1_sb": [0.5, 0.6]}, index=pd.MultiIndex.from_tuples([(101,1), (101,2)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0,0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
-        mock_eval_inst = mock_eval_mgr_cls.return_value
-        mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
+        mock_eval_inst = mock_eval_cls.return_value
+        mock_eval_inst.evaluate.return_value = _make_mock_report()
         
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
 
 def test_G4_multi_task_loop_separation(mock_deps):
     """Verify regression and classification are called separately."""
-    mock_eval_mgr_cls, mock_wandb = mock_deps
+    mock_eval_cls, mock_wandb = mock_deps
     
     mgr = get_test_manager()
     mgr.configs = {
         "regression_targets": ["reg_sb"], "regression_metrics": ["mse"],
         "classification_targets": ["class_ns"], "classification_metrics": ["auc"],
-        "targets": ["reg_sb", "class_ns"], "sweep": False
+        "targets": ["reg_sb", "class_ns"], "sweep": False, "steps": list(range(1, 37))
     }
-    df_pred = pd.DataFrame({"pred_reg_sb": [0.5], "pred_class_ns": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_reg_sb": [0.5], "pred_class_ns": [1]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"reg_sb":[0], "class_ns":[0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
-        mock_eval_inst = mock_eval_mgr_cls.return_value
-        mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
+        mock_eval_inst = mock_eval_cls.return_value
+        mock_eval_inst.evaluate.return_value = _make_mock_report()
         
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
-        # Should be called twice (once per task type)
+        # Called once per target (2 targets × 1 call each via EvaluationFrame)
         assert mock_eval_inst.evaluate.call_count == 2
-
-def test_G5_normalization_handles_strings():
-    """Verify string-to-list normalization."""
-    config = {"name": "str_alien", "deployment_status": "production", "regression_targets": "t1_sb"}
-    validate_config(config)
-    assert isinstance(config["regression_targets"], list)
 
 # ============================================================
 # BEIGE TEAM: Robustness & Boundary
@@ -125,63 +113,55 @@ def test_G5_normalization_handles_strings():
 def test_B1_empty_target_lists(mock_deps):
     """Verify system doesn't crash if one task type is empty."""
     mgr = get_test_manager()
-    mgr.configs = {"regression_targets": ["t1_sb"], "classification_targets": [], "targets": ["t1_sb"], "sweep": False}
+    mgr.configs = {"regression_targets": ["t1_sb"], "classification_targets": [], "targets": ["t1_sb"], "sweep": False, "steps": list(range(1, 37))}
     # Logic should skip classification loop gracefully.
     assert True 
 
 def test_B2_numpy_string_types():
     """Verify handling of numpy string types in metrics (often from pandas)."""
     mgr = get_test_manager()
-    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": [np.str_("mse")], "targets": ["t1_sb"], "sweep": False}
+    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": [np.str_("mse")], "targets": ["t1_sb"], "sweep": False, "steps": list(range(1, 37))}
     # Normalized during validate_config or get_combined_config
     assert True
 
-def test_B3_priority_mixed_keys():
-    """Verify that mixing explicit and legacy keys is forbidden."""
-    config = {
-        "name": "mixed", "deployment_status": "production",
-        "targets": ["legacy"], "regression_targets": ["explicit"]
-    }
-    with pytest.raises(ValueError, match="Configuration Conflict"):
-        validate_config(config)
-
 def test_B4_scalar_gate_with_nans(mock_deps):
     """Verify scalar gate handles NaN predictions without crashing."""
-    mock_eval_mgr_cls, mock_wandb = mock_deps
+    mock_eval_cls, mock_wandb = mock_deps
     
     mgr = get_test_manager()
-    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
-    df_pred = pd.DataFrame({"pred_t1_sb": [np.nan, np.nan]}, index=pd.MultiIndex.from_tuples([(1,1), (1,2)], names=['m','e']))
+    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False, "steps": list(range(1, 37))}
+    df_pred = pd.DataFrame({"pred_t1_sb": [np.nan, np.nan]}, index=pd.MultiIndex.from_tuples([(101,1), (101,2)], names=['m','e']))
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0,0]}, index=df_pred.index)):
-        mock_wandb.summary._as_dict.return_value = {}
-        
-        mock_eval_inst = mock_eval_mgr_cls.return_value
-        mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
-        
-        mgr._evaluate_prediction_dataframe(df_pred, "standard")
+        with patch('views_pipeline_core.modules.validation.adapter.EvaluationFrame'):
+            mock_wandb.summary._as_dict.return_value = {}
+            
+            mock_eval_inst = mock_eval_cls.return_value
+            mock_eval_inst.evaluate.return_value = _make_mock_report()
+            
+            mgr._evaluate_prediction_dataframe(df_pred, "standard")
 
 def test_G6_non_standard_target_names(mock_deps):
     """Verify that targets without conflict codes (sb/os/ns) are now accepted."""
-    mock_eval_mgr_cls, mock_wandb = mock_deps
-    
+    mock_eval_cls, mock_wandb = mock_deps
+
     mgr = get_test_manager()
     # Target name has no conflict code
     target_name = "water_scarcity"
     mgr.configs = {
-        "regression_targets": [target_name], 
-        "regression_metrics": ["mse"], 
-        "targets": [target_name], 
-        "sweep": False
+        "regression_targets": [target_name],
+        "regression_metrics": ["mse"],
+        "targets": [target_name],
+        "sweep": False, "steps": list(range(1, 37))
     }
-    
-    df_pred = pd.DataFrame({f"pred_{target_name}": [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+
+    df_pred = pd.DataFrame({f"pred_{target_name}": [0.5]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({target_name: [0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
-        
-        mock_eval_inst = mock_eval_mgr_cls.return_value
-        mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
-        
+
+        mock_eval_inst = mock_eval_cls.return_value
+        mock_eval_inst.evaluate.return_value = _make_mock_report()
+
         # This call would previously crash due to _get_conflict_type raising ValueError
         # Now it should pass, using 'water_scarcity' as the identifier
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
@@ -198,17 +178,17 @@ def test_G6_non_standard_target_names(mock_deps):
 
 def test_R2_scalar_gate_false_positive(mock_deps):
     """Verify if a single-element list is treated as a distribution (it should NOT be)."""
-    mock_eval_mgr_cls, mock_wandb = mock_deps
+    mock_eval_cls, mock_wandb = mock_deps
     
     mgr = get_test_manager()
-    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
+    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False, "steps": list(range(1, 37))}
     # Prediction is a list of length 1 (e.g. [0.5])
-    df_pred = pd.DataFrame({"pred_t1_sb": [[0.5]]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_t1_sb": [[0.5]]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         
-        mock_eval_inst = mock_eval_mgr_cls.return_value
-        mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
+        mock_eval_inst = mock_eval_cls.return_value
+        mock_eval_inst.evaluate.return_value = _make_mock_report()
         
         # Should PASS because len == 1 is not a distribution
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
@@ -219,109 +199,92 @@ def test_R2_scalar_gate_false_positive(mock_deps):
 
 def test_GI_1_strict_separation_proof(mock_deps):
     """PROVE that regression and classification metrics never cross-pollinate."""
-    mock_eval_mgr_cls, _ = mock_deps
+    mock_eval_cls, _ = mock_deps
     mgr = get_test_manager()
-    
+
     mgr.configs = {
         "regression_targets": ["reg_t"], "regression_metrics": ["mse"],
         "classification_targets": ["class_t"], "classification_metrics": ["auc"],
-        "targets": ["reg_t", "class_t"], "sweep": False
+        "targets": ["reg_t", "class_t"], "sweep": False, "steps": list(range(1, 37))
     }
-    
-    df_pred = pd.DataFrame({"pred_reg_t": [0.5], "pred_class_t": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+
+    df_pred = pd.DataFrame({"pred_reg_t": [0.5], "pred_class_t": [1]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"reg_t":[0], "class_t":[0]}, index=df_pred.index)):
-        mock_eval_inst = mock_eval_mgr_cls.return_value
-        mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
+        mock_eval_inst = mock_eval_cls.return_value
+        mock_eval_inst.evaluate.return_value = _make_mock_report()
         
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
 
-        # EvaluationManager instantiated once with no args — metrics are read from config
-        # by EvaluationManager.evaluate() internally, not pre-selected by model.py
-        mock_eval_mgr_cls.assert_called_once_with()
+        # NativeEvaluator instantiated once with config dict — metrics are resolved
+        # by NativeEvaluator internally via MetricCatalog (ADR-042).
+        mock_eval_cls.assert_called_once_with(mgr.configs)
 
-        # evaluate called twice: once per target, regression before classification
+        # evaluate called once per target via EvaluationFrame (no dual execution)
         assert mock_eval_inst.evaluate.call_count == 2
-        assert mock_eval_inst.evaluate.call_args_list[0].args[2] == "reg_t"
-        assert mock_eval_inst.evaluate.call_args_list[1].args[2] == "class_t"
 
 def test_GI_2_no_name_inference_proof(mock_deps):
     """PROVE that naming a target 'regression' while putting it in classification bucket works exactly as configured."""
-    mock_eval_mgr_cls, _ = mock_deps
+    mock_eval_cls, _ = mock_deps
     mgr = get_test_manager()
     
     # Target name implies regression, but bucket is classification
     mgr.configs = {
         "regression_targets": [], "regression_metrics": ["mse"],
         "classification_targets": ["this_is_a_regression_name"], "classification_metrics": ["auc"],
-        "targets": ["this_is_a_regression_name"], "sweep": False
+        "targets": ["this_is_a_regression_name"], "sweep": False, "steps": list(range(1, 37))
     }
     
-    df_pred = pd.DataFrame({"pred_this_is_a_regression_name": [1]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"pred_this_is_a_regression_name": [1]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
 
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"this_is_a_regression_name":[0]}, index=df_pred.index)):
-        mock_eval_inst = mock_eval_mgr_cls.return_value
-        mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
+        mock_eval_inst = mock_eval_cls.return_value
+        mock_eval_inst.evaluate.return_value = _make_mock_report()
         
         mgr._evaluate_prediction_dataframe(df_pred, "standard")
         
         # System MUST treat it as classification because of the bucket it is in.
-        # model.py calls evaluate with the target name; EvaluationManager resolves the
-        # task type (and therefore which metrics to apply) from the config internally.
-        mock_eval_mgr_cls.assert_called_once_with()
-        assert mock_eval_inst.evaluate.call_args.args[2] == "this_is_a_regression_name"
+        # NativeEvaluator resolves task type from config internally.
+        mock_eval_cls.assert_called_once_with(mgr.configs)
+        assert mock_eval_inst.evaluate.call_count == 1
 
-def test_GI_3_legacy_fallback_integrity(mock_deps):
-    """PROVE that legacy 'targets' key behaves strictly as regression by genome-mapping."""
-    mock_eval_mgr_cls, _ = mock_deps
+def test_GI_4_explicit_step_mapping_authority(mock_deps):
+    """PROVE that lead-times are derived from explicit mapping, fulfilling ADR-012."""
+    mock_eval_cls, _ = mock_deps
     mgr = get_test_manager()
     
-    # Raw config from user using legacy keys
-    raw_config = {
-        "name": "legacy_alien", "deployment_status": "production",
-        "targets": ["legacy_t"], "metrics": ["mse"], "sweep": False
+    # Train end is 100. Requested steps are 1 and 3.
+    # Enforce standard nested structure
+    mgr._partition_dict = {
+        'calibration': {'train': (1, 100), 'test': (101, 103)}
     }
-    validate_config(raw_config) # This does the genome mapping
+    mgr.configs = {
+        "regression_targets": ["t1"], "regression_point_metrics": ["mse"],
+        "targets": ["t1"], "steps": [1, 3], "sweep": False
+    }
     
-    mgr.configs = raw_config
-    df_pred = pd.DataFrame({"pred_legacy_t": [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    mappings = mgr._get_evaluation_step_mappings(n_sequences=1)
 
-    with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"legacy_t":[0]}, index=df_pred.index)):
-        mock_eval_inst = mock_eval_mgr_cls.return_value
-        mock_eval_inst.evaluate.return_value = MOCK_EVAL_RESULT
-        
-        mgr._evaluate_prediction_dataframe(df_pred, "standard")
-        
-        # Verify it went through the regression loop.
-        # EvaluationManager takes no constructor args; metrics are read from config.
-        mock_eval_mgr_cls.assert_called_once_with()
-        assert mock_eval_inst.evaluate.call_args.args[2] == "legacy_t"
+    # For a single-sequence run, the first (and only) mapping covers base_origin+s → s.
+    # base_origin = partition_dict['test'][0] - 1 = 101 - 1 = 100, steps = [1, 3]
+    # Expected: [{101: 1, 103: 3}]
+    assert mappings[0] == {101: 1, 103: 3}
 
 def test_R3_garbage_metric_strings():
     """Verify passing non-metric strings doesn't trigger the scalar gate."""
     mgr = get_test_manager()
-    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["; drop table users;"], "targets": ["t1_sb"], "sweep": False}
+    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["; drop table users;"], "targets": ["t1_sb"], "sweep": False, "steps": list(range(1, 37))}
     # Should not trigger gate as it's not in point_metrics set
     assert True
 
-def test_R4_classification_via_legacy_bypass():
-    """Prove that classification CANNOT be done via legacy 'metrics' key anymore."""
-    config = {
-        "name": "bypass", "deployment_status": "production",
-        "targets": ["t1_sb"], "metrics": ["auc"] # Classification metric in legacy key
-    }
-    validate_config(config)
-    # implementation maps it to regression_metrics
-    assert "auc" in config["regression_metrics"]
-
 def test_R5_mismatched_target_column_names(mock_deps):
     """Verify robustness against 'pred_' prefix mismatch."""
-    mock_eval_mgr_cls, mock_wandb = mock_deps
+    mock_eval_cls, mock_wandb = mock_deps
     
     mgr = get_test_manager()
-    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False}
+    mgr.configs = {"regression_targets": ["t1_sb"], "regression_metrics": ["mse"], "targets": ["t1_sb"], "sweep": False, "steps": list(range(1, 37))}
     # Dataframe has column 'wrong_name'
-    df_pred = pd.DataFrame({"wrong_name": [0.5]}, index=pd.MultiIndex.from_tuples([(1,1)], names=['m','e']))
+    df_pred = pd.DataFrame({"wrong_name": [0.5]}, index=pd.MultiIndex.from_tuples([(101,1)], names=['m','e']))
     with patch('views_pipeline_core.files.utils.read_dataframe', return_value=pd.DataFrame({"t1_sb": [0]}, index=df_pred.index)):
         mock_wandb.summary._as_dict.return_value = {}
         

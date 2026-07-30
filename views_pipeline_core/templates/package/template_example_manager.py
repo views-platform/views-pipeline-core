@@ -20,7 +20,6 @@ def generate(script_path: Path) -> bool:
     code = """
 from views_pipeline_core.managers.model import ModelPathManager, ForecastingModelManager
 from views_pipeline_core.files.utils import read_dataframe
-from views_pipeline_core.configs.pipeline import PipelineConfig
 import logging
 
 logger = logging.getLogger(__name__)
@@ -155,12 +154,11 @@ class ExampleForecastingModelManager(ForecastingModelManager):
         Trained model object (used in sweeps)
         \"""
         # Common paths and data loading (provided)
-        path_raw = self._model_path.data_raw # Path to raw data
         path_artifacts = self._model_path.artifacts # Path to save model artifacts
         run_type = self.config["run_type"] # e.g., "calibration", "validation", "forecasting"
-        df_viewser = read_dataframe(
-            path_raw / f"{run_type}_viewser_df{PipelineConfig.dataframe_format}"
-        ) # Dataframe obtained from viewser
+        # Raw data always present after get_data() has been called (fetched or cached)
+        raw_path = self._model_path._get_raw_data_file_paths(run_type)[0]
+        df_raw = read_dataframe(raw_path)
         partitioner_dict = self._data_loader.partition_dict # Partition dict from ViewsDataLoader
 
         # --- USER IMPLEMENTATION STARTS HERE ---
@@ -207,7 +205,6 @@ class ExampleForecastingModelManager(ForecastingModelManager):
         - Implement steps 2 and 4 with model-specific logic
         \"""
         # Common setup (provided)
-        path_raw = self._model_path.data_raw
         path_artifacts = self._model_path.artifacts
         run_type = self.config["run_type"]
 
@@ -216,11 +213,11 @@ class ExampleForecastingModelManager(ForecastingModelManager):
             path_artifact = path_artifacts / artifact_name
         else:
             path_artifact = self._model_path.get_latest_model_artifact_path(run_type)
-        
+
         self.config["timestamp"] = path_artifact.stem[-15:]
-        df_viewser = read_dataframe(
-            path_raw / f"{run_type}_viewser_df{PipelineConfig.dataframe_format}"
-        )
+        # Raw data always present after get_data() has been called (fetched or cached)
+        raw_path = self._model_path._get_raw_data_file_paths(run_type)[0]
+        df_raw = read_dataframe(raw_path)
 
         # --- USER IMPLEMENTATION STARTS HERE ---
         # 1. Load model
@@ -260,7 +257,6 @@ class ExampleForecastingModelManager(ForecastingModelManager):
         - Implement steps 2 and 4 with model-specific logic
         \"""
         # Common setup (provided)
-        path_raw = self._model_path.data_raw
         path_artifacts = self._model_path.artifacts
         run_type = self.config["run_type"]
 
@@ -269,11 +265,11 @@ class ExampleForecastingModelManager(ForecastingModelManager):
             path_artifact = path_artifacts / artifact_name
         else:
             path_artifact = self._model_path.get_latest_model_artifact_path(run_type)
-        
+
         self.config["timestamp"] = path_artifact.stem[-15:]
-        df_viewser = read_dataframe(
-            path_raw / f"{run_type}_viewser_df{PipelineConfig.dataframe_format}"
-        )
+        # Raw data always present after get_data() has been called (fetched or cached)
+        raw_path = self._model_path._get_raw_data_file_paths(run_type)[0]
+        df_raw = read_dataframe(raw_path)
 
         # --- USER IMPLEMENTATION STARTS HERE ---
         # 1. Load model
@@ -299,11 +295,10 @@ class ExampleForecastingModelManager(ForecastingModelManager):
         - Same prediction logic as _evaluate_model_artifact but without loading from disk
         \"""
         # Common setup (provided)
-        path_raw = self._model_path.data_raw
         run_type = self.config["run_type"]
-        df_viewser = read_dataframe(
-            path_raw / f"{run_type}_viewser_df{PipelineConfig.dataframe_format}"
-        )
+        # Raw data always present after get_data() has been called (fetched or cached)
+        raw_path = self._model_path._get_raw_data_file_paths(run_type)[0]
+        df_raw = read_dataframe(raw_path)
 
         # --- USER IMPLEMENTATION STARTS HERE ---
         logger.info(f"Evaluating sweep model for {eval_type}")

@@ -2,7 +2,10 @@ import pytest
 import pandas as pd
 import numpy as np
 from views_pipeline_core.data.handlers import _ViewsDataset, PGMDataset, CMDataset
-from views_pipeline_core.modules.statistics import PosteriorDistributionAnalyzer
+
+# NOTE (#316): the former views_reporting importorskip (needed only by two
+# tests of a dataset-consuming stats API deleted upstream) was removed, so
+# this suite now runs in CI instead of silently skipping.
 
 # Fixtures for test data
 @pytest.fixture
@@ -64,6 +67,14 @@ class Test_ViewsDatasetInitialization:
             _ViewsDataset(sample_features_df, targets=['missing'])
         assert "Missing targets" in str(excinfo.value)
 
+    def test_init_with_none_targets_raises_value_error(self, sample_features_df):
+        """
+        Regression test: initializing with targets=None (and is_prediction=False) 
+        should raise ValueError, not TypeError.
+        """
+        with pytest.raises(ValueError, match="Targets must be specified"):
+            _ViewsDataset(sample_features_df, targets=None)
+
 class TestTensorConversion:
     """Tests for tensor conversion functionality"""
     
@@ -93,53 +104,6 @@ class TestTensorConversion:
         
         pd.testing.assert_frame_equal(ds.dataframe, reconstructed)
 
-class TestStatisticalMethods:
-    """Tests for statistical calculations (MAP, HDI)"""
-    
-    def test_map_df(self, sample_predictions_df):
-        """Test MAP estimation logic"""
-        ds = _ViewsDataset(sample_predictions_df)
-        map_df = ds.calculate_map()
-        
-        # Validate structure
-        assert map_df.shape == (4, 2)  # 4 observations, 2 variables
-        assert all(col.endswith('_map') for col in map_df.columns)
-        
-        # Validate MAP values are within sample ranges
-        for var in ds.targets:
-            samples = ds.dataframe[var].explode().astype(float)
-            map_values = map_df[f"{var}_map"]
-            assert (map_values >= samples.min()).all()
-            assert (map_values <= samples.max()).all()
-            
-    def test_hdi_calculation(self, sample_predictions_df):
-        """Test HDI interval calculation"""
-        ds = _ViewsDataset(sample_predictions_df)
-        hdi_df = ds.calculate_hdi(alpha=0.5)
-        
-        # Validate interval structure
-        assert hdi_df.shape == (4, 4)  # 4 observations, 2 vars × 2 bounds
-        for var in ds.targets:
-            lower = hdi_df[f"{var}_hdi_lower"]
-            upper = hdi_df[f"{var}_hdi_upper"]
-            assert (lower <= upper).all()
-    
-    def test_posterior_analyzer(self):
-        """Test PosteriorDistributionAnalyzer's MAP containment and HDI nesting across distributions."""
-        failed_map, failed_nesting = PosteriorDistributionAnalyzer.test_posterior_analyzer(verbose=False)
-        
-        # Assert no MAP containment failures
-        assert not failed_map, (
-            f"MAP not contained in all HDIs for distributions: {failed_map}.\n"
-            "Check: 1) Zero-mass threshold handling 2) HDI enforcement logic"
-        )
-        
-        # Assert no HDI nesting failures
-        assert not failed_nesting, (
-            f"HDIs not properly nested for distributions: {failed_nesting}.\n"
-            "Check HDI expansion logic in _enforce_hdi_structure()"
-        )
-
 class TestSubclassValidation:
     """Tests for dataset subclass index validation"""
     
@@ -168,45 +132,6 @@ class TestEdgeCases:
         with pytest.raises(ValueError):
             _ViewsDataset(df)
 
-    # def test_missing_indices(self, sample_features_df):
-    #     """Test handling of missing indices after reindexing"""
-    #     # Initialize with broadcast_features=True
-    #     ds = _ViewsDataset(sample_features_df, 
-    #                     targets=['target'],
-    #                     broadcast_features=True)
-        
-    #     # Get full tensor first
-    #     full_tensor = ds.to_tensor()
-        
-    #     # Remove one time step from original data
-    #     subset_df = sample_features_df.loc[sample_features_df.index.get_level_values(0) != 1]
-    #     ds_subset = _ViewsDataset(subset_df, targets=['target'], broadcast_features=True)
-        
-    #     # Get subset tensor
-    #     subset_tensor = ds_subset.to_tensor()
-        
-    #     # Verify shape maintains original dimensions with NaNs
-    #     assert subset_tensor.shape == full_tensor.shape  # (2, 2, 2, 3)
-        
-    #     # Check NaN filling for missing time step
-    #     assert np.isnan(subset_tensor[0]).all()  # First time step should be all NaNs
-    #     assert not np.isnan(subset_tensor[1]).any()  # Second time step should have data
-
-    # def test_nan_handling(self):
-    #     """Test proper handling of NaN values"""
-    #     index = pd.MultiIndex.from_product([[1], [101]], names=["month_id", "country_id"])
-    #     df = pd.DataFrame({
-    #         'pred_var': [np.array([np.nan, np.nan])]
-    #     }, index=index)
-    #     ds = _ViewsDataset(df)
-        
-    #     map_df = ds.calculate_map()
-    #     hdi_df = ds.calculate_hdi()
-        
-    #     assert not map_df.empty, "MAP DataFrame should not be empty"
-    #     assert np.isnan(map_df.loc[(1, 101), 'pred_var_map'])
-    #     assert np.isnan(hdi_df.loc[(1, 101), 'pred_var_hdi_lower'])
-    #     assert np.isnan(hdi_df.loc[(1, 101), 'pred_var_hdi_upper'])
 
 class TestSubsetting:
     """Tests for data subsetting functionality"""

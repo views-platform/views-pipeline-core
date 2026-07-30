@@ -1,1 +1,1 @@
-from .configuration import ConfigurationManager
+from .configuration import ConfigurationManager as ConfigurationManager
