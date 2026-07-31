@@ -326,7 +326,14 @@ class AppwriteConfig:
     # Core connection settings
     endpoint: str
     project_id: str
-    credentials: Union[str, Dict[str, str]]
+    # repr=False: a dataclass renders every field, so this live Appwrite key was one
+    # `logger.debug(f"{config}")`, one W&B run-config capture or one traceback rendering
+    # locals away from the logs — with nothing in the type to stop it (register C-230,
+    # þing-01 #325). PLATFORM-001 §5's redaction clause is multi-carrier and binding:
+    # credentials are never logged, in any carrier. Endpoints and coordinates may be, and
+    # deliberately still render — a repr that hid everything would push people back to
+    # printing the raw object.
+    credentials: Union[str, Dict[str, str]] = field(repr=False)
     
     # Authentication settings
     auth_method: AuthMethod = AuthMethod.API_KEY
