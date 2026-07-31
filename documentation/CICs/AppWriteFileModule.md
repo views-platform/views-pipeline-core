@@ -48,8 +48,19 @@ until usage patterns stabilize.
   remote `$updatedAt` timestamps before serving them.
 - Guarantees that all public methods return `OperationResult` with `success`, `data`,
   `error`, and `code` fields, providing a uniform result contract.
-- Guarantees that `AppwriteMetadataHandler` creates databases and collections
-  on-demand if they do not already exist.
+- Guarantees that a metadata document is deleted as an orphan **only** on positive
+  evidence of the file's absence (`storage_file_not_found`). A read that FAILED for any
+  other reason -- wrong bucket id, missing read scope, a non-JSON error whose `code` is
+  `None` -- is INDETERMINATE and the operation fails instead (`_classify_storage_presence`;
+  register C-231, þing-02 #329).
+- Guarantees that a paired write (file + metadata document) verifies its containers
+  read-only **before** the file is uploaded, so a missing container cannot leave an
+  orphaned file (`_require_containers`).
+- **NO LONGER GUARANTEED (þing-02 #331):** `AppwriteMetadataHandler` no longer creates
+  databases or collections, and `AppWriteFileModule` no longer creates buckets. Creating
+  storage is a deliberate act, not a side effect of publishing; it moved to
+  `views_pipeline_core.modules.appwrite.provisioning`, which the delivery path must not
+  import (asserted in a subprocess by `tests/test_import_purity.py`, #332).
 
 ---
 
@@ -63,8 +74,14 @@ until usage patterns stabilize.
   - `allow_metadata_only_updates: bool` (default `True`).
   - `path_manager: Optional[ModelPathManager]` -- used for cache directory resolution.
 - The Appwrite server must be reachable at the configured endpoint.
-- Bucket and database/collection infrastructure is created lazily; no manual setup
-  is required.
+- **Bucket, database and collection must already exist.** They are verified read-only
+  at the first paired write and never created; a missing container raises
+  `ConfigurationException` naming the container and the command that creates it:
+
+      python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection
+
+  (Changed by þing-02 #331: on-demand creation is what forced the platform's API key to
+  carry create scopes, which blocked least privilege.)
 
 ---
 
@@ -75,7 +92,7 @@ until usage patterns stabilize.
   - Uploads files to Appwrite storage buckets.
   - Creates/updates metadata documents in Appwrite databases.
   - Writes cached files and `cache_metadata.json` to the local cache directory.
-  - Creates databases, collections, and bucket infrastructure on-demand.
+  - Verifies (never creates) bucket and collection existence, once per instance.
   - Logs at `INFO` on successful operations, `WARNING` on fallbacks, `ERROR` on
     failures.
 

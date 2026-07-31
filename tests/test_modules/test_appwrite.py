@@ -339,40 +339,6 @@ class TestMetadataManager:
     def metadata_manager(self, mock_databases, api_key_config):
         return AppwriteMetadataHandler(mock_databases, api_key_config)
 
-    def test_create_database_if_not_exists_new(self, metadata_manager, mock_databases):
-        mock_databases.list.return_value = {"databases": []}
-        mock_databases.create.return_value = {
-            "$id": "file_metadata",
-            "name": "File Metadata",
-        }
-        
-        result = metadata_manager.create_database_if_not_exists()
-        
-        assert result.success
-        mock_databases.create.assert_called_once()
-
-    def test_create_database_if_not_exists_existing(self, metadata_manager, mock_databases):
-        mock_databases.list.return_value = {
-            "databases": [
-                {"$id": "file_metadata", "name": "Test Bucket Metadata"}
-            ]
-        }
-        
-        result = metadata_manager.create_database_if_not_exists()
-        
-        assert result.success
-        assert result.code == "EXISTS"
-        mock_databases.create.assert_not_called()
-
-    def test_infer_attribute_type(self, metadata_manager):
-        # Test different types
-        assert metadata_manager._infer_attribute_type("string") == ("string", False)
-        assert metadata_manager._infer_attribute_type(123) == ("integer", False)
-        assert metadata_manager._infer_attribute_type(12.5) == ("double", False)
-        assert metadata_manager._infer_attribute_type(True) == ("boolean", False)
-        assert metadata_manager._infer_attribute_type([1, 2, 3]) == ("integer", True)
-        assert metadata_manager._infer_attribute_type("2025-10-22T12:00:00") == ("datetime", False)
-
     def test_search_files_by_metadata(self, metadata_manager, mock_databases):
         mock_databases.list_documents.return_value = {
             "documents": [{"fileId": "file123", "filename": "test.txt"}],
@@ -603,24 +569,6 @@ class TestAppWriteFileManager:
         assert result.success
         assert result.data["$id"] == "file123"
 
-    def test_create_bucket(self, file_manager):
-        file_manager.storage.create_bucket.return_value = {
-            "$id": "new_bucket",
-            "name": "New Bucket",
-        }
-        file_manager.metadata_manager.create_database_if_not_exists = Mock(
-            return_value=OperationResult(success=True, data={})
-        )
-        
-        result = file_manager.create_bucket(
-            "new_bucket",
-            name="New Bucket",
-            create_metadata_db=True
-        )
-        
-        assert result.success
-        assert result.data["$id"] == "new_bucket"
-
     def test_upload_file_with_metadata(self, file_manager, tmp_path):
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
@@ -632,12 +580,8 @@ class TestAppWriteFileManager:
                 data={"$id": "file123", "name": "test.txt", "sizeOriginal": 12}
             )
         )
-        file_manager.metadata_manager.create_metadata_collection_if_not_exists = Mock(
-            return_value=OperationResult(
-                success=True,
-                data={"database_id": "db1", "collection_id": "coll1"}
-            )
-        )
+        # Containers are verified, never created, since #331.
+        file_manager._require_containers = Mock(return_value=None)
         file_manager.metadata_manager.check_file_exists_by_hash = Mock(
             return_value=OperationResult(success=False, code="NOT_FOUND")
         )
