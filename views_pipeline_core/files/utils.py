@@ -306,7 +306,7 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
         raise
 
 
-def generate_model_file_name(run_type: str, file_extension: str) -> str:
+def generate_model_file_name(run_type: str, file_extension: str, targets_suffix: str = "") -> str:
     """
     Generates a model file name based on the run type, and timestamp.
 
@@ -318,7 +318,9 @@ def generate_model_file_name(run_type: str, file_extension: str) -> str:
         str: The generated model file name.
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{run_type}_model_{timestamp}{file_extension}"
+    if targets_suffix != "":
+        targets_suffix = f"_{targets_suffix}"
+    return f"{run_type}_model{targets_suffix}_{timestamp}{file_extension}"
 
 
 def generate_output_file_name(

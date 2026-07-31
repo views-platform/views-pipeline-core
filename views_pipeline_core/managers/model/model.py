@@ -931,6 +931,7 @@ class ForecastingModelManager(ModelManager):
         """
         try:
             from views_pipeline_core.modules.dataloaders import ViewsDataLoader
+            logger.info("----- Initializing ViewsDataLoader -----")
 
             self._data_loader = ViewsDataLoader(
                 model_path=self._model_path,
