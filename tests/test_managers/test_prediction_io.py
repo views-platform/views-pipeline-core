@@ -1,6 +1,8 @@
 """Tests for PredictionIOManager — extracted prediction I/O from ForecastingModelManager."""
 
+import logging
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -322,3 +324,76 @@ class TestAppwriteUploadGracefulDegradation:
 
         # Datastore was called (and failed gracefully)
         failing_datastore.upload_data.assert_called_once()
+
+
+class TestAppwriteInBandFailure:
+    """Register C-227 / þing-02 #330 — the failure that arrives as a RETURN VALUE.
+
+    ``DatastoreModule.upload_data`` converts the SDK's ``AppwriteException`` into an
+    ``OperationResult`` deep inside the storage module, so nothing propagates and the
+    ``except`` clause in ``_upload_to_prediction_store`` never fires. Before this fix
+    the result was discarded and success was logged unconditionally — which is what
+    made the 2026-11-30 key expiry a silent stoppage on this path rather than a
+    visible error.
+    """
+
+    def _df(self):
+        df = pd.DataFrame(
+            {"pred_lr_sb": [1.0]},
+            index=pd.MultiIndex.from_tuples(
+                [(400, 1)], names=["month_id", "priogrid_gid"]
+            ),
+        )
+        df.forecasts = MagicMock()
+        return df
+
+    def test_failed_result_logs_error_and_not_success(
+        self, mock_model_path, mock_wandb, output_dir, caplog
+    ):
+        datastore = MagicMock()
+        datastore.upload_data.return_value = SimpleNamespace(
+            success=False, code="general_unauthorized_scope", error="missing scope"
+        )
+        io = PredictionIOManager(
+            model_path=mock_model_path,
+            wandb_module=mock_wandb,
+            wandb_notifications=False,
+            use_prediction_store=True,
+            datastore=datastore,
+            pred_store_name="v010200_2026_03",
+        )
+
+        with caplog.at_level(logging.DEBUG):
+            io.save_predictions(
+                self._df(), output_dir,
+                run_type="forecasting", timestamp="20260317_120003",
+            )
+
+        assert "NOT delivered" in caplog.text
+        assert "general_unauthorized_scope" in caplog.text
+        assert "uploaded to Appwrite Datastore successfully" not in caplog.text
+
+    def test_failed_result_does_not_raise(
+        self, mock_model_path, mock_wandb, output_dir
+    ):
+        """ADR-047 unchanged: Appwrite is SECONDARY EXTERNAL and must not block a run."""
+        datastore = MagicMock()
+        datastore.upload_data.return_value = SimpleNamespace(
+            success=False, code="storage_bucket_not_found", error="no bucket"
+        )
+        io = PredictionIOManager(
+            model_path=mock_model_path,
+            wandb_module=mock_wandb,
+            wandb_notifications=False,
+            use_prediction_store=True,
+            datastore=datastore,
+            pred_store_name="v010200_2026_03",
+        )
+
+        io.save_predictions(
+            self._df(), output_dir,
+            run_type="forecasting", timestamp="20260317_120004",
+        )
+
+        saved = list(output_dir.glob("predictions_forecasting_*.parquet"))
+        assert saved, "local persistence is authoritative and must still happen"

@@ -90,6 +90,43 @@ DEFAULT_PAGE_LIMIT = 100
 MAX_ATTRIBUTE_CREATION_RETRIES = 3
 INITIAL_RETRY_DELAY = 1.0
 
+# Appwrite error types. These are the SERVER's own `type` strings, which the SDK
+# propagates verbatim into `AppwriteException.type` and this module carries as
+# `OperationResult.code` — pinned against the real SDK in
+# tests/test_modules/test_appwrite_sdk_contract.py.
+APPWRITE_FILE_NOT_FOUND = "storage_file_not_found"
+APPWRITE_BUCKET_NOT_FOUND = "storage_bucket_not_found"
+
+
+class _StoragePresence(Enum):
+    """Whether a file is in a bucket — a three-valued question.
+
+    `OperationResult.success` cannot express the third state, and substituting
+    "absent" for "could not tell" is what let a permission denial delete a live
+    forecast's metadata (register C-231). Any branch with a destructive consequence
+    must require PRESENT or ABSENT and refuse to act on INDETERMINATE.
+    """
+
+    PRESENT = "present"
+    ABSENT = "absent"
+    INDETERMINATE = "indeterminate"
+
+
+def _classify_storage_presence(result: "OperationResult") -> _StoragePresence:
+    """Classify a ``get_file`` outcome without collapsing failure into absence.
+
+    Only a positive ``storage_file_not_found`` from Appwrite counts as evidence of
+    absence. Everything else — a wrong bucket id, a missing read scope, a 502 whose
+    body was not JSON (so ``code`` is ``None``) — is INDETERMINATE. The match is
+    deliberately positive rather than a negation: an unrecognised or absent code must
+    fail safe, not authorise a delete.
+    """
+    if result.success:
+        return _StoragePresence.PRESENT
+    if result.code == APPWRITE_FILE_NOT_FOUND:
+        return _StoragePresence.ABSENT
+    return _StoragePresence.INDETERMINATE
+
 
 # Enums
 class AuthMethod(Enum):
@@ -1721,19 +1758,34 @@ class AppWriteFileModule:
         try:
             # First try to find by hash in metadata
             search_result = self.metadata_manager.check_file_exists_by_hash(
-                file_hash, 
-                self.config.collection_name, 
-                self.config.collection_id, 
+                file_hash,
+                self.config.collection_name,
+                self.config.collection_id,
                 self.config.database_id
             )
-            
+
             if search_result.success:
                 return OperationResult(
                     success=True,
                     data=search_result.data,
                     code="FOUND_BY_HASH"
                 )
-            
+
+            # The lookup did not find a match — but "found nothing" and "could not
+            # look" are different answers, and only the first means there is no
+            # duplicate. Reporting a failed lookup as NOT_FOUND makes the caller
+            # upload a second copy of a file that is already there: a read fault
+            # turned into a write (register C-232). Propagate the failure instead.
+            if search_result.code != "NOT_FOUND":
+                return OperationResult(
+                    success=False,
+                    error=(
+                        f"Could not determine whether a duplicate exists: "
+                        f"{search_result.error}"
+                    ),
+                    code=search_result.code,
+                )
+
             # Fallback to filename check if hash not found - but use efficient query
             if filename:
                 try:
@@ -2111,21 +2163,25 @@ class AppWriteFileModule:
             file_hash, collection_name, collection_id, self.config.database_id
         )
 
-        # CRITICAL FIX: Verify file exists in BOTH metadata AND storage
+        # Verify the file exists in BOTH metadata and storage before treating the
+        # metadata document as an orphan. See ``_classify_storage_presence``: a read
+        # that FAILED is not evidence of absence, and only evidence of absence may
+        # authorise a delete (register C-231, þing-02 #329).
         should_update_metadata_only = False
         if existing_metadata.success and existing_metadata.code == "FOUND_BY_HASH" and not file_id:
             existing_file_id = existing_metadata.data.get("fileId")
-            
-            # Verify the file actually exists in storage
+
             if existing_file_id:
                 file_check = self.get_file(bucket_id, existing_file_id)
-                
-                if file_check.success:
-                    # File exists in both metadata and storage
+                presence = _classify_storage_presence(file_check)
+
+                if presence is _StoragePresence.PRESENT:
                     should_update_metadata_only = self.config.allow_metadata_only_updates
                     logger.info(f"File {existing_file_id} exists in both metadata and storage")
-                else:
-                    # Metadata exists but file missing from storage - clean up metadata
+
+                elif presence is _StoragePresence.ABSENT:
+                    # Appwrite positively confirmed the file is gone: the metadata
+                    # document really is an orphan of a failed upload.
                     logger.warning(f"File {existing_file_id} found in metadata but missing from storage, will re-upload")
                     existing_doc_id = existing_metadata.data.get("$id")
                     if existing_doc_id:
@@ -2136,8 +2192,31 @@ class AppWriteFileModule:
                                 document_id=existing_doc_id
                             )
                             logger.info(f"Deleted orphaned metadata document: {existing_doc_id}")
-                        except Exception as e:
-                            logger.warning(f"Failed to delete orphaned metadata: {str(e)}")
+                        except AppwriteException as e:
+                            return OperationResult(
+                                success=False,
+                                error=(
+                                    f"Could not delete the orphaned metadata document "
+                                    f"{existing_doc_id}: {e.message}"
+                                ),
+                                code=e.type,
+                            )
+
+                else:
+                    # INDETERMINATE: wrong bucket id, no read scope on the bucket, or an
+                    # untyped transport error. The file may well exist. Deleting its
+                    # metadata document here would make a live forecast unfindable, so
+                    # refuse the whole upload and say which distinction failed.
+                    return OperationResult(
+                        success=False,
+                        error=(
+                            f"Cannot determine whether file {existing_file_id} exists in "
+                            f"bucket '{bucket_id}': {file_check.error}. Refusing to treat "
+                            f"an unreadable file as an absent one — check the bucket id "
+                            f"and that this key holds read scope on it."
+                        ),
+                        code=file_check.code,
+                    )
 
         if should_update_metadata_only:
             logger.info(f"File with hash {file_hash} already exists, updating metadata only")
@@ -2183,11 +2262,27 @@ class AppWriteFileModule:
             old_doc_id = existing_metadata.data.get("$id")
 
             if old_file_id:
-                # Delete the old file from storage
+                # Delete the old file from storage. If this fails we must NOT go on to
+                # delete its metadata document: that would leave the old file in the
+                # bucket with nothing pointing at it — unfindable, and indistinguishable
+                # from a month that never ran. Same rule as the de-dup path above:
+                # a failed operation is not a completed one (register C-231, þing-02 #329).
                 delete_result = self.delete_file(bucket_id, old_file_id)
                 if not delete_result.success:
-                    logger.warning(f"Failed to delete old file from storage: {delete_result.error}")
-                    # Continue anyway - the upload might still work
+                    presence = _classify_storage_presence(delete_result)
+                    if presence is not _StoragePresence.ABSENT:
+                        return OperationResult(
+                            success=False,
+                            error=(
+                                f"Refusing to replace '{filename}': the old file "
+                                f"{old_file_id} could not be removed from bucket "
+                                f"'{bucket_id}' ({delete_result.error}), and deleting "
+                                f"its metadata would orphan it."
+                            ),
+                            code=delete_result.code,
+                        )
+                    # Already gone from storage — the metadata is genuinely stale.
+                    logger.info(f"Old file {old_file_id} was already absent from storage")
 
             if old_doc_id:
                 # Delete the old metadata document

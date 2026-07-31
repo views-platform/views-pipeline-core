@@ -122,9 +122,18 @@ class LocalParquetSaver:
 class AppwriteSaver:
     """Uploads parquet file to Appwrite cloud storage for views-faoapi.
 
-    Wraps ``DatastoreModule.upload_data()``.  Graceful degradation: logs
-    errors but does not raise, so an Appwrite outage never blocks the
-    pipeline.
+    Wraps ``DatastoreModule.upload_data()``. Graceful degradation per ADR-047:
+    Appwrite is the SECONDARY EXTERNAL destination, so a failure is logged at
+    ``logger.error`` and does not raise — local disk and views-forecasts already
+    hold the run's authoritative artifacts.
+
+    ``upload_data`` reports failure by RETURN VALUE, not by exception: the SDK's
+    ``AppwriteException`` is converted to ``OperationResult(success=False)`` deep
+    inside the storage module, so the ``except`` clause below only catches faults
+    that never reach the SDK. The result must therefore be inspected, or a failed
+    delivery is indistinguishable from a successful one (register C-227, þing-02
+    #330) — which is what makes the 2026-11-30 key expiry a silent stoppage rather
+    than a visible error.
     """
 
     def __init__(self, datastore, model_name: str, target: str):
@@ -139,7 +148,7 @@ class AppwriteSaver:
         metadata: PredictionMetadata,
     ) -> None:
         try:
-            self._datastore.upload_data(
+            result = self._datastore.upload_data(
                 file=path / metadata.filename,
                 filename=metadata.filename,
                 loa=metadata.level,
@@ -149,10 +158,21 @@ class AppwriteSaver:
                 description="",
                 type=self._target,
             )
-            logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
         except (ConnectionError, TimeoutError, OSError, AppwriteException) as e:
             logger.error(
                 "Error uploading predictions to datastore: %s", e, exc_info=True,
+            )
+            return
+
+        if result is None or getattr(result, "success", False):
+            logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
+        else:
+            logger.error(
+                "Appwrite upload FAILED for %s — the forecast was NOT delivered. "
+                "code=%s error=%s",
+                metadata.filename,
+                getattr(result, "code", None),
+                getattr(result, "error", None),
             )
 
 

@@ -28,7 +28,6 @@ narrowly-scoped key is issued:
 | no             | (not reached)              | upload         | upload         |
 """
 
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -140,8 +139,8 @@ class TestDeleteDecision:
         _run_dedup(manager, payload)
         manager.databases.delete_document.assert_called_once()
 
-    def test_wrong_bucket_deletes_the_document(self, manager, payload):
-        """# FLIPS IN #329 — a mistyped coordinate destroys a valid index card."""
+    def test_wrong_bucket_keeps_the_document_and_fails(self, manager, payload):
+        """FLIPPED BY #329 — a mistyped coordinate no longer destroys a valid card."""
         _document_found(manager)
         _storage_says(
             manager,
@@ -149,11 +148,20 @@ class TestDeleteDecision:
                 success=False, error="no bucket", code="storage_bucket_not_found"
             ),
         )
-        _run_dedup(manager, payload)
-        manager.databases.delete_document.assert_called_once()
+        result = _run_dedup(manager, payload)
 
-    def test_permission_denied_deletes_the_document(self, manager, payload):
-        """# FLIPS IN #329 — THE finding. A correctly-scoped key deletes valid data."""
+        manager.databases.delete_document.assert_not_called()
+        assert not result.success
+        assert result.code == "storage_bucket_not_found"
+        assert "Refusing to treat an unreadable file as an absent one" in result.error
+
+    def test_permission_denied_keeps_the_document_and_fails(self, manager, payload):
+        """FLIPPED BY #329 — THE finding. A correctly-scoped key no longer deletes.
+
+        This is the row the þing sequenced the whole credential change around: under
+        the old behaviour, issuing a key without ``files.read`` on the bucket would
+        begin deleting live forecasts' metadata on the first re-upload.
+        """
         _document_found(manager)
         _storage_says(
             manager,
@@ -163,18 +171,25 @@ class TestDeleteDecision:
                 code="general_unauthorized_scope",
             ),
         )
-        _run_dedup(manager, payload)
-        manager.databases.delete_document.assert_called_once()
+        result = _run_dedup(manager, payload)
 
-    def test_untyped_error_deletes_the_document(self, manager, payload):
-        """# FLIPS IN #329 — the SDK yields type=None on a non-JSON error response
-        (see test_appwrite_sdk_contract), so ``code`` can legitimately be None."""
+        manager.databases.delete_document.assert_not_called()
+        assert not result.success
+        assert result.code == "general_unauthorized_scope"
+        assert "read scope" in result.error
+
+    def test_untyped_error_keeps_the_document_and_fails(self, manager, payload):
+        """FLIPPED BY #329 — the SDK yields type=None on a non-JSON error response
+        (pinned in test_appwrite_sdk_contract), so ``code`` can legitimately be None.
+        The classifier matches not-found positively, so None fails safe."""
         _document_found(manager)
         _storage_says(
             manager, OperationResult(success=False, error="502 Bad Gateway", code=None)
         )
-        _run_dedup(manager, payload)
-        manager.databases.delete_document.assert_called_once()
+        result = _run_dedup(manager, payload)
+
+        manager.databases.delete_document.assert_not_called()
+        assert not result.success
 
     def test_no_document_never_reaches_the_delete(self, manager, payload):
         manager.metadata_manager.check_file_exists_by_hash = Mock(
@@ -195,30 +210,30 @@ class TestFailOpenDedup:
     therefore becomes a duplicate write.
     """
 
-    def test_permission_failure_degrades_to_not_found(self, manager):
-        """# FLIPS IN #329 — indistinguishable from a genuinely absent duplicate.
+    def test_permission_failure_propagates_instead_of_reporting_no_duplicate(
+        self, manager
+    ):
+        """FLIPPED BY #329 — a failed lookup no longer masquerades as an absence.
 
-        The database says "you may not read me"; the answer handed back to the caller
-        is "there is no duplicate", and ``upload_file`` proceeds to upload a second copy.
+        Previously the database's "you may not read me" was handed back as "there is
+        no duplicate", and ``upload_file`` uploaded a second copy.
         """
         manager.metadata_manager.check_file_exists_by_hash = Mock(
             return_value=OperationResult(
                 success=False, error="denied", code="general_unauthorized_scope"
             )
         )
-        # The storage fallback sees nothing (wrong bucket, or no read scope there either)
         manager.storage.list_files.return_value = {"files": []}
 
         result = manager._file_exists_by_hash("test_bucket", "abc123", "forecast.parquet")
 
         assert not result.success
-        assert result.code == "NOT_FOUND"
-        assert result.error is None, (
-            "the permission failure left no trace in the result the caller sees"
-        )
+        assert result.code == "general_unauthorized_scope"
+        assert result.code != "NOT_FOUND"
+        assert "Could not determine whether a duplicate exists" in result.error
 
-    def test_genuine_absence_produces_the_identical_answer(self, manager):
-        """The two cases are indistinguishable — that is the defect, stated as a test."""
+    def test_genuine_absence_still_reports_not_found(self, manager):
+        """The legitimate case must be untouched: no duplicate, so upload proceeds."""
         manager.metadata_manager.check_file_exists_by_hash = Mock(
             return_value=OperationResult(success=False, code="NOT_FOUND")
         )
@@ -238,8 +253,8 @@ class TestReplacePathOrphansTheOldFile:
     file in the bucket with nothing pointing at it.
     """
 
-    def test_failed_file_delete_still_deletes_the_document(self, manager, payload):
-        """# FLIPS IN #329 (Decision 2) — third route to the same orphan."""
+    def test_failed_file_delete_no_longer_deletes_the_document(self, manager, payload):
+        """FLIPPED BY #329 (Decision 2) — third route to the same orphan, closed."""
         manager.metadata_manager.check_file_exists_by_hash = Mock(
             return_value=OperationResult(
                 success=True,
@@ -252,8 +267,30 @@ class TestReplacePathOrphansTheOldFile:
                 success=False, error="denied", code="general_unauthorized_scope"
             )
         )
-        _run_dedup(manager, payload)
+        result = _run_dedup(manager, payload)
+
+        manager.databases.delete_document.assert_not_called()
+        assert not result.success
+        assert "would orphan it" in result.error
+
+    def test_old_file_already_absent_proceeds_with_the_replace(self, manager, payload):
+        """A positively-absent old file is genuinely stale metadata — replace it."""
+        manager.metadata_manager.check_file_exists_by_hash = Mock(
+            return_value=OperationResult(
+                success=True,
+                data={"fileId": "old_file_id", "$id": "old_doc_id"},
+                code="FOUND_BY_NAME",
+            )
+        )
+        manager.delete_file = Mock(
+            return_value=OperationResult(
+                success=False, error="gone", code="storage_file_not_found"
+            )
+        )
+        result = _run_dedup(manager, payload)
+
         manager.databases.delete_document.assert_called_once()
+        assert result.success
 
 
 class TestErrorTypePropagation:

@@ -2,6 +2,7 @@
 import logging
 import sys
 from dataclasses import FrozenInstanceError
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -260,6 +261,60 @@ class TestAppwriteSaver:
         with caplog.at_level(logging.ERROR):
             saver.save(sample_pf, tmp_path, sample_metadata)
         assert "boom" in caplog.text
+
+    def test_in_band_failure_is_reported_not_swallowed(
+        self, tmp_path, sample_pf, sample_metadata, caplog
+    ):
+        """Register C-227 / þing-02 #330 — the failure that arrives as a RETURN VALUE.
+
+        ``upload_data`` converts the SDK's exception into an ``OperationResult`` deep
+        inside the storage module, so nothing is raised and the ``except`` clause never
+        fires. Before this fix the saver discarded the result and logged success, which
+        is why the 2026-11-30 key expiry would have been silent on this path.
+        """
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.return_value = SimpleNamespace(
+            success=False, code="general_unauthorized_scope", error="missing scope"
+        )
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        with caplog.at_level(logging.DEBUG):
+            saver.save(sample_pf, tmp_path, sample_metadata)
+
+        assert "NOT delivered" in caplog.text
+        assert "general_unauthorized_scope" in caplog.text
+        assert "uploaded to Appwrite Datastore successfully" not in caplog.text
+
+    def test_in_band_failure_still_does_not_raise(
+        self, tmp_path, sample_pf, sample_metadata
+    ):
+        """ADR-047 is unchanged: Appwrite is SECONDARY EXTERNAL, so it must not raise.
+
+        This fix makes the code comply with ADR-047's "logged at logger.error" clause;
+        it does not promote Appwrite to a blocking destination.
+        """
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.return_value = SimpleNamespace(
+            success=False, code="storage_bucket_not_found", error="no bucket"
+        )
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        saver.save(sample_pf, tmp_path, sample_metadata)  # must not raise
+
+    def test_successful_result_still_logs_success(
+        self, tmp_path, sample_pf, sample_metadata, caplog
+    ):
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.return_value = SimpleNamespace(
+            success=True, code="UPLOAD_SUCCESS", error=None
+        )
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        with caplog.at_level(logging.INFO):
+            saver.save(sample_pf, tmp_path, sample_metadata)
+
+        assert "successfully" in caplog.text.lower()
+        assert "NOT delivered" not in caplog.text
 
     def test_programming_error_propagates(self, tmp_path, sample_pf, sample_metadata):
         """Programming errors (TypeError, AttributeError) must NOT be swallowed."""
