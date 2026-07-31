@@ -5,7 +5,7 @@ if any are missing — preventing silent failures after hours of training.
 Addresses C-11 (Appwrite credential assumption).
 """
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from views_pipeline_core.exceptions import ConfigurationException
 
@@ -33,7 +33,9 @@ class PredictionStoreConfig:
     """
     endpoint: str
     project_id: str
-    api_key: str
+    # repr=False — the same live key as AppwriteConfig.credentials, and a dataclass
+    # renders every field. See that field's note and register C-230 (þing-01 #325).
+    api_key: str = field(repr=False)
     bucket_id: str
     bucket_name: str
     collection_id: str
@@ -51,11 +53,11 @@ class PredictionStoreConfig:
         """
         values = {}
         missing = []
-        for field, env_var in _ENV_MAP.items():
+        for field_name, env_var in _ENV_MAP.items():
             val = os.getenv(env_var)
             if val is None:
                 missing.append(env_var)
-            values[field] = val
+            values[field_name] = val
 
         if missing:
             raise ConfigurationException(
