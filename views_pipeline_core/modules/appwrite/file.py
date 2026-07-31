@@ -6,9 +6,26 @@ and authentication. It supports both API key and session-based authentication.
 
 The module consists of several key components:
     - AppWriteFileModule: Main interface for file operations
-    - AppwriteMetadataHandler: Database/collection management for file metadata
+    - AppwriteMetadataHandler: Reads and updates file metadata documents
     - CacheManager: Local caching with TTL-based validation
     - AuthManager hierarchy: Flexible authentication (API key or session)
+
+GOVERNING CONTRACT — this module sits on the VIEWS Appwrite *seam*, whose identity,
+credential and coordinate rules are platform surface, not this repo's to set:
+
+    PLATFORM-001, Identity, Secrets & Configuration Contract (views-appwrite),
+    pinned at tag platform-001-v1.2.0:
+    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/PLATFORM-001_identity_secrets_configuration_contract.md
+
+    Coordinate registry (THE canonical source for bucket/collection/database ids —
+    read and validate against it; never copy values into code or defaults):
+    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/coordinate_registry.toml
+
+Two clauses bear directly on the code below. **§6 (raise, never provision):** this module
+creates no containers — provisioning lives in the sibling `provisioning.py`, runnable and
+never importable from here, and a wrong coordinate fails rather than conjuring a new
+production bucket. **§5 (redaction, all carriers):** credentials are never logged, in any
+form. Locally: ADR-046 (amended 2026-07-31) and ADR-047 (three-destination authority).
 
 Typical usage example:
 

@@ -2,7 +2,21 @@
 
 This module provides a high-level interface for uploading, downloading, searching,
 and managing prediction files stored in Appwrite cloud storage. It handles metadata
-management, file versioning, caching, and bucket operations.
+management, file versioning and caching. It does NOT create buckets or collections.
+
+GOVERNING CONTRACT — the VIEWS Appwrite seam's identity, credential and coordinate rules
+are platform surface:
+
+    PLATFORM-001 (views-appwrite), pinned at tag platform-001-v1.2.0:
+    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/PLATFORM-001_identity_secrets_configuration_contract.md
+
+    Coordinate registry (THE canonical source for ids — never copied into code):
+    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/coordinate_registry.toml
+
+**Callers: `upload_data()` reports failure by RETURN VALUE, not by exception.** The SDK's
+`AppwriteException` is converted to `OperationResult(success=False)` inside the storage
+module, so an `except` around this call will not fire. Inspect the result (ADR-046 §1 as
+amended 2026-07-31; register C-227). Locally: ADR-046, ADR-047.
 
 Typical usage example:
 
