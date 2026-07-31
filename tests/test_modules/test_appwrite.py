@@ -40,9 +40,14 @@ def api_key_config(mock_path_manager):
         project_id="test_project",
         credentials="test_api_key",
         auth_method=AuthMethod.API_KEY,
-        bucket_id="test_bucket",
         cache_dir="/tmp/test_cache",
         path_manager=mock_path_manager,
+        bucket_id="test_bucket",
+        bucket_name="Test Bucket",
+        collection_id="test_collection",
+        collection_name="Test Collection",
+        database_id="test_database",
+        database_name="Test Database",
     )
 
 
@@ -54,9 +59,14 @@ def session_config(mock_path_manager):
         project_id="test_project",
         credentials={"email": "test@example.com", "password": "password123"},
         auth_method=AuthMethod.SESSION,
-        bucket_id="test_bucket",
         cache_dir="/tmp/test_cache",
         path_manager=mock_path_manager,
+        bucket_id="test_bucket",
+        bucket_name="Test Bucket",
+        collection_id="test_collection",
+        collection_name="Test Collection",
+        database_id="test_database",
+        database_name="Test Database",
     )
 
 
@@ -102,34 +112,39 @@ def temp_cache_dir(tmp_path):
 
 # Test AppwriteConfig
 class TestAppwriteConfig:
-    def test_config_initialization_with_defaults(self, mock_path_manager):
-        config = AppwriteConfig(
-            endpoint="https://cloud.appwrite.io/v1",
-            project_id="test_project",
-            credentials="test_key",
-            bucket_id="test_bucket",
-            path_manager=mock_path_manager,
-        )
-        
-        assert config.auth_method == AuthMethod.API_KEY
-        assert config.bucket_name == "Test Bucket"
-        # Fix: Use the actual default from the config
-        assert config.database_name == "File Metadata"  # Changed from "Test Bucket Metadata"
-        assert config.cache_ttl_hours == 24
+    def test_coordinates_have_no_defaults(self, mock_path_manager):
+        """#324/C-229 — these used to default to the live production coordinates.
+
+        Full coverage of the replacement contract lives in
+        test_appwrite_config_coordinates.py; this pins the headline here, where the
+        old "defaults apply" test used to sit.
+        """
+        from views_pipeline_core.exceptions.exceptions import ConfigurationException
+
+        with pytest.raises(ConfigurationException) as exc:
+            AppwriteConfig(
+                endpoint="https://cloud.appwrite.io/v1",
+                project_id="test_project",
+                credentials="test_key",
+                path_manager=mock_path_manager,
+            )
+        assert "bucket_id" in str(exc.value)
 
     def test_config_with_custom_values(self, mock_path_manager):
         config = AppwriteConfig(
             endpoint="https://cloud.appwrite.io/v1",
             project_id="test_project",
             credentials="test_key",
-            bucket_id="custom_bucket",
-            bucket_name="My Custom Bucket",
-            database_name="My Database",
-            collection_name="My Collection",
             cache_ttl_hours=48,
             path_manager=mock_path_manager,
+            bucket_id="my_custom_bucket",
+            bucket_name="My Custom Bucket",
+            collection_id="my_collection",
+            collection_name="My Collection",
+            database_id="my_database",
+            database_name="My Database",
         )
-        
+
         assert config.bucket_name == "My Custom Bucket"
         assert config.database_name == "My Database"
         assert config.collection_name == "My Collection"
@@ -142,6 +157,12 @@ class TestAppwriteConfig:
             credentials="test_key",
             auth_method="api_key",
             path_manager=mock_path_manager,
+            bucket_id="test_bucket",
+            bucket_name="Test Bucket",
+            collection_id="test_collection",
+            collection_name="Test Collection",
+            database_id="test_database",
+            database_name="Test Database",
         )
         
         assert isinstance(config.auth_method, AuthMethod)
@@ -659,6 +680,12 @@ class TestErrorHandling:
             credentials={"email": "test@test.com", "password": "pass"},
             auth_method=AuthMethod.SESSION,
             path_manager=mock_path_manager,
+            bucket_id="test_bucket",
+            bucket_name="Test Bucket",
+            collection_id="test_collection",
+            collection_name="Test Collection",
+            database_id="test_database",
+            database_name="Test Database",
         )
         assert config.credentials == {"email": "test@test.com", "password": "pass"}
 

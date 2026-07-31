@@ -11,10 +11,13 @@ from views_pipeline_core.modules.appwrite.reconcile import ReconciliationReport,
 
 
 class _Config:
-    bucket_id = "production_forecasts"
-    collection_id = "production_forecasts"
-    collection_name = "Production Forecasts"
-    database_id = "file_metadata"
+    # Test coordinates, deliberately not the production ones: hardcoding live
+    # addresses into fixtures is the habit #324 removed from AppwriteConfig, and a
+    # stub that carries them reads as production even when it is inert.
+    bucket_id = "test_bucket"
+    collection_id = "test_collection"
+    collection_name = "Test Collection"
+    database_id = "test_database"
 
 
 class _FakeFileManager:
