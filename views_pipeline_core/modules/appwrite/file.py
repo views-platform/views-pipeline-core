@@ -894,17 +894,22 @@ class CacheManager:
 
 # Metadata Management
 class AppwriteMetadataHandler:
-    """Handler for managing file metadata in Appwrite databases.
+    """Handler for reading and writing file metadata documents in Appwrite.
 
-    Manages the database and collection infrastructure for storing file metadata.
-    Handles dynamic attribute creation based on metadata structure, and provides
-    search and update capabilities for metadata documents.
+    Searches, reads and updates metadata documents in an EXISTING database and
+    collection.
 
-    The handler automatically:
-        - Creates databases and collections if they don't exist
-        - Infers attribute types from metadata values
-        - Creates necessary database attributes dynamically
-        - Supports searching with equality and array containment filters
+    **It no longer creates them.** Provisioning — databases, collections, attributes —
+    moved to ``views_pipeline_core.modules.appwrite.provisioning`` in þing-02 #331,
+    because creating storage as a side effect of publishing a forecast is what forced
+    the platform's API key to carry create scopes, and least privilege could not be
+    applied while narrowing the key broke every upload. Containers are now created
+    deliberately::
+
+        python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection
+
+    and their existence is verified read-only before the first write by
+    :meth:`AppWriteFileModule._require_containers`.
 
     Attributes:
         databases: Appwrite Databases service instance.
@@ -912,12 +917,6 @@ class AppwriteMetadataHandler:
 
     Example:
         >>> handler = AppwriteMetadataHandler(databases_service, config)
-        >>>
-        >>> # Ensure collection exists with required attributes
-        >>> result = handler.create_metadata_collection_if_not_exists(
-        ...     metadata={"model": "test", "targets": ["ged_sb"]},
-        ...     collection_name="Predictions"
-        ... )
         >>>
         >>> # Search for files by metadata
         >>> results = handler.search_files_by_metadata(
@@ -1310,6 +1309,12 @@ class AppWriteFileModule:
 
         Read-only (``get_bucket`` + ``list_collections``) and cached per instance, so
         the cost is two calls per process rather than two per upload.
+
+        **Scope: paired writes only.** The single-write methods (``upload_file``,
+        ``update_file_metadata``) deliberately do not call this. They touch one
+        container, so a missing one surfaces as a loud Appwrite error with nothing
+        half-written behind it — there is no pair to leave inconsistent. Add the
+        precondition here if a third paired write is ever introduced.
 
         Raises:
             ConfigurationException: naming the missing container and the exact command
@@ -2195,12 +2200,23 @@ class AppWriteFileModule:
         
         except AppwriteException as e:
             logger.error(f"Metadata handling failed: {e.message}")
-            # Rollback: delete the uploaded file if metadata fails
+            # Rollback: delete the uploaded file if metadata fails. `delete_file`
+            # reports failure by RETURN VALUE, so the `except` below never sees one —
+            # inspect the result, or a failed rollback leaves an orphaned file in the
+            # bucket and says nothing (the fourth route to the state reconcile.py
+            # exists to detect; register C-227's disease at this site).
             try:
-                self.delete_file(bucket_id, file_id)
+                rollback = self.delete_file(bucket_id, file_id)
+                if not rollback.success:
+                    logger.error(
+                        "Rollback FAILED: file %s remains in bucket '%s' with no "
+                        "metadata document (code=%s, %s). Run `python -m "
+                        "views_pipeline_core.modules.appwrite.reconcile` to confirm.",
+                        file_id, bucket_id, rollback.code, rollback.error,
+                    )
             except Exception as delete_error:
                 logger.error(f"Failed to rollback file upload after metadata error: {delete_error}")
-            
+
             return OperationResult(
                 success=False,
                 error=f"Metadata handling failed: {e.message}",
