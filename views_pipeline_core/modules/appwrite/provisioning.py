@@ -189,7 +189,11 @@ class AppwriteProvisioner:
             for collection in existing_collections.get("collections", []):
                 if collection["$id"] == coll_id or collection["name"] == coll_name:
                     if metadata:
-                        self.ensure_attributes(db_id, collection["$id"], metadata)
+                        attr_result = self.ensure_attributes(
+                            db_id, collection["$id"], metadata
+                        )
+                        if not attr_result.success:
+                            return attr_result
                     return OperationResult(
                         success=True,
                         data={
@@ -214,7 +218,11 @@ class AppwriteProvisioner:
                 enabled=True,
             )
 
-            self.ensure_attributes(db_id, coll_id, metadata or {})
+            attr_result = self.ensure_attributes(db_id, coll_id, metadata or {})
+            if not attr_result.success:
+                # The collection exists but its schema is incomplete — say so rather
+                # than reporting a successful creation over a half-built container.
+                return attr_result
 
             return OperationResult(
                 success=True,
@@ -273,16 +281,24 @@ class AppwriteProvisioner:
                         code=e.type,
                     )
 
+        # Every attribute is attempted before reporting, so one bad field does not
+        # hide the others — but a failure is NOT swallowed. This is a setup tool
+        # invoked deliberately by a person; ADR-047's graceful degradation governs the
+        # delivery path, not this one, and "OK" over a half-built schema is the same
+        # class of lie the þing convened about (#322).
+        failed: List[str] = []
+
         for attr in FIXED_METADATA_ATTRIBUTES:
             if attr["key"] in existing_attribute_keys:
                 continue
             try:
                 self._create_fixed_attribute(database_id, collection_id, attr)
             except AppwriteException as e:
-                if "attribute already exists" not in e.message.lower():
-                    logger.warning(
+                if "already exists" not in e.message.lower():
+                    logger.error(
                         f"Failed to create fixed attribute {attr['key']}: {e.message}"
                     )
+                    failed.append(f"{attr['key']} ({e.type or e.message})")
 
         for key, value in metadata.items():
             if key in existing_attribute_keys:
@@ -294,6 +310,18 @@ class AppwriteProvisioner:
                 )
             except AppwriteException as e:
                 logger.error(f"Failed to create attribute '{key}': {e.message}")
+                failed.append(f"{key} ({e.type or e.message})")
+
+        if failed:
+            return OperationResult(
+                success=False,
+                error=(
+                    f"{len(failed)} attribute(s) could not be created in collection "
+                    f"'{collection_id}': {', '.join(failed)}. The collection's schema is "
+                    f"incomplete; documents using these fields will be rejected."
+                ),
+                code="ATTRIBUTES_INCOMPLETE",
+            )
 
         return OperationResult(success=True)
 

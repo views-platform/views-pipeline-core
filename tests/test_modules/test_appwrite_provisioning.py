@@ -98,6 +98,93 @@ class TestInferAttributeType:
         assert infer_attribute_type("2025-10-22T12:00:00") == ("datetime", False)
 
 
+class TestEnsureAttributes:
+    """A setup tool must not report success while leaving the schema half-built (#322).
+
+    The delivery path's graceful-degradation rationale (ADR-047) does not reach here:
+    this runs when a person deliberately invokes `ensure-collection`, and the only
+    useful answer to "did it work?" is the truth.
+    """
+
+    def _ready(self, provisioner, existing=()):
+        provisioner.databases.list_attributes.return_value = {
+            "attributes": [{"key": k} for k in existing]
+        }
+
+    def test_reports_success_when_every_attribute_lands(self, provisioner):
+        self._ready(provisioner)
+        result = provisioner.ensure_attributes("db", "coll", {"loa": "pgm"})
+        assert result.success
+
+    def test_failed_payload_attribute_fails_the_operation(self, provisioner):
+        """Previously: logged the failure and returned success=True regardless."""
+        self._ready(provisioner)
+        provisioner.databases.create_string_attribute.side_effect = AppwriteException(
+            "invalid attribute", 400, "attribute_invalid"
+        )
+
+        result = provisioner.ensure_attributes("db", "coll", {"loa": "pgm"})
+
+        assert not result.success
+        assert "loa" in result.error
+        assert result.code == "ATTRIBUTES_INCOMPLETE"
+
+    def test_failed_fixed_attribute_fails_the_operation(self, provisioner):
+        """The fixed attributes are the ones every metadata document depends on."""
+        self._ready(provisioner)
+        provisioner.databases.create_string_attribute.side_effect = AppwriteException(
+            "boom", 500, "general_server_error"
+        )
+
+        result = provisioner.ensure_attributes("db", "coll", {})
+
+        assert not result.success
+        assert "fileId" in result.error
+
+    def test_already_exists_is_not_a_failure(self, provisioner):
+        """Re-running the setup command must stay idempotent."""
+        self._ready(provisioner)
+        provisioner.databases.create_string_attribute.side_effect = AppwriteException(
+            "Attribute already exists", 409, "attribute_already_exists"
+        )
+
+        result = provisioner.ensure_attributes("db", "coll", {"loa": "pgm"})
+
+        assert result.success
+
+    def test_incomplete_schema_fails_the_enclosing_ensure_collection(self, provisioner):
+        """The caller must not report a successful setup over a half-built schema."""
+        provisioner.databases.list.return_value = {
+            "databases": [{"$id": "file_metadata", "name": "File Metadata"}]
+        }
+        provisioner.databases.list_collections.return_value = {
+            "collections": [{"$id": "test_collection", "name": "Test Collection"}]
+        }
+        self._ready(provisioner)
+        provisioner.databases.create_string_attribute.side_effect = AppwriteException(
+            "invalid", 400, "attribute_invalid"
+        )
+
+        result = provisioner.ensure_collection(metadata={"loa": "pgm"})
+
+        assert not result.success
+        assert result.code == "ATTRIBUTES_INCOMPLETE"
+
+    def test_every_attribute_is_attempted_before_reporting(self, provisioner):
+        """One bad field must not abort the rest — report all of them at once."""
+        self._ready(provisioner)
+        provisioner.databases.create_string_attribute.side_effect = AppwriteException(
+            "nope", 400, "attribute_invalid"
+        )
+
+        result = provisioner.ensure_attributes(
+            "db", "coll", {"loa": "pgm", "category": "forecast"}
+        )
+
+        assert not result.success
+        assert "loa" in result.error and "category" in result.error
+
+
 class TestEnsureBucket:
     def test_creates_the_bucket(self, provisioner):
         provisioner.storage.create_bucket.return_value = {
