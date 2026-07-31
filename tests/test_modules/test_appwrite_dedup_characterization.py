@@ -48,13 +48,14 @@ def config(tmp_path):
         project_id="test_project",
         credentials="test_api_key",
         auth_method=AuthMethod.API_KEY,
-        bucket_id="test_bucket",
-        collection_id="test_collection",
-        collection_name="Test Collection",
-        database_id="test_db",
-        database_name="Test DB",
         cache_dir=str(tmp_path / "cache"),
         path_manager=None,
+        bucket_id="test_bucket",
+        bucket_name="Test Bucket",
+        collection_id="test_collection",
+        collection_name="Test Collection",
+        database_id="test_database",
+        database_name="Test Database",
     )
 
 

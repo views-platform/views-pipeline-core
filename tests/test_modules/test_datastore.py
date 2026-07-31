@@ -188,13 +188,14 @@ def mock_config(mock_path_manager):
         project_id="test_project",
         credentials="test_api_key",
         auth_method=AuthMethod.API_KEY,
-        bucket_id="test_bucket",
-        bucket_name="Test Bucket",
-        collection_name="Test Collection",
-        collection_id="test_collection",
-        database_id="test_database",
         cache_dir="/tmp/test_cache",
         path_manager=mock_path_manager,
+        bucket_id="test_bucket",
+        bucket_name="Test Bucket",
+        collection_id="test_collection",
+        collection_name="Test Collection",
+        database_id="test_database",
+        database_name="Test Database",
     )
 
 

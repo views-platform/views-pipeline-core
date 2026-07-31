@@ -69,7 +69,12 @@ until usage patterns stabilize.
 - `config: AppwriteConfig` -- dataclass with:
   - `endpoint`, `project_id`, `credentials` (str for API key, dict for session).
   - `auth_method: AuthMethod` -- `API_KEY` or `SESSION`.
-  - `bucket_id`, `collection_name`, `collection_id`, `database_name`, `database_id`.
+  - `bucket_id`, `bucket_name`, `collection_id`, `collection_name`, `database_id`,
+    `database_name` -- **all six are REQUIRED and have no defaults**. Construction raises
+    `ConfigurationException` naming every missing one. Until 2026-07-31 they defaulted to
+    the live production coordinates, so a caller supplying only a key operated against
+    production storage without choosing to (register C-229, #324; PLATFORM-001 §4 forbids
+    baking registry coordinates into dataclass defaults).
   - `cache_ttl_hours: int` (default 24).
   - `allow_metadata_only_updates: bool` (default `True`).
   - `path_manager: Optional[ModelPathManager]` -- used for cache directory resolution.

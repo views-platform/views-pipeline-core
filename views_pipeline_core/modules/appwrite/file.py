@@ -91,6 +91,7 @@ import shutil
 import logging
 import hashlib
 from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.exceptions.exceptions import ConfigurationException
 from abc import ABC, abstractmethod
 from enum import Enum
 
@@ -110,6 +111,18 @@ INITIAL_RETRY_DELAY = 1.0
 # tests/test_modules/test_appwrite_sdk_contract.py.
 APPWRITE_FILE_NOT_FOUND = "storage_file_not_found"
 APPWRITE_BUCKET_NOT_FOUND = "storage_bucket_not_found"
+
+# Coordinates that address real storage. They have no safe default: a default is a
+# production address reachable without a deliberate choice (register C-229, þing-02
+# #324; PLATFORM-001 §4). Their values belong to the seam's coordinate registry.
+_REQUIRED_COORDINATES = (
+    "bucket_id",
+    "bucket_name",
+    "collection_id",
+    "collection_name",
+    "database_id",
+    "database_name",
+)
 
 
 class _StoragePresence(Enum):
@@ -323,29 +336,41 @@ class AppwriteConfig:
     cache_ttl_hours: int = DEFAULT_CACHE_TTL_HOURS
     allow_metadata_only_updates: bool = True  # Whether to update metadata only when file hash exists
     
-    # Storage settings
-    bucket_id: str = "production_forecasts"
-    bucket_name: Optional[str] = None  # Will default to bucket_id with spaces if not provided
-    
-    # Metadata settings
-    collection_name: str = "Metadata"  #"Pipeline Forecasts"
-    collection_id: Optional[str] = "metadata"  # Custom collection ID override
-    database_name: Optional[str] = "File Metadata" #"File Metadata"  # Will default to bucket_name + " Metadata" if not provided
-    database_id: Optional[str] = "file_metadata"  # Custom database ID override
-    
+    # Storage and metadata coordinates. REQUIRED — see _REQUIRED_COORDINATES below.
+    # Declared Optional only so they can keep their position after the defaulted
+    # fields above; omitting one is a configuration error, not a default.
+    bucket_id: Optional[str] = None
+    bucket_name: Optional[str] = None
+    collection_name: Optional[str] = None
+    collection_id: Optional[str] = None
+    database_name: Optional[str] = None
+    database_id: Optional[str] = None
+
     # Path manager
     path_manager: ModelPathManager = None
-    
+
     def __post_init__(self):
         if isinstance(self.auth_method, str):
             self.auth_method = AuthMethod(self.auth_method)
-        
-        # Set defaults for derived values
-        if not self.bucket_name:
-            self.bucket_name = self.bucket_id.replace("_", " ").title()
-        
-        if not self.database_name:
-            self.database_name = self.collection_id.replace("_", " ").title()
+
+        # Every coordinate must arrive explicitly. Until 2026-07-31 these defaulted to
+        # the live production values ("production_forecasts", "file_metadata", …), so a
+        # caller, test or scratch script that supplied only a key operated against
+        # production storage without ever choosing to (register C-229, þing-02 #324).
+        # PLATFORM-001 §4 forbids baking registry coordinates into code, examples or
+        # dataclass defaults for precisely this reason.
+        #
+        # Empty strings count as missing: `os.getenv("X", "")` is a common way to reach
+        # here with nothing, and it must not pass silently.
+        missing = [name for name in _REQUIRED_COORDINATES if not getattr(self, name)]
+        if missing:
+            raise ConfigurationException(
+                f"AppwriteConfig is missing required coordinate(s): {missing}. "
+                f"These address real storage and have no safe default — pass them "
+                f"explicitly from the seam's coordinate registry (PLATFORM-001 §4), "
+                f"or build the config from validated environment variables via "
+                f"PredictionStoreConfig.from_environment().to_appwrite_config()."
+            )
 
 # Authentication Classes
 class AuthManager(ABC):

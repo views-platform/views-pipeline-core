@@ -32,14 +32,14 @@ def config(tmp_path):
         project_id="test_project",
         credentials="test_api_key",
         auth_method=AuthMethod.API_KEY,
+        cache_dir=str(tmp_path / "cache"),
+        path_manager=None,
         bucket_id="test_bucket",
         bucket_name="Test Bucket",
         collection_id="test_collection",
         collection_name="Test Collection",
-        database_id="file_metadata",
-        database_name="File Metadata",
-        cache_dir=str(tmp_path / "cache"),
-        path_manager=None,
+        database_id="test_database",
+        database_name="Test Database",
     )
 
 
@@ -64,8 +64,8 @@ class TestEnsureDatabase:
     def test_creates_a_missing_database(self, provisioner):
         provisioner.databases.list.return_value = {"databases": []}
         provisioner.databases.create.return_value = {
-            "$id": "file_metadata",
-            "name": "File Metadata",
+            "$id": "test_database",
+            "name": "Test Database",
         }
 
         result = provisioner.ensure_database()
@@ -75,7 +75,7 @@ class TestEnsureDatabase:
 
     def test_existing_database_is_left_alone(self, provisioner):
         provisioner.databases.list.return_value = {
-            "databases": [{"$id": "file_metadata", "name": "File Metadata"}]
+            "databases": [{"$id": "test_database", "name": "Test Database"}]
         }
 
         result = provisioner.ensure_database()
@@ -155,7 +155,7 @@ class TestEnsureAttributes:
     def test_incomplete_schema_fails_the_enclosing_ensure_collection(self, provisioner):
         """The caller must not report a successful setup over a half-built schema."""
         provisioner.databases.list.return_value = {
-            "databases": [{"$id": "file_metadata", "name": "File Metadata"}]
+            "databases": [{"$id": "test_database", "name": "Test Database"}]
         }
         provisioner.databases.list_collections.return_value = {
             "collections": [{"$id": "test_collection", "name": "Test Collection"}]
