@@ -347,28 +347,24 @@ class DatastoreModule:
         else:
             raise TypeError("file must be a Path, str, or pd.DataFrame")
 
+        # A missing bucket used to be CREATED here and the upload retried into it —
+        # so a mistyped or renamed coordinate silently provisioned a new bucket in
+        # production and published the forecast where nobody reads (register C-228,
+        # þing-02 #331). Provisioning is now a deliberate act; a wrong coordinate
+        # fails and says which one:
+        #   python -m views_pipeline_core.modules.appwrite.provisioning ensure-bucket
         if upload_result.get("code") == "storage_bucket_not_found":
-            logger.info(
-                f"Bucket '{self.__appwrite_file_manager_config.bucket_id}' not found. Creating it..."
+            bucket_id = self.__appwrite_file_manager_config.bucket_id
+            logger.error(
+                "Appwrite bucket '%s' does not exist. Refusing to create it from the "
+                "delivery path — run `python -m "
+                "views_pipeline_core.modules.appwrite.provisioning ensure-bucket "
+                "--bucket %s` if this bucket is genuinely new, or correct "
+                "APPWRITE_PROD_FORECASTS_BUCKET_ID if it is a typo.",
+                bucket_id,
+                bucket_id,
             )
-            try:
-                self.__appwrite_file_manager.create_bucket(
-                    bucket_id=self.__appwrite_file_manager_config.bucket_id,
-                    name=self.__appwrite_file_manager_config.bucket_name,
-                )
-            except Exception as e:
-                logger.error(f"Failed to create bucket: {e}")
-                return OperationResult(success=False, error=str(e))
 
-            upload_result = self.__appwrite_file_manager.upload_file_with_metadata(
-                bucket_id=self.__appwrite_file_manager_config.bucket_id,
-                file_path=file_path,
-                filename=filename,
-                metadata=metadata,
-                collection_name=self.__appwrite_file_manager_config.collection_name,
-                collection_id=self.__appwrite_file_manager_config.collection_id,
-            ).to_dict()
-        
         return OperationResult(**upload_result)
 
     def get_predictions_by_metadata(

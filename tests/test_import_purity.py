@@ -1,4 +1,15 @@
-"""Import-purity guards: pandas is a LEGACY option, never a foundational import (#320, C-225).
+"""Import-purity guards — architectural rules asserted in a subprocess, not promised.
+
+Two rules live here:
+
+1. **pandas is a LEGACY option, never a foundational import** (#320, C-225). Importing
+   the base manager — the class every engine must extend — must not load pandas.
+2. **The delivery path must not be able to provision** (#331/#332, C-233). Creating a
+   bucket, database or collection is a deliberate act performed by a person; if
+   ``views_pipeline_core.modules.appwrite.provisioning`` is reachable from the code that
+   publishes a forecast, the least-privilege key the platform is moving to cannot be
+   issued. The dependency runs one way — ``provisioning`` imports ``file``, never the
+   reverse — and that is what these probes check.
 
 The frame-native goal (epic #300) requires that importing the base manager —
 the class every engine must extend — does not load pandas. These tests are the
@@ -51,4 +62,65 @@ def test_manager_import_is_pandas_free():
 def test_manager_package_import_is_pandas_free():
     """`import views_pipeline_core.managers` (the lazy PEP 562 facade) stays pandas-free."""
     result = _run_probe("import views_pipeline_core.managers")
+    assert result.returncode == 0, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Provisioning purity (#331/#332, C-233)
+# ---------------------------------------------------------------------------
+
+_PROVISIONING = "views_pipeline_core.modules.appwrite.provisioning"
+
+FORBIDDEN_PROBE = (
+    "import sys; {imports}; "
+    "assert '{forbidden}' not in sys.modules, "
+    "'{forbidden} was imported by the delivery path'"
+)
+
+
+def _run_forbidden_probe(imports: str, forbidden: str = _PROVISIONING):
+    return subprocess.run(
+        [sys.executable, "-c", FORBIDDEN_PROBE.format(imports=imports, forbidden=forbidden)],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_storage_module_does_not_import_provisioning():
+    """`file.py` is the delivery path's storage surface; it must not reach provisioning."""
+    result = _run_forbidden_probe(
+        "import views_pipeline_core.modules.appwrite.file"
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_datastore_does_not_import_provisioning():
+    """`DatastoreModule` is what the savers call — the closest caller to a real upload."""
+    result = _run_forbidden_probe(
+        "from views_pipeline_core.modules.datastore import DatastoreModule"
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_appwrite_package_does_not_import_provisioning():
+    """The package `__init__` must not re-export it into the delivery path either."""
+    result = _run_forbidden_probe("import views_pipeline_core.modules.appwrite")
+    assert result.returncode == 0, result.stderr
+
+
+def test_savers_do_not_import_provisioning():
+    """The publish path end to end: AppwriteSaver -> DatastoreModule -> file.py."""
+    result = _run_forbidden_probe(
+        "from views_pipeline_core.managers.prediction.savers import AppwriteSaver"
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_provisioning_is_importable_on_its_own():
+    """The rule is one-way, not a ban: the setup entrypoint must still work."""
+    result = subprocess.run(
+        [sys.executable, "-c", f"import {_PROVISIONING} as p; assert p.AppwriteProvisioner"],
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stderr

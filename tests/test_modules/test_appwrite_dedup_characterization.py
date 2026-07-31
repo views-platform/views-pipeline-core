@@ -93,13 +93,8 @@ def _storage_says(manager, result: OperationResult):
 
 def _run_dedup(manager, payload):
     """Drive only as far as the decision; the rest of the upload is stubbed out."""
-    manager.metadata_manager.create_metadata_collection_if_not_exists = Mock(
-        return_value=OperationResult(
-            success=True,
-            data={"database_id": "test_db", "collection_id": "test_collection"},
-            code="EXISTS",
-        )
-    )
+    # Containers are verified, never created, since #331 — satisfy the precondition.
+    manager._require_containers = Mock(return_value=None)
     manager.upload_file = Mock(
         return_value=OperationResult(
             success=True, data={"$id": "new_file_id"}, code="CREATED"

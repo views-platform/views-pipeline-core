@@ -1,3 +1,4 @@
+import logging
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
@@ -345,60 +346,23 @@ class TestPredictionStoreManager:
                 category="forecast"
             )
 
-    def test_upload_predictions_bucket_not_found_creates_bucket(self, prediction_store, mock_appwrite_manager, tmp_path):
-        """Test that bucket is created when not found"""
-        test_file = tmp_path / "test.parquet"
-        test_file.write_text("test content")
-        
-        # First upload fails with bucket not found, second succeeds
-        mock_appwrite_manager.upload_file_with_metadata.side_effect = [
-            OperationResult(
-                success=False,
-                error="Bucket not found",
-                code="storage_bucket_not_found"
-            ),
-            OperationResult(
-                success=True,
-                data={"$id": "file123"},
-                code="CREATED"
-            )
-        ]
-        
-        # Mock successful bucket creation
-        mock_appwrite_manager.create_bucket.return_value = OperationResult(
-            success=True,
-            data={"$id": "test_bucket"},
-            code="CREATED"
-        )
-        
-        result = prediction_store.upload_predictions(
-            file=test_file,
-            filename="test.parquet",
-            loa="country",
-            name="test_model",
-            type="fatalities",
-            targets=["target1"],
-            category="forecast"
-        )
-        
-        assert result.success
-        mock_appwrite_manager.create_bucket.assert_called_once()
+    def test_missing_bucket_is_reported_not_created(self, prediction_store, mock_appwrite_manager, tmp_path):
+        """#331 — the delivery path no longer provisions its own destination.
 
-    def test_upload_predictions_bucket_creation_fails(self, prediction_store, mock_appwrite_manager, tmp_path):
-        """Test handling of bucket creation failure"""
+        Previously a `storage_bucket_not_found` made `upload_data` CREATE the bucket
+        and retry into it, so a mistyped or renamed coordinate silently published the
+        forecast to a brand-new bucket nobody reads (register C-228). The failure must
+        now surface, and the bucket must not be created.
+        """
         test_file = tmp_path / "test.parquet"
         test_file.write_text("test content")
-        
-        # Upload fails with bucket not found
+
         mock_appwrite_manager.upload_file_with_metadata.return_value = OperationResult(
             success=False,
             error="Bucket not found",
-            code="storage_bucket_not_found"
+            code="storage_bucket_not_found",
         )
-        
-        # Bucket creation fails
-        mock_appwrite_manager.create_bucket.side_effect = Exception("Creation failed")
-        
+
         result = prediction_store.upload_predictions(
             file=test_file,
             filename="test.parquet",
@@ -406,8 +370,38 @@ class TestPredictionStoreManager:
             name="test_model",
             type="fatalities",
             targets=["target1"],
-            category="forecast"
+            category="forecast",
         )
-        
+
         assert not result.success
-        assert "Creation failed" in result.error
+        assert result.code == "storage_bucket_not_found"
+        mock_appwrite_manager.create_bucket.assert_not_called()
+        # And it is not retried into a bucket that was never made.
+        assert mock_appwrite_manager.upload_file_with_metadata.call_count == 1
+
+    def test_missing_bucket_logs_the_remediation_command(
+        self, prediction_store, mock_appwrite_manager, tmp_path, caplog
+    ):
+        """The operator must be told which coordinate is wrong and how to fix it."""
+        test_file = tmp_path / "test.parquet"
+        test_file.write_text("test content")
+
+        mock_appwrite_manager.upload_file_with_metadata.return_value = OperationResult(
+            success=False,
+            error="Bucket not found",
+            code="storage_bucket_not_found",
+        )
+
+        with caplog.at_level(logging.ERROR):
+            prediction_store.upload_predictions(
+                file=test_file,
+                filename="test.parquet",
+                loa="country",
+                name="test_model",
+                type="fatalities",
+                targets=["target1"],
+                category="forecast",
+            )
+
+        assert "provisioning ensure-bucket" in caplog.text
+        assert "APPWRITE_PROD_FORECASTS_BUCKET_ID" in caplog.text
