@@ -117,6 +117,11 @@ APPWRITE_DEFAULT_PAGE_SIZE = 25
 # fires. Tripping it means the walk is INCOMPLETE, never that it is finished.
 MAX_METADATA_PAGES = 1000
 
+# Page size for the container preflight. A project holds a handful of collections, so
+# this is generous — but it is stated rather than inherited, and a total beyond it is
+# refused rather than silently truncated.
+_CONTAINER_PAGE = 100
+
 # Appwrite error types. These are the SERVER's own `type` strings, which the SDK
 # propagates verbatim into `AppwriteException.type` and this module carries as
 # `OperationResult.code` — pinned against the real SDK in
@@ -1188,8 +1193,15 @@ class AppwriteMetadataHandler:
             # #331). The collection is now provisioned deliberately:
             #   python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection
             # If it does not exist, the read below fails loud and says so.
+            # limit(1): this reads `total` for existence and `documents[0]` for the
+            # answer, so one row is all it consumes. `total` is reported over the whole
+            # match regardless of page size, so bounding the page cannot hide a
+            # duplicate hash. Explicit because "the default happens to be enough" is
+            # what C-241 was.
             search_result = self.databases.list_documents(
-                db_id, coll_id, queries=[Query.equal("file_hash", file_hash)]
+                db_id,
+                coll_id,
+                queries=[Query.equal("file_hash", file_hash), Query.limit(1)],
             )
 
             if search_result["total"] > 0:
@@ -1215,7 +1227,10 @@ class AppwriteMetadataHandler:
                         search_result = self.databases.list_documents(
                             db_id,
                             coll_id,
-                            queries=[Query.equal("file_hash", file_hash)],
+                            queries=[
+                                Query.equal("file_hash", file_hash),
+                                Query.limit(1),
+                            ],
                         )
 
                         if search_result["total"] > 0:
@@ -1291,10 +1306,12 @@ class AppwriteMetadataHandler:
                 code="MISSING_CONFIG"
             )
         try:
+            # fileId is unique per document by construction, and only documents[0] is
+            # used below.
             search_result = self.databases.list_documents(
                 database_id=db_id,
                 collection_id=coll_id,
-                queries=[Query.equal("fileId", file_id)]
+                queries=[Query.equal("fileId", file_id), Query.limit(1)],
             )
             
             if not search_result["documents"]:
@@ -1466,10 +1483,22 @@ class AppWriteFileModule:
 
         coll_id = collection_id or self.config.collection_id
         try:
-            collections = self.databases.list_collections(self.config.database_id)
-            known = {
-                c.get("$id") for c in collections.get("collections", [])
-            } | {c.get("name") for c in collections.get("collections", [])}
+            # This builds a membership set, so a SHORT read does not return less — it
+            # returns a WRONG answer: a collection that exists but falls past the page
+            # boundary reads as missing and fails the preflight. The limit is stated,
+            # and a total larger than the page is refused rather than guessed at.
+            collections = self.databases.list_collections(
+                self.config.database_id, queries=[Query.limit(_CONTAINER_PAGE)]
+            )
+            listed = collections.get("collections", [])
+            reported = collections.get("total")
+            if reported is not None and reported > len(listed):
+                raise ConfigurationException(
+                    f"Database {self.config.database_id!r} reports {reported} "
+                    f"collections but only {len(listed)} were listed; this preflight "
+                    f"cannot confirm a container's absence from a partial read."
+                )
+            known = {c.get("$id") for c in listed} | {c.get("name") for c in listed}
         except AppwriteException as e:
             raise ConfigurationException(
                 f"Cannot verify the Appwrite metadata collection in database "
@@ -1710,8 +1739,11 @@ class AppWriteFileModule:
             OperationResult with code 'CREATED' or 'UPDATED' on success.
         """
         try:
+            # Existence check plus documents[0]; one row is all that is consumed.
             existing_docs = self.databases.list_documents(
-                database_id, collection_id, queries=[Query.equal("fileId", file_id)]
+                database_id,
+                collection_id,
+                queries=[Query.equal("fileId", file_id), Query.limit(1)],
             )
             
             if existing_docs["total"] > 0:

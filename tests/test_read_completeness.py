@@ -1,0 +1,534 @@
+"""The Cluster J guard: a partial or failed read must not be usable as an answer.
+
+## The rule this file enforces
+
+> **A read that can be partial or can fail must return that fact with its content, and
+> no caller may use the content without disposing of that fact.**
+
+## Why it exists
+
+The risk register records **twenty instances of one defect** over nine months: *a system
+that cannot distinguish "no" from "I could not tell", and answers anyway.* Eleven were
+fixed individually. The class itself was never registered, so each new surface
+reintroduced it — and **five of the seven all-time Tier-1 entries belong to it**. In the
+week this guard was written it recurred twice *inside the tool built to detect it*,
+producing 436 phantom orphan-file reports against production and advice to delete
+production buckets.
+
+Three shapes, one cause:
+
+* a **failed** read reported as absence (C-231, C-71, C-80, C-170)
+* a **partial** read reported as completeness (C-241, C-242, C-26)
+* a **discarded** result reported as success (C-227, C-232, C-249)
+
+`mypy` is not in CI, so no type can carry this. An AST test can, in the idiom this repo
+already uses for `test_boundary_enforcement.py` and `test_import_purity.py`.
+
+## What it does NOT reach — stated so nobody mistakes green for safe
+
+Four of the twenty instances are outside any mechanism here: C-61 (staleness is not
+incompleteness), C-26 (truncation inside an adapter, not at a read), C-249 (the read was
+correctly marked incomplete; the renderer ignored the mark), and C-183/184/185 (you
+cannot guard what you never observe). This guard is a floor, not a ceiling.
+
+## What this analysis cannot see — a stated limit, not a silent one
+
+`_names_bound_to_a_limit` is **flow-insensitive**: it asks whether a variable ever
+receives a `Query.limit` anywhere in the function, not whether it still holds one at the
+call. So this slips through:
+
+    queries = [Query.limit(10)]
+    queries = [Query.equal("a", b)]      # limit discarded
+    self.databases.list_documents(x, y, queries=queries)
+
+Fixing it properly means real dataflow analysis, which is a large step up in complexity
+for a test — and the shape is contrived enough that paying that cost now would be
+guessing at an abstraction. Recorded here so a future reader knows it is a **known** gap
+rather than an unexamined one, and so the trigger for revisiting is explicit: the first
+time this pattern appears in real code.
+
+## Which set of calls is governed, and why it matters
+
+Two defensible sweeps exist and they differ by roughly a factor of two:
+
+* **narrow** — `list_documents`/`list_files`/`list_buckets` only
+* **broad** — every `list*` call on an Appwrite service, including `list_collections`,
+  `list_attributes` and `databases.list()`
+
+**This guard governs the broad set.** The narrow one is the set the register first
+counted, and it misses `_require_containers` (`file.py`), where an unbounded
+`list_collections` in a project with more than one page of collections reports a
+container that exists as **missing** — a partial read producing a false absence, which
+is precisely shape one. A guard that cannot see the preflight is not a guard.
+
+Getting this wrong is itself a documented failure (C-256): the sizing in issue #343 said
+"~12 sites", the register then said "16", and the measured answers were 8 (narrow) and 14
+(broad) before #341, 7 and 13 after.
+
+**Those figures are from a naive substring sweep, and this guard's own numbers differ
+because its analysis is better** — it recognises a `limit=` keyword and a limit bound to
+a variable before the call, both of which the sweep counted as unbounded. Of the 17
+`list*` calls in the governed directories the guard reports 0 unbounded, 2 allowlisted as
+bounded-in-reality, and 1 suppressed as a tracked defect; the rest it can see are
+correctly bounded. Two right answers to two different questions — spelled out because the
+history of this particular population is three wrong counts in two days.
+"""
+
+from __future__ import annotations
+
+import ast
+import pathlib
+from typing import Dict, List, Set, Tuple
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+GOVERNED_DIRS = [
+    REPO / "views_pipeline_core" / "modules" / "appwrite",
+    REPO / "views_pipeline_core" / "modules" / "datastore",
+]
+
+# Any attribute call whose name starts with one of these is a paging surface. Appwrite
+# names them consistently, and matching on the prefix means a NEW list endpoint is
+# governed the day it is first called rather than the day someone remembers to add it.
+_LIST_PREFIXES = ("list",)
+
+# Callables that return an OperationResult and therefore carry a success flag that a
+# caller must consult. Discarding one is shape three.
+_RESULT_RETURNING = {
+    "upload_file_with_metadata",
+    "create_metadata_document",
+    "delete_metadata_document",
+    "update_file_metadata",
+    "store_metadata_document",
+}
+
+
+# ---------------------------------------------------------------------------
+# Allowlist — every entry carries the reason that listing is bounded IN REALITY.
+#
+# A blanket exemption would defeat the check, so entries are (file, line-owning
+# function, called attribute) triples and nothing wider. If the call moves to another
+# function, the exemption stops applying and the guard speaks up again.
+# ---------------------------------------------------------------------------
+_BOUNDED_BY_REALITY: Dict[Tuple[str, str, str], str] = {
+    (
+        "file.py",
+        "AppWriteFileModule.debug_collection_attributes",
+        "list_attributes",
+    ): "a debug helper that logs a collection's schema; attribute count is bounded by "
+    "the schema we author, and the result is printed rather than used for a decision",
+    (
+        "provisioning.py",
+        "AppwriteProvisioner.ensure_attributes",
+        "list_attributes",
+    ): "same schema bound — the attributes are the ones this function is creating, and "
+    "the list is a presence check against a fixed set defined in this repo",
+}
+# An entry for `AppWriteFileModule.list_buckets` was written here and then DELETED: that
+# method extends its `queries` list with `Query.limit(limit)` before the call, so it was
+# already correct and the guard sees it. Allowlisting correct code is the exact failure
+# mode C-256 records — a check that flags the innocent gets exempted into uselessness —
+# and it was committed here, in the allowlist written to prevent it. Caught only because
+# qualifying the keys by class forced every entry to be re-derived.
+
+# ---------------------------------------------------------------------------
+# `except Exception` is banned in these modules EXCEPT where the handler's whole job is
+# to convert an unpredictable substrate failure into a recorded fact. Those cases are
+# the opposite of swallowing, and they are named here individually.
+# ---------------------------------------------------------------------------
+_RECORDED_NOT_SWALLOWED: Dict[Tuple[str, str], str] = {
+    (
+        "walk.py",
+        "list_all_documents",  # module-level function, so no class prefix
+    ): "records the failure in `report.indeterminate` and returns what it has; the audit "
+    "must survive any substrate error in order to report that it could not complete",
+    (
+        "file.py",
+        "AppWriteFileModule.upload_file",
+    ): "returns OperationResult(success=False) carrying the error — converting an "
+    "unpredictable substrate failure into a value the caller must inspect is the shape "
+    "this guard is FOR, not one it should ban",
+    (
+        "file.py",
+        "AppWriteFileModule.upload_file_from_bytes_with_metadata",
+    ): "logs at error level that a rollback failed. The rollback is already the failure "
+    "path; there is no further action available, and the log is the record",
+    (
+        "file.py",
+        "AppWriteFileModule._setup_cache",
+    ): "local filesystem setup, not a substrate read. Falls back to a default cache "
+    "directory and warns; no data read is being turned into an absence",
+    (
+        "datastore.py",
+        "DatastoreModule.get_file_metadata",
+    ): "returns OperationResult(success=False, code='UNKNOWN_ERROR'); same recorded-not-"
+    "swallowed shape as upload_file",
+}
+
+# ---------------------------------------------------------------------------
+# NOT the same thing as the dictionary above, and deliberately kept apart.
+#
+# An entry here does NOT say "this is fine". It says "this is a real instance of the
+# defect, it is registered, and the guard is not being weakened to hide it". Allowlisting
+# a genuine defect alongside genuine exemptions is how a check quietly becomes a lie —
+# so the two live in separate dictionaries, and every entry here must name a register ID.
+# ---------------------------------------------------------------------------
+# The ceiling on the dictionary below, enforced by a test. See that test for why.
+_MAX_TRACKED_DEFECTS = 1
+
+_TRACKED_DEFECTS: Dict[Tuple[str, str], str] = {
+    (
+        "file.py",
+        "AppWriteFileModule.upload_file_with_metadata",
+    ): "C-257 — a failed `delete_document` of the OLD metadata card is swallowed with "
+    "logger.warning, leaving a document pointing at a file that was just replaced: a "
+    "dangling document, which is the exact defect the reconcile audit exists to "
+    "enumerate. The file-deletion branch twenty lines above returns a failure "
+    "explicitly saying 'its metadata would orphan it' — the same function is careful "
+    "about the file and careless about the card. Not fixed here because the correct "
+    "behaviour interacts with ADR-047's write-failure policy and belongs in its own "
+    "change, not in the story that adds the guard",
+}
+
+
+def _display(path: pathlib.Path) -> str:
+    """Repo-relative when possible; the self-tests analyse a tmp_path outside it."""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return path.name
+
+
+def _iter_governed_files():
+    for directory in GOVERNED_DIRS:
+        for path in sorted(directory.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            yield path, ast.parse(path.read_text())
+
+
+def _enclosing_functions(tree: ast.AST) -> List[ast.AST]:
+    return [
+        n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+
+
+def _qualified_names(tree: ast.AST) -> Dict[int, str]:
+    """Map each function node's id to `Class.method` (or bare `function`).
+
+    Qualification is not cosmetic. `file.py` holds thirteen classes, and an allowlist
+    keyed on the bare method name would exempt EVERY same-named method in the file — so
+    a justification written for one class would silently cover another class's genuinely
+    unbounded call. Found by probing the allowlist rather than by reading it.
+    """
+    names: Dict[int, str] = {}
+
+    def walk(node, prefix=""):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                walk(child, f"{prefix}{child.name}.")
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                names[id(child)] = f"{prefix}{child.name}"
+                walk(child, f"{prefix}{child.name}.")
+            else:
+                walk(child, prefix)
+
+    walk(tree)
+    return names
+
+
+def _owner(functions: List[ast.AST], lineno: int, qualified: Dict[int, str]) -> str:
+    """Innermost function containing this line, qualified by class, or '<module>'."""
+    best, best_span = "<module>", None
+    for fn in functions:
+        if fn.lineno <= lineno <= (fn.end_lineno or fn.lineno):
+            span = (fn.end_lineno or fn.lineno) - fn.lineno
+            if best_span is None or span < best_span:
+                best, best_span = qualified.get(id(fn), fn.name), span
+    return best
+
+
+def _names_bound_to_a_limit(fn: ast.AST) -> Set[str]:
+    """Variables that carry a `Query.limit(...)` by the time the call is made.
+
+    This is the check the falsification audit said #343 had to get right. A guard that
+    only looks for `Query.limit` among a call's own arguments flags **correct** code:
+    `list_files` builds a `query_list`, appends the limit to it, and passes the
+    variable. Flagging correct code is how a check gets allowlisted into uselessness.
+    """
+    bound: Set[str] = set()
+    for node in ast.walk(fn):
+        # x = [..., Query.limit(n), ...]  /  x = build(Query.limit(n))
+        if isinstance(node, ast.Assign) and "Query.limit" in ast.unparse(node.value):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound.add(target.id)
+        # x.append(Query.limit(n))  /  x.extend([Query.limit(n)])
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"append", "extend", "insert"}
+            and isinstance(node.func.value, ast.Name)
+            and "Query.limit" in ast.unparse(node)
+        ):
+            bound.add(node.func.value.id)
+        # x += [Query.limit(n)]
+        if (
+            isinstance(node, ast.AugAssign)
+            and isinstance(node.target, ast.Name)
+            and "Query.limit" in ast.unparse(node.value)
+        ):
+            bound.add(node.target.id)
+    return bound
+
+
+def _call_is_bounded(call: ast.Call, limited_names: Set[str]) -> bool:
+    """Three ways a bound can legitimately be expressed. All three count."""
+    source = ast.unparse(call)
+
+    # 1. Query.limit(...) written inline in the call.
+    if "Query.limit" in source:
+        return True
+
+    # 2. An explicit `limit=` keyword — how our OWN wrappers express it
+    #    (`file_manager.list_files(bucket_id=..., limit=PAGE_SIZE, offset=...)`).
+    #    Missing this was one of the false-positive shapes C-256 records.
+    #
+    #    `limit=None` and `limit=0` do NOT count. Both read as "a limit was supplied"
+    #    to a careless check while meaning "no limit" to the substrate — the guard's
+    #    own version of the defect it exists to catch. Found by adversarially probing
+    #    this function rather than by reading it.
+    for kw in call.keywords:
+        if kw.arg != "limit":
+            continue
+        if isinstance(kw.value, ast.Constant) and not kw.value.value:
+            return False
+        return True
+
+    # 3. A variable that had a limit appended to it earlier in the same function.
+    for arg in list(call.args) + [kw.value for kw in call.keywords]:
+        if isinstance(arg, ast.Name) and arg.id in limited_names:
+            return True
+    return False
+
+
+def _unbounded_list_calls() -> List[str]:
+    findings = []
+    for path, tree in _iter_governed_files():
+        functions = _enclosing_functions(tree)
+        qualified = _qualified_names(tree)
+        limits_per_function = {id(fn): _names_bound_to_a_limit(fn) for fn in functions}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                continue
+            if not node.func.attr.startswith(_LIST_PREFIXES):
+                continue
+            owner = _owner(functions, node.lineno, qualified)
+            if (path.name, owner, node.func.attr) in _BOUNDED_BY_REALITY:
+                continue
+            enclosing = [
+                fn for fn in functions if fn.lineno <= node.lineno <= (fn.end_lineno or 0)
+            ]
+            limited: Set[str] = set()
+            for fn in enclosing:
+                limited |= limits_per_function[id(fn)]
+            if not _call_is_bounded(node, limited):
+                findings.append(
+                    f"{_display(path)}:{node.lineno} {owner}() -> {node.func.attr}"
+                )
+    return sorted(findings)
+
+
+def _bare_exception_handlers() -> List[str]:
+    findings = []
+    for path, tree in _iter_governed_files():
+        functions = _enclosing_functions(tree)
+        qualified = _qualified_names(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            if node.type is None or ast.unparse(node.type) != "Exception":
+                continue
+            owner = _owner(functions, node.lineno, qualified)
+            if (path.name, owner) in _RECORDED_NOT_SWALLOWED:
+                continue
+            if (path.name, owner) in _TRACKED_DEFECTS:
+                continue
+            findings.append(f"{_display(path)}:{node.lineno} {owner}()")
+    return sorted(findings)
+
+
+def _discarded_results() -> List[str]:
+    findings = []
+    for path, tree in _iter_governed_files():
+        functions = _enclosing_functions(tree)
+        qualified = _qualified_names(tree)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)):
+                continue
+            func = node.value.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name in _RESULT_RETURNING:
+                owner = _owner(functions, node.lineno, qualified)
+                findings.append(f"{_display(path)}:{node.lineno} {owner}() -> {name}")
+    return sorted(findings)
+
+
+# ---------------------------------------------------------------------------
+# The three checks
+# ---------------------------------------------------------------------------
+
+
+def test_no_unbounded_listing():
+    """Shape two: a partial read reported as completeness.
+
+    Appwrite returns 25 rows when no limit is supplied. A caller that treats the page as
+    the answer is not slightly wrong — it is confidently wrong, with no error signal.
+    That is C-241 (a stale forecast shipped to an external counterparty) and the
+    436-phantom-orphan incident, from one missing argument.
+    """
+    unbounded = _unbounded_list_calls()
+    assert not unbounded, (
+        f"{len(unbounded)} listing call(s) with no bound. Either supply a limit and "
+        f"page, or add a `_BOUNDED_BY_REALITY` entry saying why this listing cannot "
+        f"exceed one page:\n  " + "\n  ".join(unbounded)
+    )
+
+
+def test_no_bare_exception_handler_in_the_storage_modules():
+    """Shape one: a failed read reported as absence.
+
+    `except Exception` around a read is where "could not look" becomes "nothing there".
+    Handlers whose job is to RECORD the failure are legitimate and are named in
+    `_RECORDED_NOT_SWALLOWED` individually.
+    """
+    handlers = _bare_exception_handlers()
+    assert not handlers, (
+        f"{len(handlers)} bare `except Exception` handler(s) in the storage modules. "
+        f"Catch the specific error, or record the failure and name the handler in "
+        f"`_RECORDED_NOT_SWALLOWED`:\n  " + "\n  ".join(handlers)
+    )
+
+
+def test_every_tracked_defect_names_a_register_entry():
+    """The escape hatch cannot become a dumping ground.
+
+    `_TRACKED_DEFECTS` suppresses the guard for code that IS defective. That is only
+    honest while each entry is traceable to a tracked concern, so the format is
+    enforced rather than trusted.
+    """
+    for location, justification in _TRACKED_DEFECTS.items():
+        assert justification.startswith("C-"), (
+            f"{location} is exempted without naming a register entry: {justification[:60]}"
+        )
+
+    # A ceiling, written down. Checking only the FORMAT of each entry leaves the
+    # dictionary free to grow, and a mechanism that reports green while the thing it
+    # measures gets worse is the failure this guard exists to prevent — one level up.
+    # Raising this number is still allowed; it just has to be a deliberate edit that
+    # appears in a diff and gets argued for, rather than a free line.
+    assert len(_TRACKED_DEFECTS) <= _MAX_TRACKED_DEFECTS, (
+        f"{len(_TRACKED_DEFECTS)} tracked defects, ceiling is {_MAX_TRACKED_DEFECTS}. "
+        f"Fix one before suppressing another, or raise the ceiling deliberately and say "
+        f"why in the PR."
+    )
+
+
+def test_no_discarded_operation_result():
+    """Shape three: a discarded result reported as success.
+
+    Green today — the two sites that produced C-227 were fixed in #334, and this lands
+    as a pure ratchet so the third one cannot be written.
+    """
+    discarded = _discarded_results()
+    assert not discarded, (
+        f"{len(discarded)} call(s) whose OperationResult is discarded. The success flag "
+        f"is the only failure signal these functions have:\n  " + "\n  ".join(discarded)
+    )
+
+
+# ---------------------------------------------------------------------------
+# The guard's own tests. A check nobody has seen fail is a check nobody should
+# trust — #343 asks for a deliberately reintroduced instance of each shape.
+# ---------------------------------------------------------------------------
+
+
+def _analyse(source: str, tmp_path, monkeypatch, finder):
+    module = tmp_path / "file.py"
+    module.write_text(source)
+    monkeypatch.setattr(
+        "tests.test_read_completeness.GOVERNED_DIRS", [tmp_path], raising=False
+    )
+    import tests.test_read_completeness as guard
+
+    monkeypatch.setattr(guard, "GOVERNED_DIRS", [tmp_path])
+    return finder()
+
+
+class TestTheGuardCanActuallyFail:
+    def test_an_unbounded_listing_is_caught(self, tmp_path, monkeypatch):
+        found = _analyse(
+            "def fetch(self):\n    return self.databases.list_documents(a, b)\n",
+            tmp_path, monkeypatch, _unbounded_list_calls,
+        )
+        assert found and "fetch()" in found[0]
+
+    def test_an_inline_limit_is_accepted(self, tmp_path, monkeypatch):
+        found = _analyse(
+            "def fetch(self):\n"
+            "    return self.databases.list_documents(a, b, queries=[Query.limit(100)])\n",
+            tmp_path, monkeypatch, _unbounded_list_calls,
+        )
+        assert not found
+
+    def test_a_limit_appended_to_a_variable_is_accepted(self, tmp_path, monkeypatch):
+        """The false positive C-256 records: correct code that binds the limit first."""
+        found = _analyse(
+            "def fetch(self, limit):\n"
+            "    query_list = []\n"
+            "    query_list.append(Query.limit(limit))\n"
+            "    return self.storage.list_files(bucket_id, query_list)\n",
+            tmp_path, monkeypatch, _unbounded_list_calls,
+        )
+        assert not found, f"the guard flagged correct code: {found}"
+
+    def test_a_limit_keyword_is_accepted(self, tmp_path, monkeypatch):
+        found = _analyse(
+            "def fetch(self):\n"
+            "    return manager.list_files(bucket_id=b, limit=100, offset=0)\n",
+            tmp_path, monkeypatch, _unbounded_list_calls,
+        )
+        assert not found
+
+    def test_a_bare_exception_handler_is_caught(self, tmp_path, monkeypatch):
+        found = _analyse(
+            "def fetch(self):\n"
+            "    try:\n        return read()\n"
+            "    except Exception:\n        return None\n",
+            tmp_path, monkeypatch, _bare_exception_handlers,
+        )
+        assert found and "fetch()" in found[0]
+
+    def test_a_specific_exception_handler_is_accepted(self, tmp_path, monkeypatch):
+        found = _analyse(
+            "def fetch(self):\n"
+            "    try:\n        return read()\n"
+            "    except AppwriteException:\n        raise\n",
+            tmp_path, monkeypatch, _bare_exception_handlers,
+        )
+        assert not found
+
+    def test_a_discarded_result_is_caught(self, tmp_path, monkeypatch):
+        found = _analyse(
+            "def save(self):\n    self.upload_file_with_metadata(path, meta)\n",
+            tmp_path, monkeypatch, _discarded_results,
+        )
+        assert found and "save()" in found[0]
+
+    def test_a_consumed_result_is_accepted(self, tmp_path, monkeypatch):
+        found = _analyse(
+            "def save(self):\n"
+            "    result = self.upload_file_with_metadata(path, meta)\n"
+            "    if not result.success:\n        raise RuntimeError(result.error)\n",
+            tmp_path, monkeypatch, _discarded_results,
+        )
+        assert not found

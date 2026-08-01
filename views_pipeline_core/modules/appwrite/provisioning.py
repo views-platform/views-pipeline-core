@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from appwrite.exception import AppwriteException
 from appwrite.permission import Permission
+from appwrite.query import Query
 from appwrite.role import Role
 
 from views_pipeline_core.modules.appwrite.file import (
@@ -53,6 +54,33 @@ from views_pipeline_core.modules.appwrite.file import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Page size for the provisioning lookups below, stated rather than inherited from the
+# server's 25-row default (C-241 is what inheriting it cost).
+_PROVISION_PAGE = 100
+
+
+def _complete_listing(response: Dict[str, Any], key: str) -> Tuple[List[Any], Optional[str]]:
+    """Return ``(items, truncation_reason)`` for a listing that drives a CREATE.
+
+    Every listing in this module answers "does it already exist?", and the answer NO
+    means "create it". So a short read does not produce a smaller answer — it produces a
+    duplicate, or a spurious "already exists" error from the server. The truncation is
+    returned rather than raised so each caller can fold it into the ``OperationResult``
+    it already returns — deliberately a different shape from the rest of this module,
+    which reports failure as an ``OperationResult`` directly. A private helper cannot
+    know which code or message its caller wants, and raising would force every caller
+    into a try/except for a condition that is not exceptional. Cluster J.
+    """
+    items = response.get(key, [])
+    total = response.get("total")
+    if total is not None and total > len(items):
+        return items, (
+            f"listing of {key} is incomplete: the server reports {total} but only "
+            f"{len(items)} were read, so an existing entry could be missed and "
+            f"re-created"
+        )
+    return items, None
 
 # The attributes every metadata document carries regardless of payload. Unlike the
 # payload-inferred ones below, these are declared — ADR-040's preferred direction.
@@ -122,9 +150,14 @@ class AppwriteProvisioner:
             )
 
         try:
-            existing_databases = self.databases.list()
+            listing = self.databases.list(queries=[Query.limit(_PROVISION_PAGE)])
+            databases, truncated = _complete_listing(listing, "databases")
+            if truncated:
+                return OperationResult(
+                    success=False, error=truncated, code="LISTING_INCOMPLETE"
+                )
 
-            for db in existing_databases.get("databases", []):
+            for db in databases:
                 if db["name"] == db_name or db["$id"] == db_id:
                     logger.info(f"Database '{db_name}' already exists")
                     return OperationResult(success=True, data=db, code="EXISTS")
@@ -138,13 +171,26 @@ class AppwriteProvisioner:
             except AppwriteException as create_error:
                 # Hitting the database limit while the database already exists is benign.
                 if "maximum number of databases" in create_error.message.lower():
-                    existing_databases = self.databases.list()
-                    for db in existing_databases.get("databases", []):
+                    listing = self.databases.list(
+                        queries=[Query.limit(_PROVISION_PAGE)]
+                    )
+                    databases, truncated = _complete_listing(listing, "databases")
+                    for db in databases:
                         if db["$id"] == db_id:
                             logger.warning(
                                 f"Database limit reached, but database '{db_id}' exists"
                             )
                             return OperationResult(success=True, data=db, code="EXISTS")
+                    if truncated:
+                        # Not found — but the listing was short, so "not found" here is
+                        # "not seen". Re-raising the create error alone would report
+                        # "maximum number of databases" when the truthful answer is
+                        # "could not confirm whether it already exists".
+                        logger.error(
+                            f"Database {db_id!r} was not found while recovering from a "
+                            f"create failure, but the listing was incomplete: "
+                            f"{truncated}"
+                        )
                 raise create_error
 
         except AppwriteException as e:
@@ -184,9 +230,16 @@ class AppwriteProvisioner:
             return db_result
 
         try:
-            existing_collections = self.databases.list_collections(db_id)
+            listing = self.databases.list_collections(
+                db_id, queries=[Query.limit(_PROVISION_PAGE)]
+            )
+            collections, truncated = _complete_listing(listing, "collections")
+            if truncated:
+                return OperationResult(
+                    success=False, error=truncated, code="LISTING_INCOMPLETE"
+                )
 
-            for collection in existing_collections.get("collections", []):
+            for collection in collections:
                 if collection["$id"] == coll_id or collection["name"] == coll_name:
                     if metadata:
                         attr_result = self.ensure_attributes(
