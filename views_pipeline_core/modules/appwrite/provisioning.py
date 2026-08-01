@@ -51,6 +51,7 @@ from views_pipeline_core.modules.appwrite.file import (
     INITIAL_RETRY_DELAY,
     MAX_ATTRIBUTE_CREATION_RETRIES,
     OperationResult,
+    exception_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -170,7 +171,7 @@ class AppwriteProvisioner:
                 return OperationResult(success=True, data=result)
             except AppwriteException as create_error:
                 # Hitting the database limit while the database already exists is benign.
-                if "maximum number of databases" in create_error.message.lower():
+                if "maximum number of databases" in exception_message(create_error).lower():
                     listing = self.databases.list(
                         queries=[Query.limit(_PROVISION_PAGE)]
                     )
@@ -319,7 +320,7 @@ class AppwriteProvisioner:
             except AppwriteException as e:
                 # NOTE: matches the human-readable message rather than e.type — same
                 # defect class as C-179, preserved by the relocation (register C-235).
-                if "collection_not_found" in e.message and attempt < max_retries:
+                if "collection_not_found" in exception_message(e) and attempt < max_retries:
                     logger.warning(
                         f"Collection not ready (attempt {attempt}/{max_retries}), "
                         f"retrying in {delay}s"
@@ -347,7 +348,7 @@ class AppwriteProvisioner:
             try:
                 self._create_fixed_attribute(database_id, collection_id, attr)
             except AppwriteException as e:
-                if "already exists" not in e.message.lower():
+                if "already exists" not in exception_message(e).lower():
                     logger.error(
                         f"Failed to create fixed attribute {attr['key']}: {e.message}"
                     )
@@ -428,7 +429,7 @@ class AppwriteProvisioner:
             logger.debug(f"Created {attr_type} attribute '{key}' (array: {is_array})")
             return result
         except AppwriteException as e:
-            if "already exists" in e.message.lower():
+            if "already exists" in exception_message(e).lower():
                 logger.debug(f"Attribute '{key}' already exists")
                 return None
             raise e

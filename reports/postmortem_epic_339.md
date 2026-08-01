@@ -252,6 +252,23 @@ correct.
 
 ---
 
+## 5.7 The drill-first rule paid for itself, exactly as þing-01 predicted
+
+#347 made *drill the hang path before shipping a value* a non-optional sequencing
+constraint, on the reasoning that introducing a timeout is itself a behaviour change:
+it converts an indefinite hang into a **raised** timeout on paths that have no handler
+for one.
+
+That is precisely what happened. The drill showed all three Appwrite paths *STILL BLOCKED
+after 3s*. Bounding them then made a transport exception reachable for the first time —
+and six handlers compared against `AppwriteException.message` as though it were always a
+string, when for a transport failure it is the exception **object**. `TypeError: argument
+of type 'ConnectTimeout' is not iterable`.
+
+**Without the drill, S7 ships a crash in place of a hang.** The constraint came from
+another repo's seat, in a þing, months earlier. Worth remembering when a sequencing rule
+looks like ceremony.
+
 ## 6. What worked and should be kept
 
 1. **`/code-review max` → `/review-diff` → fix → `/review-diff` again.** Adopted mid-epic at
