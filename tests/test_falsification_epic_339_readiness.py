@@ -93,10 +93,12 @@ def test_f1c_bare_package_import_stays_clean():
 #
 # (a) COUNT. #343 says "~12 sites, of which ~5-6 are genuine" and sequences the
 #     story "after #341, which removes the main genuine unbounded call". Measured:
-#     **16** unbounded `list_*` call sites. S1 fixes exactly ONE of them
-#     (`file.py:1052`, search_files_by_metadata). Fifteen remain, including three
-#     further `list_documents` calls in file.py (:1111, :1135, :1214) and the
-#     full-bucket fallback walk in `_file_exists_by_hash` (:1523, :1543).
+#     **8** unbounded sites in THIS helper's set (list_documents/list_files/
+#     list_buckets), and **14** across any `list*` call. S1 fixes exactly ONE
+#     (`search_files_by_metadata`), leaving 7 and 13 respectively. The "16" this
+#     comment first carried was in neither sweep — see C-256. The gap between the
+#     two sets is six calls the narrow set omits (list_collections, list_attributes,
+#     and four in provisioning.py), so #343 must say which set its guard governs.
 #
 # (b) FALSE POSITIVES. A check that looks for `Query.limit` among a call's
 #     arguments flags CORRECT code: `list_files` (file.py:2460) builds `query_list`,
@@ -135,13 +137,14 @@ def _unbounded_list_sites() -> list[str]:
     return sorted(hits)
 
 
-@pytest.mark.xfail(strict=True, reason="F2 (open): 16 unbounded list_* sites remain; C-256 — resolved across #341 and #343")
+@pytest.mark.xfail(strict=True, reason="F2 (open): 7 unbounded list_* sites remain in this helper's set (13 across any list* call); C-256 — resolved across #341 and #343")
 def test_f2a_guard_worklist_is_larger_than_the_story_claims():
     """FAILS TODAY. #343 estimates ~12 sites; measure it before committing to S3's size."""
     sites = _unbounded_list_sites()
     assert len(sites) <= 1, (
-        f"{len(sites)} unbounded list_* sites remain, not the ~12 estimated and not "
-        f"the ~1 the sequencing implies after #341:\n  " + "\n  ".join(sites)
+        f"{len(sites)} unbounded list_* sites remain in this helper's set, not the ~1 "
+        f"the sequencing implies after #341 (and this set omits list_collections/"
+        f"list_attributes entirely — see C-256):\n  " + "\n  ".join(sites)
     )
 
 

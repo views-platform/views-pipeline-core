@@ -361,15 +361,22 @@ class TestMetadataManager:
         return AppwriteMetadataHandler(mock_databases, api_key_config)
 
     def test_search_files_by_metadata(self, metadata_manager, mock_databases):
-        mock_databases.list_documents.return_value = {
-            "documents": [{"fileId": "file123", "filename": "test.txt"}],
-            "total": 1,
-        }
-        
+        # `return_value` cannot express paging: it hands back the same page for every
+        # offset, which is a substrate that ignores `offset` — and the walk added in
+        # #341 correctly refuses to certify such a read. A side_effect that empties out
+        # is the minimum faithful double. Real paging behaviour is covered in
+        # tests/test_modules/test_appwrite_pagination.py against a substrate double
+        # built from the SDK's own query encoding.
+        pages = [
+            {"documents": [{"fileId": "file123", "filename": "test.txt"}], "total": 1},
+            {"documents": [], "total": 1},
+        ]
+        mock_databases.list_documents.side_effect = pages
+
         result = metadata_manager.search_files_by_metadata(
             filters={"filename": "test.txt"}
         )
-        
+
         assert result.success
         assert result.data["total"] == 1
         assert len(result.data["documents"]) == 1

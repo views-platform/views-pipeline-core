@@ -8,6 +8,7 @@ from views_pipeline_core.modules.datastore import (
     FileMetadata,
     DatastoreModule,
 )
+from views_pipeline_core.modules.datastore.datastore import MetadataSearchIncomplete
 from views_pipeline_core.modules.appwrite.file import (
     AppwriteConfig,
     OperationResult,
@@ -406,3 +407,61 @@ class TestPredictionStoreManager:
 
         assert "provisioning ensure-bucket" in caplog.text
         assert "APPWRITE_PROD_FORECASTS_BUCKET_ID" in caplog.text
+
+
+class TestSearchFailureIsNotAbsence:
+    """C-241, consumer half — Cluster J at the FAO delivery's first lookup.
+
+    `search_files_by_metadata` can now return `SEARCH_INCOMPLETE`, because #341 made it
+    refuse to certify a walk it could not complete. The chain below used to convert that
+    into an empty list and then into `None`, so the delivery path would read "there is no
+    such forecast" when the truth was "I could not tell". Swapping a false-stale answer
+    for a false-absent one is not a fix.
+    """
+
+    def test_a_failed_search_raises_rather_than_reporting_no_predictions(
+        self, prediction_store, mock_appwrite_manager
+    ):
+        mock_appwrite_manager.metadata_manager.search_files_by_metadata.return_value = (
+            OperationResult(
+                success=False,
+                error="Search incomplete: enumerated 25 of a reported 461 documents",
+                code="SEARCH_INCOMPLETE",
+            )
+        )
+
+        with pytest.raises(MetadataSearchIncomplete) as excinfo:
+            prediction_store.get_predictions_by_metadata(filters={"loa": "pgm"})
+
+        assert "SEARCH_INCOMPLETE" in str(excinfo.value)
+
+    def test_get_latest_file_id_does_not_answer_none_over_a_failed_search(
+        self, prediction_store, mock_appwrite_manager
+    ):
+        """`None` means "no such file". It must never mean "the lookup broke"."""
+        mock_appwrite_manager.metadata_manager.search_files_by_metadata.return_value = (
+            OperationResult(success=False, error="boom", code="SEARCH_INCOMPLETE")
+        )
+
+        with pytest.raises(MetadataSearchIncomplete):
+            prediction_store.get_latest_file_id(filters={"loa": "pgm"})
+
+    def test_a_genuinely_empty_match_still_returns_none(
+        self, prediction_store, mock_appwrite_manager
+    ):
+        """The other side of the distinction: a real 'no' must stay cheap and quiet."""
+        mock_appwrite_manager.metadata_manager.search_files_by_metadata.return_value = (
+            OperationResult(success=True, data={"documents": [], "total": 0})
+        )
+
+        assert prediction_store.get_latest_file_id(filters={"loa": "pgm"}) is None
+
+    def test_list_all_predictions_unfiltered_also_refuses_to_swallow(
+        self, prediction_store, mock_appwrite_manager
+    ):
+        mock_appwrite_manager.metadata_manager.search_files_by_metadata.return_value = (
+            OperationResult(success=False, error="boom", code="SEARCH_INCOMPLETE")
+        )
+
+        with pytest.raises(MetadataSearchIncomplete):
+            prediction_store.list_all_predictions_unfiltered()
