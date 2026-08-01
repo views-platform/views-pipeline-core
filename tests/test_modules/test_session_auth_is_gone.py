@@ -157,3 +157,24 @@ def test_email_password_credentials_have_no_supported_auth_mode():
     assert [m.value for m in AuthMethod] == ["api_key"]
     with pytest.raises((ValueError, KeyError, AttributeError)):
         AuthFactory.create_auth("session")
+
+
+def test_the_package_readme_does_not_document_the_deleted_api():
+    """Y2, found by the S0–S4 sweep: S4 deleted the code but not its documentation.
+
+    `modules/appwrite/README.md` still showed `auth_method=AuthMethod.SESSION` and
+    `file_manager.get_current_user()` as working examples. The dead *import* was caught
+    by review; nothing looked at the README, and no check covered it. Docs that instruct
+    a reader to call a symbol that raises are worse than no docs — they cost the reader
+    the time to discover it themselves.
+    """
+    readme = (REPO / "views_pipeline_core" / "modules" / "appwrite" / "README.md").read_text()
+
+    # The removal notice names them, so look only at code fences.
+    code = "\n".join(
+        block for i, block in enumerate(readme.split("```")) if i % 2 == 1
+    )
+    for symbol in ("AuthMethod.SESSION", "get_current_user", "SessionAuth"):
+        assert symbol not in code, (
+            f"{symbol} appears in a README code example but no longer exists"
+        )

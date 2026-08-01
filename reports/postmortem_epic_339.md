@@ -1,8 +1,8 @@
 # Post-mortem — epic #339, the Appwrite eviction (DRAFT, in progress)
 
 **Status:** DRAFT. Written while S0–S3 are fresh; to be completed when S4–S11 land.
-**Started:** 2026-08-01 · **Covers:** S0 (#353) · S1 (#354) · chore (#355) · S2 (#356) · S3 (#357)
-**Not yet covered:** S4–S11.
+**Started:** 2026-08-01 · **Covers:** S0 (#353) · S1 (#354) · chore (#355) · S2 (#356) · S3 (#357) · sweep (#358) · S4 (#359) · sweep 2 (#360)
+**Not yet covered:** S5–S11.
 
 > Notes are being taken *during* the work rather than after it, deliberately. The most
 > useful material in this document is the stuff that would be embarrassing to reconstruct
@@ -62,6 +62,23 @@ by itself, and that *the review scope determines which scale of recurrence you c
 existing site the rule governs — mechanically, not by memory — and record the count. C-258
 existed because that step was skipped in S1 and nobody noticed for three stories.
 
+### The pattern has a fourth face, and it is the sharpest one
+
+The second sweep applied the same method to shapes the first had not enumerated, and found
+**C-259: the guard's own check 3 watched 2 of 31 functions, and 3 of the 5 names it did
+carry named nothing at all.** It reported green, and a derived set confirms it *was* green —
+by accident. A new discarded result in any of the other 29 functions would have gone unseen.
+
+So the recurring failure is not really about paging. It is:
+
+> **A fact recorded once, correct when written, and never re-derived.**
+
+Its instances so far: C-256's stale worklist (line numbers shifted by the change that
+resolved it), C-249's stale citations, C-258's unenumerated walks, and now C-259 — *inside
+the mechanism built to stop the class*. The countermeasure is the same every time: **derive,
+do not list.** The guard now re-derives its own name set on every run, so a new
+`OperationResult`-returning function is governed the moment it is written.
+
 ---
 
 ## 4. What the mechanisms actually caught (evidence, not opinion)
@@ -80,8 +97,11 @@ me while writing the code. That is the case for keeping the ritual expensive.
 | A stale exemption allowlisting **correct** code | fallout of fixing the above | No |
 | `_TRACKED_DEFECTS` had no ceiling — escape hatch could grow forever | second `/review-diff` on S3 | No |
 | `_file_exists_by_hash`'s unbounded dedup walk (**Tier 1**) | S0–S3 sweep | No |
+| Guard check 3 watched 2 of 31 functions; 3 of its 5 names did not exist | S0–S4 sweep | No |
+| S4 deleted the code but its README still documented `AuthMethod.SESSION` and `get_current_user()` | S0–S4 sweep | No |
+| A test permanently skipped for a bug that was fixed — coverage silently withheld | S0–S4 sweep | No |
 
-Nine defects, zero catchable by CI. Several were in code written *to prevent that exact
+Twelve defects, zero catchable by CI. Several were in code written *to prevent that exact
 class of defect*.
 
 ### The single most effective technique
@@ -143,7 +163,15 @@ consumer chain, not while writing the fix.
 **Generalised:** after fixing a read, follow the value to its consumer and ask what the new
 failure mode *becomes* there.
 
-### 5.4 Test-double errors that produced false alarms
+### 5.4 Deletion residue is wider than the code
+
+S4's review caught a dead `Account` import. The second sweep found what nobody had looked
+for: `modules/appwrite/README.md` still showed `auth_method=AuthMethod.SESSION` and
+`get_current_user()` as working examples — **user-facing documentation, inside the package,
+instructing readers to call symbols that now raise.** A `grep` for the deleted symbol across
+*code* is habit; across `.md`, ADRs, CICs and docstrings is not. It should be.
+
+### 5.5 Test-double errors that produced false alarms
 
 Twice, a probe reported a defect that did not exist:
 - A mutation script reported "test is blind!" — it had introduced a syntax error, not a revert.
@@ -186,7 +214,14 @@ correct.
    limit is *supplied*, not whether the walk *terminates* — and C-258 sailed through it
    green. That limitation is now in the docstring, but it was discovered rather than
    declared.
-4. **Distrust the probe first.** See §5.4.
+4. **Distrust the probe first.** See §5.5.
+5. **Derive, do not list.** Any set a guard consults — function names, file paths, site
+   inventories — must be computed from the code on every run. Three of this epic's findings
+   are the same snapshot-rot failure, one of them inside a guard. See §3.
+6. **Grep deleted symbols across `.md` too**, not just `.py`. See §5.4.
+7. **A `@pytest.mark.skip` for a code defect must name a register entry.** C-260's bug
+   existed nowhere but in its own skip reason, and the skip outlived the fix — a coverage
+   hole that reports as healthy.
 
 ---
 
@@ -194,7 +229,7 @@ correct.
 
 | Item | Where |
 |---|---|
-| **C-257** — swallowed delete of the old metadata card leaves a dangling document | needs an ADR-047 write-failure policy call |
+| **C-257** — swallowed delete of the old metadata card leaves a dangling document | needs an ADR-047 write-failure policy call; **still the only entry in `_TRACKED_DEFECTS`, and the ceiling is 1** |
 | **Four page-size constants with one value** (`DEFAULT_PAGE_LIMIT`, `_CONTAINER_PAGE`, `_PROVISION_PAGE`, `PAGE_SIZE`) plus `MAX_METADATA_PAGES`/`MAX_PAGES` duplicated | WET's named trigger has now fired *four* times; extract in S11 close-out |
 | **T1 has effectively fired** — the views-crafdapi cut is the second consumer-API clone | operator scheduling decision; views-appwrite#23 |
 | **S5 (#345) is time-boxed** — `appwrite` → optional extra is free only while 3.0.0 is unpublished and five repos are pinned | sequence before the crafdapi cut |

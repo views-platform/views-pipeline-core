@@ -623,7 +623,12 @@ class TestTrainEnsemble:
 class TestEvaluateEnsemble:
     """Tests for _evaluate_ensemble method."""
     
-    @pytest.mark.skip(reason="Source code bug: 'for i in range(len(n_outputs))' where n_outputs is already an int")
+    # Un-skipped by the S0-S4 sweep. The skip read "Source code bug:
+    # 'for i in range(len(n_outputs))' where n_outputs is already an int" — that bug is
+    # FIXED (ensemble.py:349 and dataframe_ensemble.py:547 now compute n_outputs with
+    # len() and iterate range(n_outputs)), so the test had been silently withholding
+    # coverage of _evaluate_ensemble ever since. The bug was recorded nowhere but in
+    # this reason string: zero mentions in the risk register.
     def test_evaluate_ensemble_calls_evaluate_model_artifact(self, manager, sample_dataframes_list):
         """Test evaluation calls _evaluate_model_artifact for each model."""
         configs = {
