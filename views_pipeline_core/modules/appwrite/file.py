@@ -292,18 +292,29 @@ class FileMetadata:
     file_size: Optional[int] = None
     file_hash: Optional[str] = None
 
-@dataclass
+@dataclass(frozen=True)
 class AppwriteConfig:
     """Configuration for Appwrite file manager connections.
 
     Centralized configuration for all Appwrite connection settings, authentication,
     caching behavior, and storage/metadata identifiers.
 
+    **FROZEN (C-240, #346)** — attributes cannot be REBOUND. Validating coordinates in
+    `__post_init__` is worthless if a caller can reassign one afterwards:
+    `config.bucket_id = "production_forecasts"` a line later is exactly the move C-229
+    was about. Its sibling `PredictionStoreConfig` was already `frozen=True`; two configs
+    for one seam now carry one guarantee.
+
+    It does NOT deep-freeze the objects behind the attributes — `path_manager` is a live
+    collaborator and remains mutable through the wrapper. Deliberate: the guarantee this
+    type needs is that a validated coordinate cannot be swapped, and every coordinate is
+    a string.
+
     Attributes:
         endpoint: Appwrite server endpoint URL (e.g., 'https://cloud.appwrite.io/v1').
         project_id: Appwrite project identifier.
-        credentials: Authentication credentials. String for API_KEY, dict with
-            'email' and 'password' keys for SESSION auth.
+        credentials: Authentication API key (a string). The dict form documented here
+            belonged to SESSION auth, deleted in #344 — API_KEY is the only method.
         auth_method: Authentication method to use. Defaults to API_KEY.
         cache_dir: Local directory for file caching. Auto-generated if not provided.
         cache_ttl_hours: Hours before cached files expire. Defaults to 24.
@@ -370,8 +381,12 @@ class AppwriteConfig:
     path_manager: ModelPathManager = None
 
     def __post_init__(self):
+        # `object.__setattr__` because the dataclass is frozen (C-240). Coercion is the
+        # ONE mutation this type permits, it happens before the instance is handed to
+        # anyone, and `reconcile/targets.py` passes `auth_method="api_key"` as a string
+        # so the coercion has a live caller.
         if isinstance(self.auth_method, str):
-            self.auth_method = AuthMethod(self.auth_method)
+            object.__setattr__(self, "auth_method", AuthMethod(self.auth_method))
 
         # Every coordinate must arrive explicitly. Until 2026-07-31 these defaulted to
         # the live production values ("production_forecasts", "file_metadata", …), so a

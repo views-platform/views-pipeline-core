@@ -272,7 +272,14 @@ correct.
 8. **Trace a packaging change to every INSTALL site, not just every import site.** See
    §5.5. Nine passing probes did not see that CI would break — and the same change broke a
    *downstream* repo (C-262), found only by checking each consumer on disk.
-9. **Audit a guard's territory, not only its logic.** Both guard defects here were scope
+9. **Audit a guard's SCOPE, not only its logic — this has now happened three times.**
+   C-259 (which functions it watched), C-261 (which directories), and S6's dotenv check
+   (which *spelling* — it banned `find_dotenv` while `load_dotenv()` with no arguments does
+   the same thing). Every one was a guard written against the instance in front of the
+   author rather than the class the rule names. Ask: *where could this defect occur?* then
+   *where does the check look?* They were different sets all three times.
+
+   Superseded phrasing kept for the record: **audit a guard's territory, not only its logic.** Both guard defects here were scope
    errors — which functions (C-259), which directories (C-261). Ask "where could this defect
    occur?" and compare against "where does the check look?" — they were not the same set
    either time.

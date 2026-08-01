@@ -52,9 +52,15 @@ from views_pipeline_core.modules.appwrite import AppwriteConfig, AppWriteFileMod
 import logging
 import pandas as pd
 
-import dotenv
-
-dotenv.load_dotenv(dotenv.find_dotenv())
+# NO dotenv HERE. This module used to call `dotenv.load_dotenv(dotenv.find_dotenv())` at
+# module scope, so importing anything that transitively reached it walked the filesystem
+# upward from the working directory and mutated `os.environ` as an import side effect —
+# PLATFORM-001 §3 clause 3: "a library reading whatever `.env` the working directory
+# holds is the disease this contract exists to cure" (register C-177, #323).
+#
+# A service ENTRY POINT reading its own process environment is legitimate and unchanged;
+# a library doing it on behalf of every importer is not. Callers that need a `.env`
+# loaded should load it themselves, naming the file, before constructing anything here.
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
