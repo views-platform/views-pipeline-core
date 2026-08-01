@@ -62,7 +62,12 @@ class PredictionStoreConfig:
         if missing:
             raise ConfigurationException(
                 f"Missing required environment variables for prediction store: "
-                f"{missing}. Set these before running with --prediction_store.",
+                f"{missing}. Set these before running with --prediction_store. "
+                f"NOTE: pipeline-core no longer auto-loads a .env from the working "
+                f"directory (#346, register C-177) — a library reading whatever .env "
+                f"its caller is standing in is the behaviour PLATFORM-001 §3 forbids. "
+                f"If you relied on that, export the variables or load your .env "
+                f"explicitly in your entry point before constructing the store.",
             )
         return cls(**values)
 
