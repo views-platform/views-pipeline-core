@@ -1,0 +1,87 @@
+{
+  "_README": "SHAPE ONLY \u2014 captured from a live Appwrite instance by tests/fixtures/appwrite/capture_list_documents.py. No field VALUES are recorded; every value is replaced by a type descriptor. Coordinates are fingerprinted, not published (PLATFORM-001 \u00a74).",
+  "explicit_limit": {
+    "documents_returned": 5,
+    "limit_requested": 5,
+    "total_reported": 461
+  },
+  "no_limit_supplied": {
+    "document_shape": {
+      "$collectionId": [
+        "str:short"
+      ],
+      "$createdAt": [
+        "str:short:iso8601"
+      ],
+      "$databaseId": [
+        "str:short"
+      ],
+      "$id": [
+        "str:short"
+      ],
+      "$permissions": [
+        "list[empty]"
+      ],
+      "$sequence": [
+        "int"
+      ],
+      "$updatedAt": [
+        "str:short:iso8601"
+      ],
+      "bucketId": [
+        "str:short"
+      ],
+      "category": [
+        "str:short"
+      ],
+      "description": [
+        "null",
+        "str:short"
+      ],
+      "fileId": [
+        "str:short"
+      ],
+      "file_hash": [
+        "str:long"
+      ],
+      "file_size": [
+        "null"
+      ],
+      "filename": [
+        "str:long",
+        "str:short"
+      ],
+      "loa": [
+        "str:short"
+      ],
+      "mime_type": [
+        "null"
+      ],
+      "name": [
+        "str:short"
+      ],
+      "targets": [
+        "list[str:short]"
+      ],
+      "type": [
+        "str:short"
+      ],
+      "uploaded_at": [
+        "str:short:iso8601"
+      ]
+    },
+    "documents_returned": 25,
+    "response_keys": [
+      "documents",
+      "total"
+    ],
+    "total_reported": 461
+  },
+  "provenance": {
+    "captured_at": "2026-08-01T22:04:50.342175+00:00",
+    "collection_fingerprint": "b4d1609b1d44",
+    "endpoint_host": "fra.cloud.appwrite.io",
+    "project_fingerprint": "adb82f2a9235",
+    "sdk_default_page_size_belief": 25
+  }
+}

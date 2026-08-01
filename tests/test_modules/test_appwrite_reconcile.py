@@ -25,23 +25,51 @@ class _Config:
 
 
 class _FakeDatabases:
-    """Serves documents in PAGES, exactly as Appwrite does — the behaviour whose
-    absence in the first version of this audit produced 436 phantom orphans."""
+    """Serves documents in PAGES, honouring a requested limit up to the server's cap.
 
-    PAGE = 100
+    **PAGE was 100 until #348, and 100 was OUR constant rather than the substrate's.**
+    A fake built on our own page size cannot fail when our page size is the thing that
+    is wrong — which is precisely how the first version of this audit shipped with nine
+    green tests and reported 436 phantom orphans.
+
+    The value below is now sourced from a RECORDED capture against the live service
+    (`tests/fixtures/appwrite/list_documents_shape.json`, 2026-08-01): asked for no
+    limit, Appwrite returned **25 of 461** documents. Not from documentation, not from a
+    sibling repo's comment — from the service. `test_appwrite_recorded_shape.py` fails
+    if that fixture and our `APPWRITE_DEFAULT_PAGE_SIZE` ever disagree.
+    """
+
+    #: What the server returns when the caller supplies no limit. Observed, not assumed.
+    DEFAULT_PAGE = 25
+    #: The most it will return however much is asked for.
+    MAX_PAGE = 100
 
     def __init__(self, outer):
         self._outer = outer
+
+    def _page_size(self, queries):
+        """A caller's limit is honoured only up to the cap — as a real server does."""
+        import json
+
+        requested = None
+        for raw in queries or []:
+            parsed = json.loads(raw)
+            if parsed["method"] == "limit":
+                requested = parsed["values"][0]
+        if requested is None:
+            return self.DEFAULT_PAGE
+        return min(requested, self.MAX_PAGE)
 
     def list_documents(self, db_id, coll_id, queries=None):
         self._outer.calls.append("list_documents")
         if self._outer._documents_error is not None:
             raise self._outer._documents_error
+        page = self._page_size(queries)
         offset = self._outer._offset
-        self._outer._offset += self.PAGE
+        self._outer._offset += page
         docs = self._outer._documents
         return {
-            "documents": docs[offset : offset + self.PAGE],
+            "documents": docs[offset : offset + page],
             "total": self._outer._reported_total
             if self._outer._reported_total is not None
             else len(docs),
