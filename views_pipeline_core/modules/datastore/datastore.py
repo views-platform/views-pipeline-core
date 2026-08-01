@@ -63,7 +63,11 @@ import pandas as pd
 # loaded should load it themselves, naming the file, before constructing anything here.
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# NO setLevel here. A library that forces its own level at import overrides whatever the
+# APPLICATION configured — an operator who sets WARNING globally was still getting INFO
+# from this module, and never asked for it. Same class as the ambient `.env` load removed
+# in #346: an import-time side effect the importer did not request. Level is the
+# application's decision; `LoggingModule` is where this platform makes it.
 
 
 class MetadataSearchIncomplete(RuntimeError):

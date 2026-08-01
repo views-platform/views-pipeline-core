@@ -275,3 +275,42 @@ def test_the_preflight_names_the_variable_it_is_missing(monkeypatch):
     assert "APPWRITE_" in str(excinfo.value), (
         f"the preflight failed without naming a variable: {excinfo.value}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Import-time side effects, as a CLASS rather than as the one instance a þing
+# formed around. Found by the S0–S6 sweep.
+# ---------------------------------------------------------------------------
+
+
+def test_no_module_forces_a_log_level_at_import():
+    """A library must not override the application's logging configuration.
+
+    `modules/datastore/datastore.py` did `logger.setLevel(logging.INFO)` at module
+    scope, so an operator who configured WARNING globally still got INFO from that
+    module and never asked for it. Same class as the ambient `.env` load #346 removed —
+    an import-time side effect the importer did not request — and it survived because
+    that story was scoped to the dotenv line specifically.
+
+    `modules/logging/` is exempt: deciding levels is its job, and it does so inside a
+    method rather than at import.
+    """
+    import ast
+    import pathlib
+
+    repo = pathlib.Path(__file__).resolve().parent.parent.parent
+    offenders = []
+    for path in sorted((repo / "views_pipeline_core").rglob("*.py")):
+        if "__pycache__" in path.parts or path.parent.name == "logging":
+            continue
+        for node in ast.parse(path.read_text()).body:  # MODULE SCOPE only
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call) and getattr(call.func, "attr", "") == "setLevel":
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        continue  # inside a definition — runs when called, not on import
+                    offenders.append(f"{path.relative_to(repo)}:{node.lineno}")
+
+    assert not offenders, (
+        "these modules set a log level at import, overriding whatever the application "
+        f"configured: {offenders}"
+    )
