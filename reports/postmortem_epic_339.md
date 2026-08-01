@@ -1,8 +1,8 @@
 # Post-mortem — epic #339, the Appwrite eviction (DRAFT, in progress)
 
 **Status:** DRAFT. Written while S0–S3 are fresh; to be completed when S4–S11 land.
-**Started:** 2026-08-01 · **Covers:** S0 (#353) · S1 (#354) · chore (#355) · S2 (#356) · S3 (#357) · sweep (#358) · S4 (#359) · sweep 2 (#360)
-**Not yet covered:** S5–S11.
+**Started:** 2026-08-01 · **Covers:** S0 (#353) · S1 (#354) · chore (#355) · S2 (#356) · S3 (#357) · sweep (#358) · S4 (#359) · sweep 2 (#360) · S5 (#361) · sweep 3 (#362)
+**Not yet covered:** S6–S11.
 
 > Notes are being taken *during* the work rather than after it, deliberately. The most
 > useful material in this document is the stuff that would be embarrassing to reconstruct
@@ -62,6 +62,23 @@ by itself, and that *the review scope determines which scale of recurrence you c
 existing site the rule governs — mechanically, not by memory — and record the count. C-258
 existed because that step was skipped in S1 and nobody noticed for three stories.
 
+### Three sweeps, three findings, and none of them repeatable by the previous method
+
+Each retrospective sweep found something the one before it structurally could not, because
+each enumerated a **different shape**:
+
+| Sweep | Shape enumerated | Found |
+|---|---|---|
+| 1 | paging walks | **C-258** (Tier 1) — a dedup walk answering NOT_FOUND from a short read |
+| 2 | failure→absence, result discards, deletion residue, exemptions | **C-259** (guard watching 2 of 31), **C-260** (stale skip), README residue |
+| 3 | guard *territory*, cross-repo install impact, optional-dep idioms | **C-261** (guard blind to where C-227 happened), **C-262** (views-postprocessing breaks) |
+
+The transferable point is not "do sweeps". It is that **a sweep is only worth running if it
+enumerates a shape no previous sweep did** — running the paging check a third time would
+have found nothing. Choosing the shape is the whole skill, and the best source of candidate
+shapes is *the rules the recent work established*, since those are the ones not yet applied
+everywhere.
+
 ### The pattern has a fourth face, and it is the sharpest one
 
 The second sweep applied the same method to shapes the first had not enumerated, and found
@@ -75,7 +92,19 @@ So the recurring failure is not really about paging. It is:
 
 Its instances so far: C-256's stale worklist (line numbers shifted by the change that
 resolved it), C-249's stale citations, C-258's unenumerated walks, and now C-259 — *inside
-the mechanism built to stop the class*. The countermeasure is the same every time: **derive,
+the mechanism built to stop the class*.
+
+**The guard has since been found wrong a second time, differently.** C-261: all three of
+its checks shared one `GOVERNED_DIRS`, which excluded `managers/` — so check 3 could not see
+`io.py`, `savers.py` or `sampled_forecast_publisher.py`, and **C-227's defect was literally
+"both call sites discard the result", in exactly those files.** A guard blind to where its
+own headline instance happened. Nothing was broken by it (a package-wide sweep finds zero
+discards), and saying so plainly matters more than the finding: inflating a preventive gap
+into a live defect is the same over-claim this document already records four times.
+
+**Generalised: a guard needs its TERRITORY audited, not just its logic.** Both guard defects
+this epic found were about scope — which functions it watched (C-259), and which directories
+(C-261) — and neither was visible by reading the checks themselves. The countermeasure is the same every time: **derive,
 do not list.** The guard now re-derives its own name set on every run, so a new
 `OperationResult`-returning function is governed the moment it is written.
 
@@ -241,7 +270,12 @@ correct.
    existed nowhere but in its own skip reason, and the skip outlived the fix — a coverage
    hole that reports as healthy.
 8. **Trace a packaging change to every INSTALL site, not just every import site.** See
-   §5.5. Nine passing probes did not see that CI would break.
+   §5.5. Nine passing probes did not see that CI would break — and the same change broke a
+   *downstream* repo (C-262), found only by checking each consumer on disk.
+9. **Audit a guard's territory, not only its logic.** Both guard defects here were scope
+   errors — which functions (C-259), which directories (C-261). Ask "where could this defect
+   occur?" and compare against "where does the check look?" — they were not the same set
+   either time.
 
 ---
 
