@@ -233,10 +233,61 @@ answered.
 
 | Phase | Trigger |
 |---|---|
-| **3** | Once Phases 0–2 land **and** the 461-file migration question (§4) is answered. No external deadline |
-| **4** | After Phase 3, so a ~1,000-line commodity client moves rather than a 4,609-line god class |
-| **5 (drill)** | **C-254's recurring trigger**: any Appwrite pricing or ToS change, the next renewal, the 2026-11-30 key expiry — or, if none fires, the anniversary of the last drill |
+| **3** | **Phases 0–2 have now landed (2026-08-01).** The remaining gate is the 461-file migration question (§4) — measured again during S8's capture: the collection holds **461 documents**, unchanged since the incident, so the number in §4 is current rather than remembered. No external deadline |
+| **4** | After Phase 3, so a commodity client moves rather than a god class. **Note the surface is already smaller than when this was written**: 22 operations rather than 26, `appwrite` optional rather than hard, and `SessionAuth` gone. Extraction gets cheaper the longer Phases 0–2 hold |
+| **5 (drill)** | **Still un-run — the one Phase-0–2 item that did NOT get done, and it is deliberate: C-254 asks for a MinIO exit drill, which is Phase-5 work.** C-254's recurring trigger: any Appwrite pricing or ToS change, the next renewal, the 2026-11-30 key expiry — or, if none fires, the anniversary of the last drill |
 | **Destination** | **T1 has effectively fired** — the views-crafdapi cut is the second consumer-API clone (views-appwrite#23). No longer "operator decision, someday": it is a scheduling decision now. The `demand ∧ supply` clause remains unfired and is a separate route |
+
+---
+
+## 6b. Close-out — what Phases 0–2 actually delivered (2026-08-01, S11)
+
+**Every one of the 26 register entries the epic set out to resolve is Resolved**, each
+naming what fixed it and how it is pinned. Four entries were **opened** by the work and
+are deliberately left open:
+
+| Entry | Why it stays open |
+|---|---|
+| **C-257** | A swallowed `delete_document` leaves a dangling card. The right behaviour interacts with ADR-047's write-failure policy — a design decision, not a rider on the story that found it. The **only** entry in `_TRACKED_DEFECTS`, whose ceiling is 1 |
+| **C-262** | views-postprocessing must declare `views-pipeline-core[appwrite]`. Not urgent — they pin `<3.0.0`, so nothing breaks until the bump. Their C-73 records it |
+| **C-263** | "Resolved" here does not mean "fixed for the consumer": nine of these fixes ship in an unpublished 3.0.0 while the delivery path pins below it |
+| **C-267** | `file_size` and `mime_type` are null on every production document sampled. Tier 4 — both optional, read by nothing. Found by the recorded fixture on its first use |
+
+### The vendor surface, re-measured rather than restated
+
+**22 distinct Appwrite data operations** (24 including `client.set_endpoint`/`set_key`),
+down from 25 before S4. The epic's headline "26 → 22" was close but its baseline was
+already stale — `databases.get` had gone earlier. Exactly three left with S4:
+`account.create_email_password_session`, `account.get`, `account.get_prefs`.
+`users.get_prefs` survives on the API-key path.
+
+### The guard's allowlist — the honest inventory of what remains unbounded
+
+`tests/test_read_completeness.py` reports **0 unbounded `list_*` sites**. Two are
+allowlisted as bounded-in-reality, each with a written reason:
+
+* `file.py::AppWriteFileModule.debug_collection_attributes -> list_attributes` — a debug
+  helper logging a schema we author; the result is printed, never used for a decision.
+* `provisioning.py::AppwriteProvisioner.ensure_attributes -> list_attributes` — the same
+  schema bound; a presence check against a fixed set defined in this repo.
+
+One tracked defect (C-257), at a ceiling of one. Adding a second is a deliberate edit
+that appears in a diff.
+
+### What the sprint learned that changes how Phases 3–4 should be run
+
+* **A fix does not generalise by itself.** The same defect recurred at function, story,
+  file and guard scope. When a change establishes a rule, the same change must enumerate
+  every existing site the rule governs — mechanically, and record the count.
+* **Guards get written against the instance in front of the author.** Four instances,
+  including one in a guard nobody on this epic wrote. Audit a guard's *scope*, not only
+  its logic.
+* **Derive, do not list.** Every stale worklist, hardcoded name set and line citation in
+  this epic rotted the same way.
+* **Drill before shipping a behaviour change.** S7's drill turned what would have been a
+  crash into a fixed defect (C-266). The constraint came from a þing months earlier.
+
+Full account: `reports/postmortem_epic_339.md`.
 
 ---
 
