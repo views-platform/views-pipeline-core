@@ -269,6 +269,21 @@ of type 'ConnectTimeout' is not iterable`.
 another repo's seat, in a þing, months earlier. Worth remembering when a sequencing rule
 looks like ceremony.
 
+## 5.8 The recorded fixture found something on its first use
+
+S8's capture was justified as closing a *known* gap — our fakes agreed with us about
+paging. It did that: the service returned **25 of 461** with no limit supplied, confirming
+in one command what nine green tests had certified the opposite of.
+
+But it also surfaced something nobody was looking for. **`file_size` and `mime_type` are
+null on all 25 production documents**, though `_build_metadata_document` intends to
+populate both. Low severity — both are optional in the schema and nothing reads them for a
+decision — but *no mock could ever have revealed it*, because every mock in this repo
+returns what its author expected the service to hold.
+
+**The general point: a recorded fixture pays for itself twice.** Once for the question you
+asked it, and once for the questions you did not know to ask.
+
 ## 6. What worked and should be kept
 
 1. **`/code-review max` → `/review-diff` → fix → `/review-diff` again.** Adopted mid-epic at
