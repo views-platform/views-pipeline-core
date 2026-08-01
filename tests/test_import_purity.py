@@ -124,3 +124,130 @@ def test_provisioning_is_importable_on_its_own():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# S5 (#345) — the vendor SDK must not be on the delivery path's import graph.
+#
+# C-253, measured: views-hydranet, views-baseline and views-evaluation contain ZERO
+# references to Appwrite and all three install its SDK, because `appwrite` sits in
+# `[tool.poetry.dependencies]` rather than in an extra. That is CRP violated, and SDP
+# inverted — the platform's most-depended-upon package depends on a vendor SDK whose
+# `databases.list*` surface deprecated at server 1.8.0.
+#
+# The DIP seam was already correct: `PredictionSaver` is a Protocol and `AppwriteSaver`
+# implements it. Only the packaging was wrong — and the module DEFINING the Protocol
+# imported the SDK at module scope, so making the dependency optional would have broken
+# importing the Protocol itself (falsification finding F1, register C-253).
+# ---------------------------------------------------------------------------
+
+_APPWRITE = "appwrite"
+
+
+def test_bare_package_import_does_not_load_the_appwrite_sdk():
+    """Already true before #345 — pinned so the blast radius cannot grow."""
+    result = _run_forbidden_probe("import views_pipeline_core", forbidden=_APPWRITE)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_importing_the_savers_module_does_not_load_the_appwrite_sdk():
+    """F1's first half. `savers.py` defines the `PredictionSaver` Protocol AND the two
+    local savers; a module-scope `from appwrite.exception import AppwriteException`
+    meant an optional extra would break importing the Protocol."""
+    result = _run_forbidden_probe(
+        "import views_pipeline_core.managers.prediction.savers", forbidden=_APPWRITE
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_importing_the_prediction_io_manager_does_not_load_the_appwrite_sdk():
+    """F1's second half — `managers/prediction/io.py` carried the same eager import."""
+    result = _run_forbidden_probe(
+        "import views_pipeline_core.managers.prediction.io", forbidden=_APPWRITE
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_managers_facade_does_not_load_the_appwrite_sdk():
+    result = _run_forbidden_probe(
+        "import views_pipeline_core.managers.prediction", forbidden=_APPWRITE
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_local_savers_work_without_the_sdk_on_the_import_graph():
+    """The point of the whole change: a repo that never touches Appwrite can save
+    predictions. Constructing the local savers must not pull the vendor in."""
+    result = _run_forbidden_probe(
+        "from views_pipeline_core.managers.prediction.savers import "
+        "NpzSaver, LocalParquetSaver, PredictionSaver; "
+        "NpzSaver(); LocalParquetSaver()",
+        forbidden=_APPWRITE,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+_WITHOUT_EXTRA = '''
+import builtins, sys
+_real = builtins.__import__
+def _blocked(name, *a, **k):
+    if name == "appwrite" or name.startswith("appwrite."):
+        raise ImportError("No module named '%s'" % name)
+    return _real(name, *a, **k)
+builtins.__import__ = _blocked
+for _m in [m for m in sys.modules if m.startswith("appwrite")]:
+    del sys.modules[_m]
+{body}
+'''
+
+
+def _run_without_the_extra(body: str) -> subprocess.CompletedProcess:
+    """Run a probe in an interpreter where `import appwrite` always fails.
+
+    The extra IS installed in this environment, so a test that merely checks the SDK is
+    absent from `sys.modules` cannot tell "not imported" from "not installed". Blocking
+    the import is what makes the no-extra path genuinely exercised rather than assumed —
+    the same reason `test_appwrite_pagination.py` builds its double from the SDK's real
+    query encoding instead of from belief (C-218).
+    """
+    return subprocess.run(
+        [sys.executable, "-c", _WITHOUT_EXTRA.format(body=body)],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_the_package_is_usable_with_the_extra_uninstalled():
+    """The whole point of #345: a repo that never touches Appwrite can still save."""
+    result = _run_without_the_extra(
+        "import views_pipeline_core\n"
+        "from views_pipeline_core.managers.prediction.savers import ("
+        "    NpzSaver, LocalParquetSaver, PredictionSaver)\n"
+        "assert isinstance(NpzSaver(), PredictionSaver)\n"
+        "assert isinstance(LocalParquetSaver(), PredictionSaver)\n"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_fault_resolver_degrades_to_stdlib_types_without_the_extra():
+    result = _run_without_the_extra(
+        "from views_pipeline_core.managers.prediction.vendor_faults import "
+        "upload_transport_faults\n"
+        "faults = upload_transport_faults()\n"
+        "assert faults == (ConnectionError, TimeoutError, OSError), faults\n"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_asking_for_appwrite_without_the_extra_names_the_install_command():
+    """A bare `ModuleNotFoundError` six frames inside file.py tells the operator
+    nothing. Follows the `_require_dense_report_consumer` idiom."""
+    result = _run_without_the_extra(
+        "try:\n"
+        "    import views_pipeline_core.modules.appwrite\n"
+        "    raise SystemExit('imported despite the extra being absent')\n"
+        "except ImportError as e:\n"
+        "    assert \"pip install 'views-pipeline-core[appwrite]'\" in str(e), str(e)\n"
+        "    assert 'ADR-047' in str(e), 'the message should say what NEEDS no extra'\n"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

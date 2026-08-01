@@ -6,6 +6,10 @@ it, and what each story will actually touch."
 
 VERDICT: **FALSIFIED** — two hard falsifications, two soft.
 
+**Status 2026-08-01:** F1 CLOSED by #345 (both stubs converted from strict xfail after they
+XPASSed — the ratchet fired). F2 closed by #341/#343. F3 folded into C-241. F4 open on
+the cross-repo half only (views-appwrite#24).
+
 These stubs fail today. Each encodes one falsification and the story that must absorb it.
 They are not a wish-list: every one of them was produced by a probe whose prediction was
 recorded before it was run.
@@ -60,21 +64,28 @@ def _appwrite_loaded_after(import_stmt: str) -> bool:
     return out.stdout.strip() == "True"
 
 
-@pytest.mark.xfail(strict=True, reason="F1 (open): savers.py:17 imports AppwriteException at module scope — fixed by #345")
 def test_f1_importing_the_saver_module_must_not_load_the_appwrite_sdk():
-    """FAILS TODAY. Prerequisite for #345 — appwrite cannot become optional while
-    the module defining `PredictionSaver` imports the SDK at module scope."""
+    """CLOSED by #345 (S5). Converted from `xfail(strict=True)` when it XPASSed.
+
+    That conversion is the ratchet doing its job rather than an inconvenience: the stub
+    was marked strict precisely so a silent XPASS could not leave a stale expectation
+    behind. It flipped the moment `savers.py`'s module-scope
+    `from appwrite.exception import AppwriteException` was replaced by the lazy
+    `upload_transport_faults()` resolver, and the suite refused to stay green until
+    somebody looked.
+
+    Kept as a plain assertion. The comprehensive coverage now lives in
+    `tests/test_import_purity.py`, which probes the same property in a subprocess
+    across five entry points; this one remains as the audit's own record that F1 is
+    closed.
+    """
     assert not _appwrite_loaded_after(
         "import views_pipeline_core.managers.prediction.savers"
-    ), (
-        "savers.py imports appwrite eagerly (line 17); the PredictionSaver Protocol "
-        "lives in the same module, so an optional extra would break importing it"
     )
 
 
-@pytest.mark.xfail(strict=True, reason="F1 (open): io.py:15 carries the same eager import — fixed by #345")
 def test_f1b_importing_the_prediction_io_manager_must_not_load_the_sdk():
-    """FAILS TODAY. `managers/prediction/io.py:15` carries the same eager import."""
+    """CLOSED by #345 (S5). `managers/prediction/io.py` carried the same eager import."""
     assert not _appwrite_loaded_after(
         "import views_pipeline_core.managers.prediction.io"
     )

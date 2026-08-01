@@ -98,10 +98,12 @@ me while writing the code. That is the case for keeping the ritual expensive.
 | `_TRACKED_DEFECTS` had no ceiling — escape hatch could grow forever | second `/review-diff` on S3 | No |
 | `_file_exists_by_hash`'s unbounded dedup walk (**Tier 1**) | S0–S3 sweep | No |
 | Guard check 3 watched 2 of 31 functions; 3 of its 5 names did not exist | S0–S4 sweep | No |
+| Both CI workflows would stop installing `appwrite` after S5 made it an extra | `/review-diff` on S5 | **CI would have caught it — by failing** |
 | S4 deleted the code but its README still documented `AuthMethod.SESSION` and `get_current_user()` | S0–S4 sweep | No |
 | A test permanently skipped for a bug that was fixed — coverage silently withheld | S0–S4 sweep | No |
 
-Twelve defects, zero catchable by CI. Several were in code written *to prevent that exact
+Thirteen defects. Twelve were uncatchable by CI; the thirteenth *was* a CI break, found by
+review before it happened rather than by watching it go red. Several were in code written *to prevent that exact
 class of defect*.
 
 ### The single most effective technique
@@ -171,7 +173,23 @@ for: `modules/appwrite/README.md` still showed `auth_method=AuthMethod.SESSION` 
 instructing readers to call symbols that now raise.** A `grep` for the deleted symbol across
 *code* is habit; across `.md`, ADRs, CICs and docstrings is not. It should be.
 
-### 5.5 Test-double errors that produced false alarms
+### 5.5 A packaging change cannot be verified from the environment that has the package
+
+S5 made `appwrite` an optional extra. Nine subprocess probes passed, three of them running
+in an interpreter with `import appwrite` **blocked** — thorough, and blind to the actual
+break: **both CI workflows run bare `poetry install`, which after this change no longer
+installs the SDK.** Every Appwrite test would have failed in CI.
+
+No local probe could have found it. The developer environment has the extra installed, so
+the failing configuration does not exist locally; it exists only in the install command.
+Found by a review question — *"does the extras block need a corresponding change anywhere
+else?"* — rather than by running anything.
+
+**Rule: a dependency or packaging change must be traced to every place that installs the
+package**, not only to every place that imports it. CI workflows, READMEs, install hints,
+and downstream pins.
+
+### 5.6 Test-double errors that produced false alarms
 
 Twice, a probe reported a defect that did not exist:
 - A mutation script reported "test is blind!" — it had introduced a syntax error, not a revert.
@@ -214,7 +232,7 @@ correct.
    limit is *supplied*, not whether the walk *terminates* — and C-258 sailed through it
    green. That limitation is now in the docstring, but it was discovered rather than
    declared.
-4. **Distrust the probe first.** See §5.5.
+4. **Distrust the probe first.** See §5.6.
 5. **Derive, do not list.** Any set a guard consults — function names, file paths, site
    inventories — must be computed from the code on every run. Three of this epic's findings
    are the same snapshot-rot failure, one of them inside a guard. See §3.
@@ -222,6 +240,8 @@ correct.
 7. **A `@pytest.mark.skip` for a code defect must name a register entry.** C-260's bug
    existed nowhere but in its own skip reason, and the skip outlived the fix — a coverage
    hole that reports as healthy.
+8. **Trace a packaging change to every INSTALL site, not just every import site.** See
+   §5.5. Nine passing probes did not see that CI would break.
 
 ---
 
@@ -234,6 +254,8 @@ correct.
 | **T1 has effectively fired** — the views-crafdapi cut is the second consumer-API clone | operator scheduling decision; views-appwrite#23 |
 | **S5 (#345) is time-boxed** — `appwrite` → optional extra is free only while 3.0.0 is unpublished and five repos are pinned | sequence before the crafdapi cut |
 | Two register tier decisions still unanswered | C-26 promotion, C-05 demotion |
+| **`savers.py` still holds six classes in 213 lines** — S5's plan assumed it needed splitting, but removing one module-scope import achieved the packaging goal entirely. The file-structure question is now cleanly separable from the packaging one | S11, or when a seventh saver arrives |
+| **`pytest` is a hard runtime dependency** (`pyproject.toml`, pre-existing) — every consumer installs a test framework | own issue; out of #345's scope |
 | **`get_user_preferences` has no caller on the platform** — it survived S4 because it had a live API-key branch, but "live" meant reachable, not reached. `get_current_user` went because it could only ever *fail*, which is a stronger justification | genuine deletion candidate for S11 |
 | **`AuthManager` is an ABC with exactly one implementation** after S4 — speculative generality by this repo's own WET-before-DRY rule. Flagged, not removed: #345 reshapes this area | revisit after S5 |
 | **The F4 cross-repo ratchet enforces nothing in CI** — `pytest.skip()` inside `xfail(strict=True)` reports SKIPPED, so it fires only for a developer with both repos checked out. A limit, not a defect: no CI mechanism here can see another repo's file | stated in the test |
