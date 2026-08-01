@@ -20,8 +20,12 @@ The `DatastoreModule` provides a simplified API for the ViEWS pipeline to upload
 The module is part of `views-pipeline-core`. Ensure you have the package installed:
 
 ```bash
-pip install views-pipeline-core
+pip install 'views-pipeline-core[appwrite]'
 ```
+
+`DatastoreModule` reaches Appwrite, so it requires the optional `appwrite` extra
+(#345, register C-253). Without it, importing this module fails with the install command.
+
 
 ## Quick Start
 

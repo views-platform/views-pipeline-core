@@ -19,8 +19,12 @@ The `AppWriteFileModule` provides a full-featured interface for interacting with
 ## Installation
 
 ```bash
-pip install views-pipeline-core
+pip install 'views-pipeline-core[appwrite]'
 ```
+
+This module requires the optional `appwrite` extra (#345, register C-253) — the SDK is
+not installed by default, so that repos which never deliver to Appwrite do not carry it.
+
 
 ## Quick Start
 

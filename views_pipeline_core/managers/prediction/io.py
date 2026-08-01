@@ -12,12 +12,14 @@ from typing import Dict, Optional, Union
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from appwrite.exception import AppwriteException
 
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.files.utils import save_dataframe
 from views_pipeline_core.managers.prediction.file_namer import PredictionFileNamer
+from views_pipeline_core.managers.prediction.vendor_faults import (
+    upload_transport_faults,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +143,7 @@ class PredictionIOManager:
                     description="",
                     type=self._model_path.target,
                 )
-            except (ConnectionError, TimeoutError, OSError, AppwriteException) as e:
+            except upload_transport_faults() as e:
                 logger.error(
                     f"Error uploading predictions to datastore: {e}", exc_info=True
                 )

@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 import pyarrow.parquet as pq
-from appwrite.exception import AppwriteException
 
 from views_pipeline_core.data.prediction_frame import PredictionFrame
+from views_pipeline_core.managers.prediction.vendor_faults import (
+    upload_transport_faults,
+)
 from views_pipeline_core.managers.prediction.prediction_frame_converter import (
     PredictionFrameConverter,
 )
@@ -158,7 +160,7 @@ class AppwriteSaver:
                 description="",
                 type=self._target,
             )
-        except (ConnectionError, TimeoutError, OSError, AppwriteException) as e:
+        except upload_transport_faults() as e:
             logger.error(
                 "Error uploading predictions to datastore: %s", e, exc_info=True,
             )
