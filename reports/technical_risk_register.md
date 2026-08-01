@@ -8,8 +8,8 @@
 > pinned consumer repos. These entries must be closed or *consciously accepted* before tagging:
 > ~~**C-227**, **C-228**, **C-231**~~ — **CLOSED 2026-07-31** (#329/#330/#331); the remaining
 > Appwrite-seam gate item is running `reconcile.py` against production (C-236), **C-193 residual** (nothing enforces that a breaking public-symbol change
-> forces a major bump — and this release *is* that event), **C-190 residual** (no declared
-> `views-reporting` floor in `pyproject.toml`), **C-206** (every proof that would validate the
+> forces a major bump — and this release *is* that event) → **#374**, **C-190 residual** (no declared
+> `views-reporting` floor in `pyproject.toml`) → **#375**, **C-206** → **#274** (every proof that would validate the
 > release runs against editable worktrees, and this box holds `views-frames 1.8.0` while the train
 > assumes 1.10.0), plus the known `views-evaluation ^0.4.0 → ^0.5.0` bump awaiting the leaf release.
 
