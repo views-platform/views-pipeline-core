@@ -192,16 +192,40 @@ correctly shaped but not isolated.** #345 splits it; Phase 4 depends on that hav
 **views-appwrite** is the designed home but is **parked** under þing-01 D7.2/E6, with the client
 deferred behind **D8**.
 
-**D8's trigger has NOT fired.** Its demand clause is *"a second incident whose root cause is
-**auth/provision handling** in a duplicated client path"* (`orð_dómr.md:161-166`). C-241 is
-**pagination** — neither auth nor provisioning. What the episode *did* establish is that the copies
-have **diverged on SDK major version** (pipeline-core `>=13.4.1,<14`; views-faoapi `==19.2.0`), and
-that `AuthMethod` has diverged too (faoapi retired `SESSION`; we have not).
+**Corrected 2026-08-01, prompted by the views-appwrite seat (views-appwrite#23).** An earlier
+version of this section said flatly "D8's trigger has NOT fired". That overstated a narrower true
+claim, because it analysed **one disjunct of four**.
 
-**The nuance worth putting to the operator:** the þing deferred *a shared client that pipeline-core
-would import*. Under Decision K's shape **pipeline-core imports nothing** — the concrete becomes a leaf
-that only the composition root touches. That may be a materially different question from the one the
-þing answered, and it is the operator's call whether it needs a revisit or is simply new.
+D8 is `T1 ∨ T2 ∨ T3 ∨ (demand ∧ supply)`, and its ratified text closes with: *"The repo-local
+triggers remain independently sufficient."* (`orð_dómr.md:161-166`).
+
+- **The `demand ∧ supply` clause has not fired, and that part stands.** Demand is *"a second incident
+  whose root cause is **auth/provision handling** in a duplicated client path"*. C-241 is
+  **pagination** — neither auth nor provisioning. Verified against the verdict text, not remembered.
+- **T1 fires on its own, and it is about to.** views-appwrite `README:697`: *"**Second consumer API
+  clone.** The moment you clone `views-faoapi` to build a World Bank or UNHCR API, you are copying the
+  Appwrite client a third time. At N=3, extraction pays for itself immediately. This is the strongest
+  trigger."* The operator is preparing to cut **views-crafdapi**. That fires T1 regardless of anything
+  in this roadmap.
+
+**What this does and does not change.** It does **not** invalidate Phases 0–2. Not one story in them
+chooses a destination: they fix defects (S1, S2), delete dead surface (S4), or reduce coupling (S5,
+S6, S7). If extraction activates, every one of them makes extraction *cheaper* — you extract 22
+operations rather than 26, with no dead session auth, against an optional dependency behind an
+already-isolated seam. The sequencing is favourable, not colliding.
+
+What it changes is **Phase 4's premise**. This roadmap assumed the destination question would stay
+closed long enough for us to choose the timing. It will not. **The destination may be decided for us,
+and sooner than Phase 4.**
+
+**The one thing that is genuinely the operator's:** if views-appwrite begins building a shared client
+while this sprint is running, two repos are changing the same surface at the same time. That is the
+"two repositories must change together" case, and it is a scheduling call, not an engineering one.
+
+**A nuance that survives the correction:** the þing deferred *a shared client that pipeline-core would
+import*. Under Decision K's shape **pipeline-core imports nothing** — the concrete becomes a leaf that
+only the composition root touches. That may be a materially different question from the one the þing
+answered.
 
 ---
 
@@ -212,7 +236,7 @@ that only the composition root touches. That may be a materially different quest
 | **3** | Once Phases 0–2 land **and** the 461-file migration question (§4) is answered. No external deadline |
 | **4** | After Phase 3, so a ~1,000-line commodity client moves rather than a 4,609-line god class |
 | **5 (drill)** | **C-254's recurring trigger**: any Appwrite pricing or ToS change, the next renewal, the 2026-11-30 key expiry — or, if none fires, the anniversary of the last drill |
-| **Destination** | Operator decision; or D8 firing on its own terms (an auth/provision incident in the duplicated path) |
+| **Destination** | **T1 has effectively fired** — the views-crafdapi cut is the second consumer-API clone (views-appwrite#23). No longer "operator decision, someday": it is a scheduling decision now. The `demand ∧ supply` clause remains unfired and is a separate route |
 
 ---
 
@@ -222,7 +246,7 @@ that only the composition root touches. That may be a materially different quest
   lock-in.
 - **A multi-backend abstraction.** One implementation plus an imagination is not a good interface.
 - **Moving views-models' 681 lines** — already correctly isolated, no SDK, has the timeout we lack.
-- **Moving views-postprocessing's delivery logic** — of 826 measured lines only **~130 (estimated, not counted)** are
+- **Moving views-postprocessing's delivery logic** — of 826 lines across every file that so much as mentions Appwrite (the views-appwrite seat counts ~490 on the narrower basis of files whose main job is the seam; both are right, they count different sets) only **~130 (estimated, not counted)** are
   vendor-coupled; the rest is FAO contract logic that belongs there, and its `_ContractStorePort` already guarantees the
   wire layer never sees Appwrite types.
 - **views-faoapi.** Its own copy, its own trigger, and it holds the reference paging implementation
