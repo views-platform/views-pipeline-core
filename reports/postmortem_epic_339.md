@@ -127,11 +127,14 @@ me while writing the code. That is the case for keeping the ritual expensive.
 | `_TRACKED_DEFECTS` had no ceiling — escape hatch could grow forever | second `/review-diff` on S3 | No |
 | `_file_exists_by_hash`'s unbounded dedup walk (**Tier 1**) | S0–S3 sweep | No |
 | Guard check 3 watched 2 of 31 functions; 3 of its 5 names did not exist | S0–S4 sweep | No |
+| Guard territory excluded the files where C-227 happened | S0–S5 sweep | No |
+| God-class guard watched 2 of 13, both xfailed — enforcing nothing | S0–S6 sweep | No |
+| A library forced `logger.setLevel(INFO)` on the application at import | S0–S6 sweep | No |
 | Both CI workflows would stop installing `appwrite` after S5 made it an extra | `/review-diff` on S5 | **CI would have caught it — by failing** |
 | S4 deleted the code but its README still documented `AuthMethod.SESSION` and `get_current_user()` | S0–S4 sweep | No |
 | A test permanently skipped for a bug that was fixed — coverage silently withheld | S0–S4 sweep | No |
 
-Thirteen defects. Twelve were uncatchable by CI; the thirteenth *was* a CI break, found by
+Sixteen defects. Fifteen were uncatchable by CI; the thirteenth *was* a CI break, found by
 review before it happened rather than by watching it go red. Several were in code written *to prevent that exact
 class of defect*.
 
@@ -296,6 +299,14 @@ correct.
    the same thing). Every one was a guard written against the instance in front of the
    author rather than the class the rule names. Ask: *where could this defect occur?* then
    *where does the check look?* They were different sets all three times.
+
+   **Confirmed by the S0–S6 sweep, and this is the part that generalises:** the same error
+   exists in `test_falsification_no_god_classes.py`, which **nobody on this epic wrote**.
+   It names two classes literally; thirteen exceed its threshold; both named ones are
+   xfailed, so its live output was `1 passed, 2 xfailed` — it enforced nothing, and the
+   largest class in the package (1630 LOC) was unwatched. Four instances now, and the
+   fourth proves the pattern is about **how guards get written**, not about who wrote the
+   first three.
 
    Superseded phrasing kept for the record: **audit a guard's territory, not only its logic.** Both guard defects here were scope
    errors — which functions (C-259), which directories (C-261). Ask "where could this defect

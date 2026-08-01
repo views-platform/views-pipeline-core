@@ -105,3 +105,88 @@ def test_P5_god_classes_tracked_in_risk_register():
         f"{len(untracked)} god-class(es) not tracked in risk register:\n"
         + "\n".join(f"  - {u}" for u in untracked)
     )
+
+
+# ===========================================================================
+# Population guard, added by the S0-S6 sweep.
+#
+# The two tests above name TWO classes literally. The package contains THIRTEEN over
+# the threshold — so the guard watched 2 of 13, and since both of those are xfailed
+# (C-35, C-36) its live output was `1 passed, 2 xfailed`: it enforced nothing, and would
+# not have noticed a fourteenth god class appearing.
+#
+# This is the fourth instance of one pattern in epic #339 — a guard specified against
+# the instance in front of its author rather than the class the rule names (C-259: which
+# functions; C-261: which directories; #346: which spelling) — and the FIRST found in a
+# guard nobody on this epic wrote. That is the useful part: the pattern is about how
+# guards get written, not about who wrote these.
+#
+# Refactoring thirteen classes is Phase-4-scale work and is NOT attempted here. What this
+# does is stop the population growing: the current thirteen are frozen by name, and a
+# fourteenth fails. Adding one is then a deliberate edit that shows up in a diff.
+# ===========================================================================
+
+KNOWN_GOD_CLASSES = {
+    "views_pipeline_core/data/handlers.py::_ViewsDataset",  # 866 loc
+    "views_pipeline_core/data/model_path.py::ModelPathManager",  # 928 loc
+    "views_pipeline_core/managers/configuration/configuration.py::ConfigurationManager",  # 844 loc
+    "views_pipeline_core/managers/ensemble/dataframe_ensemble.py::DataFrameEnsembleManager",  # 938 loc
+    "views_pipeline_core/managers/ensemble/ensemble.py::EnsembleManager",  # 803 loc
+    "views_pipeline_core/managers/ensemble/prediction_frame_ensemble.py::PredictionFrameEnsembleManager",  # 769 loc
+    "views_pipeline_core/managers/model/model.py::ForecastingModelManager",  # 1630 loc
+    "views_pipeline_core/modules/aggregation/aggregator.py::AggregationModule",  # 867 loc
+    "views_pipeline_core/modules/appwrite/file.py::AppWriteFileModule",  # 1534 loc
+    "views_pipeline_core/modules/dataloaders/dataloaders.py::UpdateViewser",  # 556 loc
+    "views_pipeline_core/modules/dataloaders/dataloaders.py::ViewsDataLoader",  # 913 loc
+    "views_pipeline_core/modules/datastore/datastore.py::DatastoreModule",  # 560 loc
+    "views_pipeline_core/modules/validation/adapter.py::EvaluationAdapter",  # 517 loc
+}
+
+
+def _classes_over_threshold():
+    """Every class in the package above GOD_CLASS_THRESHOLD_LOC, derived not listed."""
+    import ast as _ast
+
+    found = {}
+    package = _REPO / "views_pipeline_core" if (_REPO := Path(__file__).resolve().parent.parent) else None
+    for path in sorted(package.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        for node in _ast.walk(_ast.parse(path.read_text())):
+            if isinstance(node, _ast.ClassDef):
+                loc = (node.end_lineno or node.lineno) - node.lineno
+                if loc > GOD_CLASS_THRESHOLD_LOC:
+                    found[f"{path.relative_to(_REPO)}::{node.name}"] = loc
+    return found
+
+
+def test_no_new_god_class_appears():
+    """A ratchet on the population, not a demand that the thirteen be fixed.
+
+    Fails on a class that grows past the threshold or is written past it. Does NOT fail
+    on the known thirteen — that is a separate, much larger piece of work (C-35, C-36 and
+    the Phase 4 decomposition).
+    """
+    current = _classes_over_threshold()
+    new = sorted(set(current) - KNOWN_GOD_CLASSES)
+
+    assert not new, (
+        f"{len(new)} class(es) crossed the {GOD_CLASS_THRESHOLD_LOC}-LOC god-class "
+        f"threshold: {[(n, current[n]) for n in new]}. Split it, or add it to "
+        f"KNOWN_GOD_CLASSES deliberately and say why in the PR."
+    )
+
+
+def test_the_known_population_has_not_silently_shrunk():
+    """The other direction: if a class is fixed, this entry must go.
+
+    A stale name in KNOWN_GOD_CLASSES is an exemption for something that no longer needs
+    one — the same rot as C-256's worklist and C-259's hardcoded name set.
+    """
+    current = _classes_over_threshold()
+    fixed = sorted(KNOWN_GOD_CLASSES - set(current))
+
+    assert not fixed, (
+        f"these are no longer over the threshold and should be removed from "
+        f"KNOWN_GOD_CLASSES: {fixed}"
+    )
