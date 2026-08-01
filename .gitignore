@@ -202,7 +202,7 @@ cython_debug/
 *.pkl 
 
 # folders
-#**/wandb/
+**/wandb/
 **/notebooks/
 
 # mac specific 
@@ -224,3 +224,6 @@ graphify-out/
 # logs
 *.log
 *.log.*
+
+# Agent working instructions — local to each operator's checkout, not a repo artifact.
+CLAUDE.md
