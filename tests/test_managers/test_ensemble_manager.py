@@ -227,7 +227,7 @@ class TestExecuteSingleRun:
         args = ForecastingModelArgs(run_type="calibration", train=True)
 
         with patch.object(manager, '_execute_model_tasks'):
-            with patch('views_pipeline_core.modules.validation.ensemble.validate_ensemble_model'):
+            with patch('views_pipeline_core.managers.ensemble.ensemble.validate_ensemble_model'):
                 with patch('views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer'):
                     manager.execute_single_run(args)
 
@@ -255,11 +255,23 @@ class TestExecuteSingleRun:
                     mock_validate.assert_called_once()
 
     def test_execute_single_run_skips_validation_when_training(self, manager):
-        """Test ensemble validation is skipped when training."""
+        """Ensemble validation is skipped when training.
+
+        C-213: this patched `views_pipeline_core.modules.validation.ensemble.
+        validate_ensemble_model` — the SOURCE module. `ensemble.py:17` does
+        `from ... import validate_ensemble_model`, so the manager holds its own
+        reference and the patch never reached it. `assert_not_called()` was therefore
+        vacuous: that mock could not have been called whatever the code did.
+
+        The test still went red when the guard was deleted — but for the wrong reason,
+        because the REAL function ran and raised. It would have passed silently against
+        any harmless implementation. Its neighbour five lines above patched the consumer
+        binding correctly, which is how close the two live.
+        """
         args = ForecastingModelArgs(run_type="calibration", train=True)
 
         with patch.object(manager, '_execute_model_tasks'):
-            with patch('views_pipeline_core.modules.validation.ensemble.validate_ensemble_model') as mock_validate:
+            with patch('views_pipeline_core.managers.ensemble.ensemble.validate_ensemble_model') as mock_validate:
                 with patch('views_pipeline_core.managers.ensemble.ensemble.CoreConfigSniffer'):
                     manager.execute_single_run(args)
 
