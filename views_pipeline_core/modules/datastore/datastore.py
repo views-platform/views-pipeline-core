@@ -60,6 +60,20 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+class MetadataSearchIncomplete(RuntimeError):
+    """The metadata lookup could not be certified, so its result is not an answer.
+
+    Raised where a caller would otherwise receive an empty list or ``None`` — values
+    that mean "there is no such file" and must never be produced by a lookup that
+    merely failed. See register C-241 and the Cluster J entry: the recurring defect on
+    this platform is a system that cannot distinguish "no" from "I could not tell" and
+    answers anyway.
+
+    It subclasses ``RuntimeError`` so that existing broad handlers still catch it,
+    while a caller that wants to retry the read specifically can.
+    """
+
+
 class FileMetadata:
     """Metadata container for prediction files with validation.
 
@@ -415,11 +429,18 @@ class DatastoreModule:
         )
 
         if not search_result.get("success", False):
-            logger.warning(f"Search failed with filters: {filters}")
+            # Returning [] here would tell every caller "no predictions match", which is
+            # a statement about the shelf rather than about the lookup. `get_latest_file_id`
+            # would then hand back None and the FAO delivery would report nothing to
+            # deliver — a false negative to an external counterparty, produced by a
+            # failure we had already detected. C-241, Cluster J.
             error_msg = search_result.get("error", "Unknown error")
-            logger.error(f"Search error: {error_msg}")
-            return []
-        
+            code = search_result.get("code", "UNKNOWN")
+            logger.error(f"Metadata search failed ({code}) with filters {filters}: {error_msg}")
+            raise MetadataSearchIncomplete(
+                f"metadata search failed ({code}) for filters {filters}: {error_msg}"
+            )
+
         documents = search_result.get("data", {}).get("documents", [])
         logger.info(f"Found {len(documents)} prediction files")
         
@@ -701,9 +722,17 @@ class DatastoreModule:
         )
 
         if not search_result.get("success", False):
-            logger.error(f"Search error: {search_result.get('error', 'Unknown error')}")
-            return []
-        
+            # Same swallow as `get_predictions_by_metadata`, and worse here: this method
+            # is what an operator reaches for to answer "what is actually on the shelf?".
+            # An empty list is the most misleading possible reply to that question when
+            # the read failed. C-241, Cluster J.
+            error_msg = search_result.get("error", "Unknown error")
+            code = search_result.get("code", "UNKNOWN")
+            logger.error(f"Unfiltered metadata search failed ({code}): {error_msg}")
+            raise MetadataSearchIncomplete(
+                f"unfiltered metadata search failed ({code}): {error_msg}"
+            )
+
         documents = search_result.get("data", {}).get("documents", [])
         logger.info(f"Found {len(documents)} total prediction files")
         

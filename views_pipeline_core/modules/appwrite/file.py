@@ -105,6 +105,18 @@ DEFAULT_PAGE_LIMIT = 100
 MAX_ATTRIBUTE_CREATION_RETRIES = 3
 INITIAL_RETRY_DELAY = 1.0
 
+# The number of rows Appwrite's list endpoints return when no `Query.limit` is
+# supplied. It is named here so that no walk in this module ever *inherits* it: a
+# request that omits its own limit is correct only for as long as the server's default
+# stays 25 and the match stays under it, and neither is ours to control. Register C-241
+# is what this default cost when it was left implicit.
+APPWRITE_DEFAULT_PAGE_SIZE = 25
+
+# Backstop on a paging walk. It exists for the case where the substrate ignores
+# `offset` — every page then comes back full and a `len(batch) < limit` terminator never
+# fires. Tripping it means the walk is INCOMPLETE, never that it is finished.
+MAX_METADATA_PAGES = 1000
+
 # Appwrite error types. These are the SERVER's own `type` strings, which the SDK
 # propagates verbatim into `AppwriteException.type` and this module carries as
 # `OperationResult.code` — pinned against the real SDK in
@@ -1049,11 +1061,79 @@ class AppwriteMetadataHandler:
                     if value is not None:
                         queries.append(Query.contains(attribute, value))
 
-            result = self.databases.list_documents(db_id, coll_id, queries=queries)
+            # C-241: `list_documents` returns APPWRITE_DEFAULT_PAGE_SIZE rows unless a
+            # `Query.limit` is supplied. This method used to omit one, so a match of
+            # more than 25 documents came back silently truncated — and every caller
+            # treated the truncation as the whole answer. `get_latest_file_id` then
+            # returned the newest of the OLDEST 25, which does not fail: it delivers a
+            # stale run as though it were current. views-faoapi hit the same default
+            # from the other side (their #287) and pages the same way.
+            #
+            # The walk terminates on an EMPTY page rather than on a short one, and
+            # advances the offset by what it RECEIVED rather than by what it asked for.
+            # Both matter: Appwrite may grant less than the requested limit, and a walk
+            # that treats a short page as the end skips every row after it.
+            documents = []
+            reported_total = None
+            offset = 0
+            complete = False
+
+            for _ in range(MAX_METADATA_PAGES):
+                page = self.databases.list_documents(
+                    db_id,
+                    coll_id,
+                    queries=queries
+                    + [Query.limit(DEFAULT_PAGE_LIMIT), Query.offset(offset)],
+                )
+                batch = page.get("documents") or []
+                if reported_total is None:
+                    reported_total = page.get("total")
+                documents.extend(batch)
+                if not batch:
+                    complete = True
+                    break
+                offset += len(batch)
+
+            if not complete:
+                # The substrate kept handing back full pages. The usual cause is an
+                # ignored offset, and the one thing we must not do is return the rows
+                # we happen to hold as if they were the match.
+                logger.error(
+                    f"Search of {coll_id!r} did not terminate within "
+                    f"{MAX_METADATA_PAGES} pages; refusing to report a partial result"
+                )
+                return OperationResult(
+                    success=False,
+                    error=(
+                        f"Search incomplete: walk of {coll_id!r} exceeded the "
+                        f"{MAX_METADATA_PAGES}-page guard after "
+                        f"{len(documents)} documents"
+                    ),
+                    code="SEARCH_INCOMPLETE",
+                )
+
+            # The server told us how many documents match. Enumerating a different
+            # number means the walk cannot be certified, and an uncertifiable read must
+            # not be handed back as an answer — that conflation is the defect class this
+            # method was an instance of. A concurrent write during the walk lands here
+            # too; the caller retries rather than delivering a count nobody verified.
+            if reported_total is not None and len(documents) != reported_total:
+                logger.error(
+                    f"Search of {coll_id!r} enumerated {len(documents)} documents but "
+                    f"the collection reports total={reported_total}"
+                )
+                return OperationResult(
+                    success=False,
+                    error=(
+                        f"Search incomplete: enumerated {len(documents)} of a reported "
+                        f"{reported_total} documents in {coll_id!r}"
+                    ),
+                    code="SEARCH_INCOMPLETE",
+                )
 
             return OperationResult(
                 success=True,
-                data={"documents": result["documents"], "total": result["total"]},
+                data={"documents": documents, "total": len(documents)},
             )
 
         except AppwriteException as e:
