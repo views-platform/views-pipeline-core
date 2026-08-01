@@ -76,7 +76,6 @@ When adding a new SDK call, state its expected shape at the call site.
 from appwrite.client import Client
 from appwrite.services.storage import Storage
 from appwrite.services.databases import Databases
-from appwrite.services.account import Account
 from appwrite.services.users import Users
 from appwrite.input_file import InputFile
 from appwrite.id import ID
@@ -178,7 +177,6 @@ class AuthMethod(Enum):
 
     Attributes:
         API_KEY: Server-side API key authentication. Requires string credentials.
-        SESSION: User session authentication. Requires dict with email/password.
 
     Example:
         >>> config = AppwriteConfig(
@@ -188,7 +186,6 @@ class AuthMethod(Enum):
     """
 
     API_KEY = "api_key"
-    SESSION = "session"
 
 
 class CacheValidationResult(Enum):
@@ -336,7 +333,6 @@ class AppwriteConfig:
         ...     endpoint="https://cloud.appwrite.io/v1",
         ...     project_id="my_project",
         ...     credentials={"email": "user@example.com", "password": "secret"},
-        ...     auth_method=AuthMethod.SESSION
         ... )
     """
 
@@ -405,7 +401,6 @@ class AuthManager(ABC):
 
     See Also:
         ApiKeyAuth: Implementation for API key authentication.
-        SessionAuth: Implementation for user session authentication.
         AuthFactory: Factory for creating appropriate AuthManager instances.
     """
 
@@ -456,86 +451,6 @@ class ApiKeyAuth(AuthManager):
         client.set_key(credentials)
         return OperationResult(success=True)
 
-class SessionAuth(AuthManager):
-    """Session-based authentication handler for user-specific Appwrite access.
-
-    Authenticates using email/password credentials to create a user session.
-    Suitable for applications where user-specific permissions are needed.
-
-    Attributes:
-        account: Appwrite Account service instance after setup.
-        current_user_id: ID of the authenticated user.
-
-    Example:
-        >>> auth = SessionAuth()
-        >>> result = auth.setup(client, {
-        ...     "email": "user@example.com",
-        ...     "password": "secure_password"
-        ... })
-        >>> if result.success:
-        ...     user_id = result.data['user_id']
-    """
-
-    def __init__(self):
-        """Initialize SessionAuth with empty account and user ID."""
-        self.account = None
-        self.current_user_id = None
-
-    def setup(self, client: Client, credentials: Union[str, Dict[str, str]]) -> OperationResult:
-        """Configure session authentication by creating a user session.
-
-        Args:
-            client: Appwrite Client instance to configure.
-            credentials: Dictionary with 'email' and 'password' keys.
-
-        Returns:
-            OperationResult with success=True and data containing 'user_id'
-            on successful authentication, or success=False with error details.
-        """
-        if not isinstance(credentials, dict) or not all(k in credentials for k in ["email", "password"]):
-            return OperationResult(
-                success=False,
-                error="Session authentication requires dict with 'email' and 'password'",
-                code="INVALID_CREDENTIALS"
-            )
-        
-        self.account = Account(client)
-        client.set_key("")  # Clear API key for session auth
-        
-        session_result = self._create_session(credentials["email"], credentials["password"])
-        if not session_result.success:
-            return session_result
-        
-        self.current_user_id = session_result.data["user_id"]
-        return OperationResult(success=True, data={"user_id": self.current_user_id})
-
-    def _create_session(self, email: str, password: str) -> OperationResult:
-        """Create an email/password session with Appwrite.
-
-        Args:
-            email: User's email address.
-            password: User's password.
-
-        Returns:
-            OperationResult with session details on success, including
-            session_id, user_id, and creation timestamp.
-        """
-        try:
-            session = self.account.create_email_password_session(email, password)
-            return OperationResult(
-                success=True,
-                data={
-                    "session_id": session["$id"],
-                    "user_id": session["userId"],
-                    "created": session["$createdAt"]
-                }
-            )
-        except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=e.message,
-                code=e.type
-            )
 
 class AuthFactory:
     """Factory for creating authentication handler instances.
@@ -563,10 +478,7 @@ class AuthFactory:
         """
         if auth_method == AuthMethod.API_KEY:
             return ApiKeyAuth()
-        elif auth_method == AuthMethod.SESSION:
-            return SessionAuth()
-        else:
-            raise ValueError(f"Unsupported auth method: {auth_method}")
+        raise ValueError(f"Unsupported auth method: {auth_method}")
 
 # Cache Management
 @dataclass
@@ -2766,92 +2678,29 @@ class AppWriteFileModule:
             )
 
 
-    def get_current_user(self) -> OperationResult:
-        """Get current authenticated user information.
 
-        Only available when using session authentication.
+    def get_user_preferences(self, user_id: str) -> OperationResult:
+        """Get a user's preferences from Appwrite. Requires API-key authentication.
 
-        Returns:
-            OperationResult with user data including:
-                - user_id: User's ID
-                - email: User's email address
-                - name: User's display name
-                - email_verified: Whether email is verified
-
-        Example:
-            >>> result = manager.get_current_user()
-            >>> if result.success:
-            ...     print(f"User: {result.data['email']}")
-        """
-        if not isinstance(self.auth_manager, SessionAuth):
-            return OperationResult(
-                success=False,
-                error="User information requires session authentication",
-                code="AUTH_METHOD_ERROR"
-            )
-        
-        try:
-            user = self.auth_manager.account.get()
-            return OperationResult(
-                success=True,
-                data={
-                    "user_id": user["$id"],
-                    "email": user.get("email"),
-                    "name": user.get("name"),
-                    "email_verified": user.get("emailVerification", False)
-                }
-            )
-        
-        except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=e.message,
-                code=e.type
-            )
-
-    def get_user_preferences(self, user_id: Optional[str] = None) -> OperationResult:
-        """Get user preferences from Appwrite.
-
-        For session auth, gets current user's preferences.
-        For API key auth, requires user_id parameter.
+        `user_id` became required when session auth was deleted (#344): it was optional
+        only because a session could supply the current user implicitly. There is no
+        implicit user any more, so a caller that omits it is asking a question this
+        method cannot answer.
 
         Args:
-            user_id: Required for API key auth. Optional for session auth.
+            user_id: The user whose preferences to read.
 
         Returns:
-            OperationResult with preferences data.
-                code='USER_SESSION' or code='API_KEY' indicates auth type used.
-
-        Example:
-            >>> # With session auth
-            >>> result = manager.get_user_preferences()
-            >>>
-            >>> # With API key auth
-            >>> result = manager.get_user_preferences(user_id="user123")
+            OperationResult with the preferences, code='API_KEY'.
         """
         try:
-            if isinstance(self.auth_manager, SessionAuth):
-                preferences = self.auth_manager.account.get_prefs()
-                return OperationResult(
-                    success=True,
-                    data=preferences,
-                    code="USER_SESSION"
-                )
-            else:
-                if not user_id:
-                    return OperationResult(
-                        success=False,
-                        error="user_id parameter required for API key authentication",
-                        code="MISSING_USER_ID"
-                    )
-                
-                user_prefs = self.users.get_prefs(user_id)
-                return OperationResult(
-                    success=True,
-                    data=user_prefs,
-                    code="API_KEY"
-                )
-        
+            user_prefs = self.users.get_prefs(user_id)
+            return OperationResult(
+                success=True,
+                data=user_prefs,
+                code="API_KEY"
+            )
+
         except AppwriteException as e:
             return OperationResult(
                 success=False,

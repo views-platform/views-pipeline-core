@@ -199,6 +199,9 @@ correct.
 | **T1 has effectively fired** — the views-crafdapi cut is the second consumer-API clone | operator scheduling decision; views-appwrite#23 |
 | **S5 (#345) is time-boxed** — `appwrite` → optional extra is free only while 3.0.0 is unpublished and five repos are pinned | sequence before the crafdapi cut |
 | Two register tier decisions still unanswered | C-26 promotion, C-05 demotion |
+| **`get_user_preferences` has no caller on the platform** — it survived S4 because it had a live API-key branch, but "live" meant reachable, not reached. `get_current_user` went because it could only ever *fail*, which is a stronger justification | genuine deletion candidate for S11 |
+| **`AuthManager` is an ABC with exactly one implementation** after S4 — speculative generality by this repo's own WET-before-DRY rule. Flagged, not removed: #345 reshapes this area | revisit after S5 |
+| **The F4 cross-repo ratchet enforces nothing in CI** — `pytest.skip()` inside `xfail(strict=True)` reports SKIPPED, so it fires only for a developer with both repos checked out. A limit, not a defect: no CI mechanism here can see another repo's file | stated in the test |
 
 ---
 

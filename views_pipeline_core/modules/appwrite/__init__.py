@@ -6,7 +6,6 @@ from .file import (
     AppwriteConfig as AppwriteConfig,
     AuthManager as AuthManager,
     ApiKeyAuth as ApiKeyAuth,
-    SessionAuth as SessionAuth,
     AuthFactory as AuthFactory,
     CacheMetadata as CacheMetadata,
     CacheManager as CacheManager,
