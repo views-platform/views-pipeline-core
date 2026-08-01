@@ -109,15 +109,41 @@ GOVERNED_DIRS = [
 # governed the day it is first called rather than the day someone remembers to add it.
 _LIST_PREFIXES = ("list",)
 
-# Callables that return an OperationResult and therefore carry a success flag that a
-# caller must consult. Discarding one is shape three.
-_RESULT_RETURNING = {
-    "upload_file_with_metadata",
-    "create_metadata_document",
-    "delete_metadata_document",
-    "update_file_metadata",
-    "store_metadata_document",
-}
+def _result_returning_names() -> Set[str]:
+    """Every function that returns an ``OperationResult``, DERIVED from the code.
+
+    This was a hardcoded set of five names. Measured against the repo it watched **two**
+    functions out of thirty-one — and three of its five entries named functions that do
+    not exist. The check was green, and it was green by accident: a genuinely discarded
+    result in any of the other twenty-nine would have gone unseen.
+
+    That is the same failure as C-256's stale worklist and C-249's stale citations — a
+    fact recorded once, correct when written, and never re-derived. A guard against a
+    recurring defect class cannot itself be a snapshot. It now re-derives on every run,
+    so a new `OperationResult`-returning function is governed the moment it is written
+    rather than when somebody remembers to add it.
+
+    Scope note: this deliberately sweeps the WHOLE package, not just `GOVERNED_DIRS`.
+    An `OperationResult` is this repo's in-band failure signal wherever it appears, and
+    discarding one is the same defect in `managers/` as in `modules/appwrite/`.
+    """
+    names: Set[str] = set()
+    for path in sorted((REPO / "views_pipeline_core").rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        for fn in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            annotated = "OperationResult" in (ast.unparse(fn.returns) if fn.returns else "")
+            constructs = any(
+                isinstance(n, ast.Return)
+                and n.value is not None
+                and "OperationResult(" in ast.unparse(n.value)
+                for n in ast.walk(fn)
+            )
+            if annotated or constructs:
+                names.add(fn.name)
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +403,7 @@ def _bare_exception_handlers() -> List[str]:
 
 def _discarded_results() -> List[str]:
     findings = []
+    result_returning = _result_returning_names()
     for path, tree in _iter_governed_files():
         functions = _enclosing_functions(tree)
         qualified = _qualified_names(tree)
@@ -385,7 +412,7 @@ def _discarded_results() -> List[str]:
                 continue
             func = node.value.func
             name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-            if name in _RESULT_RETURNING:
+            if name in result_returning:
                 owner = _owner(functions, node.lineno, qualified)
                 findings.append(f"{_display(path)}:{node.lineno} {owner}() -> {name}")
     return sorted(findings)
@@ -455,7 +482,12 @@ def test_no_discarded_operation_result():
     """Shape three: a discarded result reported as success.
 
     Green today — the two sites that produced C-227 were fixed in #334, and this lands
-    as a pure ratchet so the third one cannot be written.
+    as a ratchet so the third one cannot be written.
+
+    The name set is derived, not listed. It was a hardcoded five names, three of which
+    did not exist, watching two of the thirty-one functions that actually return an
+    `OperationResult` (found by the S0–S4 sweep). The check was green then too — by
+    accident rather than by coverage.
     """
     discarded = _discarded_results()
     assert not discarded, (
@@ -550,3 +582,21 @@ class TestTheGuardCanActuallyFail:
             tmp_path, monkeypatch, _discarded_results,
         )
         assert not found
+
+
+def test_the_result_returning_set_is_derived_not_listed():
+    """The guard must not be able to go blind by omission.
+
+    A hardcoded set watched 2 of 31 functions and named 3 that did not exist, while
+    reporting green. Deriving it is the fix; this test is what stops it silently
+    reverting to a snapshot — if the set ever stops covering the obvious cases, the
+    check is decorative again.
+    """
+    names = _result_returning_names()
+
+    assert len(names) >= 25, (
+        f"only {len(names)} OperationResult-returning functions discovered; the sweep "
+        "measured 31, so the derivation has stopped seeing most of the surface"
+    )
+    for expected in ("upload_file_with_metadata", "search_files_by_metadata", "upload_data"):
+        assert expected in names, f"{expected} returns an OperationResult but is not governed"
