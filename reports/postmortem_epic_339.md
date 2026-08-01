@@ -202,6 +202,24 @@ for: `modules/appwrite/README.md` still showed `auth_method=AuthMethod.SESSION` 
 instructing readers to call symbols that now raise.** A `grep` for the deleted symbol across
 *code* is habit; across `.md`, ADRs, CICs and docstrings is not. It should be.
 
+### 5.4b A cross-repo impact claim needs the consumer's PIN read, not just its imports
+
+I told views-postprocessing their next clean install would break. It will not. They pin
+`views-pipeline-core = ">=2.1.3,<3.0.0"`, so they cannot resolve the release that made
+`appwrite` optional — and the 2.x they do resolve still declares it as a hard dependency.
+
+I had measured their **source** (two imports of our Appwrite modules) and drawn a
+conclusion about their **install**, without reading the one line that decides it. The
+correction came from the other repo, not from me — the fifth counting/scope error of this
+epic and the first found by someone else.
+
+They also corrected the remedy: I offered "declare the extra, or declare `appwrite`
+directly". Declaring it directly would assert a dependency they do not have, since they
+use our wrapper and never touch the SDK. Only `views-pipeline-core[appwrite]` is honest.
+
+**Rule: when claiming a downstream repo breaks, read its pin and the resolved version's
+metadata — not its import lines.**
+
 ### 5.5 A packaging change cannot be verified from the environment that has the package
 
 S5 made `appwrite` an optional extra. Nine subprocess probes passed, three of them running
@@ -285,6 +303,21 @@ correct.
    either time.
 
 ---
+
+## 7b. The thing "Resolved" does not mean
+
+views-postprocessing's reply surfaced something that applies to **nine** of this epic's
+resolutions at once: C-241 is marked Resolved here and #341 is closed, but the fix ships in
+**3.0.0, which is unpublished**, and the consumer pins `<3.0.0`. *The delivery path that
+actually experiences the Tier 1 is still running the defective code.*
+
+They reached the same conclusion from their seat, unprompted: *"we do not have the Tier-1
+fix either, despite #341 being closed."*
+
+The status is accurate for this repo and misleading at platform level. That is not a defect
+in the fixes; it is a gap in what a register serving a **platform** can mean by "Resolved"
+when it lives in a **package**. Registered as C-263, with the cheap countermeasure — an
+entry whose remedy is unpublished says so in its status — rather than a mechanism.
 
 ## 8. Open items carried out of S0–S3
 
