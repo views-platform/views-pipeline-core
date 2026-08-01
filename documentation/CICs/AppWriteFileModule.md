@@ -191,13 +191,43 @@ if result.success:
 
 ## 10. Test Alignment
 
-- **Green tests:** Unit tests with mocked Appwrite SDK can verify hash computation,
-  deduplication logic, cache validation, and `OperationResult` construction.
-- **Beige tests:** Integration tests against a live or emulated Appwrite instance
-  verify end-to-end upload/download/metadata workflows.
-- **Red tests:** Tests should verify that invalid credentials raise `ValueError`,
-  that duplicate uploads with `allow_metadata_only_updates=True` skip re-upload,
-  and that expired cache entries trigger fresh downloads.
+**Corrected 2026-08-01 (register C-246, story #350).** The previous text promised
+*"Beige tests: Integration tests against a live or emulated Appwrite instance verify
+end-to-end upload/download/metadata workflows."* **No such tier ever existed.** That is
+worse than the §10 drift C-86 fixed elsewhere on 2026-05-21: it asserted a tier that was
+never built, and it was cited as reassurance while the seam's tests could only agree with
+their own mocks. What follows describes what exists.
+
+Tiers are annotated with **fidelity** as well as colour (ADR-005, 2026-08-01 amendment) —
+colour states a test's intent; fidelity states whether it can observe anything the author
+did not already believe.
+
+- **Green — asserted.** `tests/test_modules/test_appwrite.py`: hash computation,
+  deduplication logic, cache validation and `OperationResult` construction, against
+  hand-written doubles.
+- **Green/Beige — derived.** `test_appwrite_pagination.py`, `test_appwrite_reconcile.py`:
+  doubles built from the SDK's **own** query encoding, which return 25 rows when no
+  `Query.limit` is supplied because that is what the service does. They catch mechanism
+  errors — a walk that forgets to page, mis-advances an offset, or mistakes a capped page
+  for the end.
+- **Beige — recorded.** `test_appwrite_recorded_shape.py`, driven by
+  `tests/fixtures/appwrite/list_documents_shape.json`, captured from the live service on
+  2026-08-01: **25 documents returned of a reported 461** when no limit was supplied. Its
+  provenance is committed; coordinates are fingerprinted rather than published.
+- **Beige — substrate.** `test_appwrite_sdk_contract.py`: drives the **real installed
+  SDK** with the transport patched, pinning content-type dispatch and error types so an
+  SDK upgrade fails at upgrade time rather than mid-run.
+- **Red — asserted and derived.** `test_appwrite_dedup_characterization.py` parametrizes
+  the delete decision over eleven error outcomes including unrecognised ones, asserting
+  the invariant *delete only on a positive `storage_file_not_found`*;
+  `test_credential_redaction.py` and `test_appwrite_timeout.py` cover secret leakage and
+  bounded calls.
+- **Substrate — structural.** `test_import_purity.py` and `test_read_completeness.py`
+  observe the real import graph and the real AST in a subprocess, not a double.
+
+**What is still absent:** no test exercises a live end-to-end upload/download cycle. The
+recorded tier covers the read shape that caused the 2026-08-01 incident; it does not
+cover writes.
 
 ---
 
