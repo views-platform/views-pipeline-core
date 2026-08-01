@@ -81,6 +81,11 @@ from appwrite.input_file import InputFile
 from appwrite.id import ID
 from appwrite.exception import AppwriteException
 from appwrite.query import Query
+
+from views_pipeline_core.modules.appwrite.transport import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    install_request_timeout,
+)
 from typing import List, Optional, Dict, Any, Union
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -406,6 +411,28 @@ class AppwriteConfig:
                 f"or build the config from validated environment variables via "
                 f"PredictionStoreConfig.from_environment().to_appwrite_config()."
             )
+
+
+def exception_message(exception: Exception) -> str:
+    """The message of an ``AppwriteException`` as a string, always.
+
+    The SDK sets ``AppwriteException.message`` to whatever it was handed. For an API
+    error that is a string; for a **transport** failure it is the underlying exception
+    OBJECT — so ``"something" in e.message`` raises
+    ``TypeError: argument of type 'ConnectTimeout' is not iterable``.
+
+    That was unreachable until #347: before timeouts existed, a hung call never returned
+    at all, so no transport exception ever reached these handlers. Bounding the calls
+    made the path reachable and turned an indefinite hang into a crash — which is
+    precisely why þing-01 required the hang DRILLED before a value was shipped, and why
+    that sequencing was not optional.
+
+    Six call sites compared against ``e.message`` directly. This is the coercion they all
+    needed; the deeper fix is to branch on ``e.type`` instead of prose (register C-235).
+    """
+    message = getattr(exception, "message", None)
+    return message if isinstance(message, str) else str(message if message is not None else exception)
+
 
 # Authentication Classes
 class AuthManager(ABC):
@@ -1142,7 +1169,7 @@ class AppwriteMetadataHandler:
 
         except AppwriteException as e:
             # If the file_hash attribute doesn't exist, create it and try again
-            if "Attribute not found in schema: file_hash" in e.message:
+            if "Attribute not found in schema: file_hash" in exception_message(e):
                 logger.info("file_hash attribute not found, creating it...")
                 try:
                     self._create_attribute_by_type(
@@ -1348,6 +1375,12 @@ class AppWriteFileModule:
         #     raise ValueError("path_manager must be an instance of ModelPathManager")
 
         self.config = config
+        # C-15 / #347: bound every HTTP call before the client can make one. The SDK
+        # offers no timeout hook, so this installs one at its transport reference — see
+        # modules/appwrite/transport.py for why that is the narrowest option available.
+        # Idempotent, so constructing several managers does not stack proxies.
+        install_request_timeout()
+
         self.client = Client()
         self.client.set_endpoint(config.endpoint).set_project(config.project_id)
         
@@ -2634,7 +2667,7 @@ class AppWriteFileModule:
         
         except AppwriteException as e:
             # Check if this is a bucket not found error
-            if "Storage bucket with the requested ID could not be found" in e.message:
+            if "Storage bucket with the requested ID could not be found" in exception_message(e):
                 return OperationResult(
                     success=False,
                     error=e.message,
