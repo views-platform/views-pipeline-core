@@ -1644,21 +1644,51 @@ class AppWriteFileModule:
                 except AppwriteException as query_error:
                     logger.warning(f"Filename query failed, falling back to list: {query_error}")
                     # Fallback to original list-based approach if query fails
+                    # C-258. This walk decides whether a duplicate EXISTS, so a short
+                    # read does not return fewer files — it returns NOT_FOUND, which the
+                    # caller reads as "no duplicate" and uploads one. Same rule as
+                    # #341: terminate on an EMPTY page (Appwrite may grant fewer rows
+                    # than asked), advance by what was RECEIVED, bound the loop, and
+                    # certify against the substrate's own total before answering.
                     all_files = []
                     offset = 0
                     limit = DEFAULT_PAGE_LIMIT
-                    
-                    while True:
+                    reported_total = None
+                    complete = False
+
+                    for _ in range(MAX_METADATA_PAGES):
                         result = self.storage.list_files(
                             bucket_id, [Query.limit(limit), Query.offset(offset)]
                         )
+                        if reported_total is None:
+                            reported_total = result.get("total")
                         files_chunk = result.get("files", [])
                         all_files.extend(files_chunk)
-                        
-                        if len(files_chunk) < limit:
+                        if not files_chunk:
+                            complete = True
                             break
-                        offset += limit
-                    
+                        offset += len(files_chunk)
+
+                    if not complete or (
+                        reported_total is not None and len(all_files) != reported_total
+                    ):
+                        # Never NOT_FOUND from a walk that did not finish: "I could not
+                        # look" must not be delivered as "it is not there".
+                        logger.error(
+                            f"Duplicate check for {filename!r} could not enumerate "
+                            f"bucket {bucket_id!r}: collected {len(all_files)} of a "
+                            f"reported {reported_total}"
+                        )
+                        return OperationResult(
+                            success=False,
+                            error=(
+                                f"Duplicate check incomplete: enumerated "
+                                f"{len(all_files)} of a reported {reported_total} files "
+                                f"in {bucket_id!r}"
+                            ),
+                            code="LISTING_INCOMPLETE",
+                        )
+
                     for file in all_files:
                         if file["name"] == filename:
                             return OperationResult(

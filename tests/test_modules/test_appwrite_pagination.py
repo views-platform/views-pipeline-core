@@ -22,6 +22,8 @@ Covers C-241 (Tier 1) and the paging half of Cluster J.
 
 import json
 from pathlib import Path
+
+from appwrite.exception import AppwriteException
 from unittest.mock import Mock
 
 import pytest
@@ -31,6 +33,7 @@ from views_pipeline_core.modules.appwrite.file import (
     AppwriteConfig,
     AppwriteMetadataHandler,
     AuthMethod,
+    OperationResult,
     DEFAULT_PAGE_LIMIT,
 )
 
@@ -248,3 +251,106 @@ class TestIncompleteWalksAreNotReportedAsComplete:
 
         assert not result.success, "a non-terminating walk reported success"
         assert len(databases.calls) < 10_000, "the page guard did not bound the walk"
+
+
+class TestDedupFallbackWalkIsComplete:
+    """C-258 — the third occurrence of one pattern, found by the S0-S3 sweep.
+
+    `_file_exists_by_hash`'s FOUND_BY_NAME fallback paged with a short-page terminator
+    and a fixed stride, and had no total-guard. That does not return "fewer files": the
+    filename is absent from the collected list, the method returns NOT_FOUND, and the
+    caller reads that as "no duplicate exists" and uploads one.
+
+    The S3 guard does not catch it, because the call DOES carry `Query.limit` — the
+    guard governs whether a limit is supplied, not whether the walk terminates
+    correctly. These tests cover what the guard structurally cannot.
+    """
+
+    class _NoHashMatch:
+        """Metadata holds no matching hash, so the filename fallback is reached.
+
+        `NOT_FOUND` here is the genuine article — the hash really is absent — which is
+        exactly the case where the fallback walk's answer becomes the decision.
+        """
+
+        def check_file_exists_by_hash(self, *args, **kwargs):
+            return OperationResult(success=False, code="NOT_FOUND")
+
+    def _manager(self, config, storage):
+        from views_pipeline_core.modules.appwrite.file import AppWriteFileModule
+
+        manager = AppWriteFileModule.__new__(AppWriteFileModule)
+        manager.config = config
+        manager.storage = storage
+        manager.databases = _SubstrateFakeDatabases([])
+        manager.metadata_manager = self._NoHashMatch()
+        return manager
+
+    def test_a_capped_page_does_not_end_the_fallback_walk(self, config):
+        """The server grants 40 rows of a requested 100; the target is at index 250."""
+
+        class _CappingStorage:
+            def __init__(self, files):
+                self.files = files
+
+            def list_files(self, bucket_id, queries=None):
+                import json
+
+                limit, offset = 25, 0
+                for raw in queries or []:
+                    parsed = json.loads(raw)
+                    if parsed["method"] == "limit":
+                        limit = parsed["values"][0]
+                    elif parsed["method"] == "offset":
+                        offset = parsed["values"][0]
+                    elif parsed["method"] == "equal":
+                        # The primary name query. Production catches AppwriteException
+                        # here and falls back to the full-bucket walk, so the double
+                        # must raise the type the code actually handles — a RuntimeError
+                        # would just propagate and prove nothing.
+                        raise AppwriteException("filename query unsupported")
+                return {
+                    "files": self.files[offset : offset + min(limit, 40)],
+                    "total": len(self.files),
+                }
+
+        files = [{"$id": f"f{i}", "name": f"other_{i}.parquet"} for i in range(300)]
+        files[250] = {"$id": "target", "name": "wanted.parquet"}
+        manager = self._manager(config, _CappingStorage(files))
+
+        result = manager._file_exists_by_hash(
+            bucket_id="bucket", file_hash="deadbeef", filename="wanted.parquet"
+        )
+
+        assert result.success, (
+            "the walk stopped at the first capped page, so the file at index 250 was "
+            "never seen and the method reported NOT_FOUND — the caller will now upload "
+            "a duplicate"
+        )
+        assert result.data["$id"] == "target"
+
+    def test_a_substrate_ignoring_offset_cannot_hang_the_walk(self, config):
+        """`while True` with no backstop, in a file that defines MAX_METADATA_PAGES."""
+
+        class _StuckStorage:
+            def list_files(self, bucket_id, queries=None):
+                import json
+
+                for raw in queries or []:
+                    if json.loads(raw)["method"] == "equal":
+                        raise AppwriteException("filename query unsupported")
+                return {
+                    "files": [{"$id": f"f{i}", "name": "nope.parquet"} for i in range(100)],
+                    "total": 10_000_000,
+                }
+
+        manager = self._manager(config, _StuckStorage())
+        result = manager._file_exists_by_hash(
+            bucket_id="bucket", file_hash="deadbeef", filename="wanted.parquet"
+        )
+
+        assert not result.success
+        assert result.code != "NOT_FOUND", (
+            "a walk that could not complete reported the file as absent; NOT_FOUND is a "
+            "statement about the bucket, not about the walk"
+        )

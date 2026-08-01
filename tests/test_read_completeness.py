@@ -31,6 +31,24 @@ incompleteness), C-26 (truncation inside an adapter, not at a read), C-249 (the 
 correctly marked incomplete; the renderer ignored the mark), and C-183/184/185 (you
 cannot guard what you never observe). This guard is a floor, not a ceiling.
 
+## What this guard does NOT check — the limitation that let C-258 through
+
+**It asks whether a limit is SUPPLIED. It does not ask whether the walk TERMINATES
+correctly.** Those are different questions, and the second one is where the damage lives.
+
+`_file_exists_by_hash`'s fallback carried a perfectly good `Query.limit(limit)` on every
+request and was still wrong: it broke out of the loop on a SHORT page, advanced its
+offset by what it asked for rather than what it received, and never compared its total
+against the substrate's. A capped page therefore ended the walk early and the method
+answered `NOT_FOUND` — authorising a duplicate upload. This guard was green throughout
+(C-258, found by the S0–S3 retrospective sweep, not by this file).
+
+Walk *shape* is covered by tests instead — `test_appwrite_pagination.py` drives each walk
+against a substrate double that caps pages and ignores offsets. Encoding the rule here as
+an AST check would mean recognising loop shapes, which is a different and much larger
+piece of analysis. Stated so that green from this guard is never read as "the walks are
+correct".
+
 ## What this analysis cannot see — a stated limit, not a silent one
 
 `_names_bound_to_a_limit` is **flow-insensitive**: it asks whether a variable ever
