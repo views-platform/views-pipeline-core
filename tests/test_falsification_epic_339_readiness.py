@@ -212,12 +212,35 @@ def test_f3_faoapi_pages_in_every_metadata_path():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "F4 (open): #344 deleted SessionAuth; views-appwrite's coordinate_registry.toml "
+        "still cites file.py:359-412 for it. Cross-repo, tracked at views-appwrite#24 — "
+        "XPASSes the moment that registry is updated, which is the point"
+    ),
+)
 def test_f4_deleting_sessionauth_must_not_orphan_the_seam_registry():
-    """FAILS TODAY as a reminder, by design.
+    """The cross-repo half of #344, which this repo cannot close alone.
 
-    Passes only once #344 either (a) has not yet deleted SessionAuth, or (b) has
-    deleted it AND the cross-repo registry entry has been updated. It exists so the
-    deletion cannot land while the registry still cites file.py:359-412.
+    SessionAuth is now gone from the source. views-appwrite's canonical coordinate
+    registry still cites it **by file and line** — `file.py:359-412 (SessionAuth)` — so
+    the platform's authoritative coordinate source points at code that no longer exists.
+    That is C-239's drift class, across a repo boundary.
+
+    Marked `xfail(strict=True)` rather than left failing: this repo has done its half,
+    and the other half is an issue filed against views-appwrite (#24). When that registry
+    is updated this XPASSes, `strict=True` turns the pass into a failure, and whoever
+    sees it converts the stub into a plain assertion. An xfail that silently starts
+    passing is the problem this suite documents, so it is not allowed to.
+
+    **Where this is actually enforced: a developer's machine, not CI.** Verified rather
+    than assumed — `pytest.skip()` inside `xfail(strict=True)` reports SKIPPED, because
+    `strict` only adjudicates pass/fail outcomes. CI has no sibling checkout, so it skips
+    here and enforces nothing; that is not a defect to fix but a limit to state, since no
+    mechanism in this repo's CI can see another repo's file. The ratchet fires for
+    whoever has both repos checked out — which is whoever would be in a position to
+    update the registry.
     """
     registry = (
         REPO.parent

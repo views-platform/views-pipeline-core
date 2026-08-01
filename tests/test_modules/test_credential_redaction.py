@@ -66,16 +66,22 @@ class TestAppwriteConfigRedaction:
     def test_str_does_not_render_the_key(self, appwrite_config):
         assert _SECRET not in str(appwrite_config)
 
-    def test_session_credentials_are_also_redacted(self, appwrite_config):
-        """Session auth carries an email and password in the same field."""
+    def test_a_structured_credential_is_redacted_whole(self, appwrite_config):
+        """Redaction must not depend on the credential being a string.
+
+        This test used to construct `AuthMethod.SESSION` with an email/password dict.
+        Session auth was deleted in #344, so that mode no longer exists — but the
+        property it was checking outlives it: `credentials` is typed loosely, and a
+        future auth mode carrying a structured secret must not leak through a repr that
+        only knew how to hide strings. Kept, re-pointed at the property rather than at
+        the retired mode.
+        """
         import dataclasses
 
-        session = dataclasses.replace(
-            appwrite_config,
-            auth_method=AuthMethod.SESSION,
-            credentials={"email": "a@b.c", "password": "hunter2"},
+        structured = dataclasses.replace(
+            appwrite_config, credentials={"token": "hunter2", "scope": "files.read"}
         )
-        assert "hunter2" not in repr(session)
+        assert "hunter2" not in repr(structured)
 
     def test_non_secret_fields_are_still_visible(self, appwrite_config):
         """Redaction must not blind the diagnostics it shares a line with.

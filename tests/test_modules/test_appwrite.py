@@ -18,7 +18,6 @@ from views_pipeline_core.modules.appwrite.file import (
     AppwriteMetadataHandler,
     AuthFactory,
     ApiKeyAuth,
-    SessionAuth,
 )
 from appwrite.exception import AppwriteException
 
@@ -51,23 +50,6 @@ def api_key_config(mock_path_manager):
     )
 
 
-@pytest.fixture
-def session_config(mock_path_manager):
-    """Session-based authentication configuration"""
-    return AppwriteConfig(
-        endpoint="https://cloud.appwrite.io/v1",
-        project_id="test_project",
-        credentials={"email": "test@example.com", "password": "password123"},
-        auth_method=AuthMethod.SESSION,
-        cache_dir="/tmp/test_cache",
-        path_manager=mock_path_manager,
-        bucket_id="test_bucket",
-        bucket_name="Test Bucket",
-        collection_id="test_collection",
-        collection_name="Test Collection",
-        database_id="test_database",
-        database_name="Test Database",
-    )
 
 
 @pytest.fixture
@@ -175,9 +157,6 @@ class TestAuthFactory:
         auth = AuthFactory.create_auth(AuthMethod.API_KEY)
         assert isinstance(auth, ApiKeyAuth)
 
-    def test_create_session_auth(self):
-        auth = AuthFactory.create_auth(AuthMethod.SESSION)
-        assert isinstance(auth, SessionAuth)
 
     def test_unsupported_auth_method(self):
         with pytest.raises(ValueError):
@@ -200,46 +179,6 @@ class TestApiKeyAuth:
         assert result.code == "INVALID_CREDENTIALS"
 
 
-class TestSessionAuth:
-    def test_setup_success(self, mock_client, mock_account):
-        auth = SessionAuth()
-        mock_account.create_email_password_session.return_value = {
-            "$id": "session123",
-            "userId": "user123",
-            "$createdAt": "2025-10-22T12:00:00.000Z",
-        }
-        
-        with patch("views_pipeline_core.modules.appwrite.file.Account", return_value=mock_account):
-            result = auth.setup(
-                mock_client,
-                {"email": "test@example.com", "password": "password123"}
-            )
-        
-        assert result.success
-        assert result.data["user_id"] == "user123"
-        mock_client.set_key.assert_called_once_with("")
-
-    def test_setup_invalid_credentials(self, mock_client):
-        auth = SessionAuth()
-        result = auth.setup(mock_client, "invalid_string")
-        
-        assert not result.success
-        assert result.code == "INVALID_CREDENTIALS"
-
-    def test_setup_session_creation_failure(self, mock_client, mock_account):
-        auth = SessionAuth()
-        mock_account.create_email_password_session.side_effect = AppwriteException(
-            "Invalid credentials", 401, "user_invalid_credentials"
-        )
-        
-        with patch("views_pipeline_core.modules.appwrite.file.Account", return_value=mock_account):
-            result = auth.setup(
-                mock_client,
-                {"email": "test@example.com", "password": "wrong_password"}
-            )
-        
-        assert not result.success
-        assert result.code == "user_invalid_credentials"
 
 
 # Test CacheManager
@@ -674,27 +613,6 @@ class TestErrorHandling:
             assert not result.success
             assert result.code == "storage_file_not_found"
 
-    # Remove the invalid config test or update it to test actual validation
-    # The config doesn't validate credential types in __post_init__, so this test is invalid
-    # Option 1: Remove the test
-    # Option 2: Add actual validation to AppwriteConfig and test it
-    # For now, let's test that initialization succeeds (which is the actual behavior)
-    def test_config_initialization_with_session_credentials(self, mock_path_manager):
-        # This should succeed - the config accepts dict credentials
-        config = AppwriteConfig(
-            endpoint="https://cloud.appwrite.io/v1",
-            project_id="test_project",
-            credentials={"email": "test@test.com", "password": "pass"},
-            auth_method=AuthMethod.SESSION,
-            path_manager=mock_path_manager,
-            bucket_id="test_bucket",
-            bucket_name="Test Bucket",
-            collection_id="test_collection",
-            collection_name="Test Collection",
-            database_id="test_database",
-            database_name="Test Database",
-        )
-        assert config.credentials == {"email": "test@test.com", "password": "pass"}
 
 
 # Test OperationResult
