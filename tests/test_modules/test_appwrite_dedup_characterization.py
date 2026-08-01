@@ -307,3 +307,155 @@ class TestErrorTypePropagation:
         assert not result.success
         # The distinguishing information exists at the branch that ignores it.
         assert result.code == "general_unauthorized_scope"
+
+
+# ===========================================================================
+# C-248 — assert the INVARIANT, not the cases we happened to find.
+#
+# The tests above pin five outcomes: present, storage_file_not_found,
+# storage_bucket_not_found, general_unauthorized_scope, and code=None. Those are the
+# codes identified AFTER the defect was found — regression tests wearing red. A code
+# nobody has thought of, including one a future SDK or server version introduces, is
+# untested, and the safe behaviour for such a code is exactly what matters.
+#
+# The rule the code implements is one sentence:
+#
+#     Delete the metadata document ONLY on a positive `storage_file_not_found`.
+#     Everything else — including anything unrecognised — is INDETERMINATE and must
+#     keep the document.
+#
+# The match is positive rather than a negation precisely so an unknown code fails safe.
+# These tests assert that, so adding an error code requires no new test to be covered.
+# ===========================================================================
+
+import pytest as _pytest
+
+from views_pipeline_core.modules.appwrite.file import (
+    APPWRITE_FILE_NOT_FOUND,
+    _classify_storage_presence,
+    _StoragePresence,
+)
+
+#: Codes Appwrite is known to emit, plus shapes that are not codes at all. None of them
+#: is `storage_file_not_found`, so every one of them must be INDETERMINATE.
+_NON_ABSENCE_OUTCOMES = [
+    "storage_bucket_not_found",
+    "general_unauthorized_scope",
+    "general_argument_invalid",
+    "general_rate_limit_exceeded",
+    "user_unauthorized",
+    "document_not_found",          # a DIFFERENT not-found — must not authorise a delete
+    "storage_file_type_unsupported",
+    "general_server_error",
+    "a_code_appwrite_has_not_invented_yet",
+    "",
+    None,                           # a 502 whose body was not JSON
+]
+
+
+@_pytest.mark.parametrize("code", _NON_ABSENCE_OUTCOMES)
+def test_only_a_positive_file_not_found_is_treated_as_absence(code):
+    """The invariant, over every outcome that is not the one code that means absent."""
+    result = OperationResult(success=False, error="whatever", code=code)
+
+    assert _classify_storage_presence(result) is _StoragePresence.INDETERMINATE, (
+        f"code={code!r} was read as evidence the file is absent. Only a positive "
+        f"{APPWRITE_FILE_NOT_FOUND!r} may authorise deleting a metadata document; an "
+        "unrecognised code must fail safe (C-231, C-248)."
+    )
+
+
+def test_the_one_code_that_does_mean_absence():
+    """The other half — the invariant must not be vacuous."""
+    result = OperationResult(success=False, error="not found", code=APPWRITE_FILE_NOT_FOUND)
+    assert _classify_storage_presence(result) is _StoragePresence.ABSENT
+
+
+def test_success_is_presence_regardless_of_code():
+    """A successful read is present even if a code rides along."""
+    assert (
+        _classify_storage_presence(
+            OperationResult(success=True, data={"$id": "x"}, code=APPWRITE_FILE_NOT_FOUND)
+        )
+        is _StoragePresence.PRESENT
+    )
+
+
+@_pytest.mark.parametrize("code", _NON_ABSENCE_OUTCOMES)
+def test_the_replace_path_delete_is_classified_by_the_same_rule(manager, payload, code):
+    """The THIRD call site, untested until now (#349).
+
+    Reached when `_file_exists_by_hash` returns **FOUND_BY_NAME** — same filename, a
+    different hash — so the old file is deleted and replaced. That delete's result is
+    classified by the same helper, and a failure read as "the file is gone" would delete
+    the document too, orphaning a file that is still there. One of the three
+    pairing-breaking paths `modules/appwrite/reconcile` exists to enumerate.
+
+    Note this drives the real `upload_file_with_metadata` rather than `_run_dedup`,
+    which stubs out the branch under test.
+    """
+    manager._require_containers = Mock(return_value=None)
+    manager.databases.list_documents = Mock(return_value={"total": 0, "documents": []})
+    manager.metadata_manager.check_file_exists_by_hash = Mock(
+        return_value=OperationResult(
+            success=True,
+            data={"fileId": "old_file_id", "$id": "old_doc_id"},
+            code="FOUND_BY_NAME",
+        )
+    )
+    manager.delete_file = Mock(
+        return_value=OperationResult(success=False, error="nope", code=code)
+    )
+    manager.upload_file = Mock(
+        return_value=OperationResult(success=True, data={"$id": "new"}, code="CREATED")
+    )
+
+    result = manager.upload_file_with_metadata(
+        bucket_id="test_bucket",
+        file_path=str(payload),
+        filename=payload.name,
+        metadata={"name": "m", "loa": "pgm", "category": "forecast"},
+    )
+
+    assert not result.success, (
+        f"a delete_file failure with code={code!r} was allowed to proceed; only a "
+        f"positive {APPWRITE_FILE_NOT_FOUND!r} means the old file is genuinely gone"
+    )
+    assert "orphan" in (result.error or "").lower()
+
+
+def test_the_replace_path_proceeds_when_the_old_file_is_genuinely_gone(manager, payload):
+    """The other half — the refusal must not be unconditional."""
+    manager._require_containers = Mock(return_value=None)
+    manager.databases.list_documents = Mock(return_value={"total": 0, "documents": []})
+    manager.metadata_manager.check_file_exists_by_hash = Mock(
+        return_value=OperationResult(
+            success=True,
+            data={"fileId": "old_file_id", "$id": "old_doc_id"},
+            code="FOUND_BY_NAME",
+        )
+    )
+    manager.delete_file = Mock(
+        return_value=OperationResult(
+            success=False, error="gone", code=APPWRITE_FILE_NOT_FOUND
+        )
+    )
+    manager.upload_file = Mock(
+        return_value=OperationResult(success=True, data={"$id": "new"}, code="CREATED")
+    )
+    manager._store_metadata_document = Mock(
+        return_value=OperationResult(success=True, data={"$id": "doc"}, code="CREATED")
+    )
+    manager.databases.delete_document = Mock(return_value={})
+
+    result = manager.upload_file_with_metadata(
+        bucket_id="test_bucket",
+        file_path=str(payload),
+        filename=payload.name,
+        metadata={"name": "m", "loa": "pgm", "category": "forecast"},
+    )
+
+    assert result.success, (
+        "a positive storage_file_not_found means the old file really is gone, so the "
+        f"replace must proceed: {result.error}"
+    )
