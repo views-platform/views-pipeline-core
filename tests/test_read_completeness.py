@@ -99,10 +99,32 @@ import pathlib
 from typing import Dict, List, Set, Tuple
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-GOVERNED_DIRS = [
+
+# The three checks have DIFFERENT natural territories, and collapsing them into one
+# `GOVERNED_DIRS` put the guard on the wrong ground (found by the S0-S5 sweep).
+#
+# Checks 1 and 2 are about talking to a substrate: an unbounded `list_*` and a bare
+# `except` around a read only mean something where the SDK is actually called.
+#
+# Check 3 is not. An `OperationResult` is **this repo's in-band failure signal wherever
+# it appears**, and discarding one is the same defect in `managers/` as in
+# `modules/appwrite/`. Scoping it to the vendor directories meant the guard could not see
+# `savers.py`, `io.py`, `model.py`, or `sampled_forecast_publisher.py` — and C-227, the
+# flagship instance of this very defect class, was **"both call sites discard the
+# result"**, in exactly those files. A guard blind to where its own headline defect
+# happened is measuring the wrong territory.
+#
+# Nothing is currently broken by this: a package-wide sweep finds zero discarded results.
+# The widening is preventive, and it is the difference between a check that would have
+# caught C-227 and one that would not.
+VENDOR_DIRS = [
     REPO / "views_pipeline_core" / "modules" / "appwrite",
     REPO / "views_pipeline_core" / "modules" / "datastore",
 ]
+WHOLE_PACKAGE = [REPO / "views_pipeline_core"]
+
+# Retained: the substrate-facing checks still mean what they meant.
+GOVERNED_DIRS = VENDOR_DIRS
 
 # Any attribute call whose name starts with one of these is a paging surface. Appwrite
 # names them consistently, and matching on the prefix means a NEW list endpoint is
@@ -242,8 +264,8 @@ def _display(path: pathlib.Path) -> str:
         return path.name
 
 
-def _iter_governed_files():
-    for directory in GOVERNED_DIRS:
+def _iter_governed_files(directories=None):
+    for directory in directories if directories is not None else GOVERNED_DIRS:
         for path in sorted(directory.rglob("*.py")):
             if "__pycache__" in path.parts:
                 continue
@@ -404,7 +426,8 @@ def _bare_exception_handlers() -> List[str]:
 def _discarded_results() -> List[str]:
     findings = []
     result_returning = _result_returning_names()
-    for path, tree in _iter_governed_files():
+    # WHOLE_PACKAGE, not GOVERNED_DIRS — see the note beside those constants.
+    for path, tree in _iter_governed_files(WHOLE_PACKAGE):
         functions = _enclosing_functions(tree)
         qualified = _qualified_names(tree)
         for node in ast.walk(tree):
@@ -510,7 +533,11 @@ def _analyse(source: str, tmp_path, monkeypatch, finder):
     )
     import tests.test_read_completeness as guard
 
+    # Both territories, because the finders no longer share one: checks 1 and 2 read
+    # GOVERNED_DIRS, check 3 reads WHOLE_PACKAGE. Patching only the first is what made
+    # this helper miss the check-3 self-test after the territory split.
     monkeypatch.setattr(guard, "GOVERNED_DIRS", [tmp_path])
+    monkeypatch.setattr(guard, "WHOLE_PACKAGE", [tmp_path])
     return finder()
 
 
@@ -600,3 +627,39 @@ def test_the_result_returning_set_is_derived_not_listed():
     )
     for expected in ("upload_file_with_metadata", "search_files_by_metadata", "upload_data"):
         assert expected in names, f"{expected} returns an OperationResult but is not governed"
+
+
+def test_the_discard_check_reaches_where_c227_actually_happened():
+    """The territory fix, asserted rather than trusted.
+
+    C-227 was "both call sites discard the result" — and those call sites are
+    `managers/prediction/io.py`, `managers/prediction/savers.py` and
+    `managers/ensemble/sampled_forecast_publisher.py`, none of which is a vendor module.
+    Scoped to `VENDOR_DIRS` the check could not see any of them, so the guard against
+    Cluster J was blind to its own flagship instance.
+    """
+    scanned = {str(p.relative_to(REPO)) for p, _ in _iter_governed_files(WHOLE_PACKAGE)}
+
+    for site in (
+        "views_pipeline_core/managers/prediction/io.py",
+        "views_pipeline_core/managers/prediction/savers.py",
+        "views_pipeline_core/managers/ensemble/sampled_forecast_publisher.py",
+        "views_pipeline_core/managers/model/model.py",
+    ):
+        assert site in scanned, f"check 3 cannot see {site}, where C-227's class lives"
+
+
+def test_the_substrate_checks_stay_on_the_vendor_modules():
+    """The other half: widening check 3 must not widen checks 1 and 2.
+
+    A bare `except Exception` in `managers/` is usually a legitimate orchestration
+    handler; the register's rule is specifically about the storage modules. Widening
+    everything would produce exactly the allowlist-into-uselessness failure C-256
+    records.
+    """
+    vendor = {str(p.relative_to(REPO)) for p, _ in _iter_governed_files(VENDOR_DIRS)}
+
+    assert all(
+        p.startswith("views_pipeline_core/modules/") for p in vendor
+    ), f"the substrate checks leaked outside modules/: {sorted(vendor)[:3]}"
+    assert "views_pipeline_core/managers/prediction/savers.py" not in vendor
