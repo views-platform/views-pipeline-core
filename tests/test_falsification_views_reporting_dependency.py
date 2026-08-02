@@ -105,15 +105,14 @@ class TestHardF5_ADR054DeclaresIntentionalNonDependency:
     Severity: Hard falsification — documentation directly contradicts the 'bug' framing.
     """
 
-    @pytest.mark.skip(reason="Falsification stub — ADR-054 governs this decision")
-    def test_adr054_declares_no_dependency_on_views_reporting(self):
-        # ADR-054 line 80: "Pipeline-core NEVER depends on views-reporting."
-        # This is a deliberate architectural decision, not a bug.
-        pass
-
-    @pytest.mark.skip(reason="Falsification stub — CI proves intentional support")
-    def test_ci_explicitly_tests_without_views_reporting(self):
-        # .github/workflows/run_pytest_minimal.yml:
-        #   "pip uninstall -y views-reporting ..."
-        #   "Run core-only tests (without views-reporting)"
-        pass
+    # ENFORCED, as of #375: the two stubs that used to sit here named this rule, cited
+    # ADR-054, and asserted nothing — `@pytest.mark.skip` with a body of `pass`. They
+    # reported the constraint as covered while permitting every way of breaking it.
+    #
+    # `tests/test_reporting_is_not_a_dependency.py` now checks it for real: no declared
+    # pin (in dependencies, extras or groups), no module-scope `views_reporting` import
+    # anywhere under the package (by AST), the ADR still stating the rule, and the
+    # minimal CI job still uninstalling views-reporting. All four are mutation-tested.
+    #
+    # The stubs are deleted rather than converted: a skipped test that duplicates a real
+    # one is worse than no test, because the summary line counts it as coverage.
