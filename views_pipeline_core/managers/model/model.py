@@ -369,7 +369,8 @@ class ModelManager:
                 - evaluate (bool): Whether to evaluate model
                 - forecast (bool): Whether to generate forecasts
                 - saved (bool): Whether to use saved data
-                - eval_type (str): Evaluation type (standard/long/complete)
+                - eval_type (str): Evaluation type (standard/complete/live;
+                  'long' retired #378)
                 - update_viewser (bool): Whether to update viewser data
                 - prediction_store (bool): Whether to use prediction store
                 - wandb_notifications (bool): Whether to send WandB notifications
@@ -702,7 +703,8 @@ class ForecastingModelManager(ModelManager):
             - Skip validation
         
         Args:
-            eval_type: Evaluation type ('standard'|'long'|'complete'|'live')
+            eval_type: Evaluation type ('standard'|'complete'|'live';
+                'long' was retired in #378 — see _resolve_evaluation_sequence_number)
             artifact_name: Name of model file to evaluate
         
         Returns:
@@ -932,9 +934,11 @@ class ForecastingModelManager(ModelManager):
             # quietly and was not.
             raise NotImplementedError(
                 "eval_type='long' has been retired — it required 37 rolling-origin "
-                "sequences, but CoreConfigSniffer enforces a partition window of "
-                f"time_steps + MAX_SHIFT_COUNT (={MAX_SHIFT_COUNT}), which supports "
-                f"{MAX_SHIFT_COUNT + 1} sequences. Using it silently truncated "
+                "sequences. CoreConfigSniffer enforces a partition window of "
+                f"test_len == time_steps + MAX_SHIFT_COUNT, where MAX_SHIFT_COUNT="
+                f"{MAX_SHIFT_COUNT} — so a standard 36-step model gets a 48-month "
+                f"window, which supports {MAX_SHIFT_COUNT + 1} sequences. Using "
+                "'long' silently truncated "
                 "step-wise evaluation to the shortest sequence, reporting 12 of 36 "
                 "steps. Use 'standard'. See views-pipeline-core#378."
             )
