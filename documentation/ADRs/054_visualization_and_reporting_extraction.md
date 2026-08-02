@@ -79,7 +79,46 @@ views_reporting/
 
 **Dependency direction constraint:** `views-reporting` depends on `views-pipeline-core` (for `_ViewsDataset`, `ModelPathManager`). Pipeline-core **NEVER** depends on views-reporting. The re-export shims use `try/except ImportError` — they provide a helpful error message but do not add views-reporting as an install dependency.
 
-**Version coordination:** `views-reporting` pins `views-pipeline-core >= 2.3.0, < 3.0.0`. A breaking change to `_ViewsDataset` interface requires a coordinated release with version bumps in both packages.
+**Version coordination:** `views-reporting` pins `views-pipeline-core >= 3.0.0, < 4.0.0` (0.3.1 on PyPI; it pinned `>= 2.3.0, < 3.0.0` when this ADR was written). A breaking change to the `_ViewsDataset` interface requires a coordinated release with version bumps in both packages.
+
+#### Amendment (2026-08-02, issue #375): no `views-reporting` floor will be declared
+
+Issue #375 proposed adding a `views-reporting` version floor to `pyproject.toml`, on the reasonable
+argument that a declared floor moves a dependency failure from run time to install time. **It was
+closed without adding one.** The reasoning is recorded here because the next contributor will have
+the same reasonable thought, and nothing in `pyproject.toml` would tell them why it is wrong.
+
+Declaring the floor would draw the second arrow in the dependency graph, turning a one-way
+relationship into a cycle. Three consequences follow, each verified rather than argued:
+
+1. **A major release could no longer be cut cleanly.** views-reporting 0.3.1 requires
+   `views-pipeline-core >= 3.0.0, < 4.0.0`. On the day pipeline-core cuts 4.0.0, its own declared
+   dependency becomes unsatisfiable against itself, and the resolver — not a human — decides what
+   happens next.
+2. **The platform's Python range would collapse to 3.11.** views-reporting 0.3.1 declares
+   `requires_python >= 3.11, < 3.12`; pipeline-core supports `>= 3.11, < 3.15`. A *required*
+   dependency's ceiling becomes ours, for all five consumers, including those that never render a
+   report. (views-reporting is widening this to `< 3.15` in 0.3.2; the structural point survives the
+   fix, because the ceiling is theirs to move and ours to inherit.)
+3. **It would contradict the constraint stated directly above** and break
+   `.github/workflows/run_pytest_minimal.yml`, the CI job that uninstalls views-reporting and reruns
+   the suite precisely to keep this rule true.
+
+**What guarantees correctness instead.** The four `views_reporting` imports in
+`managers/reporting/stage.py` are all inside functions, so importing pipeline-core loads nothing from
+views-reporting. Two capability probes — `_require_dense_report_consumer` and
+`_require_evaluation_source_consumer` — fail loud with remediation text when the installed build
+lacks a public symbol the dense report path needs. That is a *capability* check rather than a
+*version* check, which is the correct mechanism for a component consumed as a runtime plug-in.
+
+**The residual, tracked separately.** The probes fire at report generation, after training and
+inference, so an environment defect costs a run. Moving them to run preflight is the fix, and it does
+not require a pin.
+
+**Trigger to revisit.** If views-reporting ever stops depending on `views-pipeline-core` — the
+inversion sketched in the Decision-K shape already applied to reconciliation, where pipeline-core
+defines a Protocol and views-reporting implements it — the cycle argument disappears and a floor
+becomes both safe and correct. Until then, this ADR's constraint stands as written.
 
 **Integration branch:** All extraction PRs merge into `integration/views-reporting-extraction` before merging to `development`.
 
