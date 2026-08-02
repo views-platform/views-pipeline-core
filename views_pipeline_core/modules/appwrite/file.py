@@ -83,7 +83,7 @@ from appwrite.exception import AppwriteException
 from appwrite.query import Query
 
 from views_pipeline_core.modules.appwrite.transport import (
-    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,  # noqa: F401 - deliberate re-export
     install_request_timeout,
 )
 from typing import List, Optional, Dict, Any, Union

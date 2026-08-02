@@ -25,6 +25,7 @@ from views_pipeline_core.modules.aggregation.aggregator import (
     AggregationModule,
 )
 
+from views_pipeline_core.managers.configuration.configuration import combined_targets
 logger = logging.getLogger(__name__)
 
 # ADR-034: priogrid_gid → priogrid_id rename for AggregationModule compatibility
@@ -852,7 +853,7 @@ class EnsembleManager(ForecastingModelManager):
         index_cols = [
             _ENTITY_RENAME.get(c, c) for c in first_df.index.names
         ]
-        target_cols = ["pred_" + col for col in self.configs.get("targets")]
+        target_cols = ["pred_" + col for col in combined_targets(self.configs)]
 
         agg = AggregationModule(
             index_cols=index_cols,

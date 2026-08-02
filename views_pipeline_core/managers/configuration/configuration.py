@@ -11,6 +11,55 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+#: Config keys views-evaluation retired in its 0.4.0 API. Its validator RAISES on any of
+#: them, and pipeline-core hands it the whole combined config — so we must not
+#: manufacture one. See #380 and the module note on `combined_targets`.
+_RETIRED_EVALUATION_KEYS = (
+    "targets",
+    "metrics",
+    "regression_uncertainty_metrics",
+    "classification_uncertainty_metrics",
+)
+
+
+def combined_targets(config: Dict) -> List[str]:
+    """Every target the model predicts, regression first, then classification.
+
+    Replaces the synthesised ``config["targets"]`` key, retired in #380.
+
+    That key was a backward-compatibility shim: it manufactured ``targets`` from the
+    task-split keys so older code kept working while configs migrated. But **the models
+    it protected no longer exist** — no model or ensemble config defines ``targets``, and
+    pipeline-core's own template has it commented out — so the shim fired on every run
+    and always produced exactly this concatenation.
+
+    Meanwhile views-evaluation retired ``targets`` in 0.4.0 and now raises on a config
+    carrying it. Since pipeline-core passes its whole combined config to
+    ``NativeEvaluator``, every evaluation run broke. Two components disagreed about a key
+    neither needed and no model supplied.
+
+    Deriving at the point of use costs nothing — the value is identical — and the
+    colliding key stops existing.
+
+    Raises:
+        ValueError: if the config still carries a retired key. The old shim let an
+            existing ``targets`` take precedence, which is how a stale key could quietly
+            outrank the split ones; this refuses instead of choosing.
+    """
+    present = [k for k in _RETIRED_EVALUATION_KEYS if config.get(k)]
+    if present:
+        raise ValueError(
+            f"Config carries retired evaluation key(s) {present}. These were removed in "
+            f"views-evaluation 0.4.0 and its validator raises on them. Use "
+            f"'regression_targets' / 'classification_targets' (and "
+            f"'regression_point_metrics' in place of 'metrics'). See #380."
+        )
+    return list(config.get("regression_targets") or []) + list(
+        config.get("classification_targets") or []
+    )
+
+
+
 class ConfigurationManager:
     """
     Manage configuration loading, validation, and runtime updates.
@@ -535,15 +584,9 @@ class ConfigurationManager:
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
 
-        # Synthesise "targets" from the task-split keys so all downstream code
-        # that reads config.get("targets") works regardless of whether the model
-        # uses the legacy "targets" key or the newer split convention.
-        # Existing "targets" key (legacy models) takes precedence.
-        if not config.get("targets"):
-            config["targets"] = (
-                config.get("regression_targets", []) +
-                config.get("classification_targets", [])
-            )
+        # NO "targets" key is synthesised here (#380). It was a shim for models using
+        # the pre-split convention; none remain, and views-evaluation — which receives
+        # this whole dict — raises on it. Callers use `combined_targets(config)`.
 
         return config
 
@@ -568,12 +611,7 @@ class ConfigurationManager:
             elif not isinstance(val, list):
                 config[key] = list(val) if hasattr(val, "__iter__") else [val]
 
-        # Synthesise "targets" from the task-split keys (mirrors get_combined_config).
-        if not config.get("targets"):
-            config["targets"] = (
-                config.get("regression_targets", []) +
-                config.get("classification_targets", [])
-            )
+        # No "targets" synthesis here either (#380) — see get_combined_config.
 
         return config
 

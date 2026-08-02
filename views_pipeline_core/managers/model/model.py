@@ -40,6 +40,7 @@ from views_pipeline_core.modules.dataloaders.datafactory_contract import (
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
 
+from views_pipeline_core.managers.configuration.configuration import combined_targets
 logger = logging.getLogger(__name__)
 
 
@@ -484,7 +485,7 @@ class ModelManager:
 
         Returns:
             The prepared DataFrame. Must contain at minimum all columns
-            listed in ``self.configs["targets"]``.
+            listed in ``combined_targets(self.configs)`` (#380).
 
         Example (override in a subclass)::
 
@@ -1487,7 +1488,7 @@ class ForecastingModelManager(ModelManager):
                             f"Validating evaluation dataframe of sequence {idx+1}/{n_sequences}"
                         )
                         CorePredictionSniffer(level=configs["level"]).sniff_predictions(
-                            df, targets=configs["targets"]
+                            df, targets=combined_targets(configs)
                         )
                         save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
 
@@ -1705,7 +1706,7 @@ class ForecastingModelManager(ModelManager):
                         )
 
                         CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
-                            df, targets=self.configs["targets"]
+                            df, targets=combined_targets(self.configs)
                         )
 
                 has_metrics = self._has_evaluation_metrics()
@@ -1791,7 +1792,7 @@ class ForecastingModelManager(ModelManager):
             run_type=self.configs["run_type"],
             timestamp=self.configs["timestamp"],
             level=self.configs.get("level"),
-            targets=self.configs.get("targets"),
+            targets=combined_targets(self.configs),
             sequence_number=sequence_number,
             target_identifier=target_identifier,
             send_alert=send_alert,
