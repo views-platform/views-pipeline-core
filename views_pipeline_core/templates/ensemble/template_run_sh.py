@@ -5,7 +5,7 @@ def generate(script_path: Path) -> bool:
     Generates a shell script to set up the environment and run a Python script.
 
     This function creates a shell script that:
-    - Checks if the operating system is macOS (Darwin) and updates the user's `.zshrc` file with necessary environment variables for `libomp`.
+    - Checks if the operating system is macOS (Darwin) and exports the environment variables `libomp` needs, for the duration of the run only.
     - Determines the script's directory and the project's root directory.
     - Sets up the path for the Conda environment specific to the project.
     - Activates the Conda environment if it exists, or creates a new one if it doesn't.
@@ -21,7 +21,7 @@ def generate(script_path: Path) -> bool:
             True if the script was successfully written to the specified directory, False otherwise.
 
     The generated shell script includes the following steps:
-    - Checks if the operating system is macOS and updates the `.zshrc` file with necessary environment variables for `libomp`.
+    - Checks if the operating system is macOS and exports the environment variables `libomp` needs, for the duration of the run only.
     - Determines the script's directory and the project's root directory.
     - Sets up the path for the Conda environment specific to the project.
     - Activates the Conda environment if it exists, or creates a new one if it doesn't.
@@ -30,21 +30,20 @@ def generate(script_path: Path) -> bool:
 
     Note:
         - Ensure that the `requirements.txt` file is present in the same directory as the generated shell script.
-        - The generated shell script is designed to be executed in a zsh shell.
+        - The generated shell script declares `#!/usr/bin/env bash` and is checked by
+          `tests/test_generated_run_scripts_are_portable.py` (issue #384).
+          It must not be changed to zsh: zsh is absent on the Linux servers, Docker
+          containers and CI runners this platform runs on.
     """
-    code = """#!/bin/zsh
+    code = """#!/usr/bin/env bash
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  if ! grep -q 'export LDFLAGS="-L/opt/homebrew/opt/libomp/lib"' ~/.zshrc; then
-    echo 'export LDFLAGS="-L/opt/homebrew/opt/libomp/lib"' >> ~/.zshrc
-  fi
-  if ! grep -q 'export CPPFLAGS="-I/opt/homebrew/opt/libomp/include"' ~/.zshrc; then
-    echo 'export CPPFLAGS="-I/opt/homebrew/opt/libomp/include"' >> ~/.zshrc
-  fi
-  if ! grep -q 'export DYLD_LIBRARY_PATH="/opt/homebrew/opt/libomp/lib:$DYLD_LIBRARY_PATH"' ~/.zshrc; then
-    echo 'export DYLD_LIBRARY_PATH="/opt/homebrew/opt/libomp/lib:$DYLD_LIBRARY_PATH"' >> ~/.zshrc
-  fi
-  source ~/.zshrc
+  # libomp sits in Homebrew's prefix on macOS and is not on the default search paths.
+  # Exported for THIS run only: the values are needed while the ensemble runs, and a
+  # script named "run this ensemble" should not rewrite the user's shell profile (#384).
+  export LDFLAGS="-L/opt/homebrew/opt/libomp/lib $LDFLAGS"
+  export CPPFLAGS="-I/opt/homebrew/opt/libomp/include $CPPFLAGS"
+  export DYLD_LIBRARY_PATH="/opt/homebrew/opt/libomp/lib:$DYLD_LIBRARY_PATH"
 fi
 
 script_path=$(dirname "$(realpath $0)")
