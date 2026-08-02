@@ -16,7 +16,15 @@ pytest = "^9.0.3"
 ingester3 = "=2.1.1"
 wandb = "^0.18.7"
 pyprojroot="^0.3.0"
-views-evaluation = "^0.5.0"
+# views-evaluation 1.0.0 is an API-STABILITY declaration, not a rewrite: the diff from
+# v0.5.0 touches zero lines under `views_evaluation/` — only tests, CI, ADR-022 and the
+# version. So `^1.0.0` (= >=1.0.0,<2.0.0) buys the guarantee without changing behaviour;
+# the full suite was run against 1.0.0 before this floor was raised (1707 passed).
+#
+# The previous `^0.5.0` capped at <0.6.0 — Poetry's caret bounds a 0.x at the next MINOR
+# — so 1.0.0 was already excluded, and the suite had drifted to a version the metadata
+# forbade. tests/test_declared_dependencies_match_reality.py now fails on that drift.
+views-evaluation = "^1.0.0"
 views-transformation-library = "^2.7.2"
 art = "^6.4"
 polars = ">=1.34.0,<2.0.0"
