@@ -79,7 +79,9 @@ views_reporting/
 
 **Dependency direction constraint:** `views-reporting` depends on `views-pipeline-core` (for `_ViewsDataset`, `ModelPathManager`). Pipeline-core **NEVER** depends on views-reporting. The re-export shims use `try/except ImportError` — they provide a helpful error message but do not add views-reporting as an install dependency.
 
-**Version coordination:** `views-reporting` pins `views-pipeline-core >= 3.0.0, < 4.0.0` (0.3.1 on PyPI; it pinned `>= 2.3.0, < 3.0.0` when this ADR was written). A breaking change to the `_ViewsDataset` interface requires a coordinated release with version bumps in both packages.
+**Version coordination:** `views-reporting` pins `views-pipeline-core >= 3.0.0, < 4.0.0` (0.3.3 on PyPI; it pinned `>= 2.3.0, < 3.0.0` when this ADR was written). A breaking change to the `_ViewsDataset` interface requires a coordinated release with version bumps in both packages.
+
+Since that pin names a version this repo has not yet published, **views-reporting 0.3.3 cannot be installed from PyPI at all** — `pip install views-reporting` fails to resolve, and publishing pipeline-core 3.0.0 is the only thing that clears it. Verified with the resolver on 2026-08-02, not inferred from metadata. Publishing 3.0.0 therefore *relieves* a live outage rather than creating exposure, which is the opposite of how a major release usually reads.
 
 #### Amendment (2026-08-02, issue #375): no `views-reporting` floor will be declared
 
@@ -91,15 +93,22 @@ the same reasonable thought, and nothing in `pyproject.toml` would tell them why
 Declaring the floor would draw the second arrow in the dependency graph, turning a one-way
 relationship into a cycle. Three consequences follow, each verified rather than argued:
 
-1. **A major release could no longer be cut cleanly.** views-reporting 0.3.1 requires
-   `views-pipeline-core >= 3.0.0, < 4.0.0`. On the day pipeline-core cuts 4.0.0, its own declared
-   dependency becomes unsatisfiable against itself, and the resolver — not a human — decides what
-   happens next.
-2. **The platform's Python range would collapse to 3.11.** views-reporting 0.3.1 declares
-   `requires_python >= 3.11, < 3.12`; pipeline-core supports `>= 3.11, < 3.15`. A *required*
-   dependency's ceiling becomes ours, for all five consumers, including those that never render a
-   report. (views-reporting is widening this to `< 3.15` in 0.3.2; the structural point survives the
-   fix, because the ceiling is theirs to move and ours to inherit.)
+1. **A major release could no longer be cut cleanly.** views-reporting requires
+   `views-pipeline-core >= 3.0.0, < 4.0.0` (0.3.1 through 0.3.3). On the day pipeline-core cuts
+   4.0.0, its own declared dependency becomes unsatisfiable against itself, and the resolver — not
+   a human — decides what happens next.
+2. **We would inherit whatever ceilings views-reporting declares.** ~~views-reporting 0.3.1
+   declares `requires_python >= 3.11, < 3.12` against pipeline-core's `>= 3.11, < 3.15`, so a
+   required pin would collapse the platform to Python 3.11 for all five consumers, including those
+   that never render a report.~~ **Superseded 2026-08-02:** views-reporting 0.3.3 declares
+   `>= 3.11, < 3.15`, identical to ours, so this particular collision is gone.
+
+   The reason survives its own example, which is why it is corrected rather than deleted. A
+   *required* dependency's ceilings become ours — Python range, transitive pins, everything — and
+   views-reporting's ceilings are theirs to move on their release schedule, not ours. Two of them
+   moved inside a single week: the Python range, and `views-evaluation` from `< 1.0.0` to
+   `>= 1.0.0, < 2.0.0` (0.3.3, which is what lets it co-resolve with this repo's `^1.0.0`). A pin
+   would have made each of those changes a coordinated release instead of a one-repo one.
 3. **It would contradict the constraint stated directly above** and break
    `.github/workflows/run_pytest_minimal.yml`, the CI job that uninstalls views-reporting and reruns
    the suite precisely to keep this rule true.
