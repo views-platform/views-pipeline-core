@@ -28,9 +28,6 @@ pin that a timed-out read is reported as a failure and never as an empty result 
 is the same rule C-241 and C-258 exist to enforce, arriving by a different route.
 """
 
-import threading
-import time
-from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -140,7 +137,6 @@ class TestEveryCallIsBounded:
         made this reachable for the first time — before #347 the call simply never
         returned, so no caller had ever had to classify one.
         """
-        import appwrite.client
         import requests
 
         AppWriteFileModule(config).get_bucket  # ensure the proxy is installed

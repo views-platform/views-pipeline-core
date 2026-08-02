@@ -42,7 +42,7 @@ def test_gen1_save_predictions_delegates_to_io_manager_not_savers():
     m._config_manager = SimpleNamespace(
         get_combined_config=lambda: {
             "run_type": "forecasting", "timestamp": "20260101_000000",
-            "level": "pgm", "targets": ["lr_sb"],
+            "level": "pgm", "regression_targets": ["lr_sb"],
         }
     )
     m._sweep = False

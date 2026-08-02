@@ -60,7 +60,7 @@ def _make_stub(prediction_format: str) -> _ForecastStub:
     merged = {
         "name": "stub_model",
         "level": "pgm",
-        "targets": ["lr_sb"],
+        "regression_targets": ["lr_sb"],
         "prediction_format": prediction_format,
         "sweep": False,
     }
@@ -387,7 +387,6 @@ def _make_eval_stub(prediction_format: str) -> _ForecastStub:
     merged = {
         "name": "stub_model",
         "level": "pgm",
-        "targets": ["lr_sb"],
         "regression_targets": ["lr_sb"],
         "classification_targets": [],
         "regression_point_metrics": ["MSE"],
@@ -597,11 +596,9 @@ def _make_sweep_stub(prediction_format: str) -> _ForecastStub:
     merged = {
         "name": "stub_model",
         "level": "pgm",
-        "targets": ["lr_sb"],
         "regression_targets": ["lr_sb"],
         "classification_targets": [],
         "regression_point_metrics": ["MSE"],
-        "metrics": ["MSE"],
         "prediction_format": prediction_format,
         "sweep": True,
         "steps": list(range(1, 37)),

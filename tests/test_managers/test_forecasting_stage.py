@@ -36,7 +36,7 @@ def _make_context(**overrides):
     defaults = dict(
         configs={
             "name": "test_model",
-            "targets": ["lr_sb"],
+            "regression_targets": ["lr_sb"],
             "level": "cm",
             "timestamp": "20260101",
         },

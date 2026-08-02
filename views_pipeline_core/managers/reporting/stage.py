@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 from views_pipeline_core.types import BaseStageContext
 
+from views_pipeline_core.managers.configuration.configuration import combined_targets
 logger = logging.getLogger(__name__)
 
 
@@ -204,7 +205,7 @@ class ReportingStage:
             EvaluationReportTemplate,
         )
 
-        targets = context.configs["targets"]
+        targets = combined_targets(context.configs)
         if not targets:
             logger.warning("No targets configured — skipping evaluation report generation.")
             return None
@@ -286,7 +287,7 @@ class ReportingStage:
                 if reference_index is None or historical_df is None:
                     reference_index = df.index
                     historical_df = pd.DataFrame(index=reference_index)
-                targets = config.get("targets")
+                targets = combined_targets(config)
                 targets = targets if isinstance(targets, list) else [targets]
                 for target in targets:
                     if target not in historical_df.columns:

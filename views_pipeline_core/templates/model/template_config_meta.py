@@ -35,12 +35,14 @@ def generate(script_path: Path, model_name: str, model_algorithm: str) -> bool:
         "name": "{model_name}",
         "algorithm": "{model_algorithm}",
         # Uncomment and modify the following lines as needed for additional metadata:
-        # "targets": ["ln_ged_sb_dep"],
         # "queryset": "escwa001_cflong",
         # "level": "pgm",
         # "creator": "Your name here",
         # "output_scale": "log", # "log" for log-scale predictions, "natural" for engines that undo transforms (HydraNet, R2DARTS2, SHURF)
-        "metrics": ["RMSLE", "CRPS", "MSE", "MSLE", "y_hat_bar"],
+        "regression_point_metrics": ["RMSLE", "MSE", "MSLE", "y_hat_bar"],
+        # "metrics" was retired in views-evaluation 0.4.0 and its validator
+        # now raises on it (#380). CRPS is a SAMPLE metric — declare it under
+        # "regression_sample_metrics" if the model emits distributions.
     }}
     return meta_config
 """

@@ -31,6 +31,12 @@ narrowly-scoped key is issued:
 from unittest.mock import Mock, patch
 
 import pytest
+
+from views_pipeline_core.modules.appwrite.file import (
+    APPWRITE_FILE_NOT_FOUND,
+    _classify_storage_presence,
+    _StoragePresence,
+)
 from appwrite.exception import AppwriteException
 
 from views_pipeline_core.modules.appwrite.file import (
@@ -328,14 +334,6 @@ class TestErrorTypePropagation:
 # These tests assert that, so adding an error code requires no new test to be covered.
 # ===========================================================================
 
-import pytest as _pytest
-
-from views_pipeline_core.modules.appwrite.file import (
-    APPWRITE_FILE_NOT_FOUND,
-    _classify_storage_presence,
-    _StoragePresence,
-)
-
 #: Codes Appwrite is known to emit, plus shapes that are not codes at all. None of them
 #: is `storage_file_not_found`, so every one of them must be INDETERMINATE.
 _NON_ABSENCE_OUTCOMES = [
@@ -353,7 +351,7 @@ _NON_ABSENCE_OUTCOMES = [
 ]
 
 
-@_pytest.mark.parametrize("code", _NON_ABSENCE_OUTCOMES)
+@pytest.mark.parametrize("code", _NON_ABSENCE_OUTCOMES)
 def test_only_a_positive_file_not_found_is_treated_as_absence(code):
     """The invariant, over every outcome that is not the one code that means absent."""
     result = OperationResult(success=False, error="whatever", code=code)
@@ -381,7 +379,7 @@ def test_success_is_presence_regardless_of_code():
     )
 
 
-@_pytest.mark.parametrize("code", _NON_ABSENCE_OUTCOMES)
+@pytest.mark.parametrize("code", _NON_ABSENCE_OUTCOMES)
 def test_the_replace_path_delete_is_classified_by_the_same_rule(manager, payload, code):
     """The THIRD call site, untested until now (#349).
 

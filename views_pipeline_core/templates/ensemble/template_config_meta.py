@@ -36,7 +36,10 @@ def generate(script_path: Path, model_name: str) -> bool:
         "level": "pgm", # Eg. "pgm", "cm"
         "prediction_format": "dataframe", # "dataframe" for parquet-based, "prediction_frame" for numpy
         "aggregation": "median", # DataFrame: "median", "mean". PredictionFrame: "arithmetic_mean", "concat"
-        "metrics": ["RMSLE", "CRPS", "MSE", "MSLE", "y_hat_bar"],
+        "regression_point_metrics": ["RMSLE", "MSE", "MSLE", "y_hat_bar"],
+        # "metrics" was retired in views-evaluation 0.4.0 and its validator
+        # now raises on it (#380). CRPS is a SAMPLE metric — declare it under
+        # "regression_sample_metrics" if the model emits distributions.
         "creator": "Your name here"
     }}
     return meta_config

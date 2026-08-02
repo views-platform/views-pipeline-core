@@ -75,7 +75,7 @@ def mock_configs():
         },
         "meta": {
             "description": "Test ensemble",
-            "targets": ["ged_sb"],
+            "regression_targets": ["ged_sb"],
             "metrics": ["mse", "mae"],
         },
         "partition": {
@@ -448,7 +448,7 @@ class TestEntityRenameInAggregation:
         df_to_aggregate = {"model_a": df}
 
         manager._config_manager.get_combined_config.return_value = {
-            "targets": ["ged_sb"],
+            "regression_targets": ["ged_sb"],
             "use_weights": False,
             "weights": {},
         }
@@ -475,7 +475,7 @@ class TestEntityRenameInAggregation:
         df_to_aggregate = {"model_a": df}
 
         manager._config_manager.get_combined_config.return_value = {
-            "targets": ["ged_sb"],
+            "regression_targets": ["ged_sb"],
             "use_weights": False,
             "weights": {},
         }
@@ -679,7 +679,7 @@ class TestForecastEnsemble:
             "models": ["purple_alien", "blue_cat"],
             "aggregation": "mean",
             "name": "test_ensemble",
-            "targets": ["ged_sb"],
+            "regression_targets": ["ged_sb"],
         }
         manager._config_manager.configs = configs
         manager._config_manager.get_combined_config.return_value = configs
@@ -705,7 +705,7 @@ class TestForecastEnsemble:
             "models": ["purple_alien"],
             "aggregation": "mean",
             "name": "test_ensemble",
-            "targets": ["ged_sb"],
+            "regression_targets": ["ged_sb"],
         }
         manager._config_manager.configs = configs
         manager._config_manager.get_combined_config.return_value = configs
@@ -1130,11 +1130,11 @@ class TestConfigModelsetMerge:
 
     def test_no_modelset_meta_unchanged(self, _build):
         """config_meta passes through when config_modelset is absent."""
-        meta = {"description": "Test ensemble", "targets": ["ged_sb"]}
+        meta = {"description": "Test ensemble", "regression_targets": ["ged_sb"]}
         _, mock_cm, _ = _build(meta, None)
         assert mock_cm.config_meta == {
             "description": "Test ensemble",
-            "targets": ["ged_sb"],
+            "regression_targets": ["ged_sb"],
         }
 
     def test_modelset_disjoint_keys_merged(self, _build):

@@ -76,7 +76,7 @@ def _make_context(**overrides):
     defaults = dict(
         configs={
             "name": "test_model",
-            "targets": ["lr_sb"],
+            "regression_targets": ["lr_sb"],
             "run_type": "calibration",
             "timestamp": "20260101",
             "level": "cm",
@@ -122,7 +122,7 @@ class TestReportingContext:
         ctx = _make_context(run_type="calibration", entity="views_pipeline")
         assert ctx.run_type == "calibration"
         assert ctx.entity == "views_pipeline"
-        assert "lr_sb" in ctx.configs["targets"]
+        assert "lr_sb" in ctx.configs["regression_targets"]
 
     def test_context_inherits_base_stage_context(self):
         from views_pipeline_core.types import BaseStageContext
@@ -213,7 +213,7 @@ class TestForecastReportEnsemble:
         ctx = _make_context(
             configs={
                 "name": "test_ensemble",
-                "targets": ["lr_sb"],
+                "regression_targets": ["lr_sb"],
                 "models": ["purple_alien", "blue_whale"],
                 "run_type": "calibration",
             },
@@ -226,7 +226,7 @@ class TestForecastReportEnsemble:
         mock_mpm_cls.return_value = mock_sub_mp
 
         # Mock sub-model configs
-        mock_mm_cls.return_value.configs = {"targets": ["lr_sb"]}
+        mock_mm_cls.return_value.configs = {"regression_targets": ["lr_sb"]}
 
         idx = pd.RangeIndex(10)
         mock_read.return_value = pd.DataFrame({"lr_sb": range(10)}, index=idx)
@@ -382,7 +382,7 @@ class TestEvaluationReport:
         cross-repo path (root=<data_generated>, primary_model=<model>)."""
         stage = _make_stage()
         ctx = _make_context(
-            configs={"name": "test", "targets": ["lr_sb", "lr_ns"], "run_type": "calibration"},
+            configs={"name": "test", "regression_targets": ["lr_sb", "lr_ns"], "run_type": "calibration"},
         )
         ctx.model_path.data_generated = Path("/tmp/dg")
         mock_source_cls.return_value.metric_frame.return_value = MagicMock()  # frame present

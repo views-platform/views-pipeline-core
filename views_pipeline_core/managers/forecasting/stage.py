@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 from views_pipeline_core.types import BaseStageContext
 
+from views_pipeline_core.managers.configuration.configuration import combined_targets
 logger = logging.getLogger(__name__)
 
 
@@ -149,7 +150,7 @@ class ForecastingStage:
                 run_type=context.run_type,
                 timestamp=context.configs.get("timestamp", ""),
                 level=context.configs.get("level"),
-                targets=context.configs.get("targets"),
+                targets=combined_targets(context.configs),
                 target_identifier=target,
                 send_alert=False,
             )
@@ -169,7 +170,7 @@ class ForecastingStage:
             )
 
         CorePredictionSniffer(level=context.configs["level"]).sniff_predictions(
-            predictions, targets=context.configs["targets"],
+            predictions, targets=combined_targets(context.configs),
         )
 
         self._io.save_predictions(
@@ -178,6 +179,6 @@ class ForecastingStage:
             run_type=context.run_type,
             timestamp=context.configs.get("timestamp", ""),
             level=context.configs.get("level"),
-            targets=context.configs.get("targets"),
+            targets=combined_targets(context.configs),
             send_alert=False,
         )

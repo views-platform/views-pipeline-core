@@ -97,7 +97,6 @@ def _make_manager():
         "regression_targets": ["target_sb"],
         "classification_targets": [],
         "regression_point_metrics": ["mse"],
-        "targets": ["target_sb"],
         "name": "test",
         "sweep": False,
         "run_type": "calibration",
@@ -234,7 +233,7 @@ class TestNoMetrics:
         manager = _make_manager()
         # Override configs to remove all metric keys
         manager._config_manager.get_combined_config.return_value = {
-            "targets": ["target_sb"],
+            "regression_targets": ["target_sb"],
             "name": "test",
             "sweep": False,
             "run_type": "calibration",
