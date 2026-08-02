@@ -647,7 +647,7 @@ class ConfigurationManager:
         Args:
             args: Validated command line arguments containing:
                 - run_type (str): 'calibration' | 'validation' | 'forecasting'
-                - eval_type (str): 'standard' | 'long' | 'complete' | 'live'
+                - eval_type (str): 'standard' | 'complete' | 'live'  ('long' retired, #378)
                 - sweep (bool): Whether this is a sweep run
                 - override_timestep (Optional[int]): Month override
             wandb_module: WandB manager for error reporting.

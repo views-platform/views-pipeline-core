@@ -101,7 +101,7 @@ Concrete argument set for the end‑to‑end forecasting pipeline: training, eva
 | `saved` | bool | False | Use locally cached data instead of fresh fetch. |
 | `override_timestep` | Optional[int] | None | Override current time index for forecasting (debug/testing). |
 | `drift_self_test` | bool | False | Trigger drift detection internal self-test during data fetch. |
-| `eval_type` | str | "standard" | Evaluation horizon type: standard, long, complete, live. |
+| `eval_type` | str | "standard" | Evaluation horizon type: standard, complete, live. (`long` retired in #378; `complete` raises NotImplementedError; `live` is currently identical to `standard`.) |
 | `report` | bool | False | Generate evaluation or forecast HTML report (requires evaluate or forecast). |
 | `update_viewser` | bool | False | Perform incremental raw data update on zero-only months. |
 | `wandb_notifications` | bool | False | Enable WandB alerts (run lifecycle + errors). |

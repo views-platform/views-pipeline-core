@@ -369,7 +369,8 @@ class ModelManager:
                 - evaluate (bool): Whether to evaluate model
                 - forecast (bool): Whether to generate forecasts
                 - saved (bool): Whether to use saved data
-                - eval_type (str): Evaluation type (standard/long/complete)
+                - eval_type (str): Evaluation type (standard/complete/live;
+                  'long' retired #378)
                 - update_viewser (bool): Whether to update viewser data
                 - prediction_store (bool): Whether to use prediction store
                 - wandb_notifications (bool): Whether to send WandB notifications
@@ -702,7 +703,8 @@ class ForecastingModelManager(ModelManager):
             - Skip validation
         
         Args:
-            eval_type: Evaluation type ('standard'|'long'|'complete'|'live')
+            eval_type: Evaluation type ('standard'|'complete'|'live';
+                'long' was retired in #378 — see _resolve_evaluation_sequence_number)
             artifact_name: Name of model file to evaluate
         
         Returns:
@@ -900,7 +902,9 @@ class ForecastingModelManager(ModelManager):
             Number of sequences.
 
         Raises:
-            NotImplementedError: If eval_type is "complete" (not yet implemented).
+            NotImplementedError: If eval_type is "long" (retired, #378) or "complete"
+                (not yet implemented). Both request a sequence count the partition
+                geometry enforced by CoreConfigSniffer cannot supply.
             ValueError: If eval_type is not recognized.
 
         Example:
@@ -911,12 +915,37 @@ class ForecastingModelManager(ModelManager):
         if eval_type == "standard":
             return MAX_SHIFT_COUNT + 1       # 13: base origin + 12 shifts
         elif eval_type == "long":
-            return 3 * MAX_SHIFT_COUNT + 1   # 37: base origin + 36 shifts
+            # Retired 2026-08-02 (#378, register C-268). This returned
+            # 3*MAX_SHIFT_COUNT + 1 = 37, but CoreConfigSniffer *enforces*
+            # test_len == time_steps + MAX_SHIFT_COUNT (36 + 12 = 48 months), which
+            # supports exactly 13 sequences. 37 would need a 72-month window that the
+            # sniffer rejects outright.
+            #
+            # The 24 surplus sequences forecast past the actuals horizon, so
+            # EvaluationAdapter's `actual.index.intersection(df.index)` matched
+            # progressively fewer months — down to 12 — and step-wise evaluation
+            # truncated to the shortest sequence, silently reporting 12 of 36 steps.
+            # Verified against every real model config: 256 of 256 (model, run_type)
+            # combinations, without exception.
+            #
+            # Same failure shape as C-70 (Tier 1) on this same resolver: an eval_type
+            # accepted by the CLI and asserted by tests, but unsupported by the
+            # geometry. `complete` crashed loudly and was caught; `long` degraded
+            # quietly and was not.
+            raise NotImplementedError(
+                "eval_type='long' has been retired — it required 37 rolling-origin "
+                "sequences. CoreConfigSniffer enforces a partition window of "
+                f"test_len == time_steps + MAX_SHIFT_COUNT, where MAX_SHIFT_COUNT="
+                f"{MAX_SHIFT_COUNT} — so a standard 36-step model gets a 48-month "
+                f"window, which supports {MAX_SHIFT_COUNT + 1} sequences. Using "
+                "'long' silently truncated "
+                "step-wise evaluation to the shortest sequence, reporting 12 of 36 "
+                "steps. Use 'standard'. See views-pipeline-core#378."
+            )
         elif eval_type == "complete":
             raise NotImplementedError(
                 "eval_type='complete' is not yet implemented — the required "
-                "sequence count depends on partition geometry. Use 'standard' "
-                "or 'long' instead."
+                "sequence count depends on partition geometry. Use 'standard'."
             )
         elif eval_type == "live":
             return MAX_SHIFT_COUNT + 1       # 13: same as standard
