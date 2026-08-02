@@ -11,7 +11,7 @@
 > forces a major bump — and this release *is* that event) → **#374**, **C-190 residual** (no declared
 > `views-reporting` floor in `pyproject.toml`) → **#375**, **C-206** → **#274** (every proof that would validate the
 > release runs against editable worktrees, and this box holds `views-frames 1.8.0` while the train
-> assumes 1.10.0), plus the known `views-evaluation ^0.4.0 → ^0.5.0` bump awaiting the leaf release.
+> assumes 1.10.0), ~~plus the known `views-evaluation ^0.4.0 → ^0.5.0` bump awaiting the leaf release~~ — **DONE 2026-08-02**: views-evaluation 0.5.0 published to PyPI, pin bumped, and the adoption verified against the **published wheel** in a clean venv rather than the editable checkout: `to_metric_frame` present, all six kwargs `evaluation/stage.py` passes accepted, and a real 12-key combined config **accepted** by their new fail-loud validator.
 
 > **Strategic context (2026-06-19) — `views-frames` is coming.** A new leaf
 > data-contract package, `views_platform/views-frames` (scaffolded 2026-06-19,
