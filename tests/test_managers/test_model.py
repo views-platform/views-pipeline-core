@@ -272,11 +272,59 @@ class TestForecastingModelManagerStatic:
         n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
         assert n == 13  # base origin + 12 shifts
 
-    def test_resolve_evaluation_sequence_long(self):
-        """Long evaluation: 3 * MAX_SHIFT_COUNT + 1 = 37 sequences."""
-        n = ForecastingModelManager._resolve_evaluation_sequence_number("long")
-        assert n == 37  # base origin + 36 shifts
-        
+    def test_resolve_evaluation_sequence_long_is_retired(self):
+        """'long' is retired — it asked for 37 sequences the geometry cannot serve (#378).
+
+        This test previously asserted ``n == 37``, which is exactly how the defect
+        survived: the number was checked against the hardcoded formula that produced
+        it, never against the partition window ``CoreConfigSniffer`` *enforces*
+        (``test_len == time_steps + MAX_SHIFT_COUNT`` = 48 months → 13 sequences).
+
+        The 24 surplus sequences forecast past the actuals horizon, so step-wise
+        evaluation truncated to the shortest one and silently reported 12 of 36 steps
+        — in 256 of 256 (model, run_type) combinations.
+
+        Same shape as C-70 (Tier 1) on this same resolver: an eval_type the CLI
+        accepted and a test asserted, but the geometry could not support.
+        """
+        with pytest.raises(NotImplementedError, match="retired"):
+            ForecastingModelManager._resolve_evaluation_sequence_number("long")
+
+    def test_resolve_evaluation_sequence_live_matches_standard(self):
+        """'live' returns MAX_SHIFT_COUNT + 1 — currently identical to 'standard'."""
+        assert (
+            ForecastingModelManager._resolve_evaluation_sequence_number("live")
+            == ForecastingModelManager._resolve_evaluation_sequence_number("standard")
+            == 13
+        )
+
+    def test_sequence_count_agrees_with_enforced_partition_geometry(self):
+        """The two authorities on sequence count must not diverge again (#378).
+
+        ``CoreConfigSniffer`` enforces ``test_len == time_steps + MAX_SHIFT_COUNT`` and
+        derives ``num_sequences = (test_end - base_origin - time_steps)//stride + 1``.
+        Any eval_type that returns a number must match that, or it is requesting
+        sequences the partition cannot supply — which is the C-268 defect.
+        """
+        from views_pipeline_core.modules.validation.core_config_sniffer import (
+            MAX_SHIFT_COUNT,
+        )
+
+        time_steps, stride, test_start = 36, 1, 457
+        test_end = test_start + time_steps + MAX_SHIFT_COUNT - 1   # the enforced window
+        base_origin = test_start - 1
+        geometry_count = (test_end - base_origin - time_steps) // stride + 1
+
+        for eval_type in ("standard", "live"):
+            assert (
+                ForecastingModelManager._resolve_evaluation_sequence_number(eval_type)
+                == geometry_count
+            ), (
+                f"eval_type={eval_type!r} requests more sequences than the enforced "
+                f"partition window supports ({geometry_count})"
+            )
+
+
     def test_resolve_evaluation_sequence_complete(self):
         """Test complete evaluation raises NotImplementedError."""
         with pytest.raises(NotImplementedError, match="not yet implemented"):

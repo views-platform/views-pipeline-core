@@ -38,13 +38,13 @@ class TestForecastingModelArgsInit:
             run_type="forecasting",
             train=True,
             forecast=True,
-            eval_type="long",
+            eval_type="live",
         )
         
         assert args.run_type == "forecasting"
         assert args.train is True
         assert args.forecast is True
-        assert args.eval_type == "long"
+        assert args.eval_type == "live"
 
 
 # ============================================================================
@@ -301,13 +301,32 @@ class TestValidationArtifact:
 class TestValidationEvalType:
     def test_valid_eval_types(self):
         """Test all valid evaluation types."""
-        for eval_type in ["standard", "long", "complete", "live"]:
+        for eval_type in ["standard", "complete", "live"]:
             args = ForecastingModelArgs(
                 run_type="calibration",
                 train=True,
                 eval_type=eval_type,
             )
             assert args.eval_type == eval_type
+
+    def test_eval_type_long_is_retired(self):
+        """'long' must be rejected at the CLI boundary (#378).
+
+        It requested 37 rolling-origin sequences while CoreConfigSniffer enforces a
+        partition window supporting 13, so it silently truncated step-wise evaluation
+        to 12 of 36 steps — verified across 256 of 256 (model, run_type) combinations.
+
+        Same shape as C-70 (Tier 1) on the same resolver: an eval_type the CLI accepted
+        and these tests asserted, but the geometry could not support. That one crashed
+        and was caught; this one degraded quietly. Rejecting at the boundary is what
+        stops a future caller silently getting a third of their evaluation.
+        """
+        with pytest.raises(SystemExit):
+            ForecastingModelArgs(
+                run_type="calibration",
+                train=True,
+                eval_type="long",
+            )
             
     def test_invalid_eval_type(self):
         """Test invalid evaluation type fails."""
@@ -345,7 +364,7 @@ class TestParseArgs:
             "--forecast",
             "--report",
             "--override_timestep", "530",
-            "--eval_type", "long",
+            "--eval_type", "live",
             "--wandb_notifications",
         ]
         
@@ -357,7 +376,7 @@ class TestParseArgs:
         assert args.forecast is True
         assert args.report is True
         assert args.override_timestep == 530
-        assert args.eval_type == "long"
+        assert args.eval_type == "live"
         assert args.wandb_notifications is True
         
     def test_parse_monthly_shorthand(self):
@@ -495,7 +514,7 @@ class TestGetDict:
             run_type="validation",
             train=True,
             evaluate=True,
-            eval_type="long",
+            eval_type="live",
         )
         
         d = args.get_dict()
@@ -565,7 +584,7 @@ class TestForecastingModelArgsIntegration:
             "--train",
             "--evaluate",
             "--report",
-            "--eval_type", "long",
+            "--eval_type", "live",
             "--wandb_notifications",
         ]
         
@@ -576,7 +595,7 @@ class TestForecastingModelArgsIntegration:
         assert args.train is True
         assert args.evaluate is True
         assert args.report is True
-        assert args.eval_type == "long"
+        assert args.eval_type == "live"
         
         # Should be able to convert to dict and shell command
         d = args.get_dict()

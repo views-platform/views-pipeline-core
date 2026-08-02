@@ -84,7 +84,7 @@ This class is not directly instantiated; extend it to implement concrete trainin
 | `_data_loader` | `ViewsDataLoader` instance if queryset is available. |
 | `_args` | Parsed `ForecastingModelArgs` once execution begins. |
 | `_project` | Derived WandB project name (`{model_name}_{run_type}` or sweep variant). |
-| `_eval_type` | Evaluation scope string (`standard`, `long`, `complete`, `live`). |
+| `_eval_type` | Evaluation scope string (`standard`, `complete`, `live`). `long` retired in #378 — it requested 37 sequences against a geometry supporting 13. |
 | `_pred_store_name` | Prediction store run identifier (optional). |
 
 ### Execution Flow (Single Run)
