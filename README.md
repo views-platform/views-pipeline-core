@@ -8,10 +8,6 @@
 </div>
 
 <p align="center">
-  <img src="views_pipeline_core/assets/vpc_header.png" alt="VIEWS Pipeline Core Banner" width="85%">
-</p>
-
-<p align="center">
   <img src="https://img.shields.io/github/license/views-platform/views-pipeline-core" alt="GitHub License" />
   &nbsp;&nbsp;
   <img src="https://img.shields.io/github/check-runs/views-platform/views-pipeline-core/main" alt="GitHub branch check runs" />

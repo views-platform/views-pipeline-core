@@ -136,6 +136,20 @@ def test_s1_every_editable_source_tree_is_publishable_state():
     * **It ignored unpushed commits.** Likewise: a proof that cannot be reproduced from the
       remote is not evidence anyone else can check.
 
+    **What it audits, precisely.** `importlib.metadata` reads THIS interpreter — the one
+    pytest is running in. The PFE/S1 proof runs elsewhere: `views-models/monthly_run.sh`
+    invokes `envs/views_ensemble/bin/python`, and the per-model envs under
+    `views-models/envs/` have different editable sets again. Measured: the pytest env holds
+    seven editable trees and **views-hydranet is not among them**, while the
+    `envs/views-hydranet` env holds hydranet, views-evaluation and views-frames.
+
+    So this catches the environment a developer runs tests in, and the old hardcoded check
+    caught views-hydranet unconditionally. **Neither covers the other.** Point
+    `RUN_S1_READINESS=1 pytest` at the proof interpreter to audit the proof environment:
+
+        views-models/envs/views_ensemble/bin/python -m pytest \
+            tests/test_falsification_s1_readiness.py -k editable_source_tree
+
     Not run in CI by design — there are no editable installs there, so the check would be
     vacuous rather than reassuring.
     """
@@ -146,10 +160,16 @@ def test_s1_every_editable_source_tree_is_publishable_state():
         "C-206 is resolved by construction and this test should be deleted deliberately."
     )
 
-    problems = []
+    problems, inspected = [], []
     for name, path in sorted(trees.items()):
-        if not os.path.isdir(os.path.join(path, ".git")):
+        # `os.path.EXISTS`, not `isdir`. In a git worktree `.git` is a FILE containing a
+        # gitdir pointer, so `isdir` was False and every worktree was skipped — meaning
+        # this check was disarmed by the exact remedy its own failure message recommends.
+        # Following the advice would have left `problems` empty and the test green having
+        # inspected nothing.
+        if not os.path.exists(os.path.join(path, ".git")):
             continue  # installed from a directory that is not a checkout — nothing to assert
+        inspected.append(name)
         branch = _git(path, "rev-parse", "--abbrev-ref", "HEAD")
         dirty = _git(path, "status", "--porcelain")
         if branch not in _PUBLISHABLE_BRANCHES:
@@ -166,6 +186,13 @@ def test_s1_every_editable_source_tree_is_publishable_state():
         else:
             if ahead != "0":
                 problems.append(f"{name}: {ahead} commit(s) not pushed")
+
+    assert inspected, (
+        f"Found {len(trees)} editable distribution(s) but inspected none of them — every "
+        f"path failed the checkout test, so this assertion verified nothing. That is the "
+        f"failure mode this check itself shipped with: `.git` is a FILE in a worktree, so "
+        f"an `isdir` test skipped them all silently. Paths seen: {sorted(trees.values())}"
+    )
 
     assert not problems, (
         "Editable source trees are not in a state a proof can stand on:\n  "

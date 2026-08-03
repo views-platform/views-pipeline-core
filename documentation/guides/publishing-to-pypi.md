@@ -5,7 +5,8 @@ Every command is copy-pasteable; the *why* is spelled out where getting it wrong
 expensive.
 
 > **Last verified:** 2026-08-03, preparing `3.0.0`. Mechanism confirmed against
-> views-evaluation 1.0.0, which shipped 2026-08-02 through a byte-identical workflow file.
+> views-evaluation 1.0.0, which shipped 2026-08-02 through a mechanism-identical workflow
+> file (it differs only in the package name inside the version-guard URL).
 > Companion documents: `CHANGELOG.md` (what changed), the release gate in
 > `reports/technical_risk_register.md` (what must be closed or consciously accepted first).
 
@@ -24,9 +25,15 @@ on:
 — a *published GitHub Release*, or a manual dispatch. Pushing `git tag 3.0.0 && git push
 --tags` and waiting will wait forever.
 
-The proof is in this repo's own history: a `2.3.1` tag existed on `main` for months,
-pointing at a commit whose `pyproject.toml` still said `2.3.0`. It was never published,
-because a tag was all it ever was. (It has since been deleted.)
+> **2.3.1 is NOT the proof of this** — an earlier draft of this guide said it was and had
+> the causality backwards. What actually happened on 2026-05-18: a tag *and* a Release were
+> created, the workflow **did** fire, and it failed its own version guard because
+> `pyproject.toml` at that commit still read `2.3.0`. The Release was then reverted to a
+> draft. So 2.3.1 is evidence that **the version guard works**, not that tags are inert.
+>
+> The tag has since been deleted. **The draft Release still exists** — which makes the
+> first row of the troubleshooting table below dangerous: publishing that draft re-fires a
+> run guaranteed to fail.
 
 ---
 
@@ -41,14 +48,20 @@ git commit -am "release: X.Y.Z" && git push   # PR -> merge to development -> me
 # 2. Cut the GitHub Release FROM main. THIS is what publishes.
 gh release create X.Y.Z --target main \
     --title "views-pipeline-core X.Y.Z" \
-    --notes-file <(sed -n '/## \[X.Y.Z\]/,/^## \[/p' CHANGELOG.md)
+    --notes-file <(sed -n '/## \[X.Y.Z\]/,/^## \[/p' CHANGELOG.md | sed '$d')
+#   the trailing `sed '$d'` matters: sed ranges INCLUDE their terminator, so without it
+#   every release page ends with a stray `## [previous-version]` heading
 
-# 3. Watch it land
-gh run watch "$(gh run list --workflow=publish_package.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+# 3. Watch it land. Do NOT blindly take `--limit 1` — it currently resolves to the FAILED
+#    2026-05-18 run, and an instant red X invites exactly the wrong reaction (recutting).
+gh run list --workflow=publish_package.yml --limit 5 \
+    --json databaseId,headBranch,status,conclusion,createdAt
+gh run watch <databaseId of the run you just triggered>
 
 # 4. Confirm, then prove it from outside
 open https://pypi.org/project/views-pipeline-core/
-python -m venv /tmp/verify && /tmp/verify/bin/pip install views-pipeline-core==X.Y.Z
+rm -rf /tmp/verify && python3.11 -m venv /tmp/verify   # 3.11 explicitly — see the range note
+/tmp/verify/bin/pip install views-pipeline-core==X.Y.Z
 /tmp/verify/bin/python -c "import views_pipeline_core; print('ok')"
 ```
 
@@ -75,6 +88,11 @@ before you cut anything:
 gh secret list --repo views-platform/views-pipeline-core | grep PYPI_TOKEN
 ```
 
+This proves the secret **exists**, not that it still works — there is no way to test
+validity short of publishing. As of 2026-08-03 it is present, dating from 2024-11-21.
+views-evaluation's is of similar vintage and published successfully on 2026-08-02, which is
+the best available evidence that tokens in this org are live.
+
 > **Worth knowing:** views-reporting has migrated to PyPI **Trusted Publishing** (OIDC, no
 > token, nothing to expire) — see their `.github/workflows/publish_package.yml` and ADR-015.
 > This repo and views-evaluation have not. Migrating is a good idea and a bad idea *during*
@@ -99,7 +117,7 @@ Check first: `curl -s https://pypi.org/pypi/views-pipeline-core/json | jq -r .in
 Run everything, from `development`:
 
 ```bash
-conda run -n views_pipeline pytest tests/ -q          # baseline: 1755 passed
+conda run -n views_pipeline pytest tests/ -q          # baseline: 1761 passed (3.0.0 prep)
 conda run -n views_pipeline ruff check .
 bash documentation/validate_docs.sh
 conda run -n views_pipeline poetry check              # warnings are fine; exit code must be 0
@@ -130,7 +148,11 @@ catches the size symptom; this check catches the shape.
 
 ## Merging to `main`
 
-Branch protection requires an admin merge (solo-driver `REVIEW_REQUIRED` rule):
+Branch protection here is a **repository ruleset**, not classic branch protection — so
+`gh api repos/.../branches/main/protection` returns 404 and tells you nothing. Inspect it
+with `gh api repos/views-platform/views-pipeline-core/rules/branches/main`: it requires 3
+approving reviews with admin bypass, and it covers `development` as well as `main`. Hence
+the admin merge:
 
 ```bash
 gh pr create --base main --head development --title "release: X.Y.Z"
@@ -138,8 +160,15 @@ gh pr merge <N> --merge --admin        # NOT squash — main must keep developme
 ```
 
 `check-branch` (the job in `prevent_merge_when_branch_behind.yml`) asserts the target
-branch is an ancestor of your HEAD. If it fails, merge `main` into your branch first — it
-is complaining about staleness, not about reviews.
+branch is an ancestor of your HEAD. **For a `development` → `main` PR this WILL fail on the
+first attempt**, not might: `main` carries its own old merge commit that `development` does
+not contain. Do this before opening the PR:
+
+```bash
+git checkout development && git merge origin/main && git push
+```
+
+It is complaining about staleness, not about reviews.
 
 ---
 
@@ -158,7 +187,7 @@ mid-release; if it is ever unified, do it in a quiet moment and update this line
 | Release published, workflow never ran | Release was created as a **draft** | Publish the draft; drafts do not fire `release: published` |
 | Workflow ran, failed at `poetry publish` | `PYPI_TOKEN` missing/expired | Fix the secret, then re-run via **`workflow_dispatch`** — do not delete and recut the Release |
 | `Version must be higher than …` | `pyproject.toml` not bumped, or already published | Bump, merge, cut a *new* Release. **A PyPI version can never be reused, even after deletion** |
-| Tag exists, no Release | Someone pushed a tag expecting it to publish | Create the Release from the tag |
+| Tag exists, no Release | Someone pushed a tag expecting it to publish | Create the Release from the tag — **after** confirming `pyproject.toml` *at that tag* carries the version you intend to publish. Skipping that check is precisely what produced the failed 2.3.1 run |
 
 **Never** delete a PyPI release to "redo" it. The version number is burned permanently;
 release `X.Y.Z+1` instead.
@@ -172,3 +201,22 @@ release `X.Y.Z+1` instead.
    `[tool.uv.sources]` git pin), views-baseline and views-hydranet (#319).
 3. Update `reports/technical_risk_register.md`: close what the release resolved, and record
    what was consciously accepted so the next release inherits a decision rather than a gap.
+
+---
+
+## Known expiries and deferrals
+
+**The publish path expires around 2026-09-16.** `publish_package.yml` pins
+`actions/checkout@v3` and `actions/setup-python@v4`, both Node 20, and GitHub's runner logs
+already warn that Node 20 is removed on that date. Bump to `@v4`/`@v5` in a quiet moment,
+not during a release.
+
+**PEP 621 migration is deferred, and here is the trigger.** This repo still uses the legacy
+`[tool.poetry]` metadata tables, which `poetry check` reports as deprecated (exit 0, twelve
+warnings). Migrating is *not* a one-file change: `publish_package.yml` reads the version via
+`toml.load(...)['tool']['poetry']['version']` and would `KeyError` **after** the tag and
+Release are public. **Migrate when the workflow's version lookup changes in the same
+commit**, or when a poetry-core release turns those warnings into errors. Two costs of
+waiting, recorded so they are not rediscovered: the legacy table emits only the **first** of
+three declared authors into the wheel, and classifier auto-derivation cannot be disabled
+from it.

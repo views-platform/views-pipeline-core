@@ -2,33 +2,46 @@
 
 All notable changes to `views-pipeline-core`.
 
-This file did not exist before 3.0.0. It exists now because 3.0.0 carries **sixteen
-breaking changes across 185 commits**, and without it the only record of what broke would
-have been a commit log. Precedent and rationale: `views-evaluation/CHANGELOG.md`, created
+This file did not exist before 3.0.0. It exists now because 3.0.0 is a major release and
+without it the only record of what broke would have been a commit log.
+
+`git log 2.3.0..development --no-merges` counts **185 commits**, of which **16 carry the
+conventional-commit `!` breaking marker**. This changelog lists **13** consumer-facing
+breaking entries: two of the sixteen are not consumer-visible (adopting views-evaluation
+0.5.0, superseded days later by the `^1.0.0` floor; and a documentation-only ADR
+amendment), and one entry below covers two commits. Precedent and rationale: `views-evaluation/CHANGELOG.md`, created
 for the same reason after their 0.4.0 shipped breaking changes unannounced.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/); this project uses
 [semantic versioning](https://semver.org/).
 
-> **Baseline note.** The previous published release is **2.3.0** (PyPI, 2026-05-18). A
-> `2.3.1` git tag existed but pointed at a commit whose `pyproject.toml` still read
-> `2.3.0`; it was never published and has been deleted. **There is no 2.3.1.**
+> **Baseline note.** The previous published release is **2.3.0** (PyPI, 2026-05-18).
+> **There is no 2.3.1.** A 2.3.1 tag and GitHub Release were created the same day, and the
+> publish workflow *did* run — it failed its own version guard, because `pyproject.toml` at
+> that commit still read `2.3.0`. The Release was reverted to a draft and the tag has now
+> been deleted. Nothing was ever uploaded to PyPI under that number.
 
 ---
 
 ## [3.0.0] — 2026-08-03
 
 A major release. Every item under *Removed* and *Changed — breaking* will break a 2.x
-consumer that touches it. The engine repos (views-hydranet, views-baseline) and
-views-reporting are already migrated and pin `>=3.0.0,<4.0.0`.
+consumer that touches it. views-baseline and views-reporting pin `>=3.0.0,<4.0.0`.
+views-hydranet pins it on `development`; its **default branch `main` still caps at
+`<3.0.0`** and will not receive this release until that merges. (Found by review — the
+claim originally read "already migrated", formed by reading a local checkout that happens
+to sit on `development`. That is the editable-worktree blind spot C-206 names, committed
+while describing the release that documents it.)
 
 ### Removed
 
 - **The four ADR-054 re-export shims** — `modules/{statistics,visualizations,mapping,reports}`.
   These functions live in **views-reporting**; import them from there. An org-wide search
   found zero remaining consumers before removal. (#318)
-- **Session authentication** for Appwrite — `SessionAuth` and the four account/session
-  operations. Nothing constructed it. (#344)
+- **Session authentication** for Appwrite — `SessionAuth` and **three** account/session
+  operations. Nothing constructed it. (A fourth, `users.get_prefs`, was grouped with them
+  in the issue title but is reached on the API-key path and survives — see
+  `tests/test_modules/test_session_auth_is_gone.py`.) (#344 → #359)
 - **`eval_type="long"`.** It requested 37 rolling-origin sequences while the enforced
   partition geometry supplies 13, so step-wise evaluation silently reported **12 of 36
   steps**. Use `"standard"`. (#379)
@@ -39,8 +52,10 @@ views-reporting are already migrated and pin `>=3.0.0,<4.0.0`.
 - **The ambient `.env` load.** Credentials no longer arrive by omission;
   `AppwriteConfig` is frozen. (#346)
 - **57 MB of shapefiles and header images** from the wheel — they moved to views-reporting
-  under ADR-054 and were never deleted here. The wheel is **60 MB → 1.2 MB unpacked**.
-  Nothing in this package referenced them. (#389)
+  under ADR-054 and were never deleted here. Download **7.3 MB → 0.4 MB**; unpacked
+  **60.2 MB → 1.2 MB**. No *code* referenced them, but `README.md` did — an `<img>` tag
+  pointing at a deleted file, which would have rendered broken on the PyPI page this
+  release exists to populate. Removed here. (#389)
 - **`pytest` as a runtime dependency.** Every consumer was installing a test framework it
   never imports. It is now in the dev group; `poetry install` still provides it.
 
@@ -75,7 +90,7 @@ views-reporting are already migrated and pin `>=3.0.0,<4.0.0`.
   dispatch at the fetch choke point, a leaf-owned directory cache with retire-swap writes,
   and `CoreFrameSniffer` for frame-native partition audit. (epic #285: #286–#290)
 - **Frame-native evaluation actuals** — `from_actual_arrays`, so frame-fed models evaluate
-  without pandas being touched. (epic #300: #301, #302)
+  without pandas being touched. (#301, #302; epic #300 remains open)
 - **The datafactory consumer contract** — vendored conformance fixture plus loud runtime
   validation. (#162)
 - **Reconciliation decoupled from views-reporting** via a DIP port and injected adapter.
@@ -84,19 +99,27 @@ views-reporting are already migrated and pin `>=3.0.0,<4.0.0`.
   conformance, and a fail-loud `sample_count` guard. (#269, #160)
 - **A pandas-free base-manager import graph** — lazy facades, preflight, and a permanent
   purity guard. (#320)
-- **Network timeouts on every Appwrite call**, with the hang path drilled first — an
-  unbounded call previously hung a delivery indefinitely. (#347)
+- **Network timeouts on every Appwrite call.** The hang path was drilled before a value
+  was chosen: a transport that never returns was installed and every Appwrite path stayed
+  blocked with no timeout, no error and no recovery. No delivery is on record as having
+  hung — the drill establishes that one *could have*, indefinitely. (#347)
 - **The Cluster J read-completeness guard** — a partial or failed read must not be usable
   as an answer, enforced by AST at authoring time. (#343)
 - **A recorded-response fixture** captured from the live Appwrite service, replacing tests
   that could only agree with their own mocks. (#348)
-- **PyPI metadata** — description, licence, repository and classifiers. Every release up to
-  2.3.0 published with all of these blank.
+- **PyPI metadata** — summary, licence and repository/homepage URLs, all of which were
+  blank on every release up to and including 2.3.0 (`summary: None`, `license: None`,
+  `project_urls: None`). Classifiers were **not** blank: Poetry has always derived them
+  from `requires-python`. The `LICENSE` file (MIT) had been in the repository the whole
+  time and was never declared, so the published artifact did not state its own licence.
 
 ### Fixed
 
 - **`get_latest_file_id` returned the newest of the *oldest 25* matches.** The metadata
-  search was unpaged, so the FAO delivery could ship a **stale run rather than failing**.
+  search was unpaged, so a delivery could ship a **stale run rather than failing**. Affected
+  set: this package, and views-postprocessing by inheritance — **not** views-faoapi, which
+  keeps its own correctly-paged copy. Reachability depends on a matching-document count
+  above 25 and was never confirmed against production.
   The search now pages, terminates on an empty page, and is certified against the total the
   service reports. A failed read raises instead of returning `[]`. *(Tier 1)* (#341)
 - **A failed read was reported as absence** in the deduplication fallback walk, answering
@@ -105,12 +128,22 @@ views-reporting are already migrated and pin `>=3.0.0,<4.0.0`.
   warning** — including the sentence that licenses deleting a production bucket. Rendering
   now refuses to interpret while the read is known incomplete. *(Tier 1)* (#342)
 - **Appwrite upload failures were reported in-band and discarded**, with both call sites
-  logging unconditional success over a half-succeeded write. *(Tier 1)* (#329, #330, #331)
+  logging unconditional success over a half-succeeded write. *(Tier 1, C-227)* (#330)
+- **A failed bucket read was treated as proof of absence, and absence triggered a
+  destructive metadata delete.** *(Tier 1, C-231)* (#329)
+- **A failed duplicate lookup was reported as "no duplicate"**, turning a read fault into a
+  duplicate write. *(Tier 1, C-232)* (#329)
+- **A wrong or stale bucket coordinate silently provisioned new production storage.** The
+  auto-create-and-retry is gone; a missing bucket now fails. Consumers relying on
+  provisioning-by-accident will see a failure where they previously saw success.
+  *(Tier 1, C-228)* (#331)
 - **Production coordinates were reachable by omission** — a missing environment variable
   fell back to production defaults. (#324)
 - **`priogrid_gid` → `priogrid_id`** normalised at a single seam.
 - **Ensemble forecast cache** now regenerates when a constituent's sample count no longer
-  matches its config, and fails loud when a constituent produces the wrong count. (C-85)
+  matches its config, and fails loud when a constituent produces the wrong count. (The
+  source cites register `C-85` in six places; that entry is about EnsembleManager test
+  coverage and is the wrong ID. Left uncorrected here rather than guessed at.)
 
 ### Known limitations
 
@@ -121,8 +154,8 @@ views-reporting are already migrated and pin `>=3.0.0,<4.0.0`.
   `Programming Language :: Python :: 3.12/3.13/3.14` classifiers from that range
   automatically — treat `Requires-Python` as the binding statement, not the classifiers.
 - **No enforcement that a breaking public-symbol change forces a major bump.** This release
-  *is* that event, and the bump was reasoned by hand. Consciously accepted; the guard lands
-  in 3.0.1. (#374)
+  *is* that event, and the bump was reasoned by hand. Consciously accepted for this
+  release; the guard is tracked in #374 and is not yet scheduled. (#374)
 
 ---
 
