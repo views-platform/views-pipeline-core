@@ -131,31 +131,64 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 TARGET = "unfao"
 
 
+def _say(message: str, *, stderr: bool = False) -> None:
+    """Print, but never let a closed pipe destroy the thing we are trying to say.
+
+    `python tools/wipe_fao_shelf.py --confirm | head` closes stdout early, and every
+    subsequent write raises `BrokenPipeError`. That was survivable for progress lines and
+    fatal for the receipt: raised from inside the interrupt handler, it destroyed the one
+    output the handler exists to guarantee. Swallowing an OSError here is deliberate and
+    narrow — the alternative is losing the record of what a destructive run deleted.
+    """
+    try:
+        print(message, file=sys.stderr if stderr else sys.stdout, flush=True)
+    except OSError:
+        pass
+
+
 def _fail(message: str) -> int:
-    print(f"\nREFUSING TO RUN — {message}", file=sys.stderr)
+    _say(f"\nREFUSING TO RUN — {message}", stderr=True)
     return 2
 
 
-def _receipt(
-    deleted_documents: int,
-    total_documents: int,
-    deleted_files: int,
-    total_files: int,
-    failures: List[str],
-) -> None:
+class _Progress:
+    """What the run has done so far, shared between `_delete` and its caller.
+
+    Mutable and passed by reference ON PURPOSE. `_delete` is called inside a
+    `try/except BaseException` whose job is to print a receipt when the run is
+    interrupted — and an interrupted call returns nothing, so anything the receipt needs
+    cannot travel by return value. The previous version learned this the expensive way:
+    it returned the counters, the handler read the zeros it had initialised, and an
+    interrupt after deleting an entire index printed `documents deleted : 0 of 144`.
+
+    `receipt_printed` lives here for the same reason — so a signal arriving during
+    `_delete`'s epilogue cannot cause a second, contradictory receipt to be printed
+    *below* the true one, where an operator looks.
+    """
+
+    def __init__(self, total_documents: int, total_files: int) -> None:
+        self.total_documents = total_documents
+        self.total_files = total_files
+        self.deleted_documents = 0
+        self.deleted_files = 0
+        self.failures: List[str] = []
+        self.receipt_printed = False
+
+
+def _receipt(progress: "_Progress") -> None:
     """Print what actually happened, on every exit path that deleted anything.
 
-    Factored out because the run can now stop between the two phases, and a run that
-    stops must still say what it did. A receipt printed only on the happy path is not a
-    receipt.
+    Takes the accumulator rather than five positionals so it cannot be handed a stale
+    snapshot — which is exactly how the interrupt path came to report zeros.
     """
-    print("\n" + "=" * 70)
-    print("RECEIPT")
-    print("=" * 70)
-    print(f"  documents deleted : {deleted_documents} of {total_documents}")
-    print(f"  files deleted     : {deleted_files} of {total_files}")
-    if failures:
-        print(f"  failures          : {len(failures)}")
+    _say("\n" + "=" * 70)
+    _say("RECEIPT")
+    _say("=" * 70)
+    _say(f"  documents deleted : {progress.deleted_documents} of {progress.total_documents}")
+    _say(f"  files deleted     : {progress.deleted_files} of {progress.total_files}")
+    if progress.failures:
+        _say(f"  failures          : {len(progress.failures)}")
+    progress.receipt_printed = True
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -190,7 +223,21 @@ def main(argv: List[str] | None = None) -> int:
         list_all_files,
     )
 
-    file_manager = build_file_manager(TARGET)
+    # `build_file_manager` raises when the FAO coordinates are missing. Uncaught, that
+    # exited 1 — which this file's own exit-code table defines as "some deletes failed…
+    # a receipt was printed" — so the half-loaded environment C-271 exists for was
+    # reported to a wrapper as a PARTIAL WIPE. C-271 was fixed for the protected half and
+    # left open for this one.
+    from views_pipeline_core.exceptions.exceptions import ConfigurationException
+
+    try:
+        file_manager = build_file_manager(TARGET)
+    except ConfigurationException as e:
+        return _fail(
+            f"the FAO shelf's own coordinates could not be resolved: {e} Load the full "
+            f"platform environment (`platform_env_load`) and re-run. Nothing was read "
+            f"and nothing was deleted."
+        )
     bucket = file_manager.config.bucket_id
     collection = file_manager.config.collection_id
 
@@ -228,10 +275,10 @@ def main(argv: List[str] | None = None) -> int:
                 f"outbound shelf. Check {env_var}."
             )
 
-    print(f"target shelf : {TARGET}")
-    print(f"bucket       : {bucket}")
-    print(f"collection   : {collection}\n")
-    print("Reading (read-only so far) …\n")
+    _say(f"target shelf : {TARGET}")
+    _say(f"bucket       : {bucket}")
+    _say(f"collection   : {collection}\n")
+    _say("Reading (read-only so far) …\n")
 
     report = AuditReport(bucket_id=bucket, collection_id=collection)
     files = list_all_files(file_manager, bucket, report)
@@ -248,7 +295,7 @@ def main(argv: List[str] | None = None) -> int:
 
     if report.indeterminate:
         for note in report.indeterminate:
-            print(f"  - {note}", file=sys.stderr)
+            _say(f"  - {note}", stderr=True)
         return _fail(
             "the listing came back incomplete. A partial read makes present records look "
             "absent, so a wipe based on it would report success while leaving records "
@@ -289,84 +336,97 @@ def main(argv: List[str] | None = None) -> int:
                 f"--target unfao --list\n"
                 f"If it is (2), re-run with --accept-unpaired-shelf."
             )
-        print(
+        _say(
             "  proceeding on --accept-unpaired-shelf: no document references any file "
             "in this bucket, and the operator has asserted this is one broken shelf "
             "rather than two shelves read as one.\n"
         )
 
-    print(f"  files to delete     : {len(files)}")
-    print(f"  documents to delete : {len(documents)}\n")
+    _say(f"  files to delete     : {len(files)}")
+    _say(f"  documents to delete : {len(documents)}\n")
 
     if not files and not documents:
-        print("Shelf is already empty. Nothing to do.")
+        _say("Shelf is already empty. Nothing to do.")
         return 0
 
     if not args.confirm:
-        print("-" * 70)
-        print("DRY RUN — nothing has been deleted.")
-        print("-" * 70)
+        _say("-" * 70)
+        _say("DRY RUN — nothing has been deleted.")
+        _say("-" * 70)
         for d in documents[:10]:
-            print(f"  would delete document {d.get('$id')}  ({d.get('category')})")
+            _say(f"  would delete document {d.get('$id')}  ({d.get('category')})")
         if len(documents) > 10:
-            print(f"  … and {len(documents) - 10} more documents")
+            _say(f"  … and {len(documents) - 10} more documents")
         for f in files[:10]:
-            print(f"  would delete file     {f.get('$id')}  {f.get('name')}")
+            _say(f"  would delete file     {f.get('$id')}  {f.get('name')}")
         if len(files) > 10:
-            print(f"  … and {len(files) - 10} more files")
-        print("\nRe-run with --confirm to delete.")
+            _say(f"  … and {len(files) - 10} more files")
+        _say("\nRe-run with --confirm to delete.")
         return 0
 
-    print("=" * 70)
-    print("DELETING")
-    print("=" * 70)
+    _say("=" * 70)
+    _say("DELETING")
+    _say("=" * 70)
 
-    failures: List[str] = []
-    deleted_documents = 0
-    deleted_files = 0
-    receipt_printed = False
+    # A SHARED, MUTABLE accumulator — not return values. `_delete` runs inside a
+    # `try/except BaseException` whose whole purpose is printing a receipt when the run is
+    # interrupted, and an interrupted call returns nothing. The first version of this
+    # extraction bound the counters in `main()` and returned them from `_delete`, so the
+    # handler always read the zeros it initialised: an interrupt after deleting the entire
+    # FAO index printed `documents deleted : 0 of 144`. A receipt that lies about a
+    # destructive run is the defect safety property 6 exists to refuse, introduced by the
+    # fix for it. `failures` was already shared and was the only field the handler got
+    # right, which is what made the zeros beside it so misleading.
+    progress = _Progress(total_documents=len(documents), total_files=len(files))
 
     try:
-        deleted_documents, deleted_files, receipt_printed, code = _delete(
-            file_manager, bucket, collection, files, documents, failures
-        )
+        code = _delete(file_manager, bucket, collection, files, documents, progress)
     except BaseException:
         # Ctrl-C is the interruption the documents-first ordering is reasoned about, and
         # it is exactly when knowing what was already deleted matters most. `except
-        # Exception` would not catch it, so the receipt is guaranteed here and the
-        # signal is then re-raised unchanged.
-        _receipt(deleted_documents, len(documents), deleted_files, len(files), failures)
-        print(
+        # Exception` would not catch it, so the receipt is guaranteed here and the signal
+        # is re-raised unchanged. `_receipt` is only emitted if `_delete` did not already
+        # emit one, so a signal arriving during `_delete`'s own epilogue cannot print a
+        # second, contradictory receipt below the true one.
+        if not progress.receipt_printed:
+            _receipt(progress)
+        _say(
             "\n  INTERRUPTED. The counts above are what completed. Documents are "
             "deleted before files, so the remainder is inert; re-run when ready.",
-            file=sys.stderr,
+            stderr=True,
         )
         raise
 
-    if not receipt_printed:
-        _receipt(deleted_documents, len(documents), deleted_files, len(files), failures)
+    if not progress.receipt_printed:
+        _receipt(progress)
     return code
 
 
-def _delete(file_manager, bucket, collection, files, documents, failures):
-    """Perform the deletion. Returns (deleted_documents, deleted_files, printed, code).
+def _delete(file_manager, bucket, collection, files, documents, progress) -> int:
+    """Perform the deletion, recording into `progress` as it goes. Returns an exit code.
 
-    Split out so the caller can guarantee a receipt on ANY exit, including a signal.
+    Split out so the caller can guarantee a receipt on ANY exit, including a signal —
+    which is only possible because everything the receipt needs lives in `progress`
+    rather than in this function's locals.
     """
     # Documents first: remove the index, then the content. An interruption then leaves
     # files without documents (inert) rather than documents pointing at nothing.
-    deleted_documents = 0
     for d in documents:
         doc_id = d.get("$id")
         try:
             file_manager.databases.delete_document(
                 file_manager.config.database_id, collection, doc_id
             )
-            deleted_documents += 1
-            print(f"  deleted document {doc_id}")
         except Exception as e:  # noqa: BLE001 — reported, never swallowed
-            failures.append(f"document {doc_id}: {type(e).__name__}: {e}")
-            print(f"  FAILED   document {doc_id}: {e}", file=sys.stderr)
+            progress.failures.append(f"document {doc_id}: {type(e).__name__}: {e}")
+            _say(f"  FAILED   document {doc_id}: {e}", stderr=True)
+            continue
+        # The increment and the print are OUTSIDE the try, and in that order. Inside it,
+        # a failing print was recorded as a delete failure for a document that HAD been
+        # deleted — counted as both, which was the only reachable route to the accounting
+        # error below. The file loop already scoped its try this way; this loop did not.
+        progress.deleted_documents += 1
+        _say(f"  deleted document {doc_id}")
 
     # The file phase is GATED on the document phase. Deleting files after the index
     # failed to clear produces dangling documents — cards pointing at content that is
@@ -375,21 +435,20 @@ def _delete(file_manager, bucket, collection, files, documents, failures):
     # metadata surviving means the service serves a manifest whose every file id 404s.
     # The realistic cause is a key holding `files.write` but not `documents.write`
     # (rotation, narrowed scope, changed collection permissions). Register C-272.
-    if deleted_documents != len(documents):
-        _receipt(deleted_documents, len(documents), 0, len(files), failures)
-        print(
-            f"\n  STOPPING BEFORE THE FILES. Only {deleted_documents} of "
+    if progress.deleted_documents != len(documents):
+        _receipt(progress)
+        _say(
+            f"\n  STOPPING BEFORE THE FILES. Only {progress.deleted_documents} of "
             f"{len(documents)} documents were deleted, and removing files now would "
-            f"leave the remainder DANGLING — pointing at content that no longer "
-            f"exists. That is worse than the state you started in, and a re-run cannot "
-            f"repair it because the files would already be gone. Fix the cause "
-            f"(most likely the API key lacks `documents.write` on this collection), "
-            f"then re-run: no file has been touched.",
-            file=sys.stderr,
+            f"leave the remainder DANGLING — pointing at content that no longer exists. "
+            f"That is worse than the state you started in, and a re-run cannot repair it "
+            f"because the files would already be gone. Fix the cause (most likely the API "
+            f"key lacks `documents.write` on this collection), then re-run: no file has "
+            f"been touched.",
+            stderr=True,
         )
-        return deleted_documents, 0, True, 1
+        return 1
 
-    deleted_files = 0
     for f in files:
         file_id = f.get("$id")
         # `delete_file` signals failure by RETURN VALUE for AppwriteException — ignoring
@@ -402,49 +461,61 @@ def _delete(file_manager, bucket, collection, files, documents, failures):
         try:
             result = file_manager.delete_file(bucket, file_id)
         except Exception as e:  # noqa: BLE001 — reported, never swallowed
-            failures.append(
+            progress.failures.append(
                 f"file {file_id}: {type(e).__name__}: {e} (the delete may have SUCCEEDED "
                 f"server-side — this is an error escaping the SDK, not a refusal)"
             )
-            print(f"  FAILED   file    {file_id}: {type(e).__name__}: {e}", file=sys.stderr)
+            _say(f"  FAILED   file    {file_id}: {type(e).__name__}: {e}", stderr=True)
             continue
 
         if getattr(result, "success", False):
-            deleted_files += 1
-            print(f"  deleted file     {file_id}  {f.get('name')}")
+            progress.deleted_files += 1
+            _say(f"  deleted file     {file_id}  {f.get('name')}")
         else:
             error = getattr(result, "error", None) or "unknown error"
-            failures.append(f"file {file_id}: {error}")
-            print(f"  FAILED   file    {file_id}: {error}", file=sys.stderr)
+            progress.failures.append(f"file {file_id}: {error}")
+            _say(f"  FAILED   file    {file_id}: {error}", stderr=True)
 
-    _receipt(deleted_documents, len(documents), deleted_files, len(files), failures)
+    _receipt(progress)
 
     # Every record must be accounted for as either deleted or failed. If this ever
     # trips, a shape change has produced an outcome that is neither — the silent middle
     # this whole file exists to refuse.
-    accounted = deleted_documents + deleted_files + len(failures)
+    accounted = (
+        progress.deleted_documents + progress.deleted_files + len(progress.failures)
+    )
     expected = len(documents) + len(files)
     if accounted != expected:
-        print(
-            f"\n  ACCOUNTING BROKEN: {accounted} records accounted for, {expected} "
-            f"processed. Some record was neither deleted nor recorded as failed. Do not "
-            f"trust the counts above; re-run the audit before acting on them.",
-            file=sys.stderr,
+        # Direction matters, and the first version never checked it. FEWER than expected
+        # is the silent middle — a record neither deleted nor recorded. MORE is
+        # double-counting, a bookkeeping bug in this script rather than a substrate
+        # mystery; telling an operator "do not trust the counts" after a complete success
+        # invites them to re-run a destructive tool for no reason.
+        shape = (
+            "some record was neither deleted nor recorded as failed"
+            if accounted < expected
+            else "some record was counted twice — a bookkeeping error in this script, "
+                 "not necessarily a failed deletion"
         )
-        return deleted_documents, deleted_files, True, 3
+        _say(
+            f"\n  ACCOUNTING BROKEN: {accounted} accounted for, {expected} processed — "
+            f"{shape}. Re-run the audit before acting on the counts above.",
+            stderr=True,
+        )
+        return 3
 
-    if failures:
-        print(f"\n  {len(failures)} FAILURE(S):")
-        for failure in failures:
-            print(f"    - {failure}")
-        print("\n  Re-run to retry the remainder. Files are deleted only after every "
-              "document is, so a re-run cannot make the pairing worse.")
-        return deleted_documents, deleted_files, True, 1
+    if progress.failures:
+        _say(f"\n  {len(progress.failures)} FAILURE(S):")
+        for failure in progress.failures:
+            _say(f"    - {failure}")
+        _say("\n  Re-run to retry the remainder. Files are deleted only after every "
+             "document is, so a re-run cannot make the pairing worse.")
+        return 1
 
-    print("\n  Shelf is empty. Re-run the audit to confirm:")
-    print("    python -m views_pipeline_core.modules.appwrite.audit "
-          "--target unfao --list")
-    return deleted_documents, deleted_files, True, 0
+    _say("\n  Shelf is empty. Re-run the audit to confirm:")
+    _say("    python -m views_pipeline_core.modules.appwrite.audit "
+         "--target unfao --list")
+    return 0
 
 
 if __name__ == "__main__":

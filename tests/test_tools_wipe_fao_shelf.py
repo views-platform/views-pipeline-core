@@ -46,6 +46,7 @@ directly.
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -84,12 +85,26 @@ class _Databases:
     ordering safety property went unguarded and a swap left the suite green (C-276).
     """
 
-    def __init__(self, log: List[str], failing_document_id: str | None = None) -> None:
+    def __init__(
+        self,
+        log: List[str],
+        failing_document_id: str | None = None,
+        interrupt_after: int | None = None,
+    ) -> None:
+        self._interrupt_after = interrupt_after
         self.deleted: List[str] = []
+        self.collections_used: List[str] = []
         self._log = log
         self._failing_document_id = failing_document_id
 
     def delete_document(self, database_id: str, collection_id: str, document_id: str) -> None:
+        # Record the coordinate, do not ignore it. A file whose thesis is "collection
+        # matters as much as bucket" must assert that the VALIDATED collection is the one
+        # deleted from; while the fake dropped this argument, transposing the call site
+        # or hardcoding a foreign collection both passed the whole suite.
+        self.collections_used.append(collection_id)
+        if self._interrupt_after is not None and len(self.deleted) >= self._interrupt_after:
+            raise KeyboardInterrupt
         if document_id == self._failing_document_id:
             raise RuntimeError("user (role: applications) missing scope (documents.write)")
         self.deleted.append(document_id)
@@ -102,15 +117,22 @@ class _FileManager:
         failing_file_id: str | None = None,
         raising_file_id: str | None = None,
         failing_document_id: str | None = None,
+        interrupt_after_documents: int | None = None,
     ) -> None:
         self.config = _Config()
         self.log: List[str] = []
-        self.databases = _Databases(self.log, failing_document_id=failing_document_id)
+        self.databases = _Databases(
+            self.log,
+            failing_document_id=failing_document_id,
+            interrupt_after=interrupt_after_documents,
+        )
         self.deleted_files: List[str] = []
+        self.buckets_used: List[str] = []
         self._failing_file_id = failing_file_id
         self._raising_file_id = raising_file_id
 
     def delete_file(self, bucket_id: str, file_id: str) -> _Result:
+        self.buckets_used.append(bucket_id)
         if file_id == self._raising_file_id:
             # The shape verified against the real SDK: a 204 with no Content-Type
             # header makes `client.call` raise a bare KeyError from inside its own
@@ -146,6 +168,8 @@ def wire(monkeypatch):
         raising_file_id: str | None = None,
         failing_document_id: str | None = None,
         set_protected: bool = True,
+        interrupt_after_documents: int | None = None,
+        interrupt_in_epilogue: bool = False,
     ):
         # The protected coordinates must be resolvable or the tool refuses outright —
         # an absent guard is not a passed guard (C-271). Set to values that are
@@ -161,7 +185,19 @@ def wire(monkeypatch):
             failing_file_id=failing_file_id,
             raising_file_id=raising_file_id,
             failing_document_id=failing_document_id,
+            interrupt_after_documents=interrupt_after_documents,
         )
+        if interrupt_in_epilogue:
+            # Fire once the deletion is fully done, i.e. while `_delete` is printing its
+            # own receipt and closing lines — the window in which a second receipt used
+            # to be printed beneath the true one.
+            original = tool._receipt
+
+            def _receipt_then_interrupt(progress):
+                original(progress)
+                raise KeyboardInterrupt
+
+            monkeypatch.setattr(tool, "_receipt", _receipt_then_interrupt, raising=True)
         monkeypatch.setattr(
             audit_pkg, "build_file_manager", lambda *a, **k: manager, raising=True
         )
@@ -425,3 +461,115 @@ def test_accept_unpaired_shelf_allows_the_genuinely_broken_case_through(wire, ca
         "Proceeding on an operator override must say so in the output; a silent "
         "override is indistinguishable from the check not having run."
     )
+
+
+def test_deletes_from_the_coordinates_that_were_validated(wire):
+    """The validated collection must be the collection deleted from (C-271).
+
+    The guards check `bucket` and `collection`; nothing asserted that those same values
+    reach the delete calls. While the fakes ignored their coordinate arguments, both
+    transposing them at the call site and hardcoding a foreign collection passed the
+    entire suite — on a tool whose stated thesis is that collection matters as much as
+    bucket.
+    """
+    tool, manager = wire()
+    assert tool.main(["--confirm"]) == 0
+
+    assert set(manager.databases.collections_used) == {_Config.collection_id}, (
+        f"Documents were deleted from {set(manager.databases.collections_used)}, not the "
+        f"validated collection {_Config.collection_id!r}."
+    )
+    assert set(manager.buckets_used) == {_Config.bucket_id}, (
+        f"Files were deleted from {set(manager.buckets_used)}, not the validated bucket "
+        f"{_Config.bucket_id!r}."
+    )
+
+
+def test_an_interrupt_prints_a_receipt_showing_what_actually_completed(wire, capsys):
+    """The whole reason `_delete` was extracted — and it had no test, so it shipped broken.
+
+    The first extraction returned the counters to a handler that, on an exception, can
+    never receive a return value; it therefore printed the zeros it had initialised. An
+    interrupt after deleting an entire index reported `documents deleted : 0 of N` under
+    the sentence "The counts above are what completed". A receipt that lies about a
+    destructive run is the defect safety property 6 exists to refuse.
+    """
+    tool, manager = wire(interrupt_after_documents=2)
+
+    with pytest.raises(KeyboardInterrupt):
+        tool.main(["--confirm"])
+
+    out = capsys.readouterr()
+    combined = out.out + out.err
+    assert "documents deleted : 2 of 3" in combined, (
+        f"The interrupt receipt did not report what actually completed. Two documents "
+        f"were deleted. Output was:\n{combined}"
+    )
+    assert "documents deleted : 0 of 3" not in combined, (
+        "The receipt reported zeros for a run that deleted two documents."
+    )
+    assert "INTERRUPTED" in combined
+
+
+def test_an_interrupt_after_the_receipt_does_not_print_a_second_one(wire, capsys):
+    """A signal in `_delete`'s epilogue must not print a contradictory receipt below the true one.
+
+    An operator reads the LAST receipt in the scrollback. Printing a second, stale one
+    beneath the correct one is worse than printing none.
+    """
+    tool, manager = wire(interrupt_in_epilogue=True)
+
+    with pytest.raises(KeyboardInterrupt):
+        tool.main(["--confirm"])
+
+    combined = capsys.readouterr()
+    assert (combined.out + combined.err).count("RECEIPT") == 1, (
+        "More than one receipt was printed. The last one an operator sees must be the "
+        "true one, and there must only be one."
+    )
+
+
+def test_a_closed_stdout_does_not_destroy_the_receipt(wire, monkeypatch, capsys):
+    """`... --confirm | head` closes stdout; the receipt must still reach stderr.
+
+    A BrokenPipeError raised from inside the interrupt handler destroyed the one output
+    that handler exists to guarantee.
+    """
+    tool, manager = wire()
+    real_print = print
+
+    def _broken(*args, **kwargs):
+        if kwargs.get("file") not in (sys.stderr,):
+            raise BrokenPipeError(32, "Broken pipe")
+        real_print(*args, **kwargs)
+
+    monkeypatch.setattr("builtins.print", _broken)
+    exit_code = tool.main(["--confirm"])
+    monkeypatch.undo()
+
+    assert exit_code == 0, (
+        "A closed stdout turned a successful wipe into a failure. Progress output is not "
+        "worth losing the run over."
+    )
+
+
+def test_unresolvable_fao_coordinates_refuse_rather_than_look_like_a_partial_wipe(
+    wire, capsys, monkeypatch
+):
+    """`build_file_manager` raising must exit 2, not 1 (C-271, the unfixed half).
+
+    Exit 1 is documented as "some deletes failed … a receipt was printed and a re-run is
+    safe". Reporting a shell with no credentials as a partial wipe is the opposite of
+    true, and it is the exact half-loaded-environment scenario C-271 was raised for.
+    """
+    tool, _ = wire()
+    from views_pipeline_core.exceptions.exceptions import ConfigurationException
+    import views_pipeline_core.modules.appwrite.audit as audit_pkg
+
+    def _raise(*a, **k):
+        raise ConfigurationException("Missing environment variable(s) for target 'unfao'.")
+
+    monkeypatch.setattr(audit_pkg, "build_file_manager", _raise, raising=True)
+
+    assert tool.main(["--confirm"]) == 2
+    _assert_refused_because(capsys, "own coordinates could not be resolved")
