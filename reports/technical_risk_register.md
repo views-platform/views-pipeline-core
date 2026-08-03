@@ -1,22 +1,31 @@
 # Technical Risk Register
 
-**Last updated:** 2026-08-03 (C-270..C-277 raised, fixed and closed on #390; round-2 review corrected this register's own overclaims — see C-273)
+**Last updated:** 2026-08-03 (**3.0.0 SHIPPED** — gate closed with C-193 and C-206 consciously accepted)
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 277 concerns (167 resolved) + 41 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.0.0 (runbook: issue #313).** A breaking release into five
-> pinned consumer repos. These entries must be closed or *consciously accepted* before tagging:
-> ~~**C-227**, **C-228**, **C-231**~~ — **CLOSED 2026-07-31** (#329/#330/#331); ~~the remaining
-> Appwrite-seam gate item is running the audit against production (C-236)~~ — **CLOSED 2026-08-02/03**:
-> both shelves audited (`--target forecasts`, the `production_forecasts` bucket, clean at 461/461; the FAO shelf showed 1 orphan and
-> 15 dangling documents, all inert and all pre-dating the C-227 fix), and the FAO shelf was then
-> **wiped entirely** with views-faoapi's approval (views-faoapi#353) — 144/144 documents and 130/130
-> files deleted, zero failures, because its whole contents were throwaway placeholder data. **C-193 residual** (nothing enforces that a breaking public-symbol change
-> forces a major bump — and this release *is* that event) → **#374**, ~~**C-190 residual** (no declared
-> `views-reporting` floor in `pyproject.toml`) → **#375**~~ — **CLOSED 2026-08-02**: decided *not* to
-> declare one. views-reporting depends on views-pipeline-core, so a floor would make the dependency
-> cyclic and would inherit their ceilings on our release schedule. Recorded in ADR-054 and enforced
-> by `tests/test_reporting_is_not_a_dependency.py` (four mutation-tested checks), **C-206** (every proof that would validate the release runs against editable worktrees — **the views-frames half is now CLOSED (2026-08-02): the box has been upgraded 1.8.0 → 1.10.2, the full suite passes unchanged (1707), and pipeline-core's floor is raised `^1.8` → `^1.10.2` so nothing can resolve a stale one. The editable-worktree half remains: sibling repos are still installed from working trees, so a proof still validates whatever branch each happens to be on**), ~~plus the known `views-evaluation ^0.4.0 → ^0.5.0` bump awaiting the leaf release~~ — **DONE 2026-08-02/03**: views-evaluation 0.5.0 then **1.0.0** published to PyPI, pin now `^1.0.0` (1.0.0's diff from v0.5.0 touches zero lines under `views_evaluation/` — an API-stability declaration, verified by running the full suite against it before raising the floor), pin bumped, and the adoption verified against the **published wheel** in a clean venv rather than the editable checkout: `to_metric_frame` present, all six kwargs `evaluation/stage.py` passes accepted, and a real 12-key combined config **accepted** by their new fail-loud validator.
+> **Release gate — pipeline-core 3.0.0 — ~~CLOSED~~ SHIPPED 2026-08-03.**
+> `views-pipeline-core 3.0.0` is on PyPI. Verified from outside rather than from the
+> development environment: a fresh empty venv installed it from PyPI, seven core modules
+> imported, a real call returned correctly, `pytest` was confirmed **absent** from a
+> consumer install, and the `[appwrite]` extra installed and imported on request.
+> `pip install views-reporting` and `pip install views-baseline` — both unresolvable
+> before — now resolve.
+>
+> Gate disposition, in the gate's own wording (*"closed or consciously accepted"*):
+> ~~**C-227**, **C-228**, **C-231**~~ closed (#329/#330/#331) · ~~**C-236**~~ closed (both
+> shelves audited; FAO shelf wiped with views-faoapi's approval) · ~~**C-190**~~ closed as
+> *will not pin* (#375) · ~~views-evaluation bump~~ done (`^1.0.0`) ·
+> **C-193 / #374 — CONSCIOUSLY ACCEPTED**: nothing enforces that a breaking public-symbol
+> change forces a major bump, and this release *was* that event. The bump was reasoned by
+> hand and both engines were migrated first. The guard is tracked in #374 and is not
+> scheduled. · **C-206 / #274 — CONSCIOUSLY ACCEPTED**: proofs run against editable
+> worktrees. It does not affect the published artifact — CI builds from a clean install,
+> and the clean-room verification above used PyPI, not a local tree. The check is now
+> derived rather than hardcoded (#391) and reports real problems in five repos.
+>
+> **Both acceptances are decisions, not gaps.** Recording them is the point: the next
+> release inherits a decision rather than rediscovering an open question.
 
 > **Strategic context (2026-06-19) — `views-frames` is coming.** A new leaf
 > data-contract package, `views_platform/views-frames` (scaffolded 2026-06-19,
