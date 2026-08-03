@@ -388,7 +388,7 @@ class AppwriteConfig:
     def __post_init__(self):
         # `object.__setattr__` because the dataclass is frozen (C-240). Coercion is the
         # ONE mutation this type permits, it happens before the instance is handed to
-        # anyone, and `reconcile/targets.py` passes `auth_method="api_key"` as a string
+        # anyone, and `audit/targets.py` passes `auth_method="api_key"` as a string
         # so the coercion has a live caller.
         if isinstance(self.auth_method, str):
             object.__setattr__(self, "auth_method", AuthMethod(self.auth_method))
@@ -2354,15 +2354,16 @@ class AppWriteFileModule:
             # Rollback: delete the uploaded file if metadata fails. `delete_file`
             # reports failure by RETURN VALUE, so the `except` below never sees one —
             # inspect the result, or a failed rollback leaves an orphaned file in the
-            # bucket and says nothing (the fourth route to the state reconcile.py
-            # exists to detect; register C-227's disease at this site).
+            # bucket and says nothing (the fourth route to the state the
+            # `modules/appwrite/audit/` package exists to detect; register C-227's
+            # disease at this site).
             try:
                 rollback = self.delete_file(bucket_id, file_id)
                 if not rollback.success:
                     logger.error(
                         "Rollback FAILED: file %s remains in bucket '%s' with no "
                         "metadata document (code=%s, %s). Run `python -m "
-                        "views_pipeline_core.modules.appwrite.reconcile` to confirm.",
+                        "views_pipeline_core.modules.appwrite.audit` to confirm.",
                         file_id, bucket_id, rollback.code, rollback.error,
                     )
             except Exception as delete_error:

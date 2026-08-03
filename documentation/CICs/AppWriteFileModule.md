@@ -205,7 +205,7 @@ did not already believe.
 - **Green — asserted.** `tests/test_modules/test_appwrite.py`: hash computation,
   deduplication logic, cache validation and `OperationResult` construction, against
   hand-written doubles.
-- **Green/Beige — derived.** `test_appwrite_pagination.py`, `test_appwrite_reconcile.py`:
+- **Green/Beige — derived.** `test_appwrite_pagination.py`, `test_appwrite_audit.py`:
   doubles built from the SDK's **own** query encoding, which return 25 rows when no
   `Query.limit` is supplied because that is what the service does. They catch mechanism
   errors — a walk that forgets to page, mis-advances an offset, or mistakes a capped page

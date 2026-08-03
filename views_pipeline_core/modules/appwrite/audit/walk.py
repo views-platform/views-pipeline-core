@@ -31,7 +31,10 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Appwrite caps a single page; walk until a short page comes back.
+# Appwrite caps a single page. The walk terminates on an EMPTY page, never a short
+# one, and advances by what it RECEIVED — see the module docstring. (This comment used
+# to read "walk until a short page comes back", describing the terminator C-242's second
+# finding removed; it outlived the behaviour it described by two stories.)
 PAGE_SIZE = 100
 # Guard against an unbounded walk if the substrate misreports paging.
 MAX_PAGES = 1000
@@ -131,3 +134,56 @@ def list_all_documents(file_manager, report) -> List[Dict[str, Any]]:
     if reported_total is not None and len(documents) != reported_total:
         _note_short_walk(report, f"collection {coll_id!r}", len(documents), reported_total)
     return documents
+
+
+def unique_by_id(
+    items: List[Dict[str, Any]], report, what: str
+) -> List[Dict[str, Any]]:
+    """Collapse records sharing an ``$id``, recording that it happened.
+
+    Lives here rather than in ``__init__`` because it is about **paging artefacts** —
+    the thing these two walks produce — so under CCP it belongs beside them. It is
+    public because `tools/wipe_fao_shelf.py` and the audit both need it: a private
+    name reached across the package boundary is a name the next tidy-up deletes, and
+    the caller it would break is the one that deletes production data (C-274).
+
+    **Call this BEFORE consulting ``report.indeterminate``.** It is the only detector
+    of an offset-unstable walk: a collection shifting under concurrent writes returns
+    ``total`` rows of which some are repeats and an equal number were never seen, so
+    the count-guard above agrees with itself and says nothing. Checking first makes
+    these notes write-only (C-270).
+
+    A repeat is not necessarily an error — paging under concurrent writes can return
+    one twice — but it means the walk saw a shifting collection, which is worth saying
+    out loud rather than quietly averaging away.
+    """
+    seen, unique, unidentified = set(), [], 0
+    for item in items:
+        key = item.get("$id")
+        if not key:
+            # No id, so no way to tell this record from another one — which is NOT the
+            # same as it being a repeat. Keying them all on None collapsed three
+            # untagged records into one and reported the two it destroyed as
+            # duplicates: a de-duplicator deleting distinct records, inside the tool
+            # whose whole job is enumerating completely. Keep it and declare it.
+            unidentified += 1
+            unique.append(item)
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+
+    repeats = len(items) - len(unique)
+    if repeats:
+        report.indeterminate.append(
+            f"{repeats} {what}(s) were returned more than once by paging; the "
+            f"collection changed during the walk, so these counts are a snapshot of a "
+            f"moving target"
+        )
+    if unidentified:
+        report.indeterminate.append(
+            f"{unidentified} {what}(s) carry no $id and cannot be identified; they are "
+            f"counted but cannot be matched against the other side of the pairing"
+        )
+    return unique

@@ -182,7 +182,7 @@ class TestAppwriteConfigIsFrozen:
     def test_the_string_auth_method_still_coerces(self):
         """Freezing must not break `__post_init__`'s coercion.
 
-        `reconcile/targets.py` passes `auth_method="api_key"` as a string, so the
+        `audit/targets.py` passes `auth_method="api_key"` as a string, so the
         coercion has a live caller and freezing requires `object.__setattr__`.
         """
         assert _config(auth_method="api_key").auth_method is AuthMethod.API_KEY

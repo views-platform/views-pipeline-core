@@ -1,4 +1,4 @@
-"""Tests for the read-only Appwrite reconciliation audit (register C-236).
+"""Tests for the read-only Appwrite shelf audit (register C-236).
 
 The property that matters most here is the one the audited code gets wrong: a listing
 that **could not be read** must never be reported as an empty listing. If this audit
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import pytest
 
 from views_pipeline_core.modules.appwrite.file import OperationResult
-from views_pipeline_core.modules.appwrite.reconcile import ReconciliationReport, reconcile
+from views_pipeline_core.modules.appwrite.audit import AuditReport, audit
 
 
 class _Config:
@@ -120,7 +120,7 @@ class TestPairing:
             files=[_file("f1"), _file("f2", "other.parquet")],
             documents=[_doc("d1", "f1"), _doc("d2", "f2")],
         )
-        report = reconcile(fm)
+        report = audit(fm)
         assert report.is_clean
         assert report.files_total == 2
         assert report.documents_total == 2
@@ -131,7 +131,7 @@ class TestPairing:
         fm = _FakeFileManager(
             files=[_file("f1"), _file("f2")], documents=[_doc("d1", "f1")]
         )
-        report = reconcile(fm)
+        report = audit(fm)
         assert not report.is_clean
         assert [f["$id"] for f in report.orphan_files] == ["f2"]
         assert report.dangling_documents == []
@@ -142,7 +142,7 @@ class TestPairing:
             files=[_file("f1")],
             documents=[_doc("d1", "f1"), _doc("d2", "vanished")],
         )
-        report = reconcile(fm)
+        report = audit(fm)
         assert not report.is_clean
         assert [d["$id"] for d in report.dangling_documents] == ["d2"]
         assert report.orphan_files == []
@@ -153,7 +153,7 @@ class TestPairing:
             files=[_file("f1", "same.parquet"), _file("f2", "same.parquet")],
             documents=[_doc("d1", "f1"), _doc("d2", "f2")],
         )
-        report = reconcile(fm)
+        report = audit(fm)
         assert report.duplicate_file_names == {"same.parquet": 2}
         # Updated by #342/C-244: this used to assert `not is_clean`, which is the
         # conflation the register objects to. Every file here HAS a document and every
@@ -178,7 +178,7 @@ class TestIndeterminate:
                 code="general_unauthorized_scope",
             ),
         )
-        report = reconcile(fm)
+        report = audit(fm)
         assert report.indeterminate, "an unreadable bucket must be recorded, not ignored"
         assert "general_unauthorized_scope" in report.indeterminate[0]
         assert "INDETERMINATE" in report.render()
@@ -189,7 +189,7 @@ class TestIndeterminate:
             documents=[],
             documents_error=RuntimeError("general_unauthorized_scope: denied"),
         )
-        report = reconcile(fm)
+        report = audit(fm)
         assert report.indeterminate
         # Every file looks orphaned when the collection cannot be read — which is
         # exactly why the verdict must be INDETERMINATE and not "PAIRING BROKEN".
@@ -201,12 +201,12 @@ class TestIndeterminate:
             documents=[],
             documents_error=RuntimeError("denied"),
         )
-        rendered = reconcile(fm).render()
+        rendered = audit(fm).render()
         assert "VERDICT: INDETERMINATE" in rendered
         assert "VERDICT: PAIRING BROKEN" not in rendered
 
     def test_partial_page_failure_does_not_claim_a_complete_listing(self):
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
+        report = AuditReport(bucket_id="b", collection_id="c")
         report.indeterminate.append("list_files failed")
         assert "LOWER BOUND, not a total" in report.render()
 
@@ -222,7 +222,7 @@ class TestReadOnly:
         the thing this test is actually for.
         """
         fm = _FakeFileManager(files=[_file("f1")], documents=[_doc("d1", "f1")])
-        reconcile(fm)
+        audit(fm)
 
         assert fm.calls, "the audit made no calls at all"
         for call in fm.calls:
@@ -256,7 +256,7 @@ class TestHistoryVersusDefect:
         docs = [_doc("d1", "new1")]
         docs[0]["$createdAt"] = "2026-06-26T11:00:00.000+00:00"
 
-        report = reconcile(self._fm(files, docs))
+        report = audit(self._fm(files, docs))
 
         assert len(report.orphan_files) == 3
         assert report.orphans_predating_metadata == 3
@@ -270,7 +270,7 @@ class TestHistoryVersusDefect:
         docs = [_doc("d1", "something_else")]
         docs[0]["$createdAt"] = "2026-06-26T11:00:00.000+00:00"
 
-        report = reconcile(self._fm(files, docs))
+        report = audit(self._fm(files, docs))
 
         assert report.orphans_predating_metadata == 1
         assert [f["$id"] for f in report.orphans_since_metadata] == ["new_unindexed"]
@@ -279,7 +279,7 @@ class TestHistoryVersusDefect:
     def test_no_documents_at_all_refuses_to_classify(self):
         """With no first-document date there is no baseline, and saying so beats guessing."""
         files = [_file("a"), _file("b")]
-        report = reconcile(self._fm(files, []))
+        report = audit(self._fm(files, []))
 
         assert report.orphans_predating_metadata == 0
         assert len(report.orphans_since_metadata) == 2
@@ -292,7 +292,7 @@ class TestHistoryVersusDefect:
         docs = [_doc("d1", "a")]
         docs[0]["$createdAt"] = "2026-06-26T11:00:00.000+00:00"
 
-        report = reconcile(self._fm(files, docs))
+        report = audit(self._fm(files, docs))
 
         # #342: these are parsed, offset-aware datetimes rather than raw strings.
         # Holding them as text is what made a `+02:00` value sort after a later `Z`
@@ -305,7 +305,7 @@ class TestHistoryVersusDefect:
 class TestReportIsScannable:
     def test_detail_is_opt_in(self):
         files = [_file(f"f{i}") for i in range(50)]
-        report = reconcile(_FakeFileManager(files=files, documents=[]))
+        report = audit(_FakeFileManager(files=files, documents=[]))
 
         summary = report.render()
         detailed = report.render(list_detail=True)
@@ -316,24 +316,24 @@ class TestReportIsScannable:
 
 class TestTargets:
     def test_the_two_shelves_are_distinct_targets(self):
-        from views_pipeline_core.modules.appwrite.reconcile import _TARGETS
+        from views_pipeline_core.modules.appwrite.audit import TARGETS
 
-        assert _TARGETS["forecasts"]["bucket_id"] == "APPWRITE_PROD_FORECASTS_BUCKET_ID"
-        assert _TARGETS["unfao"]["bucket_id"] == "APPWRITE_UNFAO_BUCKET_ID"
+        assert TARGETS["forecasts"]["bucket_id"] == "APPWRITE_PROD_FORECASTS_BUCKET_ID"
+        assert TARGETS["unfao"]["bucket_id"] == "APPWRITE_UNFAO_BUCKET_ID"
         assert (
-            _TARGETS["forecasts"]["collection_id"]
-            != _TARGETS["unfao"]["collection_id"]
+            TARGETS["forecasts"]["collection_id"]
+            != TARGETS["unfao"]["collection_id"]
         ), "auditing one shelf must not silently read the other's collection"
 
     def test_missing_variable_fails_loud_naming_it(self, monkeypatch):
         from views_pipeline_core.exceptions.exceptions import ConfigurationException
-        from views_pipeline_core.modules.appwrite.reconcile import _build_file_manager
+        from views_pipeline_core.modules.appwrite.audit import build_file_manager
 
         monkeypatch.delenv("APPWRITE_UNFAO_BUCKET_ID", raising=False)
         monkeypatch.setenv("APPWRITE_ENDPOINT", "https://x/v1")
 
         with pytest.raises(ConfigurationException) as exc:
-            _build_file_manager("unfao")
+            build_file_manager("unfao")
         assert "APPWRITE_UNFAO_BUCKET_ID" in str(exc.value)
 
 
@@ -350,7 +350,7 @@ class TestOrphansByDay:
         docs = [_doc("d1", "indexed")]
         docs[0]["$createdAt"] = "2025-11-17T14:27:42.000+00:00"
 
-        report = reconcile(_FakeFileManager(files=files, documents=docs))
+        report = audit(_FakeFileManager(files=files, documents=docs))
 
         assert report.orphans_by_day == {"2026-07-27": 5}
         rendered = report.render()
@@ -366,7 +366,7 @@ class TestOrphansByDay:
         docs = [_doc("d1", "none")]
         docs[0]["$createdAt"] = "2026-05-01T10:00:00.000+00:00"
 
-        report = reconcile(_FakeFileManager(files=files, documents=docs))
+        report = audit(_FakeFileManager(files=files, documents=docs))
 
         assert len(report.orphans_by_day) == 3
 
@@ -377,7 +377,7 @@ class TestDanglingDocumentsAreAlwaysShown:
         files = [_file("present")]
         docs = [_doc("d1", "present"), _doc("d2", "vanished")]
 
-        rendered = reconcile(_FakeFileManager(files=files, documents=docs)).render()
+        rendered = audit(_FakeFileManager(files=files, documents=docs)).render()
 
         assert "Cards pointing at files that are not there" in rendered
         assert "vanished" in rendered
@@ -397,7 +397,7 @@ class TestDocumentPagination:
         files = [_file(f"f{i}", f"forecast_{i}.parquet") for i in range(250)]
         docs = [_doc(f"d{i}", f"f{i}") for i in range(250)]
 
-        report = reconcile(_FakeFileManager(files=files, documents=docs))
+        report = audit(_FakeFileManager(files=files, documents=docs))
 
         assert report.documents_total == 250, (
             "a short read would report 100 here and invent 150 orphans"
@@ -411,7 +411,7 @@ class TestDocumentPagination:
         docs = [_doc(f"d{i}", f"f{i}") for i in range(50)]
 
         # The collection claims 500 documents but only serves 50.
-        report = reconcile(
+        report = audit(
             _FakeFileManager(files=files, documents=docs, reported_total=500)
         )
 
@@ -429,7 +429,7 @@ class TestDocumentPagination:
         docs = [_doc(f"d{i}", f"f{i}") for i in range(150)]
         fm = _FakeFileManager(files=files, documents=docs)
 
-        report = reconcile(fm)
+        report = audit(fm)
 
         assert fm.calls.count("list_documents") == 3
         assert report.documents_total == 150
@@ -506,7 +506,7 @@ class TestC249ConclusionOverAnIncompleteRead:
     """C-249, Tier 1 — the defect this module exists to detect, in its own renderer."""
 
     def test_history_conclusion_is_withheld_when_the_read_was_incomplete(self):
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
+        report = AuditReport(bucket_id="b", collection_id="c")
         report.orphan_files = [_file("f1")]
         report.docs_earliest = datetime(2026, 7, 28, tzinfo=timezone.utc)
         report.docs_latest = datetime(2026, 7, 29, tzinfo=timezone.utc)
@@ -523,7 +523,7 @@ class TestC249ConclusionOverAnIncompleteRead:
         )
 
     def test_the_incompleteness_warning_precedes_any_interpretation(self):
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
+        report = AuditReport(bucket_id="b", collection_id="c")
         report.orphan_files = [_file("f1")]
         report.docs_earliest = datetime(2026, 7, 28, tzinfo=timezone.utc)
         report.indeterminate = ["could not read the collection"]
@@ -544,7 +544,7 @@ class TestC242FileWalkIsCertifiedToo:
             reported_total=500,
             documents=[_doc(f"d{i}", f"f{i}") for i in range(30)],
         )
-        report = reconcile(manager)
+        report = audit(manager)
 
         assert report.indeterminate, (
             "the bucket reports 500 files, the walk collected 30, and the audit said "
@@ -569,7 +569,7 @@ class TestC243TimestampsAreValidated:
         docs = [{"$id": "d1", "fileId": "other", "name": "m", "$createdAt": "2026-07-27T22:00:00Z"}]
         manager = _TotalAwareFileManager(files, documents=docs)
 
-        report = reconcile(manager)
+        report = audit(manager)
 
         assert report.orphans_predating_metadata == 1, (
             "21:00Z was judged later than 22:00Z because the offsets were compared as "
@@ -582,7 +582,7 @@ class TestC243TimestampsAreValidated:
         docs = [{"$id": "d1", "fileId": "other", "name": "m", "$createdAt": "2026-07-27T00:00:00Z"}]
         manager = _TotalAwareFileManager(files, documents=docs)
 
-        report = reconcile(manager)
+        report = audit(manager)
 
         assert report.indeterminate, (
             "'not-a-date' sorted lexicographically against real ISO timestamps and was "
@@ -593,7 +593,7 @@ class TestC243TimestampsAreValidated:
 
 class TestC244VerdictAndExitCode:
     def test_is_clean_is_false_when_the_audit_could_not_complete(self):
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
+        report = AuditReport(bucket_id="b", collection_id="c")
         report.indeterminate = ["could not read the bucket"]
 
         assert not report.is_clean, (
@@ -602,7 +602,7 @@ class TestC244VerdictAndExitCode:
         )
 
     def test_duplicate_names_alone_do_not_read_as_a_broken_pairing(self):
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
+        report = AuditReport(bucket_id="b", collection_id="c")
         report.duplicate_file_names = {"forecast.parquet": 2}
 
         out = report.render()
@@ -613,26 +613,26 @@ class TestC244VerdictAndExitCode:
         )
 
     def test_duplicates_alone_do_not_exit_nonzero(self):
-        from views_pipeline_core.modules.appwrite.reconcile import _exit_code
+        from views_pipeline_core.modules.appwrite.audit import exit_code
 
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
+        report = AuditReport(bucket_id="b", collection_id="c")
         report.duplicate_file_names = {"forecast.parquet": 2}
 
-        assert _exit_code(report) == 0, (
+        assert exit_code(report) == 0, (
             "exit 1 makes `conda run` print 'ERROR ... failed', which reads as a crash "
             "and teaches people to stop running the audit"
         )
 
     def test_a_broken_pairing_still_exits_one_and_indeterminate_two(self):
-        from views_pipeline_core.modules.appwrite.reconcile import _exit_code
+        from views_pipeline_core.modules.appwrite.audit import exit_code
 
-        broken = ReconciliationReport(bucket_id="b", collection_id="c")
+        broken = AuditReport(bucket_id="b", collection_id="c")
         broken.orphan_files = [_file("f1")]
-        assert _exit_code(broken) == 1
+        assert exit_code(broken) == 1
 
-        unknown = ReconciliationReport(bucket_id="b", collection_id="c")
+        unknown = AuditReport(bucket_id="b", collection_id="c")
         unknown.indeterminate = ["could not read"]
-        assert _exit_code(unknown) == 2
+        assert exit_code(unknown) == 2
 
 
 class TestC250BucketOverrideCannotMismatchTheCollection:
@@ -640,7 +640,7 @@ class TestC250BucketOverrideCannotMismatchTheCollection:
         """`--target forecasts --bucket unfao_bucket` audited FAO's files against the
         forecasts collection: every file an orphan, verdict PAIRING BROKEN. A flag
         that reproduces this tool's own false alarm on demand."""
-        from views_pipeline_core.modules.appwrite.reconcile import _build_file_manager
+        from views_pipeline_core.modules.appwrite.audit import build_file_manager
 
         for var in (
             "APPWRITE_ENDPOINT", "APPWRITE_DATASTORE_PROJECT_ID",
@@ -652,7 +652,7 @@ class TestC250BucketOverrideCannotMismatchTheCollection:
             monkeypatch.setenv(var, "x")
 
         with pytest.raises(Exception) as excinfo:
-            _build_file_manager("forecasts", bucket_override="some_other_bucket")
+            build_file_manager("forecasts", bucket_override="some_other_bucket")
 
         assert "collection" in str(excinfo.value).lower(), (
             "overriding one half of a bucket/collection pair must be refused, naming "
@@ -666,7 +666,7 @@ class TestC251UndatedAndDuplicateRecords:
         docs = [{"$id": "d1", "fileId": "other", "name": "m", "$createdAt": "2026-07-27T00:00:00Z"}]
         manager = _TotalAwareFileManager(files, documents=docs)
 
-        out = reconcile(manager).render()
+        out = audit(manager).render()
 
         assert "(after metadata stopped)" not in out, (
             "a record with no timestamp was given a definite temporal claim, because "
@@ -677,7 +677,7 @@ class TestC251UndatedAndDuplicateRecords:
         dup = _file("f1")
         manager = _TotalAwareFileManager([dup, dup], documents=[])
 
-        report = reconcile(manager)
+        report = audit(manager)
 
         assert report.files_total == 1, (
             f"files_total={report.files_total}: the displayed count uses a list while "
@@ -696,10 +696,10 @@ class TestDedupDoesNotDestroyRecords:
     """
 
     def test_records_without_an_id_are_kept_not_collapsed(self):
-        from views_pipeline_core.modules.appwrite.reconcile import _unique_by_id
+        from views_pipeline_core.modules.appwrite.audit import unique_by_id
 
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
-        kept = _unique_by_id(
+        report = AuditReport(bucket_id="b", collection_id="c")
+        kept = unique_by_id(
             [{"name": "a"}, {"name": "b"}, {"name": "c"}], report, "file"
         )
 
@@ -711,10 +711,10 @@ class TestDedupDoesNotDestroyRecords:
         assert any("identif" in r.lower() for r in report.indeterminate)
 
     def test_genuine_repeats_are_still_collapsed(self):
-        from views_pipeline_core.modules.appwrite.reconcile import _unique_by_id
+        from views_pipeline_core.modules.appwrite.audit import unique_by_id
 
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
-        kept = _unique_by_id([{"$id": "f1"}, {"$id": "f1"}, {"$id": "f2"}], report, "file")
+        report = AuditReport(bucket_id="b", collection_id="c")
+        kept = unique_by_id([{"$id": "f1"}, {"$id": "f1"}, {"$id": "f2"}], report, "file")
 
         assert len(kept) == 2
         assert any("more than once" in r for r in report.indeterminate)
@@ -729,7 +729,7 @@ class TestWalksSurviveAServerThatCapsThePage:
     """
 
     def test_a_capped_file_page_does_not_end_the_walk(self):
-        from views_pipeline_core.modules.appwrite.reconcile.walk import list_all_files
+        from views_pipeline_core.modules.appwrite.audit.walk import list_all_files
 
         class _Capping:
             def __init__(self, n):
@@ -741,7 +741,7 @@ class TestWalksSurviveAServerThatCapsThePage:
                     data={"files": self.files[offset : offset + 40], "total": len(self.files)},
                 )
 
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
+        report = AuditReport(bucket_id="b", collection_id="c")
         files = list_all_files(_Capping(500), "b", report)
 
         assert len(files) == 500, (
@@ -752,14 +752,14 @@ class TestWalksSurviveAServerThatCapsThePage:
         assert not report.indeterminate
 
     def test_a_capped_document_page_does_not_end_the_walk(self):
-        from views_pipeline_core.modules.appwrite.reconcile.walk import list_all_documents
+        from views_pipeline_core.modules.appwrite.audit.walk import list_all_documents
 
         class _Manager:
             def __init__(self, n):
                 self.config = _Config()
                 self.databases = _CappingDatabases([_doc(f"d{i}", f"f{i}") for i in range(n)])
 
-        report = ReconciliationReport(bucket_id="b", collection_id="c")
+        report = AuditReport(bucket_id="b", collection_id="c")
         documents = list_all_documents(_Manager(300), report)
 
         assert len(documents) == 300

@@ -114,7 +114,7 @@ def test_f1c_bare_package_import_stays_clean():
 # (b) FALSE POSITIVES. A check that looks for `Query.limit` among a call's
 #     arguments flags CORRECT code: `list_files` (file.py:2460) builds `query_list`,
 #     appends `Query.limit(limit)` to it, then passes the variable. The repaired
-#     `reconcile.py` does the same. A guard that flags correct code gets allowlisted
+#     the audit (now `modules/appwrite/audit/`) does the same. A guard that flags correct code gets allowlisted
 #     into uselessness — which is how a check teaches people to ignore it.
 #
 # ABSORBED BY: #343 (S3). The story must (i) carry the real count, (ii) resolve
@@ -164,7 +164,7 @@ def test_f2b_the_naive_check_flags_correct_code():
 
     `list_files` (file.py:2460) builds `query_list`, appends `Query.limit(limit)` to it,
     then passes the variable. The naive check above — which is the check as SPECIFIED in
-    #343 — flags that as unbounded. So does the repaired `reconcile.py`.
+    #343 — flags that as unbounded. So does the repaired audit (now `modules/appwrite/audit/`).
 
     An earlier version marked this `xfail(strict=True)` claiming #343 would flip it. It
     could not: `_unbounded_list_sites()` lives in THIS file, so writing a better guard in

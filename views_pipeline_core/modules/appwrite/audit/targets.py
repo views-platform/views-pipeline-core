@@ -92,7 +92,7 @@ def build_file_manager(
         AppwriteConfig(
             path_manager=None,
             auth_method="api_key",
-            cache_dir=".appwrite_reconcile_cache",
+            cache_dir=".appwrite_audit_cache",
             **values,
         )
     )

@@ -141,7 +141,7 @@ class TestTheRecordedShape:
         )
 
     def test_the_fields_our_code_reads_were_present(self, recorded):
-        """`reconcile` and the metadata walkers dereference these by name."""
+        """The audit (`modules/appwrite/audit/`) and the metadata walkers dereference these by name."""
         shape = recorded["no_limit_supplied"]["document_shape"]
         if not shape:
             pytest.skip("the collection was empty at capture time")

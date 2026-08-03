@@ -121,7 +121,14 @@ VENDOR_DIRS = [
     REPO / "views_pipeline_core" / "modules" / "appwrite",
     REPO / "views_pipeline_core" / "modules" / "datastore",
 ]
-WHOLE_PACKAGE = [REPO / "views_pipeline_core"]
+WHOLE_PACKAGE = [
+    REPO / "views_pipeline_core",
+    # `tools/` (2026-08-03, C-275). Not shipped in the wheel, but it holds SDK-calling,
+    # `OperationResult`-consuming, DESTRUCTIVE operator scripts — exactly the code this
+    # guard exists for. Leaving it out would repeat the scoping mistake described above
+    # with the stakes raised from a wrong report to a wrong deletion.
+    REPO / "tools",
+]
 
 # Retained: the substrate-facing checks still mean what they meant.
 GOVERNED_DIRS = VENDOR_DIRS
@@ -247,7 +254,8 @@ _TRACKED_DEFECTS: Dict[Tuple[str, str], str] = {
         "AppWriteFileModule.upload_file_with_metadata",
     ): "C-257 — a failed `delete_document` of the OLD metadata card is swallowed with "
     "logger.warning, leaving a document pointing at a file that was just replaced: a "
-    "dangling document, which is the exact defect the reconcile audit exists to "
+    "dangling document, which is the exact defect the Appwrite shelf audit "
+    "(`modules/appwrite/audit/`) exists to "
     "enumerate. The file-deletion branch twenty lines above returns a failure "
     "explicitly saying 'its metadata would orphan it' — the same function is careful "
     "about the file and careless about the card. Not fixed here because the correct "

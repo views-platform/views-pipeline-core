@@ -136,8 +136,11 @@ dependencies from the rest of the pipeline.
 > `AppWriteFileModule` for `views_pipeline_core/modules/appwrite/provisioning.py` —
 > **runnable, never importable**. The delivery path must not import it, and that is asserted
 > in a subprocess by `tests/test_import_purity.py`, not merely stated here (#332).
-> A third module now exists alongside them: `modules/appwrite/reconcile.py`, a read-only
-> audit of file↔metadata pairing (C-236).
+> A third module now exists alongside them: `modules/appwrite/audit/`, a read-only
+> audit of file↔metadata pairing (C-236). It was a single `reconcile.py` until #342 split
+> it by responsibility, and was renamed from `reconcile` to `audit` in #390 — `reconcile`
+> already means CM↔PGM hierarchical alignment in this codebase (`modules/reconciliation/`),
+> and one word for two unrelated things is a trap for whoever reads it next.
 
 ### 4. SHA-256 deduplication
 
@@ -205,7 +208,7 @@ deployment and ensures that fresh environments are self-provisioning.
 - A destructive act on the seam requires positive evidence, never the absence of a
   successful read.
 - Publishing cannot create infrastructure, so the credential it runs under can be narrowed.
-- The file↔metadata pairing is auditable (`modules/appwrite/reconcile.py`).
+- The file↔metadata pairing is auditable (`modules/appwrite/audit/`).
 
 ### Negative
 

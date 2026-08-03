@@ -69,7 +69,7 @@ The exposure is therefore **not existential**. It is that **nobody knows how lon
 and an unmeasured recovery time is indistinguishable from an unbounded one (C-254).
 
 **Size, honestly:** the four vendor modules (`file.py`, `datastore.py`, `provisioning.py`,
-`reconcile.py`) total **4,503 lines, of which only 2,014 are real code** — 1,620 are docstrings and 869
+the audit — a single `reconcile.py` when this was written, split into the `audit/` package by #342 and renamed `audit` by #390) total **4,503 lines, of which only 2,014 are real code** — 1,620 are docstrings and 869
 are blank or comment. (The 4,609 figure quoted elsewhere adds `modules/appwrite/__init__.py` and
 `configs/prediction_store.py`; the breakdown above is the four modules only.) And the module's *attachment* to the platform is **six construction sites**
 (`DatastoreModule(` ×6, `AppwriteSaver(` ×1). It is a large module hanging off few hooks, which is why
@@ -176,7 +176,7 @@ Appwrite is the same shape, and the port already exists: **`PredictionSaver` is 
 
 | Stays in pipeline-core | Leaves |
 |---|---|
-| the `PredictionSaver` Protocol | `file.py`, `datastore.py`, `provisioning.py`, `reconcile.py` |
+| the `PredictionSaver` Protocol | `file.py`, `datastore.py`, `provisioning.py`, `audit/` |
 | env validation (or it goes too) | **~4,500 of 4,609 lines** |
 | **zero Appwrite imports, zero SDK dependency** | |
 
