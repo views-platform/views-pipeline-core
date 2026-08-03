@@ -2,6 +2,7 @@
 import logging
 import sys
 from dataclasses import FrozenInstanceError
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -14,7 +15,14 @@ import pytest
 sys.modules.setdefault("views_forecasts", MagicMock())
 sys.modules.setdefault("views_forecasts.extensions", MagicMock())
 
-from views_pipeline_core.data.prediction_frame import PredictionFrame  # noqa: E402
+from views_frames import (  # noqa: E402
+    PredictionFrame,
+    SpatialLevel,
+    SpatioTemporalIndex,
+)
+from views_pipeline_core.managers.prediction.prediction_frame_io import (  # noqa: E402
+    load_pf,
+)
 from views_pipeline_core.managers.prediction.savers import (  # noqa: E402
     AppwriteSaver,
     LocalParquetSaver,
@@ -32,17 +40,18 @@ from views_pipeline_core.managers.prediction.savers import (  # noqa: E402
 def sample_pf():
     """A small PredictionFrame with 4 cells and 3 samples."""
     return PredictionFrame(
-        y_pred=np.array(
+        np.array(
             [[0.1, 0.2, 0.3],
              [0.4, 0.5, 0.6],
              [0.7, 0.8, 0.9],
              [1.0, 1.1, 1.2]],
             dtype=np.float32,
         ),
-        identifiers={
-            "time": np.array([501, 501, 502, 502]),
-            "unit": np.array([1001, 1002, 1001, 1002]),
-        },
+        SpatioTemporalIndex(
+            time=np.array([501, 501, 502, 502], dtype=np.int64),
+            unit=np.array([1001, 1002, 1001, 1002], dtype=np.int64),
+            level=SpatialLevel.PGM,
+        ),
     )
 
 
@@ -94,9 +103,9 @@ class TestNpzSaver:
         saver.save(sample_pf, tmp_path, sample_metadata)
 
         stem = sample_metadata.filename.rsplit(".", 1)[0]
-        loaded = PredictionFrame.load(tmp_path / stem)
+        loaded = load_pf(tmp_path / stem, "pgm")
 
-        np.testing.assert_array_equal(loaded.y_pred, sample_pf.y_pred)
+        np.testing.assert_array_equal(loaded.values, sample_pf.values)
         np.testing.assert_array_equal(
             loaded.identifiers["time"], sample_pf.identifiers["time"]
         )
@@ -119,7 +128,7 @@ class TestNpzSaver:
         saver.save(sample_pf, tmp_path, sample_metadata)
 
         stem = sample_metadata.filename.rsplit(".", 1)[0]
-        loaded = PredictionFrame.load(tmp_path / stem)
+        loaded = load_pf(tmp_path / stem, "pgm")
 
         assert loaded.n_rows == sample_pf.n_rows
         assert loaded.sample_count == sample_pf.sample_count
@@ -165,7 +174,7 @@ class TestLocalParquetSaver:
         col = f"pred_{sample_metadata.target}"
         cell_values = np.array(df[col].iloc[0], dtype=np.float32)
         np.testing.assert_array_almost_equal(
-            cell_values, sample_pf.y_pred[0], decimal=5,
+            cell_values, sample_pf.values[0], decimal=5,
         )
 
     def test_creates_directory(self, tmp_path, sample_pf, sample_metadata):
@@ -246,12 +255,75 @@ class TestAppwriteSaver:
     def test_logs_error_on_failure(self, tmp_path, sample_pf, sample_metadata, caplog):
         """Failed upload logs error with exception details."""
         mock_datastore = MagicMock()
-        mock_datastore.upload_data.side_effect = RuntimeError("boom")
+        mock_datastore.upload_data.side_effect = ConnectionError("boom")
         saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
 
         with caplog.at_level(logging.ERROR):
             saver.save(sample_pf, tmp_path, sample_metadata)
         assert "boom" in caplog.text
+
+    def test_in_band_failure_is_reported_not_swallowed(
+        self, tmp_path, sample_pf, sample_metadata, caplog
+    ):
+        """Register C-227 / þing-02 #330 — the failure that arrives as a RETURN VALUE.
+
+        ``upload_data`` converts the SDK's exception into an ``OperationResult`` deep
+        inside the storage module, so nothing is raised and the ``except`` clause never
+        fires. Before this fix the saver discarded the result and logged success, which
+        is why the 2026-11-30 key expiry would have been silent on this path.
+        """
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.return_value = SimpleNamespace(
+            success=False, code="general_unauthorized_scope", error="missing scope"
+        )
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        with caplog.at_level(logging.DEBUG):
+            saver.save(sample_pf, tmp_path, sample_metadata)
+
+        assert "NOT delivered" in caplog.text
+        assert "general_unauthorized_scope" in caplog.text
+        assert "uploaded to Appwrite Datastore successfully" not in caplog.text
+
+    def test_in_band_failure_still_does_not_raise(
+        self, tmp_path, sample_pf, sample_metadata
+    ):
+        """ADR-047 is unchanged: Appwrite is SECONDARY EXTERNAL, so it must not raise.
+
+        This fix makes the code comply with ADR-047's "logged at logger.error" clause;
+        it does not promote Appwrite to a blocking destination.
+        """
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.return_value = SimpleNamespace(
+            success=False, code="storage_bucket_not_found", error="no bucket"
+        )
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        saver.save(sample_pf, tmp_path, sample_metadata)  # must not raise
+
+    def test_successful_result_still_logs_success(
+        self, tmp_path, sample_pf, sample_metadata, caplog
+    ):
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.return_value = SimpleNamespace(
+            success=True, code="UPLOAD_SUCCESS", error=None
+        )
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        with caplog.at_level(logging.INFO):
+            saver.save(sample_pf, tmp_path, sample_metadata)
+
+        assert "successfully" in caplog.text.lower()
+        assert "NOT delivered" not in caplog.text
+
+    def test_programming_error_propagates(self, tmp_path, sample_pf, sample_metadata):
+        """Programming errors (TypeError, AttributeError) must NOT be swallowed."""
+        mock_datastore = MagicMock()
+        mock_datastore.upload_data.side_effect = TypeError("wrong arg type")
+        saver = AppwriteSaver(mock_datastore, "test_model", "ged_sb")
+
+        with pytest.raises(TypeError, match="wrong arg type"):
+            saver.save(sample_pf, tmp_path, sample_metadata)
 
 
 # ── ViewsForecastsSaver ────────────────────────────────────────────────────

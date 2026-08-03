@@ -1,6 +1,7 @@
+from views_frames import SpatialLevel
+
 from .horizon import ForecastHorizon
-from .reconciliation import ReconciliationInvariants
-from .spatial import SpatialLevel
+from .reconciliation_invariants import ReconciliationInvariants
 from .temporal import PartitionSet, TemporalPartition
 
 __all__ = [

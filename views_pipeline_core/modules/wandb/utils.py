@@ -355,24 +355,162 @@ def format_metadata_dict(metadata_dict):
     formatted_dict = dict(sorted(formatted_dict.items(), key=lambda item: item[0]))
     return formatted_dict
 
-def get_latest_run(entity: str, model_name: str, run_type: str) -> Optional['wandb.apis.public.runs.Run']:
-    """
-    Retrieves the latest WandB run from the current session.
+# Substring wandb embeds in the ValueError raised by ``Api().runs(...)`` when the
+# project does not exist (the normal state for WANDB_MODE=offline models). This is
+# wandb's undocumented, human-readable message text — verified against wandb 0.18.x
+# (pyproject: wandb = "^0.18.7"). If a wandb bump rewords this, get_latest_run stops
+# recognising project-not-found and re-raises instead of returning None — see
+# risk register C-179. The WARNING log on the re-raise path makes that drift visible.
+_PROJECT_NOT_FOUND_MARKER = "could not find project"
 
-    Returns:
-        Optional[wandb.Run]: The latest run object if available, otherwise None.
+
+def _fetch_qualifying_runs(
+    entity: str, model_name: str, run_type: str
+) -> list:
+    """
+    Return the finished, metrics-bearing runs for a model's WandB project,
+    newest first.
+
+    Shared fetch + filter for :func:`get_latest_run` and
+    :func:`get_run_by_timestamp` (keeps the fragile project-not-found handling
+    in one place — see C-179). A run "qualifies" when its state is ``"finished"``
+    and its summary carries more than one key (i.e. it holds metrics).
+
+    Returns an empty list when the project does not exist (the normal case for
+    models run with ``WANDB_MODE=offline``). Transient WandB/API errors are
+    propagated unchanged so callers can distinguish "not in the cloud" from
+    "WandB hiccupped".
     """
     from wandb import Api
+
+    project_path = f"{entity}/{model_name}_{run_type}"
     api = Api()
-    wandb_runs = sorted(
-        api.runs(f"{entity}/{model_name}_{run_type}", include_sweeps=False),
-        key=lambda run: run.created_at,
-        reverse=True,
-    )
-    # Pick the latest successfully finished run
-    latest_run = next(
+    try:
+        wandb_runs = sorted(
+            api.runs(project_path, include_sweeps=False),
+            key=lambda run: run.created_at,
+            reverse=True,
+        )
+    except ValueError as e:
+        # WandB raises ValueError("Could not find project ...") when the project
+        # does not exist — routine for offline-only models. Treat as "no run".
+        # Any other ValueError is unexpected and propagates (logged so a wandb
+        # message-text change that breaks the match above is observable — C-179).
+        if _PROJECT_NOT_FOUND_MARKER in str(e).lower():
+            logger.info(
+                f"WandB project '{project_path}' not found; treating as no run "
+                f"available (e.g. model run with WANDB_MODE=offline)."
+            )
+            return []
+        logger.warning(
+            f"Unexpected ValueError from WandB for '{project_path}' "
+            f"(not recognised as project-not-found): {e}. Re-raising."
+        )
+        raise
+
+    return [
         run
         for run in wandb_runs
         if run.state == "finished" and len(dict(run.summary)) > 1
+    ]
+
+
+def get_latest_run(
+    entity: str, model_name: str, run_type: str
+) -> Optional['wandb.apis.public.runs.Run']:
+    """
+    Retrieve the latest finished, metrics-bearing WandB run for a model.
+
+    Queries the WandB project ``f"{entity}/{model_name}_{run_type}"`` and returns
+    the most recently created run whose state is ``"finished"`` and whose summary
+    carries more than one key (i.e. it holds metrics).
+
+    Contract (see GitHub issue #177):
+        Returns the newest qualifying run, or ``None`` when the run is *genuinely
+        absent* — either the project does not exist (the normal case for models
+        run with ``WANDB_MODE=offline``, which never create a cloud project) or
+        the project exists but holds no finished, metrics-bearing run. "No run
+        available" is a normal state, not an error.
+
+        *Transient* failures (network/communication errors, or any other
+        unexpected WandB/API error) are propagated unchanged, so callers can
+        distinguish "this model is not in the cloud" (``None`` -> surface as
+        missing) from "WandB hiccupped" (exception -> retry or mark degraded).
+
+    Returns:
+        Optional[wandb.Run]: The latest qualifying run, or ``None`` if genuinely
+        absent.
+
+    Raises:
+        Exception: Transient WandB/API errors are propagated. Project-not-found
+            is NOT raised — it is reported as ``None``.
+    """
+    qualifying_runs = _fetch_qualifying_runs(entity, model_name, run_type)
+    if not qualifying_runs:
+        logger.info(
+            f"No finished, metrics-bearing WandB run found for "
+            f"'{entity}/{model_name}_{run_type}'."
+        )
+        return None
+    return qualifying_runs[0]
+
+
+def get_run_by_timestamp(
+    entity: str, model_name: str, run_type: str, timestamp: str
+) -> Optional['wandb.apis.public.runs.Run']:
+    """
+    Retrieve the finished, metrics-bearing WandB run that produced a specific
+    artifact, identified by its pipeline ``timestamp``.
+
+    Provenance-aware counterpart to :func:`get_latest_run` (see GitHub issue
+    #178). The pipeline stamps a single ``timestamp`` (``YYYYMMDD_HHMMSS``,
+    created at ``configuration.py``) into *both* the artifact filename and the
+    WandB run's config (``config=self.configs`` in the model manager). This
+    function selects the run whose ``config["timestamp"]`` matches the artifact's
+    timestamp, so a report can attach the metrics of the run that actually
+    produced the artifact under report — not merely the newest run in the
+    project.
+
+    Contract:
+        Returns the newest qualifying run whose ``config["timestamp"] ==
+        timestamp``, or ``None`` when no qualifying run carries that timestamp
+        (project absent, no qualifying run, or none match). ``None`` means
+        "the artifact's run could not be identified" — a caller that needs a
+        best-effort display should fall back to :func:`get_latest_run` and
+        *label* the metrics as not provenance-matched, never silently present a
+        non-matching run's metrics as the artifact's.
+
+        Transient WandB/API errors are propagated (same posture as
+        :func:`get_latest_run`).
+
+    Returns:
+        Optional[wandb.Run]: The run whose config timestamp matches, or ``None``.
+
+    Raises:
+        ValueError: If ``timestamp`` is empty/falsy. A blank timestamp is a
+            caller error, not a "no match" — without this guard it would
+            silently match a run whose config carries no timestamp
+            (``None == None``), returning a non-provenance-matched run.
+        Exception: Transient WandB/API errors are propagated. Project-not-found
+            is NOT raised — it is reported as ``None``.
+    """
+    if not timestamp:
+        raise ValueError(
+            "get_run_by_timestamp requires a non-empty timestamp "
+            "(the artifact's YYYYMMDD_HHMMSS stamp)."
+        )
+    qualifying_runs = _fetch_qualifying_runs(entity, model_name, run_type)
+    match = next(
+        (
+            run
+            for run in qualifying_runs
+            if dict(run.config).get("timestamp") == timestamp
+        ),
+        None,
     )
-    return latest_run if len(dict(latest_run.summary)) > 1 else None
+    if match is None:
+        logger.info(
+            f"No finished WandB run with config timestamp '{timestamp}' found "
+            f"for '{entity}/{model_name}_{run_type}'."
+        )
+    return match

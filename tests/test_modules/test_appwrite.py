@@ -1,3 +1,6 @@
+import json
+import logging
+
 import pytest
 from unittest.mock import Mock, patch
 from pathlib import Path
@@ -15,7 +18,6 @@ from views_pipeline_core.modules.appwrite.file import (
     AppwriteMetadataHandler,
     AuthFactory,
     ApiKeyAuth,
-    SessionAuth,
 )
 from appwrite.exception import AppwriteException
 
@@ -37,24 +39,17 @@ def api_key_config(mock_path_manager):
         project_id="test_project",
         credentials="test_api_key",
         auth_method=AuthMethod.API_KEY,
-        bucket_id="test_bucket",
         cache_dir="/tmp/test_cache",
         path_manager=mock_path_manager,
+        bucket_id="test_bucket",
+        bucket_name="Test Bucket",
+        collection_id="test_collection",
+        collection_name="Test Collection",
+        database_id="test_database",
+        database_name="Test Database",
     )
 
 
-@pytest.fixture
-def session_config(mock_path_manager):
-    """Session-based authentication configuration"""
-    return AppwriteConfig(
-        endpoint="https://cloud.appwrite.io/v1",
-        project_id="test_project",
-        credentials={"email": "test@example.com", "password": "password123"},
-        auth_method=AuthMethod.SESSION,
-        bucket_id="test_bucket",
-        cache_dir="/tmp/test_cache",
-        path_manager=mock_path_manager,
-    )
 
 
 @pytest.fixture
@@ -99,34 +94,39 @@ def temp_cache_dir(tmp_path):
 
 # Test AppwriteConfig
 class TestAppwriteConfig:
-    def test_config_initialization_with_defaults(self, mock_path_manager):
-        config = AppwriteConfig(
-            endpoint="https://cloud.appwrite.io/v1",
-            project_id="test_project",
-            credentials="test_key",
-            bucket_id="test_bucket",
-            path_manager=mock_path_manager,
-        )
-        
-        assert config.auth_method == AuthMethod.API_KEY
-        assert config.bucket_name == "Test Bucket"
-        # Fix: Use the actual default from the config
-        assert config.database_name == "File Metadata"  # Changed from "Test Bucket Metadata"
-        assert config.cache_ttl_hours == 24
+    def test_coordinates_have_no_defaults(self, mock_path_manager):
+        """#324/C-229 — these used to default to the live production coordinates.
+
+        Full coverage of the replacement contract lives in
+        test_appwrite_config_coordinates.py; this pins the headline here, where the
+        old "defaults apply" test used to sit.
+        """
+        from views_pipeline_core.exceptions.exceptions import ConfigurationException
+
+        with pytest.raises(ConfigurationException) as exc:
+            AppwriteConfig(
+                endpoint="https://cloud.appwrite.io/v1",
+                project_id="test_project",
+                credentials="test_key",
+                path_manager=mock_path_manager,
+            )
+        assert "bucket_id" in str(exc.value)
 
     def test_config_with_custom_values(self, mock_path_manager):
         config = AppwriteConfig(
             endpoint="https://cloud.appwrite.io/v1",
             project_id="test_project",
             credentials="test_key",
-            bucket_id="custom_bucket",
-            bucket_name="My Custom Bucket",
-            database_name="My Database",
-            collection_name="My Collection",
             cache_ttl_hours=48,
             path_manager=mock_path_manager,
+            bucket_id="my_custom_bucket",
+            bucket_name="My Custom Bucket",
+            collection_id="my_collection",
+            collection_name="My Collection",
+            database_id="my_database",
+            database_name="My Database",
         )
-        
+
         assert config.bucket_name == "My Custom Bucket"
         assert config.database_name == "My Database"
         assert config.collection_name == "My Collection"
@@ -139,6 +139,12 @@ class TestAppwriteConfig:
             credentials="test_key",
             auth_method="api_key",
             path_manager=mock_path_manager,
+            bucket_id="test_bucket",
+            bucket_name="Test Bucket",
+            collection_id="test_collection",
+            collection_name="Test Collection",
+            database_id="test_database",
+            database_name="Test Database",
         )
         
         assert isinstance(config.auth_method, AuthMethod)
@@ -151,9 +157,6 @@ class TestAuthFactory:
         auth = AuthFactory.create_auth(AuthMethod.API_KEY)
         assert isinstance(auth, ApiKeyAuth)
 
-    def test_create_session_auth(self):
-        auth = AuthFactory.create_auth(AuthMethod.SESSION)
-        assert isinstance(auth, SessionAuth)
 
     def test_unsupported_auth_method(self):
         with pytest.raises(ValueError):
@@ -176,46 +179,6 @@ class TestApiKeyAuth:
         assert result.code == "INVALID_CREDENTIALS"
 
 
-class TestSessionAuth:
-    def test_setup_success(self, mock_client, mock_account):
-        auth = SessionAuth()
-        mock_account.create_email_password_session.return_value = {
-            "$id": "session123",
-            "userId": "user123",
-            "$createdAt": "2025-10-22T12:00:00.000Z",
-        }
-        
-        with patch("views_pipeline_core.modules.appwrite.file.Account", return_value=mock_account):
-            result = auth.setup(
-                mock_client,
-                {"email": "test@example.com", "password": "password123"}
-            )
-        
-        assert result.success
-        assert result.data["user_id"] == "user123"
-        mock_client.set_key.assert_called_once_with("")
-
-    def test_setup_invalid_credentials(self, mock_client):
-        auth = SessionAuth()
-        result = auth.setup(mock_client, "invalid_string")
-        
-        assert not result.success
-        assert result.code == "INVALID_CREDENTIALS"
-
-    def test_setup_session_creation_failure(self, mock_client, mock_account):
-        auth = SessionAuth()
-        mock_account.create_email_password_session.side_effect = AppwriteException(
-            "Invalid credentials", 401, "user_invalid_credentials"
-        )
-        
-        with patch("views_pipeline_core.modules.appwrite.file.Account", return_value=mock_account):
-            result = auth.setup(
-                mock_client,
-                {"email": "test@example.com", "password": "wrong_password"}
-            )
-        
-        assert not result.success
-        assert result.code == "user_invalid_credentials"
 
 
 # Test CacheManager
@@ -336,50 +299,23 @@ class TestMetadataManager:
     def metadata_manager(self, mock_databases, api_key_config):
         return AppwriteMetadataHandler(mock_databases, api_key_config)
 
-    def test_create_database_if_not_exists_new(self, metadata_manager, mock_databases):
-        mock_databases.list.return_value = {"databases": []}
-        mock_databases.create.return_value = {
-            "$id": "file_metadata",
-            "name": "File Metadata",
-        }
-        
-        result = metadata_manager.create_database_if_not_exists()
-        
-        assert result.success
-        mock_databases.create.assert_called_once()
-
-    def test_create_database_if_not_exists_existing(self, metadata_manager, mock_databases):
-        mock_databases.list.return_value = {
-            "databases": [
-                {"$id": "file_metadata", "name": "Test Bucket Metadata"}
-            ]
-        }
-        
-        result = metadata_manager.create_database_if_not_exists()
-        
-        assert result.success
-        assert result.code == "EXISTS"
-        mock_databases.create.assert_not_called()
-
-    def test_infer_attribute_type(self, metadata_manager):
-        # Test different types
-        assert metadata_manager._infer_attribute_type("string") == ("string", False)
-        assert metadata_manager._infer_attribute_type(123) == ("integer", False)
-        assert metadata_manager._infer_attribute_type(12.5) == ("double", False)
-        assert metadata_manager._infer_attribute_type(True) == ("boolean", False)
-        assert metadata_manager._infer_attribute_type([1, 2, 3]) == ("integer", True)
-        assert metadata_manager._infer_attribute_type("2025-10-22T12:00:00") == ("datetime", False)
-
     def test_search_files_by_metadata(self, metadata_manager, mock_databases):
-        mock_databases.list_documents.return_value = {
-            "documents": [{"fileId": "file123", "filename": "test.txt"}],
-            "total": 1,
-        }
-        
+        # `return_value` cannot express paging: it hands back the same page for every
+        # offset, which is a substrate that ignores `offset` — and the walk added in
+        # #341 correctly refuses to certify such a read. A side_effect that empties out
+        # is the minimum faithful double. Real paging behaviour is covered in
+        # tests/test_modules/test_appwrite_pagination.py against a substrate double
+        # built from the SDK's own query encoding.
+        pages = [
+            {"documents": [{"fileId": "file123", "filename": "test.txt"}], "total": 1},
+            {"documents": [], "total": 1},
+        ]
+        mock_databases.list_documents.side_effect = pages
+
         result = metadata_manager.search_files_by_metadata(
             filters={"filename": "test.txt"}
         )
-        
+
         assert result.success
         assert result.data["total"] == 1
         assert len(result.data["documents"]) == 1
@@ -512,6 +448,55 @@ class TestAppWriteFileManager:
         assert result.data["file_bytes"] == b"remote content"
         assert not result.data["from_cache"]
 
+
+    def test_download_file_json_dict_coerced_to_bytes(self, file_manager, caplog):
+        """#310: the Appwrite SDK returns a PARSED DICT for application/json
+        files (e.g. ADR-013 wire manifests); download_file must coerce to bytes
+        instead of crashing at the cache write — and must say, loudly, that the
+        re-serialized bytes are not byte-identical to the stored artifact."""
+        manifest = {
+            "contract_version": "1.5",
+            "run_id": "run0",
+            "shards": [{"name": "a.tap.zip", "sha256": "abc", "time_id": 543}],
+            "sidecar_sha256": None,
+        }
+        file_manager.storage.get_file_download.return_value = manifest
+        file_manager.get_file = Mock(
+            return_value=OperationResult(
+                success=True,
+                data={"name": "run0__lr_ged_sb__manifest.json",
+                      "$updatedAt": "2026-07-27T12:00:00Z"},
+            )
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = file_manager.download_file(
+                "bucket1", "manifest1", use_cache=False
+            )
+
+        assert result.success
+        payload = result.data["file_bytes"]
+        assert isinstance(payload, bytes)
+        assert json.loads(payload) == manifest  # semantic round-trip
+        assert "not byte-identical" in caplog.text  # fidelity caveat is loud
+
+    def test_download_file_bytes_payload_emits_no_fidelity_warning(
+        self, file_manager, caplog
+    ):
+        """The coercion branch must not touch the normal binary path."""
+        file_manager.storage.get_file_download.return_value = b"binary shard"
+        file_manager.get_file = Mock(
+            return_value=OperationResult(
+                success=True,
+                data={"name": "a.tap.zip", "$updatedAt": "2026-07-27T12:00:00Z"},
+            )
+        )
+        with caplog.at_level(logging.WARNING):
+            result = file_manager.download_file("bucket1", "shard1", use_cache=False)
+        assert result.success
+        assert result.data["file_bytes"] == b"binary shard"
+        assert "not byte-identical" not in caplog.text
+
     def test_list_files(self, file_manager):
         file_manager.storage.list_files.return_value = {
             "files": [
@@ -551,24 +536,6 @@ class TestAppWriteFileManager:
         assert result.success
         assert result.data["$id"] == "file123"
 
-    def test_create_bucket(self, file_manager):
-        file_manager.storage.create_bucket.return_value = {
-            "$id": "new_bucket",
-            "name": "New Bucket",
-        }
-        file_manager.metadata_manager.create_database_if_not_exists = Mock(
-            return_value=OperationResult(success=True, data={})
-        )
-        
-        result = file_manager.create_bucket(
-            "new_bucket",
-            name="New Bucket",
-            create_metadata_db=True
-        )
-        
-        assert result.success
-        assert result.data["$id"] == "new_bucket"
-
     def test_upload_file_with_metadata(self, file_manager, tmp_path):
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
@@ -580,12 +547,8 @@ class TestAppWriteFileManager:
                 data={"$id": "file123", "name": "test.txt", "sizeOriginal": 12}
             )
         )
-        file_manager.metadata_manager.create_metadata_collection_if_not_exists = Mock(
-            return_value=OperationResult(
-                success=True,
-                data={"database_id": "db1", "collection_id": "coll1"}
-            )
-        )
+        # Containers are verified, never created, since #331.
+        file_manager._require_containers = Mock(return_value=None)
         file_manager.metadata_manager.check_file_exists_by_hash = Mock(
             return_value=OperationResult(success=False, code="NOT_FOUND")
         )
@@ -650,21 +613,6 @@ class TestErrorHandling:
             assert not result.success
             assert result.code == "storage_file_not_found"
 
-    # Remove the invalid config test or update it to test actual validation
-    # The config doesn't validate credential types in __post_init__, so this test is invalid
-    # Option 1: Remove the test
-    # Option 2: Add actual validation to AppwriteConfig and test it
-    # For now, let's test that initialization succeeds (which is the actual behavior)
-    def test_config_initialization_with_session_credentials(self, mock_path_manager):
-        # This should succeed - the config accepts dict credentials
-        config = AppwriteConfig(
-            endpoint="https://cloud.appwrite.io/v1",
-            project_id="test_project",
-            credentials={"email": "test@test.com", "password": "pass"},
-            auth_method=AuthMethod.SESSION,
-            path_manager=mock_path_manager,
-        )
-        assert config.credentials == {"email": "test@test.com", "password": "pass"}
 
 
 # Test OperationResult

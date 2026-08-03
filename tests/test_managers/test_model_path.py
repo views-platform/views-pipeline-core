@@ -444,6 +444,44 @@ class TestArtifactMethods:
         assert "config" not in latest.name
 
 
+class TestResolveArtifactPath:
+    """Tests for resolve_artifact_path() — C-99 fix."""
+
+    def test_resolve_none_delegates_to_latest(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+        (manager.artifacts / "calibration_model_20241101_120000.pt").touch()
+        (manager.artifacts / "calibration_model_20241105_143022.pt").touch()
+
+        result = manager.resolve_artifact_path("calibration")
+        latest = manager.get_latest_model_artifact_path("calibration")
+        assert result == latest
+
+    def test_resolve_named_returns_exact(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+        (manager.artifacts / "calibration_model_20241101_120000.pt").touch()
+        (manager.artifacts / "calibration_model_20241105_143022.pt").touch()
+
+        result = manager.resolve_artifact_path(
+            "calibration", "calibration_model_20241101_120000.pt"
+        )
+        assert result == manager.artifacts / "calibration_model_20241101_120000.pt"
+
+    def test_resolve_missing_raises(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        with pytest.raises(FileNotFoundError, match="nonexistent.pt"):
+            manager.resolve_artifact_path("calibration", "nonexistent.pt")
+
+    def test_resolve_stem_timestamp_extraction(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+        (manager.artifacts / "calibration_model_20241101_120000.pt").touch()
+
+        result = manager.resolve_artifact_path(
+            "calibration", "calibration_model_20241101_120000.pt"
+        )
+        assert result.stem[-15:] == "20241101_120000"
+
+
 # ============================================================================
 # Test Data File Methods
 # ============================================================================
@@ -604,3 +642,96 @@ class TestIntegration:
         # Check paths have correct structure
         assert manager.model_dir.parent == manager.models
         assert manager.models.parent == manager.root
+
+
+# ============================================================================
+# Test PredictionFrame Discovery
+# ============================================================================
+
+class TestPFPredictionDiscovery:
+    def test_finds_numpy_prediction_dirs(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        pf_dir = manager.data_generated / "predictions_calibration_20241105_120000"
+        target_dir = pf_dir / "ged_sb"
+        target_dir.mkdir(parents=True)
+        (target_dir / "y_pred.npy").touch()
+
+        paths = manager._get_generated_pf_prediction_paths("calibration")
+        assert len(paths) == 1
+        assert paths[0] == pf_dir
+
+    def test_ignores_parquet_files(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        (manager.data_generated / "predictions_calibration_20241105.parquet").touch()
+
+        paths = manager._get_generated_pf_prediction_paths("calibration")
+        assert len(paths) == 0
+
+    def test_finds_forecast_layout(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        pf_dir = manager.data_generated / "predictions_forecasting_20241105_120000"
+        target_dir = pf_dir / "ged_sb"
+        target_dir.mkdir(parents=True)
+        (target_dir / "y_pred.npy").touch()
+
+        paths = manager._get_generated_pf_prediction_paths("forecasting")
+        assert len(paths) == 1
+        assert paths[0] == pf_dir
+
+    def test_finds_eval_layout(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        pf_dir = manager.data_generated / "predictions_calibration_20241105_120000"
+        origin_dir = pf_dir / "origin_0" / "ged_sb"
+        origin_dir.mkdir(parents=True)
+        (origin_dir / "y_pred.npy").touch()
+
+        paths = manager._get_generated_pf_prediction_paths("calibration")
+        assert len(paths) == 1
+        assert paths[0] == pf_dir
+
+    def test_sorted_newest_first(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        for ts in ["20241101_100000", "20241105_120000", "20241103_090000"]:
+            d = manager.data_generated / f"predictions_calibration_{ts}" / "ged_sb"
+            d.mkdir(parents=True)
+            (d / "y_pred.npy").touch()
+
+        paths = manager._get_generated_pf_prediction_paths("calibration")
+        assert len(paths) == 3
+        assert "20241105" in paths[0].name
+        assert "20241103" in paths[1].name
+        assert "20241101" in paths[2].name
+
+    def test_filters_by_run_type(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        for run_type in ["calibration", "validation"]:
+            d = manager.data_generated / f"predictions_{run_type}_20241105_120000" / "ged_sb"
+            d.mkdir(parents=True)
+            (d / "y_pred.npy").touch()
+
+        cal_paths = manager._get_generated_pf_prediction_paths("calibration")
+        val_paths = manager._get_generated_pf_prediction_paths("validation")
+        assert len(cal_paths) == 1
+        assert len(val_paths) == 1
+
+    def test_ignores_staging_dirs(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        staging = manager.data_generated / "_pf_staging"
+        staging.mkdir(parents=True)
+        (staging / "y_pred.npy").touch()
+
+        paths = manager._get_generated_pf_prediction_paths("calibration")
+        assert len(paths) == 0
+
+    def test_empty_data_generated_returns_empty(self, mock_project_root):
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        paths = manager._get_generated_pf_prediction_paths("calibration")
+        assert paths == []

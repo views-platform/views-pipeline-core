@@ -25,6 +25,7 @@ import warnings
 from pathlib import Path
 from views_pipeline_core.cli import ForecastingModelArgs
 from views_pipeline_core.managers.ensemble import EnsemblePathManager, EnsembleManager
+from views_pipeline_core.managers.ensemble import PredictionFrameEnsembleManager
 
 warnings.filterwarnings("ignore")
 
@@ -45,6 +46,10 @@ if __name__ == "__main__":
     wandb.login()
     args = ForecastingModelArgs.parse_args()
 
+    # For PredictionFrame ensembles (numpy end-to-end), use:
+    #   PredictionFrameEnsembleManager
+    # For DataFrame ensembles (parquet-based), use:
+    #   EnsembleManager
     manager = EnsembleManager(
         ensemble_path=ensemble_path,
         wandb_notifications=args.wandb_notifications,

@@ -36,7 +36,7 @@ Frozen dataclass that captures, validates, and serializes CLI arguments for the 
   - At least one action flag (`train`, `evaluate`, `forecast`, `sweep`, `report`) must be set.
   - `train` and `artifact_name` are mutually exclusive.
   - If neither `train` nor `sweep` is set, `saved` must be `True`.
-  - `eval_type` must be one of `"standard"`, `"long"`, `"complete"`, `"live"`.
+  - `eval_type` must be one of `"standard"`, `"complete"`, `"live"`. `"long"` was retired in #378 — it requested 37 rolling-origin sequences while `CoreConfigSniffer` enforces a partition window supporting 13, silently truncating step-wise evaluation to 12 of 36 steps.
 - **`parse_args()`**: Class method that creates an `argparse.ArgumentParser`, parses `sys.argv`, and returns a validated `ForecastingModelArgs` instance.
 - **`to_shell_command(model_path, script_name="run.sh")`**: Generates a `List[str]` shell command from the current arguments, suitable for `subprocess` calls.
 - **`get_dict()`**: Returns all 14 fields as a plain dictionary.

@@ -15,16 +15,37 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-sys.modules["wandb"] = MagicMock()
-sys.modules["views_evaluation"] = MagicMock()
-sys.modules["views_evaluation.evaluation"] = MagicMock()
-sys.modules["views_evaluation.evaluation.evaluation_frame"] = MagicMock()
-sys.modules["art"] = MagicMock()
-
-from views_pipeline_core.managers.evaluation.stage import (  # noqa: E402
+from views_pipeline_core.managers.evaluation.stage import (
     EvaluationContext,
     EvaluationStage,
 )
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _mock_optional_deps():
+    """Mock the heavy/optional deps the stage imports **lazily** (wandb, views_evaluation,
+    art) for this module's tests only, restoring sys.modules on teardown.
+
+    Module-scoped + restored so the mock never leaks into other test modules — e.g.
+    test_metric_frame_faithfulness.py needs the REAL views_evaluation. (Previously these were
+    permanent module-level sys.modules mutations that poisoned later modules.)
+    """
+    names = [
+        "wandb",
+        "views_evaluation",
+        "views_evaluation.evaluation",
+        "views_evaluation.evaluation.evaluation_frame",
+        "art",
+    ]
+    saved = {n: sys.modules.get(n) for n in names}
+    for n in names:
+        sys.modules[n] = MagicMock()
+    yield
+    for n, mod in saved.items():
+        if mod is None:
+            sys.modules.pop(n, None)
+        else:
+            sys.modules[n] = mod
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -445,3 +466,214 @@ class TestContextContract:
         assert expected.issubset(members), (
             f"Protocol missing members: {expected - members}"
         )
+
+
+# ── S2 (#226): MetricFrame evaluation-of-record emit ─────────────────────────
+
+
+class TestMetricFrameEmit:
+    """_publish_results persists a typed MetricFrame per target at the locked
+    cross-repo path (data_generated/<model>/<run_type>/metricframe_<target>),
+    independent of the legacy parquet IO manager."""
+
+    def _ctx(self, tmp_path, **over):
+        cfg = {
+            "regression_targets": ["lr_sb"], "classification_targets": [],
+            "regression_point_metrics": ["MSE"], "steps": list(range(1, 37)),
+            "sweep": False, "run_type": "calibration", "level": "pgm",
+        }
+        cfg.update(over.pop("configs", {}))
+        ctx = _make_context(configs=cfg, **over)
+        ctx.model_path.data_generated = tmp_path
+        ctx.model_path.model_name = "my_model"
+        if ctx.data_loader is not None:
+            ctx.data_loader.month_last = 540  # data-vintage marker (data_version, S4)
+        return ctx
+
+    def test_provenance_none_when_no_active_run_or_loader(self, tmp_path):
+        # run_id None when no active WandB run; data_version None when no data_loader (S4).
+        stage = _make_stage()
+        stage._wandb_module.run_id = None
+        ctx = self._ctx(tmp_path, data_loader=None)
+        report = _make_mock_report()
+
+        stage._save_metric_frame(report, "lr_sb", ctx)
+
+        _, kwargs = report.to_metric_frame.call_args
+        assert kwargs["run_id"] is None
+        assert kwargs["data_version"] is None
+
+    def test_emits_to_metric_frame_with_provenance_and_locked_path(self, tmp_path):
+        stage = _make_stage()
+        stage._wandb_module.run_id = "run-abc"  # active WandB run (S4)
+        ctx = self._ctx(tmp_path)
+        report = _make_mock_report()
+
+        stage._save_metric_frame(report, "lr_sb", ctx)
+
+        report.to_metric_frame.assert_called_once_with(
+            model_id="my_model",
+            run_type="calibration",
+            partition=str(ctx.partition_dict["calibration"]),
+            level="pgm",
+            run_id="run-abc",
+            data_version="540",
+        )
+        # CROSS-REPO CONTRACT: this path must equal views-reporting's
+        # MetricFrameFileSource._frame_dir = root / model / run_type / metricframe_<target>
+        # (root=<data_generated>). If this changes, views-reporting must change in lockstep
+        # or reporting silently finds no frame.
+        expected = tmp_path / "my_model" / "calibration" / "metricframe_lr_sb"
+        report.to_metric_frame.return_value.save.assert_called_once_with(expected)
+
+    def test_missing_partition_fails_loud(self, tmp_path):
+        # A run_type absent from partition_dict must raise, not record partition="None".
+        stage = _make_stage()
+        ctx = self._ctx(tmp_path, run_type="forecasting")  # not in the default partition_dict
+        report = _make_mock_report()
+        with pytest.raises(KeyError):
+            stage._save_metric_frame(report, "lr_sb", ctx)
+
+    def test_metric_frame_emitted_even_when_io_none(self, tmp_path):
+        # PFE ensembles run with io_manager=None: legacy parquet is skipped but the
+        # eval-of-record MetricFrame must still be persisted.
+        stage = EvaluationStage(wandb_module=MagicMock(), io_manager=None)
+        ctx = self._ctx(tmp_path)
+        report = _make_mock_report()
+
+        stage._publish_results(report, "lr_sb", ctx)
+
+        report.to_metric_frame.return_value.save.assert_called_once()
+
+    def test_capability_absent_skips_without_error(self, tmp_path):
+        # An older views-evaluation (no to_metric_frame) must not break the eval run.
+        stage = _make_stage()
+        ctx = self._ctx(tmp_path)
+
+        class _OldReport:  # lacks to_metric_frame
+            def to_dict(self):
+                return {"schemas": {"step": {}, "time_series": {}, "month": {}}}
+
+            def to_dataframe(self, _schema):
+                return pd.DataFrame()
+
+        stage._save_metric_frame(_OldReport(), "lr_sb", ctx)  # must not raise
+        assert not any(tmp_path.iterdir())  # nothing written
+
+    def test_sweep_run_skips_metric_frame(self, tmp_path):
+        stage = _make_stage()
+        ctx = self._ctx(tmp_path, configs={"sweep": True})
+        report = _make_mock_report()
+
+        stage._publish_results(report, "lr_sb", ctx)
+
+        report.to_metric_frame.assert_not_called()
+
+
+# ── #302: frame-native actuals (epic #300) ───────────────────────────────────
+
+
+class TestFrameNativeActuals:
+    """Frame-fed evaluate: actuals from the frame cache, zero pandas touches.
+
+    The pandas-free proof (promoted falsify H4): read_dataframe is patched to
+    explode and prepare_actuals_df is a tripwire — a completed evaluate proves
+    the frame path never touches pandas actuals.
+    """
+
+    @staticmethod
+    def _cache_frame(tmp_path, features=("lr_sb",), months=(445, 446), n_samples=1):
+        import numpy as np
+        from views_frames import FeatureFrame, SpatialLevel, SpatioTemporalIndex
+
+        from views_pipeline_core.modules.dataloaders.frame_cache import save_frame_cache
+
+        n_units = 3
+        time = np.repeat(np.asarray(months, dtype=np.int64), n_units)
+        unit = np.tile(np.arange(1, n_units + 1, dtype=np.int64), len(months))
+        frame = FeatureFrame(
+            y_features=np.arange(
+                len(time) * len(features) * n_samples, dtype=np.float32
+            ).reshape(len(time), len(features), n_samples),
+            index=SpatioTemporalIndex(time=time, unit=unit, level=SpatialLevel.PGM),
+            feature_names=list(features),
+        )
+        cache = tmp_path / "calibration_datafactory_ff"
+        save_frame_cache(frame, cache)
+        return cache
+
+    @staticmethod
+    def _pf(months=(445, 446), n_units=3, n_samples=4):
+        import numpy as np
+        from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
+
+        time = np.repeat(np.asarray(months, dtype=np.int64), n_units)
+        unit = np.tile(np.arange(1, n_units + 1, dtype=np.int64), len(months))
+        return PredictionFrame(
+            np.ones((len(time), n_samples), dtype=np.float32),
+            SpatioTemporalIndex(time, unit, SpatialLevel.PGM),
+        )
+
+    def _frame_context(self, cache, **overrides):
+        tripwire = MagicMock(
+            side_effect=AssertionError("prepare_actuals_df must not run on the frame path")
+        )
+        defaults = dict(
+            prediction_format="prediction_frame",
+            data_format="feature_frame",
+            frame_cache_path=cache,
+            prepare_actuals_df=tripwire,
+        )
+        defaults.update(overrides)
+        return _make_context(**defaults), tripwire
+
+    def test_frame_evaluate_is_pandas_free(self, tmp_path):
+        cache = self._cache_frame(tmp_path)
+        context, tripwire = self._frame_context(cache)
+        stage = _make_stage()
+        predictions = {"lr_sb": [self._pf()]}
+
+        with patch(
+            "views_pipeline_core.files.utils.read_dataframe",
+            side_effect=AssertionError("read_dataframe must not run on the frame path"),
+        ):
+            stage.evaluate(predictions, context, ensemble=False)
+
+        tripwire.assert_not_called()
+        stage._wandb_module.log_evaluation_results.assert_called_once()
+        stage._io.save_evaluations.assert_not_called()  # legacy egress gated off
+
+    def test_frame_requires_prediction_frame_format(self, tmp_path):
+        cache = self._cache_frame(tmp_path)
+        context, _ = self._frame_context(cache, prediction_format="dataframe")
+        with pytest.raises(ValueError, match="unsupported combination"):
+            _make_stage().evaluate({}, context, ensemble=False)
+
+    def test_frame_ensemble_unsupported(self, tmp_path):
+        cache = self._cache_frame(tmp_path)
+        context, _ = self._frame_context(cache)
+        with pytest.raises(ValueError, match="ensemble constituents"):
+            _make_stage().evaluate({}, context, ensemble=True)
+
+    def test_missing_frame_cache_path_fails_loud(self):
+        context, _ = self._frame_context(None)
+        with pytest.raises(ValueError, match="no frame_cache_path"):
+            _make_stage().evaluate({}, context, ensemble=False)
+
+    def test_missing_target_fails_loud(self, tmp_path):
+        cache = self._cache_frame(tmp_path, features=("other_feature",))
+        context, _ = self._frame_context(cache)
+        with pytest.raises(ValueError, match=r"Targets \['lr_sb'\] not present"):
+            _make_stage().evaluate({"lr_sb": [self._pf()]}, context, ensemble=False)
+
+    def test_multi_sample_actuals_fail_loud(self, tmp_path):
+        cache = self._cache_frame(tmp_path, n_samples=3)
+        context, _ = self._frame_context(cache)
+        with pytest.raises(ValueError, match="sample_count=3"):
+            _make_stage().evaluate({"lr_sb": [self._pf()]}, context, ensemble=False)
+
+    def test_dataframe_default_still_uses_pandas_actuals(self):
+        """The legacy path is untouched: default context still calls read_dataframe."""
+        context = _make_context()
+        assert context.data_format == "dataframe"
+        assert context.frame_cache_path is None

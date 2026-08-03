@@ -169,7 +169,9 @@ class TestGetPartitionDict:
         assert part_dict["train"] == (121, 444)
         assert part_dict["test"] == (445, 492)
         
-    @patch("views_pipeline_core.modules.dataloaders.dataloaders.ViewsMonth")
+    # Patch target follows the moved import (#286): the forecasting branch now
+    # lazy-imports ViewsMonth inside fetch_context.resolve_default_partition_dict.
+    @patch("ingester3.ViewsMonth.ViewsMonth")
     def test_forecasting_partition(self, mock_views_month, data_loader):
         """Test forecasting partition dict"""
         # Mock current month
@@ -440,3 +442,60 @@ class TestDataLoaderIntegration:
         assert loader.partition == "calibration"
         assert loader.month_first == 121
         assert loader.month_last == 444
+
+
+# ============================================================================
+# C-87: float64 dtype guarantee
+# ============================================================================
+
+class TestDtypeGuarantee:
+    """CIC §3: all numeric columns must be float64 after loading."""
+
+    def test_int32_columns_promoted_to_float64(self, data_loader, sample_dataframe, sample_queryset):
+        """int32 columns from upstream are promoted to float64 by the loader."""
+        df_int32 = sample_dataframe.copy()
+        df_int32["int_feature"] = np.array([1] * len(df_int32), dtype=np.int32)
+
+        mock_publish = sample_queryset.publish.return_value
+        mock_publish.fetch_with_drift_detection.return_value = (df_int32, [])
+        data_loader._model_path.get_queryset.return_value = sample_queryset
+        data_loader.month_first = 121
+        data_loader.month_last = 444
+
+        df, _ = data_loader._fetch_data_from_viewser(self_test=False)
+
+        assert df["int_feature"].dtype == np.float64, (
+            f"int32 column should be promoted to float64, got {df['int_feature'].dtype}"
+        )
+
+    def test_float32_columns_promoted_to_float64(self, data_loader, sample_dataframe, sample_queryset):
+        """float32 columns from upstream are promoted to float64 by the loader."""
+        df_f32 = sample_dataframe.copy()
+        df_f32["f32_feature"] = np.array([1.0] * len(df_f32), dtype=np.float32)
+
+        mock_publish = sample_queryset.publish.return_value
+        mock_publish.fetch_with_drift_detection.return_value = (df_f32, [])
+        data_loader._model_path.get_queryset.return_value = sample_queryset
+        data_loader.month_first = 121
+        data_loader.month_last = 444
+
+        df, _ = data_loader._fetch_data_from_viewser(self_test=False)
+
+        assert df["f32_feature"].dtype == np.float64, (
+            f"float32 column should be promoted to float64, got {df['f32_feature'].dtype}"
+        )
+
+    def test_sample_dataframe_fixture_uses_float64(self, sample_dataframe):
+        """Verify the test fixture itself uses float64 (baseline)."""
+        for col in sample_dataframe.columns:
+            assert sample_dataframe[col].dtype == np.float64, (
+                f"Column '{col}' in sample fixture is {sample_dataframe[col].dtype}, "
+                f"expected float64."
+            )
+
+
+class TestCachedFramePath:
+    """#287: the frame-cache path handle exists on the loader, unset by default."""
+
+    def test_cached_frame_path_none_until_frame_path_runs(self, data_loader):
+        assert data_loader.cached_frame_path is None

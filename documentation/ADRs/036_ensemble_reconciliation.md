@@ -8,6 +8,37 @@
 | Author              | Jim                     |
 | Date                | 01/11/2024              |
 
+## Naming Note — "reconcile" is reserved for this decision
+
+**Added 2026-08-03 (#390).** **As an identifier** — a module, package, class, function or
+config-key name — `reconcile` / `reconciliation` in this codebase means **one thing: the CM↔PGM
+hierarchical alignment described below**: `modules/reconciliation/`, `reconcile_frames.py`, the
+injected `Reconciler` port (Decision K, #217), and the `reconciled=` wire-contract field.
+
+*Scoped to identifiers deliberately, because the unscoped version was false.* The ordinary
+English verb is alive and legitimate in prose and in messages — `dataloaders.py:1187` raises
+*"…is out of step with datafactory's `OutputFormat` vocabulary — reconcile against the vendored
+contract fixture"*, which is a correspondence between two contracts and has nothing to do with
+grids and countries. Nobody is confused by a verb. People are confused by two packages.
+
+It is recorded here, in the ADR that owns the word, because the contributor this rule exists
+to stop is about to name something *new and unrelated* `reconcile` — in `managers/`, in a
+tool, in a sniffer — and has no reason to open the ADR of whichever module happened to
+collide. That mistake has already been made once: `modules/appwrite/reconcile/` audited the
+pairing between Appwrite files and their metadata documents, an entirely unrelated concept,
+and was renamed to `modules/appwrite/audit/` (ADR-046 §3 records that history).
+
+If you are naming something that checks, compares, or repairs a correspondence, prefer
+**audit**, **verify**, **pair** or **align**. Two live meanings for one word is a trap for
+whoever reads the code next, and the cost is paid by every future reader rather than by the
+namer.
+
+**Not** the same as ADR-040's *"Naming Note"*, which an earlier draft of this section cited as
+precedent. ADR-040 exists to say that *sniffer* legitimately carries **two** orthogonal meanings
+— semantic inference (forbidden) and structural auditing (mandated by ADR-041). It accommodates a
+second meaning; this note refuses one. The two sections look alike and do opposite jobs, and a
+contributor following that pointer would have found a template for the opposite policy.
+
 ## Context
 The notebook-based views3/fatalities002 pipeline generates a cm and a pgm ensemble. It was found that the pgm ensemble suffered from what might be termed normalisation issues, in that the peak and total numbers of fatalities forecast at pgm level are clearly too low. In particular, summing forecast fatalities over the pg cells belonging to a given country, a dcomapring to the fatalities forecast for the same country at cm level almost always gives the result that the summed pgm values are significantly - often an order of magnitude - lower
 As a quick fix, therefore, a reconciliation function was created which accepts a pgm forecast dataframe and a cm forecast dataframe, fetches via viewser a pgm->cm mapping, computes for every country for every month the sum over its constituent pg cells, and renormalises the pgm forecasts for those cells so that the sum matches the cm-level forecast. A check is performed which ensures that the set of months in the two input dfs is the same.

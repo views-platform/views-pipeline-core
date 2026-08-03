@@ -1,5 +1,13 @@
+# Import purity (#320, C-223/C-225): this module is the base of EVERY engine's
+# import chain, so it must not load pandas — or anything from the legacy
+# DataFrame tier — at module scope. pandas-typed signatures survive via PEP 563
+# (`from __future__ import annotations`); the DataFrame path imports pandas and
+# the dataset classes function-locally, guarded by `_require_dataframe_runtime`.
+# Tripwire: tests/test_import_purity.py.
+from __future__ import annotations
+
 import sys
-from typing import Callable, Union, Optional, List, Dict
+from typing import TYPE_CHECKING, Callable, Union, Optional, List, Dict
 import logging
 import importlib
 from abc import abstractmethod
@@ -7,25 +15,54 @@ from datetime import datetime
 import traceback
 from views_pipeline_core.cli import ForecastingModelArgs
 from views_pipeline_core.exceptions import ModelForecastingException
-import pandas as pd
 from pathlib import Path
 from functools import partial
 import random
 from views_pipeline_core.modules.wandb import WandBModule
-from views_pipeline_core.managers import ConfigurationManager
+from views_pipeline_core.managers.configuration.configuration import ConfigurationManager
 from views_pipeline_core.exceptions import (
     DataFetchException,
     ModelTrainingException,
     ModelEvaluationException,
     PipelineException,
 )
-from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 from views_pipeline_core.data.prediction_frame import PredictionFrame
+
+if TYPE_CHECKING:  # annotation-only; never imported at runtime
+    import pandas as pd
+from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
+from views_pipeline_core.modules.dataloaders.datafactory_contract import (
+    DATA_FORMAT_DATAFRAME,
+    DATA_FORMAT_FEATURE_FRAME,
+    declared_data_format,
+)
 
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
 
+from views_pipeline_core.managers.configuration.configuration import combined_targets
 logger = logging.getLogger(__name__)
+
+
+def _require_dataframe_runtime() -> None:
+    """Fail loud at run start if the legacy DataFrame path lacks pandas (C-224).
+
+    pandas is imported lazily since #320 so the frame-native path never loads
+    it; the cost is that a broken/missing pandas would otherwise surface at the
+    first DataFrame touch — potentially deep inside a run. Mirrors the
+    reporting stage's ``_require_*`` capability-preflight idiom: probe once,
+    fail with remediation, before any expensive work.
+    """
+    try:
+        import pandas  # noqa: F401
+    except ImportError as e:
+        raise RuntimeError(
+            "This model declares data_format='dataframe' (the legacy pandas "
+            "path), but pandas is not importable in this environment. Install "
+            "pandas, or migrate the model to data_format='feature_frame'. "
+            f"Underlying import error: {e}"
+        ) from e
+
 
 # ModelPathManager relocated to data/ layer per ADR-045 E6 (Root Cause #1:
 # inverted dependencies).  Re-exported here for backward compatibility.
@@ -192,6 +229,8 @@ class ModelManager:
         # called after CoreConfigSniffer.sniff_all() guarantees configs are valid.
         self._data_loader = None
         self._cached_data_path = None
+        # Set when the model declares data_format: feature_frame (#290).
+        self._cached_frame_path = None
 
         if use_prediction_store:
             from views_pipeline_core.configs.prediction_store import PredictionStoreConfig
@@ -331,7 +370,8 @@ class ModelManager:
                 - evaluate (bool): Whether to evaluate model
                 - forecast (bool): Whether to generate forecasts
                 - saved (bool): Whether to use saved data
-                - eval_type (str): Evaluation type (standard/long/complete)
+                - eval_type (str): Evaluation type (standard/complete/live;
+                  'long' retired #378)
                 - update_viewser (bool): Whether to update viewser data
                 - prediction_store (bool): Whether to use prediction store
                 - wandb_notifications (bool): Whether to send WandB notifications
@@ -445,7 +485,7 @@ class ModelManager:
 
         Returns:
             The prepared DataFrame. Must contain at minimum all columns
-            listed in ``self.configs["targets"]``.
+            listed in ``combined_targets(self.configs)`` (#380).
 
         Example (override in a subclass)::
 
@@ -664,7 +704,8 @@ class ForecastingModelManager(ModelManager):
             - Skip validation
         
         Args:
-            eval_type: Evaluation type ('standard'|'long'|'complete'|'live')
+            eval_type: Evaluation type ('standard'|'complete'|'live';
+                'long' was retired in #378 — see _resolve_evaluation_sequence_number)
             artifact_name: Name of model file to evaluate
         
         Returns:
@@ -820,12 +861,19 @@ class ForecastingModelManager(ModelManager):
         )
     
     @staticmethod
-    def dataset_class(loa: str) -> Optional[type]:
+    def dataset_class(loa: str) -> type:
+        # DataFrame-path only: the dataset classes live in the legacy tier
+        # (frozen handlers.py, pandas + files.utils chain), so importing them
+        # here — not at module scope — keeps the frame path pandas-free (#320).
+        from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+
         dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
         dataset_cls = dataset_classes.get(loa)
         if dataset_cls:
             return partial(dataset_cls)
-        return None
+        raise ValueError(
+            f"Unknown level-of-analysis '{loa}'. Expected one of: {list(dataset_classes.keys())}"
+        )
 
     def _has_evaluation_metrics(self) -> bool:
         """Return True if any metric keys are specified in config."""
@@ -852,10 +900,13 @@ class ForecastingModelManager(ModelManager):
             eval_type: Type of evaluation
 
         Returns:
-            Number of sequences, or None for complete type
+            Number of sequences.
 
         Raises:
-            ValueError: If eval_type invalid
+            NotImplementedError: If eval_type is "long" (retired, #378) or "complete"
+                (not yet implemented). Both request a sequence count the partition
+                geometry enforced by CoreConfigSniffer cannot supply.
+            ValueError: If eval_type is not recognized.
 
         Example:
             >>> n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
@@ -865,9 +916,38 @@ class ForecastingModelManager(ModelManager):
         if eval_type == "standard":
             return MAX_SHIFT_COUNT + 1       # 13: base origin + 12 shifts
         elif eval_type == "long":
-            return 3 * MAX_SHIFT_COUNT + 1   # 37: base origin + 36 shifts
+            # Retired 2026-08-02 (#378, register C-268). This returned
+            # 3*MAX_SHIFT_COUNT + 1 = 37, but CoreConfigSniffer *enforces*
+            # test_len == time_steps + MAX_SHIFT_COUNT (36 + 12 = 48 months), which
+            # supports exactly 13 sequences. 37 would need a 72-month window that the
+            # sniffer rejects outright.
+            #
+            # The 24 surplus sequences forecast past the actuals horizon, so
+            # EvaluationAdapter's `actual.index.intersection(df.index)` matched
+            # progressively fewer months — down to 12 — and step-wise evaluation
+            # truncated to the shortest sequence, silently reporting 12 of 36 steps.
+            # Verified against every real model config: 256 of 256 (model, run_type)
+            # combinations, without exception.
+            #
+            # Same failure shape as C-70 (Tier 1) on this same resolver: an eval_type
+            # accepted by the CLI and asserted by tests, but unsupported by the
+            # geometry. `complete` crashed loudly and was caught; `long` degraded
+            # quietly and was not.
+            raise NotImplementedError(
+                "eval_type='long' has been retired — it required 37 rolling-origin "
+                "sequences. CoreConfigSniffer enforces a partition window of "
+                f"test_len == time_steps + MAX_SHIFT_COUNT, where MAX_SHIFT_COUNT="
+                f"{MAX_SHIFT_COUNT} — so a standard 36-step model gets a 48-month "
+                f"window, which supports {MAX_SHIFT_COUNT + 1} sequences. Using "
+                "'long' silently truncated "
+                "step-wise evaluation to the shortest sequence, reporting 12 of 36 "
+                "steps. Use 'standard'. See views-pipeline-core#378."
+            )
         elif eval_type == "complete":
-            return None  # currently set as None because sophisticated calculation is needed
+            raise NotImplementedError(
+                "eval_type='complete' is not yet implemented — the required "
+                "sequence count depends on partition geometry. Use 'standard'."
+            )
         elif eval_type == "live":
             return MAX_SHIFT_COUNT + 1       # 13: same as standard
         else:
@@ -904,6 +984,22 @@ class ForecastingModelManager(ModelManager):
             raise RuntimeError(
                 "No cached data path available — _execute_data_fetching() "
                 "must run before engines access raw data."
+            )
+        return path
+
+    def _get_cached_frame_path(self):
+        """Return the FeatureFrame cache directory for the current partition.
+
+        Engine subclasses call this instead of hardcoding the directory
+        convention (C-59 lesson). Only set for models declaring
+        data_format: feature_frame (#290).
+        """
+        path = self._cached_frame_path
+        if path is None:
+            raise RuntimeError(
+                "No cached frame path available — the model must declare "
+                "data_format: feature_frame and _execute_data_fetching() must "
+                "run before engines access the frame cache."
             )
         return path
 
@@ -959,7 +1055,7 @@ class ForecastingModelManager(ModelManager):
         # Layer 1: structural pre-condition — fail immediately if partition config
         # is inaccessible, before any side effects (WandB login, data fetching, etc.)
         self._assert_partition_config_accessible(args.run_type)
-        CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
+        CoreConfigSniffer(self.configs, self._partition_dict, target=self._model_path.target).sniff_all(args.run_type)
 
         # Construct ViewsDataLoader now that config is validated
         self._initialize_data_loader()
@@ -1023,7 +1119,7 @@ class ForecastingModelManager(ModelManager):
 
         # Layer 1: structural pre-condition — match execute_single_run() contract
         self._assert_partition_config_accessible(args.run_type)
-        CoreConfigSniffer(self.configs, self._partition_dict).sniff_all(args.run_type)
+        CoreConfigSniffer(self.configs, self._partition_dict, target=self._model_path.target).sniff_all(args.run_type)
 
         # Construct ViewsDataLoader now that config is validated
         self._initialize_data_loader()
@@ -1129,21 +1225,46 @@ class ForecastingModelManager(ModelManager):
             - Updates viewser if args.update_viewser=True
         """
 
+        # Explicit df-vs-ff dispatch (#290, epic #285): the model's queryset
+        # descriptor declares its input shape; absent → dataframe, byte-identical
+        # legacy behavior. Resolved BEFORE the wandb run/try block so a config
+        # typo fails as a crisp ValueError with no spurious fetch-failure alert.
+        # This is a second get_queryset() read (the loader takes its own #289
+        # snapshot for the fetch): deliberate — if a regenerated queryset were
+        # to diverge between the reads, the loader's fail-loud gates (dict
+        # check, frame-capable source check) catch the contradiction loudly.
+        data_format = declared_data_format(self._model_path.get_queryset())
+        # Remembered for the evaluation stage (#302): actuals sourcing and
+        # legacy-egress gating dispatch on the same declaration.
+        self._data_format = data_format
+        if data_format == DATA_FORMAT_DATAFRAME:
+            _require_dataframe_runtime()  # C-224 preflight — see its docstring
+
         with self._wandb_module.initialize_run(
             project=self._project,
             config={},
             job_type="fetch_data",
         ):
             try:
-                self._data_loader.get_data(
-                    use_saved=self.args.saved,
-                    validate=True,
-                    self_test=self.args.drift_self_test,
-                    partition=self.args.run_type,
-                    override_month=self.args.override_timestep,
-                    level=self.configs["level"],
-                )
-                self._cached_data_path = self._data_loader.cached_data_path
+                if data_format == DATA_FORMAT_FEATURE_FRAME:
+                    self._data_loader.get_feature_frame(
+                        partition=self.args.run_type,
+                        use_saved=self.args.saved,
+                        level=self.configs["level"],
+                        validate=True,
+                        override_month=self.args.override_timestep,
+                    )
+                    self._cached_frame_path = self._data_loader.cached_frame_path
+                else:
+                    self._data_loader.get_data(
+                        use_saved=self.args.saved,
+                        validate=True,
+                        self_test=self.args.drift_self_test,
+                        partition=self.args.run_type,
+                        override_month=self.args.override_timestep,
+                        level=self.configs["level"],
+                    )
+                    self._cached_data_path = self._data_loader.cached_data_path
 
                 self._wandb_module.send_alert(
                     title=f"Queryset Fetch Complete ({str(self.args.run_type)})",
@@ -1276,13 +1397,21 @@ class ForecastingModelManager(ModelManager):
                     # are alive simultaneously.  Each origin writes:
                     #   Track A  staging/_pf_staging/origin_i/target/ — compact .npy,
                     #            used by the metrics reload below (mmap-safe)
+                    #   Track A+ data_generated/predictions_{run_type}_{ts}/origin_i/target/
+                    #            — permanent numpy for PF ensemble consumption
                     #   Track B  data_generated/predictions_*.parquet — list-in-cell,
-                    #            for downstream consumers (unchanged format)
-                    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
-                        PredictionFrameConverter,
-                    )
-                    converter = PredictionFrameConverter()
+                    #            controlled by mandatory skip_predictions_delivery key
+                    _skip_delivery = self.configs["skip_predictions_delivery"]
+                    if not _skip_delivery:
+                        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+                            PredictionFrameConverter,
+                        )
+                        converter = PredictionFrameConverter()
                     staging_path = self._model_path.data_generated / "_pf_staging"
+                    _run_type = self.args.run_type
+                    _ts = self._model_path.resolve_artifact_path(
+                        self.args.run_type, self.args.artifact_name
+                    ).stem[-15:]
                     all_targets: List[str] = []
                     n_sequences = 0
 
@@ -1304,13 +1433,20 @@ class ForecastingModelManager(ModelManager):
                                 )
                         for target in list(pf_dict.keys()):
                             pf = pf_dict.pop(target)  # remove from dict → refcount drops
-                            # Track A — compact numpy (metrics)
-                            pf.save(staging_path / f"origin_{origin_idx}" / target)
+                            # Track A — compact numpy (metrics mmap reload)
+                            save_pf(pf, staging_path / f"origin_{origin_idx}" / target)
+                            # Track A+ — permanent numpy for ensemble consumption
+                            save_pf(
+                                pf,
+                                self._model_path.data_generated
+                                / f"predictions_{_run_type}_{_ts}"
+                                / f"origin_{origin_idx}"
+                                / target
+                            )
                             # Track B — list-in-cell parquet (delivery)
-                            # Skipped when skip_predictions_delivery=True to
-                            # reduce peak memory.  Ensemble downstream will not
-                            # receive prediction parquets for this run.
-                            if not self.configs.get("skip_predictions_delivery", False):
+                            # Controlled by mandatory skip_predictions_delivery key.
+                            # PF ensembles consume Track A+ numpy, not Track B.
+                            if not _skip_delivery:
                                 table = converter.to_arrow_table(
                                     pf, target, level=self.configs["level"]
                                 )
@@ -1352,7 +1488,7 @@ class ForecastingModelManager(ModelManager):
                             f"Validating evaluation dataframe of sequence {idx+1}/{n_sequences}"
                         )
                         CorePredictionSniffer(level=configs["level"]).sniff_predictions(
-                            df, targets=configs["targets"]
+                            df, targets=combined_targets(configs)
                         )
                         save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
 
@@ -1397,8 +1533,9 @@ class ForecastingModelManager(ModelManager):
                         # not by M × T × PF_size simultaneously.
                         raw_preds_for_metrics = {
                             target: [
-                                PredictionFrame.load(
-                                    staging_path / f"origin_{i}" / target, mmap=True
+                                load_pf(
+                                    staging_path / f"origin_{i}" / target,
+                                    self.configs["level"], mmap=True,
                                 )
                                 for i in range(n_sequences)
                             ]
@@ -1458,6 +1595,20 @@ class ForecastingModelManager(ModelManager):
         ):
             try:
                 predictions = self._forecast_model_artifact(self.args.artifact_name)
+                if (
+                    self._prediction_format == "prediction_frame"
+                    and isinstance(predictions, dict)
+                ):
+                    _ts = self._model_path.resolve_artifact_path(
+                        self.args.run_type, self.args.artifact_name
+                    ).stem[-15:]
+                    for target, pf in predictions.items():
+                        save_pf(
+                            pf,
+                            self._model_path.data_generated
+                            / f"predictions_{self.args.run_type}_{_ts}"
+                            / target
+                        )
                 context = ForecastingContext(
                     configs=self.configs,
                     model_path=self._model_path,
@@ -1555,7 +1706,7 @@ class ForecastingModelManager(ModelManager):
                         )
 
                         CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
-                            df, targets=self.configs["targets"]
+                            df, targets=combined_targets(self.configs)
                         )
 
                 has_metrics = self._has_evaluation_metrics()
@@ -1592,8 +1743,11 @@ class ForecastingModelManager(ModelManager):
                     model_path=self._model_path,
                     run_type=self.args.run_type,
                     entity=self._entity,
+                    prediction_format=self._prediction_format,
                 )
                 self._reporting_stage.generate_forecast_report(context)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Forecast report generation failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -1638,7 +1792,7 @@ class ForecastingModelManager(ModelManager):
             run_type=self.configs["run_type"],
             timestamp=self.configs["timestamp"],
             level=self.configs.get("level"),
-            targets=self.configs.get("targets"),
+            targets=combined_targets(self.configs),
             sequence_number=sequence_number,
             target_identifier=target_identifier,
             send_alert=send_alert,
@@ -1683,6 +1837,10 @@ class ForecastingModelManager(ModelManager):
             run_type=self.args.run_type,
             data_loader=getattr(self, '_data_loader', None),
             prepare_actuals_df=self.prepare_actuals_df,
+            # #302: frame-fed models evaluate against the frame cache; defaults
+            # keep every dataframe-path and ensemble construction unchanged.
+            data_format=getattr(self, "_data_format", DATA_FORMAT_DATAFRAME),
+            frame_cache_path=getattr(self, "_cached_frame_path", None),
         )
         self._evaluation_stage.evaluate(df_predictions, context, ensemble=ensemble)
 
@@ -1918,8 +2076,11 @@ class ForecastingModelManager(ModelManager):
                     model_path=self._model_path,
                     run_type=self.args.run_type,
                     entity=self._entity,
+                    prediction_format=self._prediction_format,
                 )
                 self._reporting_stage.generate_evaluation_report(context)
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Evaluation report generation failed: {traceback.format_exc()}")
                 raise PipelineException(

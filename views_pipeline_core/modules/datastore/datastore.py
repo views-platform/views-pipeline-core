@@ -2,7 +2,21 @@
 
 This module provides a high-level interface for uploading, downloading, searching,
 and managing prediction files stored in Appwrite cloud storage. It handles metadata
-management, file versioning, caching, and bucket operations.
+management, file versioning and caching. It does NOT create buckets or collections.
+
+GOVERNING CONTRACT — the VIEWS Appwrite seam's identity, credential and coordinate rules
+are platform surface:
+
+    PLATFORM-001 (views-appwrite), pinned at tag platform-001-v1.2.0:
+    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/PLATFORM-001_identity_secrets_configuration_contract.md
+
+    Coordinate registry (THE canonical source for ids — never copied into code):
+    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/coordinate_registry.toml
+
+**Callers: `upload_data()` reports failure by RETURN VALUE, not by exception.** The SDK's
+`AppwriteException` is converted to `OperationResult(success=False)` inside the storage
+module, so an `except` around this call will not fire. Inspect the result (ADR-046 §1 as
+amended 2026-07-31; register C-227). Locally: ADR-046, ADR-047.
 
 Typical usage example:
 
@@ -38,12 +52,36 @@ from views_pipeline_core.modules.appwrite import AppwriteConfig, AppWriteFileMod
 import logging
 import pandas as pd
 
-import dotenv
-
-dotenv.load_dotenv(dotenv.find_dotenv())
+# NO dotenv HERE. This module used to call `dotenv.load_dotenv(dotenv.find_dotenv())` at
+# module scope, so importing anything that transitively reached it walked the filesystem
+# upward from the working directory and mutated `os.environ` as an import side effect —
+# PLATFORM-001 §3 clause 3: "a library reading whatever `.env` the working directory
+# holds is the disease this contract exists to cure" (register C-177, #323).
+#
+# A service ENTRY POINT reading its own process environment is legitimate and unchanged;
+# a library doing it on behalf of every importer is not. Callers that need a `.env`
+# loaded should load it themselves, naming the file, before constructing anything here.
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# NO setLevel here. A library that forces its own level at import overrides whatever the
+# APPLICATION configured — an operator who sets WARNING globally was still getting INFO
+# from this module, and never asked for it. Same class as the ambient `.env` load removed
+# in #346: an import-time side effect the importer did not request. Level is the
+# application's decision; `LoggingModule` is where this platform makes it.
+
+
+class MetadataSearchIncomplete(RuntimeError):
+    """The metadata lookup could not be certified, so its result is not an answer.
+
+    Raised where a caller would otherwise receive an empty list or ``None`` — values
+    that mean "there is no such file" and must never be produced by a lookup that
+    merely failed. See register C-241 and the Cluster J entry: the recurring defect on
+    this platform is a system that cannot distinguish "no" from "I could not tell" and
+    answers anyway.
+
+    It subclasses ``RuntimeError`` so that existing broad handlers still catch it,
+    while a caller that wants to retry the read specifically can.
+    """
 
 
 class FileMetadata:
@@ -347,28 +385,24 @@ class DatastoreModule:
         else:
             raise TypeError("file must be a Path, str, or pd.DataFrame")
 
+        # A missing bucket used to be CREATED here and the upload retried into it —
+        # so a mistyped or renamed coordinate silently provisioned a new bucket in
+        # production and published the forecast where nobody reads (register C-228,
+        # þing-02 #331). Provisioning is now a deliberate act; a wrong coordinate
+        # fails and says which one:
+        #   python -m views_pipeline_core.modules.appwrite.provisioning ensure-bucket
         if upload_result.get("code") == "storage_bucket_not_found":
-            logger.info(
-                f"Bucket '{self.__appwrite_file_manager_config.bucket_id}' not found. Creating it..."
+            bucket_id = self.__appwrite_file_manager_config.bucket_id
+            logger.error(
+                "Appwrite bucket '%s' does not exist. Refusing to create it from the "
+                "delivery path — run `python -m "
+                "views_pipeline_core.modules.appwrite.provisioning ensure-bucket "
+                "--bucket %s` if this bucket is genuinely new, or correct "
+                "APPWRITE_PROD_FORECASTS_BUCKET_ID if it is a typo.",
+                bucket_id,
+                bucket_id,
             )
-            try:
-                self.__appwrite_file_manager.create_bucket(
-                    bucket_id=self.__appwrite_file_manager_config.bucket_id,
-                    name=self.__appwrite_file_manager_config.bucket_name,
-                )
-            except Exception as e:
-                logger.error(f"Failed to create bucket: {e}")
-                return OperationResult(success=False, error=str(e))
 
-            upload_result = self.__appwrite_file_manager.upload_file_with_metadata(
-                bucket_id=self.__appwrite_file_manager_config.bucket_id,
-                file_path=file_path,
-                filename=filename,
-                metadata=metadata,
-                collection_name=self.__appwrite_file_manager_config.collection_name,
-                collection_id=self.__appwrite_file_manager_config.collection_id,
-            ).to_dict()
-        
         return OperationResult(**upload_result)
 
     def get_predictions_by_metadata(
@@ -405,11 +439,18 @@ class DatastoreModule:
         )
 
         if not search_result.get("success", False):
-            logger.warning(f"Search failed with filters: {filters}")
+            # Returning [] here would tell every caller "no predictions match", which is
+            # a statement about the shelf rather than about the lookup. `get_latest_file_id`
+            # would then hand back None and the FAO delivery would report nothing to
+            # deliver — a false negative to an external counterparty, produced by a
+            # failure we had already detected. C-241, Cluster J.
             error_msg = search_result.get("error", "Unknown error")
-            logger.error(f"Search error: {error_msg}")
-            return []
-        
+            code = search_result.get("code", "UNKNOWN")
+            logger.error(f"Metadata search failed ({code}) with filters {filters}: {error_msg}")
+            raise MetadataSearchIncomplete(
+                f"metadata search failed ({code}) for filters {filters}: {error_msg}"
+            )
+
         documents = search_result.get("data", {}).get("documents", [])
         logger.info(f"Found {len(documents)} prediction files")
         
@@ -691,9 +732,17 @@ class DatastoreModule:
         )
 
         if not search_result.get("success", False):
-            logger.error(f"Search error: {search_result.get('error', 'Unknown error')}")
-            return []
-        
+            # Same swallow as `get_predictions_by_metadata`, and worse here: this method
+            # is what an operator reaches for to answer "what is actually on the shelf?".
+            # An empty list is the most misleading possible reply to that question when
+            # the read failed. C-241, Cluster J.
+            error_msg = search_result.get("error", "Unknown error")
+            code = search_result.get("code", "UNKNOWN")
+            logger.error(f"Unfiltered metadata search failed ({code}): {error_msg}")
+            raise MetadataSearchIncomplete(
+                f"unfiltered metadata search failed ({code}): {error_msg}"
+            )
+
         documents = search_result.get("data", {}).get("documents", [])
         logger.info(f"Found {len(documents)} total prediction files")
         

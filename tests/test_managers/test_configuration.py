@@ -34,7 +34,7 @@ def base_configs():
         "meta": {
             "description": "Test model",
             "author": "Test Author",
-            "metrics": ["mse", "mae"],
+            "regression_point_metrics": ["mse", "mae"],
         },
         "partition": {
             "calibration": {
@@ -194,6 +194,42 @@ class TestConfigurationManagerDictInterface:
 # ============================================================================
 
 class TestGetCombinedConfig:
+    def test_the_retired_targets_key_is_not_synthesised(self, base_configs):
+        """#380: the combined config must not carry `targets`.
+
+        These three tests previously asserted the SYNTHESIS — that
+        `get_combined_config()` manufactured a `targets` key from the task-split ones.
+        That shim existed for models using the pre-split convention; none remain, and
+        views-evaluation (which receives this whole dict) raises on the key. The
+        behaviour they pinned is now a defect, so they assert its absence instead.
+        """
+        configs = base_configs
+        configs["hyperparameters"].pop("targets", None)
+        configs["hyperparameters"]["regression_targets"] = ["lr_ged_sb"]
+        configs["hyperparameters"]["classification_targets"] = ["binary_conflict"]
+
+        config = ConfigurationManager(
+            configs["hyperparameters"], configs["deployment"], configs["meta"]
+        ).get_combined_config()
+
+        assert "targets" not in config
+
+    def test_the_target_list_is_derived_instead(self, base_configs):
+        """The capability the shim provided, now at the point of use."""
+        from views_pipeline_core.managers.configuration.configuration import (
+            combined_targets,
+        )
+
+        configs = base_configs
+        configs["hyperparameters"].pop("targets", None)
+        configs["hyperparameters"]["regression_targets"] = ["lr_ged_sb"]
+        configs["hyperparameters"]["classification_targets"] = ["binary_conflict"]
+
+        config = ConfigurationManager(
+            configs["hyperparameters"], configs["deployment"], configs["meta"]
+        ).get_combined_config()
+
+        assert combined_targets(config) == ["lr_ged_sb", "binary_conflict"]
     def test_basic_merge(self, config_manager):
         """Test basic configuration merging."""
         config = config_manager.get_combined_config()
@@ -246,48 +282,8 @@ class TestGetCombinedConfig:
         config = manager.get_combined_config()
         assert config["regression_targets"] == ["single_target"]
 
-    def test_synthesises_targets_from_regression_targets(self, base_configs):
-        """targets is synthesised when only regression_targets is present."""
-        configs = copy.deepcopy(base_configs)
-        configs["hyperparameters"].pop("targets", None)
-        configs["hyperparameters"]["regression_targets"] = ["lr_ged_sb"]
 
-        manager = ConfigurationManager(
-            config_hyperparameters=configs["hyperparameters"],
-            config_deployment=configs["deployment"],
-            config_meta=configs["meta"],
-        )
-        config = manager.get_combined_config()
-        assert config["targets"] == ["lr_ged_sb"]
 
-    def test_synthesises_targets_from_classification_targets(self, base_configs):
-        """targets is synthesised when only classification_targets is present."""
-        configs = copy.deepcopy(base_configs)
-        configs["hyperparameters"].pop("targets", None)
-        configs["hyperparameters"]["classification_targets"] = ["binary_conflict"]
-
-        manager = ConfigurationManager(
-            config_hyperparameters=configs["hyperparameters"],
-            config_deployment=configs["deployment"],
-            config_meta=configs["meta"],
-        )
-        config = manager.get_combined_config()
-        assert config["targets"] == ["binary_conflict"]
-
-    def test_synthesises_targets_combines_both_task_types(self, base_configs):
-        """targets combines regression and classification when both are present."""
-        configs = copy.deepcopy(base_configs)
-        configs["hyperparameters"].pop("targets", None)
-        configs["hyperparameters"]["regression_targets"] = ["lr_ged_sb"]
-        configs["hyperparameters"]["classification_targets"] = ["binary_conflict"]
-
-        manager = ConfigurationManager(
-            config_hyperparameters=configs["hyperparameters"],
-            config_deployment=configs["deployment"],
-            config_meta=configs["meta"],
-        )
-        config = manager.get_combined_config()
-        assert config["targets"] == ["lr_ged_sb", "binary_conflict"]
 
     def test_legacy_targets_key_takes_precedence_over_synthesis(self, base_configs):
         """Explicit 'targets' key is not overwritten by synthesis."""

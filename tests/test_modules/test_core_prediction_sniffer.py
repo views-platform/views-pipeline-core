@@ -52,13 +52,25 @@ class TestSniffPredictionsPass:
 # ---------------------------------------------------------------------------
 
 class TestBehaviorChanges:
-    def test_priogrid_id_index_raises(self):
-        """priogrid_id is legacy — only priogrid_gid is canonical."""
+    def test_grid_names_accepted_canonical_and_legacy(self):
+        """priogrid_id is canonical (ADR-015); the legacy priogrid_gid is still accepted."""
+        for entity in ("priogrid_id", "priogrid_gid"):
+            df = pd.DataFrame(
+                {"pred_ged_sb": [0.1, 0.2, 0.3]},
+                index=pd.MultiIndex.from_tuples(
+                    [(100, 480), (101, 481), (102, 482)],
+                    names=[entity, "month_id"],
+                ),
+            )
+            CorePredictionSniffer(level="pgm").sniff_predictions(df, "ged_sb")
+
+    def test_non_grid_entity_name_raises(self):
+        """A name that is neither priogrid_id nor the legacy alias is rejected."""
         df = pd.DataFrame(
             {"pred_ged_sb": [0.1, 0.2, 0.3]},
             index=pd.MultiIndex.from_tuples(
                 [(100, 480), (101, 481), (102, 482)],
-                names=["priogrid_id", "month_id"],
+                names=["grid_cell", "month_id"],
             ),
         )
         with pytest.raises(ValueError, match="do not match"):

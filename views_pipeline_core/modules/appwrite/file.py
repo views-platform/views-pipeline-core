@@ -6,9 +6,26 @@ and authentication. It supports both API key and session-based authentication.
 
 The module consists of several key components:
     - AppWriteFileModule: Main interface for file operations
-    - AppwriteMetadataHandler: Database/collection management for file metadata
+    - AppwriteMetadataHandler: Reads and updates file metadata documents
     - CacheManager: Local caching with TTL-based validation
     - AuthManager hierarchy: Flexible authentication (API key or session)
+
+GOVERNING CONTRACT — this module sits on the VIEWS Appwrite *seam*, whose identity,
+credential and coordinate rules are platform surface, not this repo's to set:
+
+    PLATFORM-001, Identity, Secrets & Configuration Contract (views-appwrite),
+    pinned at tag platform-001-v1.2.0:
+    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/PLATFORM-001_identity_secrets_configuration_contract.md
+
+    Coordinate registry (THE canonical source for bucket/collection/database ids —
+    read and validate against it; never copy values into code or defaults):
+    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/coordinate_registry.toml
+
+Two clauses bear directly on the code below. **§6 (raise, never provision):** this module
+creates no containers — provisioning lives in the sibling `provisioning.py`, runnable and
+never importable from here, and a wrong coordinate fails rather than conjuring a new
+production bucket. **§5 (redaction, all carriers):** credentials are never logged, in any
+form. Locally: ADR-046 (amended 2026-07-31) and ADR-047 (three-destination authority).
 
 Typical usage example:
 
@@ -45,29 +62,40 @@ Typical usage example:
         save_path="/tmp/output.parquet",
         use_cache=True
     )
+
+SDK RETURN-SHAPE CONTRACT (C-219 audit, 2026-07-27, #310 post-incident):
+the Appwrite SDK dispatches on response Content-Type — application/json
+returns a PARSED DICT, everything else raw bytes (pinned by
+tests/test_modules/test_appwrite_sdk_contract.py). All API endpoints used
+here serve JSON and are consumed as dicts (a shape surprise fails loud on
+first subscript). The ONE bytes-expecting site platform-wide is
+download_file, which coerces SDK-parsed JSON back to bytes (#310, C-217).
+When adding a new SDK call, state its expected shape at the call site.
 """
 
 from appwrite.client import Client
 from appwrite.services.storage import Storage
 from appwrite.services.databases import Databases
-from appwrite.services.account import Account
 from appwrite.services.users import Users
 from appwrite.input_file import InputFile
 from appwrite.id import ID
-from appwrite.role import Role
-from appwrite.permission import Permission
 from appwrite.exception import AppwriteException
 from appwrite.query import Query
-from typing import List, Optional, Dict, Any, Union, Tuple
+
+from views_pipeline_core.modules.appwrite.transport import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,  # noqa: F401 - deliberate re-export
+    install_request_timeout,
+)
+from typing import List, Optional, Dict, Any, Union
 from dataclasses import dataclass, field
 from pathlib import Path
 import json
 from datetime import datetime, timedelta
 import shutil
-import time
 import logging
 import hashlib
 from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.exceptions.exceptions import ConfigurationException
 from abc import ABC, abstractmethod
 from enum import Enum
 
@@ -81,6 +109,72 @@ DEFAULT_PAGE_LIMIT = 100
 MAX_ATTRIBUTE_CREATION_RETRIES = 3
 INITIAL_RETRY_DELAY = 1.0
 
+# The number of rows Appwrite's list endpoints return when no `Query.limit` is
+# supplied. It is named here so that no walk in this module ever *inherits* it: a
+# request that omits its own limit is correct only for as long as the server's default
+# stays 25 and the match stays under it, and neither is ours to control. Register C-241
+# is what this default cost when it was left implicit.
+APPWRITE_DEFAULT_PAGE_SIZE = 25
+
+# Backstop on a paging walk. It exists for the case where the substrate ignores
+# `offset` — every page then comes back full and a `len(batch) < limit` terminator never
+# fires. Tripping it means the walk is INCOMPLETE, never that it is finished.
+MAX_METADATA_PAGES = 1000
+
+# Page size for the container preflight. A project holds a handful of collections, so
+# this is generous — but it is stated rather than inherited, and a total beyond it is
+# refused rather than silently truncated.
+_CONTAINER_PAGE = 100
+
+# Appwrite error types. These are the SERVER's own `type` strings, which the SDK
+# propagates verbatim into `AppwriteException.type` and this module carries as
+# `OperationResult.code` — pinned against the real SDK in
+# tests/test_modules/test_appwrite_sdk_contract.py.
+APPWRITE_FILE_NOT_FOUND = "storage_file_not_found"
+APPWRITE_BUCKET_NOT_FOUND = "storage_bucket_not_found"
+
+# Coordinates that address real storage. They have no safe default: a default is a
+# production address reachable without a deliberate choice (register C-229, þing-02
+# #324; PLATFORM-001 §4). Their values belong to the seam's coordinate registry.
+_REQUIRED_COORDINATES = (
+    "bucket_id",
+    "bucket_name",
+    "collection_id",
+    "collection_name",
+    "database_id",
+    "database_name",
+)
+
+
+class _StoragePresence(Enum):
+    """Whether a file is in a bucket — a three-valued question.
+
+    `OperationResult.success` cannot express the third state, and substituting
+    "absent" for "could not tell" is what let a permission denial delete a live
+    forecast's metadata (register C-231). Any branch with a destructive consequence
+    must require PRESENT or ABSENT and refuse to act on INDETERMINATE.
+    """
+
+    PRESENT = "present"
+    ABSENT = "absent"
+    INDETERMINATE = "indeterminate"
+
+
+def _classify_storage_presence(result: "OperationResult") -> _StoragePresence:
+    """Classify a ``get_file`` outcome without collapsing failure into absence.
+
+    Only a positive ``storage_file_not_found`` from Appwrite counts as evidence of
+    absence. Everything else — a wrong bucket id, a missing read scope, a 502 whose
+    body was not JSON (so ``code`` is ``None``) — is INDETERMINATE. The match is
+    deliberately positive rather than a negation: an unrecognised or absent code must
+    fail safe, not authorise a delete.
+    """
+    if result.success:
+        return _StoragePresence.PRESENT
+    if result.code == APPWRITE_FILE_NOT_FOUND:
+        return _StoragePresence.ABSENT
+    return _StoragePresence.INDETERMINATE
+
 
 # Enums
 class AuthMethod(Enum):
@@ -88,7 +182,6 @@ class AuthMethod(Enum):
 
     Attributes:
         API_KEY: Server-side API key authentication. Requires string credentials.
-        SESSION: User session authentication. Requires dict with email/password.
 
     Example:
         >>> config = AppwriteConfig(
@@ -98,7 +191,6 @@ class AuthMethod(Enum):
     """
 
     API_KEY = "api_key"
-    SESSION = "session"
 
 
 class CacheValidationResult(Enum):
@@ -205,18 +297,29 @@ class FileMetadata:
     file_size: Optional[int] = None
     file_hash: Optional[str] = None
 
-@dataclass
+@dataclass(frozen=True)
 class AppwriteConfig:
     """Configuration for Appwrite file manager connections.
 
     Centralized configuration for all Appwrite connection settings, authentication,
     caching behavior, and storage/metadata identifiers.
 
+    **FROZEN (C-240, #346)** — attributes cannot be REBOUND. Validating coordinates in
+    `__post_init__` is worthless if a caller can reassign one afterwards:
+    `config.bucket_id = "production_forecasts"` a line later is exactly the move C-229
+    was about. Its sibling `PredictionStoreConfig` was already `frozen=True`; two configs
+    for one seam now carry one guarantee.
+
+    It does NOT deep-freeze the objects behind the attributes — `path_manager` is a live
+    collaborator and remains mutable through the wrapper. Deliberate: the guarantee this
+    type needs is that a validated coordinate cannot be swapped, and every coordinate is
+    a string.
+
     Attributes:
         endpoint: Appwrite server endpoint URL (e.g., 'https://cloud.appwrite.io/v1').
         project_id: Appwrite project identifier.
-        credentials: Authentication credentials. String for API_KEY, dict with
-            'email' and 'password' keys for SESSION auth.
+        credentials: Authentication API key (a string). The dict form documented here
+            belonged to SESSION auth, deleted in #344 — API_KEY is the only method.
         auth_method: Authentication method to use. Defaults to API_KEY.
         cache_dir: Local directory for file caching. Auto-generated if not provided.
         cache_ttl_hours: Hours before cached files expire. Defaults to 24.
@@ -246,14 +349,20 @@ class AppwriteConfig:
         ...     endpoint="https://cloud.appwrite.io/v1",
         ...     project_id="my_project",
         ...     credentials={"email": "user@example.com", "password": "secret"},
-        ...     auth_method=AuthMethod.SESSION
         ... )
     """
 
     # Core connection settings
     endpoint: str
     project_id: str
-    credentials: Union[str, Dict[str, str]]
+    # repr=False: a dataclass renders every field, so this live Appwrite key was one
+    # `logger.debug(f"{config}")`, one W&B run-config capture or one traceback rendering
+    # locals away from the logs — with nothing in the type to stop it (register C-230,
+    # þing-01 #325). PLATFORM-001 §5's redaction clause is multi-carrier and binding:
+    # credentials are never logged, in any carrier. Endpoints and coordinates may be, and
+    # deliberately still render — a repr that hid everything would push people back to
+    # printing the raw object.
+    credentials: Union[str, Dict[str, str]] = field(repr=False)
     
     # Authentication settings
     auth_method: AuthMethod = AuthMethod.API_KEY
@@ -263,29 +372,67 @@ class AppwriteConfig:
     cache_ttl_hours: int = DEFAULT_CACHE_TTL_HOURS
     allow_metadata_only_updates: bool = True  # Whether to update metadata only when file hash exists
     
-    # Storage settings
-    bucket_id: str = "production_forecasts"
-    bucket_name: Optional[str] = None  # Will default to bucket_id with spaces if not provided
-    
-    # Metadata settings
-    collection_name: str = "Metadata"  #"Pipeline Forecasts"
-    collection_id: Optional[str] = "metadata"  # Custom collection ID override
-    database_name: Optional[str] = "File Metadata" #"File Metadata"  # Will default to bucket_name + " Metadata" if not provided
-    database_id: Optional[str] = "file_metadata"  # Custom database ID override
-    
+    # Storage and metadata coordinates. REQUIRED — see _REQUIRED_COORDINATES below.
+    # Declared Optional only so they can keep their position after the defaulted
+    # fields above; omitting one is a configuration error, not a default.
+    bucket_id: Optional[str] = None
+    bucket_name: Optional[str] = None
+    collection_name: Optional[str] = None
+    collection_id: Optional[str] = None
+    database_name: Optional[str] = None
+    database_id: Optional[str] = None
+
     # Path manager
     path_manager: ModelPathManager = None
-    
+
     def __post_init__(self):
+        # `object.__setattr__` because the dataclass is frozen (C-240). Coercion is the
+        # ONE mutation this type permits, it happens before the instance is handed to
+        # anyone, and `audit/targets.py` passes `auth_method="api_key"` as a string
+        # so the coercion has a live caller.
         if isinstance(self.auth_method, str):
-            self.auth_method = AuthMethod(self.auth_method)
-        
-        # Set defaults for derived values
-        if not self.bucket_name:
-            self.bucket_name = self.bucket_id.replace("_", " ").title()
-        
-        if not self.database_name:
-            self.database_name = self.collection_id.replace("_", " ").title()
+            object.__setattr__(self, "auth_method", AuthMethod(self.auth_method))
+
+        # Every coordinate must arrive explicitly. Until 2026-07-31 these defaulted to
+        # the live production values ("production_forecasts", "file_metadata", …), so a
+        # caller, test or scratch script that supplied only a key operated against
+        # production storage without ever choosing to (register C-229, þing-02 #324).
+        # PLATFORM-001 §4 forbids baking registry coordinates into code, examples or
+        # dataclass defaults for precisely this reason.
+        #
+        # Empty strings count as missing: `os.getenv("X", "")` is a common way to reach
+        # here with nothing, and it must not pass silently.
+        missing = [name for name in _REQUIRED_COORDINATES if not getattr(self, name)]
+        if missing:
+            raise ConfigurationException(
+                f"AppwriteConfig is missing required coordinate(s): {missing}. "
+                f"These address real storage and have no safe default — pass them "
+                f"explicitly from the seam's coordinate registry (PLATFORM-001 §4), "
+                f"or build the config from validated environment variables via "
+                f"PredictionStoreConfig.from_environment().to_appwrite_config()."
+            )
+
+
+def exception_message(exception: Exception) -> str:
+    """The message of an ``AppwriteException`` as a string, always.
+
+    The SDK sets ``AppwriteException.message`` to whatever it was handed. For an API
+    error that is a string; for a **transport** failure it is the underlying exception
+    OBJECT — so ``"something" in e.message`` raises
+    ``TypeError: argument of type 'ConnectTimeout' is not iterable``.
+
+    That was unreachable until #347: before timeouts existed, a hung call never returned
+    at all, so no transport exception ever reached these handlers. Bounding the calls
+    made the path reachable and turned an indefinite hang into a crash — which is
+    precisely why þing-01 required the hang DRILLED before a value was shipped, and why
+    that sequencing was not optional.
+
+    Six call sites compared against ``e.message`` directly. This is the coercion they all
+    needed; the deeper fix is to branch on ``e.type`` instead of prose (register C-235).
+    """
+    message = getattr(exception, "message", None)
+    return message if isinstance(message, str) else str(message if message is not None else exception)
+
 
 # Authentication Classes
 class AuthManager(ABC):
@@ -296,7 +443,6 @@ class AuthManager(ABC):
 
     See Also:
         ApiKeyAuth: Implementation for API key authentication.
-        SessionAuth: Implementation for user session authentication.
         AuthFactory: Factory for creating appropriate AuthManager instances.
     """
 
@@ -347,86 +493,6 @@ class ApiKeyAuth(AuthManager):
         client.set_key(credentials)
         return OperationResult(success=True)
 
-class SessionAuth(AuthManager):
-    """Session-based authentication handler for user-specific Appwrite access.
-
-    Authenticates using email/password credentials to create a user session.
-    Suitable for applications where user-specific permissions are needed.
-
-    Attributes:
-        account: Appwrite Account service instance after setup.
-        current_user_id: ID of the authenticated user.
-
-    Example:
-        >>> auth = SessionAuth()
-        >>> result = auth.setup(client, {
-        ...     "email": "user@example.com",
-        ...     "password": "secure_password"
-        ... })
-        >>> if result.success:
-        ...     user_id = result.data['user_id']
-    """
-
-    def __init__(self):
-        """Initialize SessionAuth with empty account and user ID."""
-        self.account = None
-        self.current_user_id = None
-
-    def setup(self, client: Client, credentials: Union[str, Dict[str, str]]) -> OperationResult:
-        """Configure session authentication by creating a user session.
-
-        Args:
-            client: Appwrite Client instance to configure.
-            credentials: Dictionary with 'email' and 'password' keys.
-
-        Returns:
-            OperationResult with success=True and data containing 'user_id'
-            on successful authentication, or success=False with error details.
-        """
-        if not isinstance(credentials, dict) or not all(k in credentials for k in ["email", "password"]):
-            return OperationResult(
-                success=False,
-                error="Session authentication requires dict with 'email' and 'password'",
-                code="INVALID_CREDENTIALS"
-            )
-        
-        self.account = Account(client)
-        client.set_key("")  # Clear API key for session auth
-        
-        session_result = self._create_session(credentials["email"], credentials["password"])
-        if not session_result.success:
-            return session_result
-        
-        self.current_user_id = session_result.data["user_id"]
-        return OperationResult(success=True, data={"user_id": self.current_user_id})
-
-    def _create_session(self, email: str, password: str) -> OperationResult:
-        """Create an email/password session with Appwrite.
-
-        Args:
-            email: User's email address.
-            password: User's password.
-
-        Returns:
-            OperationResult with session details on success, including
-            session_id, user_id, and creation timestamp.
-        """
-        try:
-            session = self.account.create_email_password_session(email, password)
-            return OperationResult(
-                success=True,
-                data={
-                    "session_id": session["$id"],
-                    "user_id": session["userId"],
-                    "created": session["$createdAt"]
-                }
-            )
-        except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=e.message,
-                code=e.type
-            )
 
 class AuthFactory:
     """Factory for creating authentication handler instances.
@@ -454,10 +520,7 @@ class AuthFactory:
         """
         if auth_method == AuthMethod.API_KEY:
             return ApiKeyAuth()
-        elif auth_method == AuthMethod.SESSION:
-            return SessionAuth()
-        else:
-            raise ValueError(f"Unsupported auth method: {auth_method}")
+        raise ValueError(f"Unsupported auth method: {auth_method}")
 
 # Cache Management
 @dataclass
@@ -851,17 +914,22 @@ class CacheManager:
 
 # Metadata Management
 class AppwriteMetadataHandler:
-    """Handler for managing file metadata in Appwrite databases.
+    """Handler for reading and writing file metadata documents in Appwrite.
 
-    Manages the database and collection infrastructure for storing file metadata.
-    Handles dynamic attribute creation based on metadata structure, and provides
-    search and update capabilities for metadata documents.
+    Searches, reads and updates metadata documents in an EXISTING database and
+    collection.
 
-    The handler automatically:
-        - Creates databases and collections if they don't exist
-        - Infers attribute types from metadata values
-        - Creates necessary database attributes dynamically
-        - Supports searching with equality and array containment filters
+    **It no longer creates them.** Provisioning — databases, collections, attributes —
+    moved to ``views_pipeline_core.modules.appwrite.provisioning`` in þing-02 #331,
+    because creating storage as a side effect of publishing a forecast is what forced
+    the platform's API key to carry create scopes, and least privilege could not be
+    applied while narrowing the key broke every upload. Containers are now created
+    deliberately::
+
+        python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection
+
+    and their existence is verified read-only before the first write by
+    :meth:`AppWriteFileModule._require_containers`.
 
     Attributes:
         databases: Appwrite Databases service instance.
@@ -869,12 +937,6 @@ class AppwriteMetadataHandler:
 
     Example:
         >>> handler = AppwriteMetadataHandler(databases_service, config)
-        >>>
-        >>> # Ensure collection exists with required attributes
-        >>> result = handler.create_metadata_collection_if_not_exists(
-        ...     metadata={"model": "test", "targets": ["ged_sb"]},
-        ...     collection_name="Predictions"
-        ... )
         >>>
         >>> # Search for files by metadata
         >>> results = handler.search_files_by_metadata(
@@ -893,383 +955,6 @@ class AppwriteMetadataHandler:
         self.databases = databases
         self.config = config
 
-    def create_database_if_not_exists(self, database_id: str = None, database_name: str = None) -> OperationResult:
-        """Create metadata database if it doesn't exist.
-
-        Checks for existing database by name or ID, creating a new one only
-        if necessary. Uses config values as defaults for parameters.
-
-        Args:
-            database_id: Database identifier. Defaults to config.database_id.
-            database_name: Human-readable database name. Defaults to config.database_name.
-
-        Returns:
-            OperationResult with:
-                - success=True and database data if exists or created
-                - code='EXISTS' if database already existed
-                - success=False if database limit reached or other error
-
-        Example:
-            >>> result = handler.create_database_if_not_exists(
-            ...     database_id="predictions_db",
-            ...     database_name="Predictions Database"
-            ... )
-        """
-        # Use config values as defaults
-        db_id = database_id or self.config.database_id
-        db_name = database_name or self.config.database_name
-        
-        if not db_id or not db_name:
-            return OperationResult(
-                success=False,
-                error="Database ID and name must be provided in config or as parameters",
-                code="MISSING_CONFIG"
-            )
-        
-        try:
-            existing_databases = self.databases.list()
-            
-            for db in existing_databases.get("databases", []):
-                if db["name"] == db_name or db["$id"] == db_id:
-                    logger.info(f"Database '{db_name}' already exists")
-                    return OperationResult(
-                        success=True,
-                        data=db,
-                        code="EXISTS"
-                    )
-            
-            # Only try to create if it doesn't exist
-            try:
-                result = self.databases.create(
-                    database_id=db_id,
-                    name=db_name,
-                    enabled=True
-                )
-                
-                logger.info(f"Created new database: {db_name}")
-                return OperationResult(
-                    success=True,
-                    data=result
-                )
-            except AppwriteException as create_error:
-                # If we hit the database limit but the database exists, that's okay
-                if "maximum number of databases" in create_error.message.lower():
-                    # Try to find the database again
-                    existing_databases = self.databases.list()
-                    for db in existing_databases.get("databases", []):
-                        if db["$id"] == db_id:
-                            logger.warning(f"Database limit reached, but database '{db_id}' exists")
-                            return OperationResult(
-                                success=True,
-                                data=db,
-                                code="EXISTS"
-                            )
-                raise create_error
-
-        except AppwriteException as e:
-            logger.error(f"Database operation failed: {e.message}")
-            return OperationResult(
-                success=False,
-                error=f"Database operation failed: {e.message}",
-                code=e.type
-            )
-
-    def _infer_attribute_type(self, value: Any) -> Tuple[str, bool]:
-        """Infer Appwrite attribute type from a Python value.
-
-        Determines the appropriate database attribute type based on the
-        value's Python type. Handles arrays by checking the first element.
-
-        Args:
-            value: Python value to infer type from.
-
-        Returns:
-            Tuple of (type_string, is_array) where type_string is one of:
-            'boolean', 'integer', 'double', 'datetime', 'string'.
-
-        Example:
-            >>> handler._infer_attribute_type(["a", "b"])
-            ('string', True)
-            >>> handler._infer_attribute_type(42)
-            ('integer', False)
-            >>> handler._infer_attribute_type("2024-01-15T10:00:00")
-            ('datetime', False)
-        """
-        is_array = isinstance(value, list)
-        base_value = value[0] if is_array and value else value
-        
-        if isinstance(base_value, bool):
-            return "boolean", is_array
-        elif isinstance(base_value, int):
-            return "integer", is_array
-        elif isinstance(base_value, float):
-            return "double", is_array
-        elif isinstance(base_value, datetime):
-            return "datetime", is_array
-        elif isinstance(base_value, str):
-            try:
-                datetime.fromisoformat(base_value.replace("Z", "+00:00"))
-                return "datetime", is_array
-            except (ValueError, AttributeError):
-                return "string", is_array
-        else:
-            return "string", is_array
-
-    def _create_dynamic_attributes(
-        self,
-        database_id: str,
-        collection_id: str,
-        metadata: Dict[str, Any],
-        max_retries: int = MAX_ATTRIBUTE_CREATION_RETRIES,
-        initial_delay: float = INITIAL_RETRY_DELAY
-    ) -> OperationResult:
-        """Create database attributes dynamically based on metadata structure.
-
-        Creates both fixed attributes (fileId, bucketId, etc.) and dynamic
-        attributes inferred from the metadata dictionary. Uses exponential
-        backoff for retries when collection is not ready.
-
-        Args:
-            database_id: Target database identifier.
-            collection_id: Target collection identifier.
-            metadata: Dictionary of metadata fields to create attributes for.
-            max_retries: Maximum retry attempts for listing attributes.
-            initial_delay: Initial delay in seconds between retries.
-
-        Returns:
-            OperationResult indicating success or failure of attribute creation.
-        """
-        fixed_attributes = [
-            {"key": "fileId", "type": "string", "size": 255, "required": True},
-            {"key": "bucketId", "type": "string", "size": 255, "required": True},
-            {"key": "filename", "type": "string", "size": 500, "required": True},
-            {"key": "file_size", "type": "integer", "required": False},
-            {"key": "mime_type", "type": "string", "size": 100, "required": False},
-            {"key": "uploaded_at", "type": "datetime", "required": False},
-            {"key": "file_hash", "type": "string", "size": 64, "required": False},
-        ]
-        
-        delay = initial_delay
-        existing_attribute_keys = set()
-        
-        for attempt in range(1, max_retries + 1):
-            try:
-                existing_attributes = self.databases.list_attributes(database_id, collection_id)
-                existing_attribute_keys = {attr["key"] for attr in existing_attributes["attributes"]}
-                logger.debug(f"Found {len(existing_attribute_keys)} existing attributes")
-                break
-            except AppwriteException as e:
-                if "collection_not_found" in e.message and attempt < max_retries:
-                    logger.warning(f"Collection not ready (attempt {attempt}/{max_retries}), retrying in {delay}s")
-                    time.sleep(delay)
-                    delay *= 2
-                else:
-                    logger.error(f"Failed to list attributes: {e.message}")
-                    return OperationResult(
-                        success=False,
-                        error=f"Failed to list attributes: {e.message}",
-                        code=e.type
-                    )
-        
-        for attr in fixed_attributes:
-            if attr["key"] in existing_attribute_keys:
-                continue
-            
-            try:
-                self._create_single_attribute(database_id, collection_id, attr)
-            except AppwriteException as e:
-                if "attribute already exists" not in e.message.lower():
-                    logger.warning(f"Failed to create fixed attribute {attr['key']}: {e.message}")
-        
-        for key, value in metadata.items():
-            if key in existing_attribute_keys:
-                continue
-            
-            try:
-                attr_type, is_array = self._infer_attribute_type(value)
-                self._create_attribute_by_type(database_id, collection_id, key, attr_type, is_array)
-            except AppwriteException as e:
-                logger.error(f"Failed to create attribute '{key}': {e.message}")
-        
-        return OperationResult(success=True)
-
-    def _create_single_attribute(self, database_id: str, collection_id: str, attr: Dict[str, Any]):
-        """Create a single fixed attribute in the collection.
-
-        Args:
-            database_id: Target database identifier.
-            collection_id: Target collection identifier.
-            attr: Attribute specification dict with 'key', 'type', 'size', 'required'.
-        """
-        attr_creators = {
-            "string": lambda: self.databases.create_string_attribute(
-                database_id, collection_id, attr["key"], attr["size"], attr["required"]
-            ),
-            "integer": lambda: self.databases.create_integer_attribute(
-                database_id, collection_id, attr["key"], attr["required"]
-            ),
-            "datetime": lambda: self.databases.create_datetime_attribute(
-                database_id, collection_id, attr["key"], attr["required"]
-            ),
-        }
-        
-        if attr["type"] in attr_creators:
-            attr_creators[attr["type"]]()
-            logger.debug(f"Created {attr['type']} attribute: {attr['key']}")
-
-    def _create_attribute_by_type(
-        self,
-        database_id: str,
-        collection_id: str,
-        key: str,
-        attr_type: str,
-        is_array: bool
-):
-        """Create an attribute of a specific type in the collection.
-
-        Args:
-            database_id: Target database identifier.
-            collection_id: Target collection identifier.
-            key: Attribute key/name.
-            attr_type: Type string ('string', 'integer', 'boolean', etc.).
-            is_array: Whether the attribute should be an array type.
-
-        Returns:
-            Created attribute result, or None if attribute already exists.
-
-        Raises:
-            AppwriteException: If creation fails for reasons other than
-                attribute already existing.
-        """
-        common_args = [database_id, collection_id, key]
-        
-        try:
-            if attr_type == "string":
-                result = self.databases.create_string_attribute(
-                    *common_args, size=255, required=False, array=is_array
-                )
-            elif attr_type == "integer":
-                result = self.databases.create_integer_attribute(
-                    *common_args, required=False, array=is_array
-                )
-            elif attr_type == "boolean" and not is_array:
-                result = self.databases.create_boolean_attribute(
-                    *common_args, required=False
-                )
-            else:
-                result = self.databases.create_string_attribute(
-                    *common_args, size=255, required=False, array=is_array
-                )
-                logger.warning(f"Unsupported type {attr_type} for {key}, defaulted to string")
-            
-            logger.debug(f"Created {attr_type} attribute '{key}' (array: {is_array})")
-            return result
-        except AppwriteException as e:
-            # If the attribute already exists, that's fine - just return
-            if "already exists" in e.message.lower():
-                logger.debug(f"Attribute '{key}' already exists")
-                return None
-            # Otherwise, re-raise the exception
-            raise e
-
-    def create_metadata_collection_if_not_exists(
-        self,
-        metadata: Dict[str, Any] = None,
-        collection_name: str = None,
-        collection_id: str = None,
-        database_id: str = None
-    ) -> OperationResult:
-        """Create metadata collection if it doesn't exist.
-
-        Ensures the database and collection exist, creating them if needed.
-        Also creates dynamic attributes based on provided metadata structure.
-
-        Args:
-            metadata: Optional metadata dict to infer required attributes from.
-            collection_name: Collection name. Defaults to config.collection_name.
-            collection_id: Collection ID. Defaults to config.collection_id.
-            database_id: Database ID. Defaults to config.database_id.
-
-        Returns:
-            OperationResult with:
-                - success=True and data containing collection info and IDs
-                - code='EXISTS' if collection already existed
-                - success=False if creation fails
-
-        Example:
-            >>> result = handler.create_metadata_collection_if_not_exists(
-            ...     metadata={"model": "test", "loa": "pgm"},
-            ...     collection_name="Predictions"
-            ... )
-            >>> if result.success:
-            ...     coll_id = result.data['collection_id']
-        """
-        # Use config values as defaults
-        db_id = database_id or self.config.database_id
-        coll_name = collection_name or self.config.collection_name
-        coll_id = collection_id or self.config.collection_id
-        
-        if not db_id or not coll_name or not coll_id:
-            return OperationResult(
-                success=False,
-                error="Database ID, collection name, and collection ID must be provided in config or as parameters",
-                code="MISSING_CONFIG"
-            )
-        
-        db_result = self.create_database_if_not_exists(db_id, self.config.database_name)
-        if not db_result.success:
-            return db_result
-        
-        try:
-            existing_collections = self.databases.list_collections(db_id)
-            
-            for collection in existing_collections.get("collections", []):
-                if collection["$id"] == coll_id or collection["name"] == coll_name:
-                    if metadata:
-                        self._create_dynamic_attributes(db_id, collection["$id"], metadata)
-                    
-                    return OperationResult(
-                        success=True,
-                        data={
-                            "collection": collection,
-                            "database_id": db_id,
-                            "collection_id": collection["$id"]
-                        },
-                        code="EXISTS"
-                    )
-            
-            result = self.databases.create_collection(
-                database_id=db_id,
-                collection_id=coll_id,
-                name=coll_name,
-                permissions=[
-                    Permission.read(Role.any()),
-                    Permission.create(Role.any()),
-                    Permission.update(Role.any()),
-                    Permission.delete(Role.any()),
-                ],
-                document_security=False,
-                enabled=True,
-            )
-            
-            self._create_dynamic_attributes(db_id, coll_id, metadata or {})
-            
-            return OperationResult(
-                success=True,
-                data={
-                    "collection": result,
-                    "database_id": db_id,
-                    "collection_id": result["$id"]
-                }
-            )
-        
-        except AppwriteException as e:
-            logger.error(f"Collection creation failed: {e.message}")
-            return OperationResult(
-                success=False,
-                error=f"Collection creation failed: {e.message}",
-                code=e.type
-            )
 
     def search_files_by_metadata(
     self,
@@ -1335,11 +1020,79 @@ class AppwriteMetadataHandler:
                     if value is not None:
                         queries.append(Query.contains(attribute, value))
 
-            result = self.databases.list_documents(db_id, coll_id, queries=queries)
+            # C-241: `list_documents` returns APPWRITE_DEFAULT_PAGE_SIZE rows unless a
+            # `Query.limit` is supplied. This method used to omit one, so a match of
+            # more than 25 documents came back silently truncated — and every caller
+            # treated the truncation as the whole answer. `get_latest_file_id` then
+            # returned the newest of the OLDEST 25, which does not fail: it delivers a
+            # stale run as though it were current. views-faoapi hit the same default
+            # from the other side (their #287) and pages the same way.
+            #
+            # The walk terminates on an EMPTY page rather than on a short one, and
+            # advances the offset by what it RECEIVED rather than by what it asked for.
+            # Both matter: Appwrite may grant less than the requested limit, and a walk
+            # that treats a short page as the end skips every row after it.
+            documents = []
+            reported_total = None
+            offset = 0
+            complete = False
+
+            for _ in range(MAX_METADATA_PAGES):
+                page = self.databases.list_documents(
+                    db_id,
+                    coll_id,
+                    queries=queries
+                    + [Query.limit(DEFAULT_PAGE_LIMIT), Query.offset(offset)],
+                )
+                batch = page.get("documents") or []
+                if reported_total is None:
+                    reported_total = page.get("total")
+                documents.extend(batch)
+                if not batch:
+                    complete = True
+                    break
+                offset += len(batch)
+
+            if not complete:
+                # The substrate kept handing back full pages. The usual cause is an
+                # ignored offset, and the one thing we must not do is return the rows
+                # we happen to hold as if they were the match.
+                logger.error(
+                    f"Search of {coll_id!r} did not terminate within "
+                    f"{MAX_METADATA_PAGES} pages; refusing to report a partial result"
+                )
+                return OperationResult(
+                    success=False,
+                    error=(
+                        f"Search incomplete: walk of {coll_id!r} exceeded the "
+                        f"{MAX_METADATA_PAGES}-page guard after "
+                        f"{len(documents)} documents"
+                    ),
+                    code="SEARCH_INCOMPLETE",
+                )
+
+            # The server told us how many documents match. Enumerating a different
+            # number means the walk cannot be certified, and an uncertifiable read must
+            # not be handed back as an answer — that conflation is the defect class this
+            # method was an instance of. A concurrent write during the walk lands here
+            # too; the caller retries rather than delivering a count nobody verified.
+            if reported_total is not None and len(documents) != reported_total:
+                logger.error(
+                    f"Search of {coll_id!r} enumerated {len(documents)} documents but "
+                    f"the collection reports total={reported_total}"
+                )
+                return OperationResult(
+                    success=False,
+                    error=(
+                        f"Search incomplete: enumerated {len(documents)} of a reported "
+                        f"{reported_total} documents in {coll_id!r}"
+                    ),
+                    code="SEARCH_INCOMPLETE",
+                )
 
             return OperationResult(
                 success=True,
-                data={"documents": result["documents"], "total": result["total"]},
+                data={"documents": documents, "total": len(documents)},
             )
 
         except AppwriteException as e:
@@ -1388,17 +1141,21 @@ class AppwriteMetadataHandler:
                 code="MISSING_CONFIG",
             )
         try:
-            # First ensure the collection exists
-            collection_result = self.create_metadata_collection_if_not_exists(
-                {}, collection_name, collection_id, database_id
-            )
-
-            if not collection_result.success:
-                return collection_result
-
-            # Now search for the file by hash
+            # This is a QUERY. It used to create the database, collection and attributes
+            # before searching — a read with a write's side effect, and one of the
+            # reasons the platform key needed create scopes (register C-233, þing-02
+            # #331). The collection is now provisioned deliberately:
+            #   python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection
+            # If it does not exist, the read below fails loud and says so.
+            # limit(1): this reads `total` for existence and `documents[0]` for the
+            # answer, so one row is all it consumes. `total` is reported over the whole
+            # match regardless of page size, so bounding the page cannot hide a
+            # duplicate hash. Explicit because "the default happens to be enough" is
+            # what C-241 was.
             search_result = self.databases.list_documents(
-                db_id, coll_id, queries=[Query.equal("file_hash", file_hash)]
+                db_id,
+                coll_id,
+                queries=[Query.equal("file_hash", file_hash), Query.limit(1)],
             )
 
             if search_result["total"] > 0:
@@ -1412,7 +1169,7 @@ class AppwriteMetadataHandler:
 
         except AppwriteException as e:
             # If the file_hash attribute doesn't exist, create it and try again
-            if "Attribute not found in schema: file_hash" in e.message:
+            if "Attribute not found in schema: file_hash" in exception_message(e):
                 logger.info("file_hash attribute not found, creating it...")
                 try:
                     self._create_attribute_by_type(
@@ -1424,7 +1181,10 @@ class AppwriteMetadataHandler:
                         search_result = self.databases.list_documents(
                             db_id,
                             coll_id,
-                            queries=[Query.equal("file_hash", file_hash)],
+                            queries=[
+                                Query.equal("file_hash", file_hash),
+                                Query.limit(1),
+                            ],
                         )
 
                         if search_result["total"] > 0:
@@ -1500,10 +1260,12 @@ class AppwriteMetadataHandler:
                 code="MISSING_CONFIG"
             )
         try:
+            # fileId is unique per document by construction, and only documents[0] is
+            # used below.
             search_result = self.databases.list_documents(
                 database_id=db_id,
                 collection_id=coll_id,
-                queries=[Query.equal("fileId", file_id)]
+                queries=[Query.equal("fileId", file_id), Query.limit(1)],
             )
             
             if not search_result["documents"]:
@@ -1613,6 +1375,12 @@ class AppWriteFileModule:
         #     raise ValueError("path_manager must be an instance of ModelPathManager")
 
         self.config = config
+        # C-15 / #347: bound every HTTP call before the client can make one. The SDK
+        # offers no timeout hook, so this installs one at its transport reference — see
+        # modules/appwrite/transport.py for why that is the narrowest option available.
+        # Idempotent, so constructing several managers does not stack proxies.
+        install_request_timeout()
+
         self.client = Client()
         self.client.set_endpoint(config.endpoint).set_project(config.project_id)
         
@@ -1630,6 +1398,83 @@ class AppWriteFileModule:
         # Initialize managers
         self.metadata_manager = AppwriteMetadataHandler(self.databases, config)
         self.cache_manager = self._setup_cache()
+
+        # Containers are verified once per process, before the first write.
+        self._containers_verified = False
+
+    def _require_containers(self, bucket_id: str, collection_id: str = None) -> None:
+        """Fail loud, BEFORE any write, if a target container does not exist.
+
+        Provisioning left the delivery path in þing-02 #331, so an upload can no longer
+        conjure its own destination. Something must still notice when a destination is
+        missing — and it has to notice *before* the file is uploaded, because
+        ``upload_file_with_metadata`` writes the file first and the metadata document
+        second. Discovering a missing collection after the upload would leave the file
+        in the bucket with no index card: an orphan, which is the corruption #329
+        exists to remove.
+
+        Read-only (``get_bucket`` + ``list_collections``) and cached per instance, so
+        the cost is two calls per process rather than two per upload.
+
+        **Scope: paired writes only.** The single-write methods (``upload_file``,
+        ``update_file_metadata``) deliberately do not call this. They touch one
+        container, so a missing one surfaces as a loud Appwrite error with nothing
+        half-written behind it — there is no pair to leave inconsistent. Add the
+        precondition here if a third paired write is ever introduced.
+
+        Raises:
+            ConfigurationException: naming the missing container and the exact command
+                that creates it.
+        """
+        if self._containers_verified:
+            return
+
+        from views_pipeline_core.exceptions.exceptions import ConfigurationException
+
+        bucket_check = self.get_bucket(bucket_id)
+        if not bucket_check.success:
+            raise ConfigurationException(
+                f"Appwrite bucket '{bucket_id}' is not usable: {bucket_check.error} "
+                f"(code={bucket_check.code}). If it does not exist, create it "
+                f"deliberately:\n"
+                f"    python -m views_pipeline_core.modules.appwrite.provisioning "
+                f"ensure-bucket --bucket {bucket_id}"
+            )
+
+        coll_id = collection_id or self.config.collection_id
+        try:
+            # This builds a membership set, so a SHORT read does not return less — it
+            # returns a WRONG answer: a collection that exists but falls past the page
+            # boundary reads as missing and fails the preflight. The limit is stated,
+            # and a total larger than the page is refused rather than guessed at.
+            collections = self.databases.list_collections(
+                self.config.database_id, queries=[Query.limit(_CONTAINER_PAGE)]
+            )
+            listed = collections.get("collections", [])
+            reported = collections.get("total")
+            if reported is not None and reported > len(listed):
+                raise ConfigurationException(
+                    f"Database {self.config.database_id!r} reports {reported} "
+                    f"collections but only {len(listed)} were listed; this preflight "
+                    f"cannot confirm a container's absence from a partial read."
+                )
+            known = {c.get("$id") for c in listed} | {c.get("name") for c in listed}
+        except AppwriteException as e:
+            raise ConfigurationException(
+                f"Cannot verify the Appwrite metadata collection in database "
+                f"'{self.config.database_id}': {e.message} (type={e.type}). "
+                f"Check the coordinates and that this key may read the database."
+            ) from e
+
+        if coll_id not in known and self.config.collection_name not in known:
+            raise ConfigurationException(
+                f"Appwrite metadata collection '{coll_id}' does not exist in database "
+                f"'{self.config.database_id}'. Create it deliberately:\n"
+                f"    python -m views_pipeline_core.modules.appwrite.provisioning "
+                f"ensure-collection"
+            )
+
+        self._containers_verified = True
 
     def _setup_cache(self) -> CacheManager:
         """Initialize the local file cache manager.
@@ -1712,19 +1557,34 @@ class AppWriteFileModule:
         try:
             # First try to find by hash in metadata
             search_result = self.metadata_manager.check_file_exists_by_hash(
-                file_hash, 
-                self.config.collection_name, 
-                self.config.collection_id, 
+                file_hash,
+                self.config.collection_name,
+                self.config.collection_id,
                 self.config.database_id
             )
-            
+
             if search_result.success:
                 return OperationResult(
                     success=True,
                     data=search_result.data,
                     code="FOUND_BY_HASH"
                 )
-            
+
+            # The lookup did not find a match — but "found nothing" and "could not
+            # look" are different answers, and only the first means there is no
+            # duplicate. Reporting a failed lookup as NOT_FOUND makes the caller
+            # upload a second copy of a file that is already there: a read fault
+            # turned into a write (register C-232). Propagate the failure instead.
+            if search_result.code != "NOT_FOUND":
+                return OperationResult(
+                    success=False,
+                    error=(
+                        f"Could not determine whether a duplicate exists: "
+                        f"{search_result.error}"
+                    ),
+                    code=search_result.code,
+                )
+
             # Fallback to filename check if hash not found - but use efficient query
             if filename:
                 try:
@@ -1744,21 +1604,51 @@ class AppWriteFileModule:
                 except AppwriteException as query_error:
                     logger.warning(f"Filename query failed, falling back to list: {query_error}")
                     # Fallback to original list-based approach if query fails
+                    # C-258. This walk decides whether a duplicate EXISTS, so a short
+                    # read does not return fewer files — it returns NOT_FOUND, which the
+                    # caller reads as "no duplicate" and uploads one. Same rule as
+                    # #341: terminate on an EMPTY page (Appwrite may grant fewer rows
+                    # than asked), advance by what was RECEIVED, bound the loop, and
+                    # certify against the substrate's own total before answering.
                     all_files = []
                     offset = 0
                     limit = DEFAULT_PAGE_LIMIT
-                    
-                    while True:
+                    reported_total = None
+                    complete = False
+
+                    for _ in range(MAX_METADATA_PAGES):
                         result = self.storage.list_files(
                             bucket_id, [Query.limit(limit), Query.offset(offset)]
                         )
+                        if reported_total is None:
+                            reported_total = result.get("total")
                         files_chunk = result.get("files", [])
                         all_files.extend(files_chunk)
-                        
-                        if len(files_chunk) < limit:
+                        if not files_chunk:
+                            complete = True
                             break
-                        offset += limit
-                    
+                        offset += len(files_chunk)
+
+                    if not complete or (
+                        reported_total is not None and len(all_files) != reported_total
+                    ):
+                        # Never NOT_FOUND from a walk that did not finish: "I could not
+                        # look" must not be delivered as "it is not there".
+                        logger.error(
+                            f"Duplicate check for {filename!r} could not enumerate "
+                            f"bucket {bucket_id!r}: collected {len(all_files)} of a "
+                            f"reported {reported_total}"
+                        )
+                        return OperationResult(
+                            success=False,
+                            error=(
+                                f"Duplicate check incomplete: enumerated "
+                                f"{len(all_files)} of a reported {reported_total} files "
+                                f"in {bucket_id!r}"
+                            ),
+                            code="LISTING_INCOMPLETE",
+                        )
+
                     for file in all_files:
                         if file["name"] == filename:
                             return OperationResult(
@@ -1839,8 +1729,11 @@ class AppWriteFileModule:
             OperationResult with code 'CREATED' or 'UPDATED' on success.
         """
         try:
+            # Existence check plus documents[0]; one row is all that is consumed.
             existing_docs = self.databases.list_documents(
-                database_id, collection_id, queries=[Query.equal("fileId", file_id)]
+                database_id,
+                collection_id,
+                queries=[Query.equal("fileId", file_id), Query.limit(1)],
             )
             
             if existing_docs["total"] > 0:
@@ -2102,21 +1995,25 @@ class AppWriteFileModule:
             file_hash, collection_name, collection_id, self.config.database_id
         )
 
-        # CRITICAL FIX: Verify file exists in BOTH metadata AND storage
+        # Verify the file exists in BOTH metadata and storage before treating the
+        # metadata document as an orphan. See ``_classify_storage_presence``: a read
+        # that FAILED is not evidence of absence, and only evidence of absence may
+        # authorise a delete (register C-231, þing-02 #329).
         should_update_metadata_only = False
         if existing_metadata.success and existing_metadata.code == "FOUND_BY_HASH" and not file_id:
             existing_file_id = existing_metadata.data.get("fileId")
-            
-            # Verify the file actually exists in storage
+
             if existing_file_id:
                 file_check = self.get_file(bucket_id, existing_file_id)
-                
-                if file_check.success:
-                    # File exists in both metadata and storage
+                presence = _classify_storage_presence(file_check)
+
+                if presence is _StoragePresence.PRESENT:
                     should_update_metadata_only = self.config.allow_metadata_only_updates
                     logger.info(f"File {existing_file_id} exists in both metadata and storage")
-                else:
-                    # Metadata exists but file missing from storage - clean up metadata
+
+                elif presence is _StoragePresence.ABSENT:
+                    # Appwrite positively confirmed the file is gone: the metadata
+                    # document really is an orphan of a failed upload.
                     logger.warning(f"File {existing_file_id} found in metadata but missing from storage, will re-upload")
                     existing_doc_id = existing_metadata.data.get("$id")
                     if existing_doc_id:
@@ -2127,8 +2024,31 @@ class AppWriteFileModule:
                                 document_id=existing_doc_id
                             )
                             logger.info(f"Deleted orphaned metadata document: {existing_doc_id}")
-                        except Exception as e:
-                            logger.warning(f"Failed to delete orphaned metadata: {str(e)}")
+                        except AppwriteException as e:
+                            return OperationResult(
+                                success=False,
+                                error=(
+                                    f"Could not delete the orphaned metadata document "
+                                    f"{existing_doc_id}: {e.message}"
+                                ),
+                                code=e.type,
+                            )
+
+                else:
+                    # INDETERMINATE: wrong bucket id, no read scope on the bucket, or an
+                    # untyped transport error. The file may well exist. Deleting its
+                    # metadata document here would make a live forecast unfindable, so
+                    # refuse the whole upload and say which distinction failed.
+                    return OperationResult(
+                        success=False,
+                        error=(
+                            f"Cannot determine whether file {existing_file_id} exists in "
+                            f"bucket '{bucket_id}': {file_check.error}. Refusing to treat "
+                            f"an unreadable file as an absent one — check the bucket id "
+                            f"and that this key holds read scope on it."
+                        ),
+                        code=file_check.code,
+                    )
 
         if should_update_metadata_only:
             logger.info(f"File with hash {file_hash} already exists, updating metadata only")
@@ -2174,11 +2094,27 @@ class AppWriteFileModule:
             old_doc_id = existing_metadata.data.get("$id")
 
             if old_file_id:
-                # Delete the old file from storage
+                # Delete the old file from storage. If this fails we must NOT go on to
+                # delete its metadata document: that would leave the old file in the
+                # bucket with nothing pointing at it — unfindable, and indistinguishable
+                # from a month that never ran. Same rule as the de-dup path above:
+                # a failed operation is not a completed one (register C-231, þing-02 #329).
                 delete_result = self.delete_file(bucket_id, old_file_id)
                 if not delete_result.success:
-                    logger.warning(f"Failed to delete old file from storage: {delete_result.error}")
-                    # Continue anyway - the upload might still work
+                    presence = _classify_storage_presence(delete_result)
+                    if presence is not _StoragePresence.ABSENT:
+                        return OperationResult(
+                            success=False,
+                            error=(
+                                f"Refusing to replace '{filename}': the old file "
+                                f"{old_file_id} could not be removed from bucket "
+                                f"'{bucket_id}' ({delete_result.error}), and deleting "
+                                f"its metadata would orphan it."
+                            ),
+                            code=delete_result.code,
+                        )
+                    # Already gone from storage — the metadata is genuinely stale.
+                    logger.info(f"Old file {old_file_id} was already absent from storage")
 
             if old_doc_id:
                 # Delete the old metadata document
@@ -2192,16 +2128,10 @@ class AppWriteFileModule:
                 except Exception as e:
                     logger.warning(f"Failed to delete old metadata: {str(e)}")
 
-        # Ensure metadata infrastructure exists
-        collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
-            metadata, collection_name, collection_id, self.config.database_id
-        )
-        if not collection_result.success:
-            return OperationResult(
-                success=False,
-                error=collection_result.error,
-                code=collection_result.code
-            )
+        # Containers must already exist — provisioning is a deliberate act (#331).
+        # Verified BEFORE the upload below, so a missing collection cannot leave an
+        # orphaned file in the bucket.
+        self._require_containers(bucket_id, collection_id)
 
         # Add file_hash to metadata
         metadata["file_hash"] = file_hash
@@ -2227,8 +2157,8 @@ class AppWriteFileModule:
         uploaded_file_id = upload_result.data.get("$id")
         
         # Get database and collection IDs from the collection result
-        database_id = collection_result.data.get("database_id") or self.config.database_id
-        coll_id = collection_result.data.get("collection_id") or collection_id
+        database_id = self.config.database_id
+        coll_id = collection_id or self.config.collection_id
 
         # Prepare metadata with file reference
         metadata_with_file_ref = {
@@ -2338,17 +2268,10 @@ class AppWriteFileModule:
             
             existing_file_id = existing_metadata.data.get("fileId")
             
-            # Ensure collection exists with new metadata fields
-            collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
-                metadata, collection_name, collection_id, self.config.database_id
-            )
-            if not collection_result.success:
-                return OperationResult(
-                    success=False,
-                    error=collection_result.error,
-                    code=collection_result.code
-                )
-            
+            # Containers must already exist — provisioning is deliberate (#331).
+            self._require_containers(bucket_id, collection_id)
+
+
             # Update the metadata
             metadata_update = metadata.copy()
             metadata_update["file_hash"] = file_hash
@@ -2383,16 +2306,8 @@ class AppWriteFileModule:
                 )
         
         # Ensure metadata infrastructure exists
-        collection_result = self.metadata_manager.create_metadata_collection_if_not_exists(
-            metadata, collection_name, collection_id, self.config.database_id
-        )
-        if not collection_result.success:
-            return OperationResult(
-                success=False,
-                error=collection_result.error,
-                code=collection_result.code
-            )
-        
+        self._require_containers(bucket_id, collection_id)
+
         # Add file_hash to metadata
         metadata["file_hash"] = file_hash
         
@@ -2411,8 +2326,8 @@ class AppWriteFileModule:
             return upload_result
         
         file_id = upload_result.data["$id"]
-        database_id = collection_result.data["database_id"]
-        coll_id = collection_result.data["collection_id"]
+        database_id = self.config.database_id
+        coll_id = collection_id or self.config.collection_id
         
         # Create and store metadata
         try:
@@ -2436,12 +2351,24 @@ class AppWriteFileModule:
         
         except AppwriteException as e:
             logger.error(f"Metadata handling failed: {e.message}")
-            # Rollback: delete the uploaded file if metadata fails
+            # Rollback: delete the uploaded file if metadata fails. `delete_file`
+            # reports failure by RETURN VALUE, so the `except` below never sees one —
+            # inspect the result, or a failed rollback leaves an orphaned file in the
+            # bucket and says nothing (the fourth route to the state the
+            # `modules/appwrite/audit/` package exists to detect; register C-227's
+            # disease at this site).
             try:
-                self.delete_file(bucket_id, file_id)
+                rollback = self.delete_file(bucket_id, file_id)
+                if not rollback.success:
+                    logger.error(
+                        "Rollback FAILED: file %s remains in bucket '%s' with no "
+                        "metadata document (code=%s, %s). Run `python -m "
+                        "views_pipeline_core.modules.appwrite.audit` to confirm.",
+                        file_id, bucket_id, rollback.code, rollback.error,
+                    )
             except Exception as delete_error:
                 logger.error(f"Failed to rollback file upload after metadata error: {delete_error}")
-            
+
             return OperationResult(
                 success=False,
                 error=f"Metadata handling failed: {e.message}",
@@ -2529,7 +2456,24 @@ class AppWriteFileModule:
             
             # Download from remote
             file_bytes = self.storage.get_file_download(bucket_id, file_id)
-            
+            # The Appwrite SDK's Client.call() returns a PARSED DICT (response.json())
+            # for any file served with Content-Type: application/json — e.g. ADR-013
+            # wire *.json manifests — despite get_file_download's `-> bytes` annotation
+            # (#310). Every downstream use here expects raw bytes, so coerce JSON
+            # responses back to bytes. NOTE (byte-fidelity, register C-217): the
+            # re-serialization is compact JSON — NOT byte-identical to the stored
+            # artifact (e.g. the publisher writes manifests indent=2 + newline).
+            # Semantically equivalent for every parser; never byte-compare a JSON
+            # download against its shelf artifact.
+            if isinstance(file_bytes, dict):
+                logger.warning(
+                    "download_file: JSON payload for file_id=%s arrived SDK-parsed; "
+                    "re-serialized to bytes (compact form — not byte-identical to "
+                    "the stored artifact, see #310/C-217).",
+                    file_id,
+                )
+                file_bytes = json.dumps(file_bytes).encode("utf-8")
+
             # Determine filename for caching
             filename = file_metadata.get("name", file_id) if file_metadata else file_id
             cache_path = self.cache_manager._get_cache_path(bucket_id, file_id, filename)
@@ -2724,7 +2668,7 @@ class AppWriteFileModule:
         
         except AppwriteException as e:
             # Check if this is a bucket not found error
-            if "Storage bucket with the requested ID could not be found" in e.message:
+            if "Storage bucket with the requested ID could not be found" in exception_message(e):
                 return OperationResult(
                     success=False,
                     error=e.message,
@@ -2782,180 +2726,30 @@ class AppWriteFileModule:
                 code=e.type
             )
 
-    def create_bucket(
-        self,
-        bucket_id: str,
-        name: str = None,
-        permissions: List[str] = None,
-        file_security: bool = True,
-        enabled: bool = True,
-        maximum_file_size: int = None,
-        allowed_file_extensions: List[str] = None,
-        encryption: bool = False,
-        compression: str = "none",
-        antivirus: bool = True,
-        create_metadata_db: bool = True
-    ) -> OperationResult:
-        """Create a new storage bucket.
 
-        Creates a bucket with specified settings and optionally creates
-        an associated metadata database.
+
+    def get_user_preferences(self, user_id: str) -> OperationResult:
+        """Get a user's preferences from Appwrite. Requires API-key authentication.
+
+        `user_id` became required when session auth was deleted (#344): it was optional
+        only because a session could supply the current user implicitly. There is no
+        implicit user any more, so a caller that omits it is asking a question this
+        method cannot answer.
 
         Args:
-            bucket_id: Unique identifier for the bucket.
-            name: Human-readable bucket name. Defaults to config.bucket_name.
-            permissions: List of Appwrite permission strings.
-            file_security: Whether to enable file-level security. Defaults to True.
-            enabled: Whether bucket is enabled. Defaults to True.
-            maximum_file_size: Max file size in bytes. None for default.
-            allowed_file_extensions: List of allowed extensions. Empty for any.
-            encryption: Whether to encrypt files. Defaults to False.
-            compression: Compression type ('none', 'gzip', 'zstd').
-            antivirus: Whether to scan for viruses. Defaults to True.
-            create_metadata_db: Whether to create metadata database. Defaults to True.
+            user_id: The user whose preferences to read.
 
         Returns:
-            OperationResult with:
-                - success=True, code='CREATED' and bucket data
-                - 'metadata_database' key in data if create_metadata_db=True
-
-        Example:
-            >>> result = manager.create_bucket(
-            ...     bucket_id="new_forecasts",
-            ...     name="New Forecasts",
-            ...     maximum_file_size=100 * 1024 * 1024,  # 100MB
-            ...     allowed_file_extensions=["parquet", "csv"]
-            ... )
+            OperationResult with the preferences, code='API_KEY'.
         """
-        # Use default name from config if not provided
-        if name is None:
-            name = self.config.bucket_name
-        
         try:
-            if permissions is None:
-                permissions = []
-            
-            if allowed_file_extensions is None:
-                allowed_file_extensions = []
-            
-            result = self.storage.create_bucket(
-                bucket_id=bucket_id,
-                name=name,
-                permissions=permissions,
-                file_security=file_security,
-                enabled=enabled,
-                maximum_file_size=maximum_file_size,
-                allowed_file_extensions=allowed_file_extensions,
-                encryption=encryption,
-                compression=compression,
-                antivirus=antivirus
-            )
-            
-            # Automatically create metadata database if requested
-            if create_metadata_db:
-                db_result = self.metadata_manager.create_database_if_not_exists(name, self.config.database_id)
-                if db_result.success:
-                    result["metadata_database"] = db_result.data
-            
+            user_prefs = self.users.get_prefs(user_id)
             return OperationResult(
                 success=True,
-                data=result,
-                code="CREATED"
-            )
-        
-        except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=e.message,
-                code=e.type
+                data=user_prefs,
+                code="API_KEY"
             )
 
-    def get_current_user(self) -> OperationResult:
-        """Get current authenticated user information.
-
-        Only available when using session authentication.
-
-        Returns:
-            OperationResult with user data including:
-                - user_id: User's ID
-                - email: User's email address
-                - name: User's display name
-                - email_verified: Whether email is verified
-
-        Example:
-            >>> result = manager.get_current_user()
-            >>> if result.success:
-            ...     print(f"User: {result.data['email']}")
-        """
-        if not isinstance(self.auth_manager, SessionAuth):
-            return OperationResult(
-                success=False,
-                error="User information requires session authentication",
-                code="AUTH_METHOD_ERROR"
-            )
-        
-        try:
-            user = self.auth_manager.account.get()
-            return OperationResult(
-                success=True,
-                data={
-                    "user_id": user["$id"],
-                    "email": user.get("email"),
-                    "name": user.get("name"),
-                    "email_verified": user.get("emailVerification", False)
-                }
-            )
-        
-        except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=e.message,
-                code=e.type
-            )
-
-    def get_user_preferences(self, user_id: Optional[str] = None) -> OperationResult:
-        """Get user preferences from Appwrite.
-
-        For session auth, gets current user's preferences.
-        For API key auth, requires user_id parameter.
-
-        Args:
-            user_id: Required for API key auth. Optional for session auth.
-
-        Returns:
-            OperationResult with preferences data.
-                code='USER_SESSION' or code='API_KEY' indicates auth type used.
-
-        Example:
-            >>> # With session auth
-            >>> result = manager.get_user_preferences()
-            >>>
-            >>> # With API key auth
-            >>> result = manager.get_user_preferences(user_id="user123")
-        """
-        try:
-            if isinstance(self.auth_manager, SessionAuth):
-                preferences = self.auth_manager.account.get_prefs()
-                return OperationResult(
-                    success=True,
-                    data=preferences,
-                    code="USER_SESSION"
-                )
-            else:
-                if not user_id:
-                    return OperationResult(
-                        success=False,
-                        error="user_id parameter required for API key authentication",
-                        code="MISSING_USER_ID"
-                    )
-                
-                user_prefs = self.users.get_prefs(user_id)
-                return OperationResult(
-                    success=True,
-                    data=user_prefs,
-                    code="API_KEY"
-                )
-        
         except AppwriteException as e:
             return OperationResult(
                 success=False,

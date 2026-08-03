@@ -86,7 +86,6 @@ Each CIC has 12 sections:
 - `PosteriorDistributionAnalyzer.md` — MAP and HDI computation
 
 ### Transformations
-- `DatasetTransformationModule.md` — Data transforms with undo
 
 ### CLI
 - `ForecastingModelArgs.md` — Validated CLI argument dataclass

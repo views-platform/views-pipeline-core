@@ -9,7 +9,7 @@
 
 ## 1. Purpose
 
-Provides a high-level interface for uploading, downloading, searching, and managing prediction files stored in Appwrite cloud storage. Wraps the lower-level `AppWriteFileModule` and handles metadata management, file versioning, caching, and automatic bucket creation. Paired with `FileMetadata`, which validates and encapsulates the metadata required for each stored file.
+Provides a high-level interface for uploading, downloading, searching, and managing prediction files stored in Appwrite cloud storage. Wraps the lower-level `AppWriteFileModule` and handles metadata management, file versioning and caching. It does **not** create buckets: provisioning moved to `views_pipeline_core.modules.appwrite.provisioning` in þing-02 #331. Paired with `FileMetadata`, which validates and encapsulates the metadata required for each stored file.
 
 ---
 
@@ -26,7 +26,7 @@ Provides a high-level interface for uploading, downloading, searching, and manag
 ## 3. Responsibilities and Guarantees
 
 - **`FileMetadata`**: Validates all metadata fields at construction time. Enforces type safety (`TypeError`) and valid `category` values (`"forecast"` or `"historical"`, `ValueError`). The `to_dict()` method omits `description` if it is `None` or empty.
-- **`upload_data()`**: Uploads a file (`Path` or `str`) with validated metadata to the configured Appwrite bucket. Auto-creates the bucket on `storage_bucket_not_found` error code and retries the upload. Returns `OperationResult`.
+- **`upload_data()`**: Uploads a file (`Path` or `str`) with validated metadata to the configured Appwrite bucket. On `storage_bucket_not_found` it **fails and logs the remediation command** -- it no longer creates the bucket and retries. Auto-creation meant a mistyped or renamed coordinate silently provisioned a new production bucket and published the forecast where nobody reads (register C-228). Returns `OperationResult`.
 - **`get_predictions_by_metadata()`**: Searches metadata documents with caller-supplied filters, automatically merging `model_path.model_name` as the `"name"` filter. Returns results sorted by `$createdAt` descending. Returns empty list on search failure.
 - **`download_prediction()`**: Downloads a file by ID with optional caching (`use_cache`, `validate_cache`, `save_path`). The `validate_cache` parameter (default `True`) controls whether cached files are checked against their TTL before reuse. Supports saving to disk (`save_path`) or returning bytes in-memory.
 - **`download_latest_file()`**: Convenience method combining `get_latest_file_id()` and `download_prediction()`. Raises `FileNotFoundError` if no files match.
@@ -53,7 +53,7 @@ Provides a high-level interface for uploading, downloading, searching, and manag
 - All mutating operations (`upload_data`, `delete_prediction`, `update_prediction_metadata`) return `OperationResult` with `.success`, `.data`, `.code`, and `.error` fields.
 - `get_predictions_by_metadata()` and `list_all_*` methods return `List[Dict[str, Any]]`.
 - `download_prediction()` and `download_latest_file()` return `OperationResult` with either `file_bytes` or `save_path` in `.data`.
-- Side effects: creates buckets in Appwrite on first upload if bucket does not exist. Writes files to local disk when `save_path` is provided. Logs extensively via `logging.getLogger(__name__)`.
+- Side effects: **creates no Appwrite infrastructure.** Writes files to local disk when `save_path` is provided. Logs extensively via `logging.getLogger(__name__)`.
 
 ---
 
@@ -61,7 +61,8 @@ Provides a high-level interface for uploading, downloading, searching, and manag
 
 - **`FileMetadata` construction**: Raises `TypeError` for wrong types, `ValueError` for invalid `category`. Fail loud and proud.
 - **`upload_data()` with DataFrame**: Raises `NotImplementedError`. With unsupported type: raises `TypeError`.
-- **`upload_data()` bucket creation failure**: Returns `OperationResult(success=False)` with error string. Does **not** raise.
+- **`upload_data()` missing bucket**: Returns `OperationResult(success=False, code="storage_bucket_not_found")` and logs at ERROR naming the bucket and the `provisioning ensure-bucket` command. Does **not** raise, and does **not** create the bucket.
+- **Callers must inspect the returned `OperationResult`.** Failure is reported in-band, not by exception: the SDK's `AppwriteException` is converted to `success=False` inside the storage module, so an `except` clause around `upload_data()` will not fire (register C-227, þing-02 #330).
 - **`download_latest_file()` with no matches**: Raises `FileNotFoundError`.
 - **`get_predictions_by_metadata()` search failure**: Logs warning/error and returns empty list. Does **not** raise.
 - **`get_file_metadata()` errors**: Catches all exceptions and returns `OperationResult(success=False)`.
@@ -147,7 +148,7 @@ FileMetadata(loa="pgm", name="m", type="model", targets=[1, 2], category="foreca
 Tests live in `tests/test_modules/test_datastore.py`. Coverage includes:
 
 - **`TestPredictionMetadata`**: Valid initialization, missing description, all type validation errors (`TypeError` for loa, name, type, targets, description), invalid category (`ValueError`), `to_dict()` with and without description.
-- **`TestPredictionStoreManager`**: Initialization, upload from `Path` and `str`, DataFrame `NotImplementedError`, invalid file type `TypeError`, auto-bucket-creation on 404, bucket creation failure handling.
+- **`TestPredictionStoreManager`**: Initialization, upload from `Path` and `str`, DataFrame `NotImplementedError`, invalid file type `TypeError`, missing-bucket reported not created, remediation command logged.
 
 All tests use mocked `AppWriteFileModule` via `unittest.mock.patch` to avoid real Appwrite calls.
 

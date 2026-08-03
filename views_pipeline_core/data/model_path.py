@@ -23,6 +23,7 @@ from pathlib import Path
 import dotenv
 
 from views_pipeline_core.configs import PipelineConfig
+from views_pipeline_core.data.constants import CACHE_SOURCES
 
 logger = logging.getLogger(__name__)
 
@@ -474,9 +475,11 @@ class ModelPathManager:
             self._build_absolute_directory(Path("main.py")),
             self._build_absolute_directory(Path("README.md")),
         ]
-        # Initialize model-specific directories only if the class is ModelPathManager
-        if self.__class__.__name__ == "ModelPathManager":
+        # Initialize type-specific scripts
+        if self.target == "model":
             self._initialize_model_specific_scripts()
+        elif self.target == "ensemble":
+            self._initialize_ensemble_specific_scripts()
 
     def _initialize_model_specific_scripts(self) -> None:
         """
@@ -494,6 +497,20 @@ class ModelPathManager:
             self.queryset_path,
             self._build_absolute_directory(Path("configs/config_sweep.py")),
         ]
+
+    def _initialize_ensemble_specific_scripts(self) -> None:
+        """
+        Initialize ensemble-specific script paths.
+
+        Sets up paths to scripts unique to ensembles (modelset config).
+        config_modelset.py is optional — only added when present on disk.
+
+        Internal Use:
+            Called by _initialize_scripts for ensemble instances.
+        """
+        config_modelset = self.model_dir / "configs" / "config_modelset.py"
+        if config_modelset.exists():
+            self.scripts.append(config_modelset)
 
     @staticmethod
     def _is_path(path_input: Union[str, Path], validate: bool = True) -> bool:
@@ -583,12 +600,12 @@ class ModelPathManager:
         Returns:
             Sorted list of raw data file paths (newest first)
         """
+        prefixes = tuple(f"{run_type}_{src}_df" for src in CACHE_SOURCES)
         paths = [
             f
             for f in self.data_raw.iterdir()
             if f.is_file()
-            and (f.stem.startswith(f"{run_type}_viewser_df")
-                 or f.stem.startswith(f"{run_type}_datafactory_df"))
+            and f.stem.startswith(prefixes)
             and f.suffix == PipelineConfig.dataframe_format
         ]
         return sorted(paths, reverse=True)
@@ -616,6 +633,33 @@ class ModelPathManager:
             and f.suffix == PipelineConfig.dataframe_format
         ]
         return sorted(paths, reverse=True)
+
+    def _get_generated_pf_prediction_paths(self, run_type: str) -> List[Path]:
+        """
+        Get generated PredictionFrame directories for run type.
+
+        Finds directories in data_generated/ that match the
+        predictions_{run_type}_* naming convention.
+
+        Internal Use:
+            Used by ensemble managers to discover sub-model numpy outputs.
+
+        Args:
+            run_type: Run type ('calibration', 'validation', 'forecasting')
+
+        Returns:
+            Sorted list of prediction directory paths (newest first)
+        """
+        if not self.data_generated.exists():
+            return []
+        paths = [
+            d
+            for d in self.data_generated.iterdir()
+            if d.is_dir()
+            and d.name.startswith(f"predictions_{run_type}")
+            and not d.name.startswith("_")
+        ]
+        return sorted(paths, key=lambda p: p.name, reverse=True)
 
     def get_latest_model_artifact_path(self, run_type: str) -> Path:
         """
@@ -656,6 +700,35 @@ class ModelPathManager:
         logger.info(f"Artifact used: {model_files[0]}")
 
         return self.artifacts / model_files[0]
+
+    def resolve_artifact_path(self, run_type: str, artifact_name: str = None) -> Path:
+        """
+        Return the artifact path for the given run_type.
+
+        When artifact_name is provided, resolve it directly in the artifacts
+        directory. When artifact_name is None, delegate to
+        get_latest_model_artifact_path(run_type).
+
+        Args:
+            run_type: Run type ('calibration', 'validation', 'forecasting')
+            artifact_name: Optional explicit artifact filename
+
+        Returns:
+            Path to the resolved model artifact
+
+        Raises:
+            FileNotFoundError: If artifact_name is given but does not exist,
+                or if no artifacts exist for run_type when delegating
+        """
+        if artifact_name is not None:
+            path = self.artifacts / artifact_name
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Named artifact '{artifact_name}' not found in '{self.artifacts}'"
+                )
+            logger.info(f"Artifact used (named): {path}")
+            return path
+        return self.get_latest_model_artifact_path(run_type)
 
     def get_queryset(self) -> Optional[Dict[str, str]]:
         """

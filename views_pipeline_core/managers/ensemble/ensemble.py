@@ -1,3 +1,4 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 from typing import Union, Optional, List, Dict
 import logging
 import time
@@ -14,18 +15,21 @@ from views_pipeline_core.managers.model import (
 )
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
+from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.modules.reconciliation.reconciliation import (
-    ReconciliationModule,
-)
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
+from views_pipeline_core.domain.reconciliation_port import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.modules.aggregation.aggregator import (
     AggregationModule,
 )
 
+from views_pipeline_core.managers.configuration.configuration import combined_targets
 logger = logging.getLogger(__name__)
+
+# ADR-034: priogrid_gid → priogrid_id rename for AggregationModule compatibility
+_ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
 
 # ============================================================ Ensemble Path Manager ============================================================
 
@@ -100,6 +104,7 @@ class EnsembleManager(ForecastingModelManager):
         ensemble_path: EnsemblePathManager,
         wandb_notifications: bool = False,
         use_prediction_store: bool = False,
+        reconciler: Optional[Reconciler] = None,
     ) -> None:
         """
         Initialize the EnsembleManager.
@@ -108,9 +113,27 @@ class EnsembleManager(ForecastingModelManager):
             ensemble_path (EnsemblePathManager): The EnsemblePathManager object.
             wandb_notifications (bool, optional): Flag to enable/disable W&B notifications. Defaults to False.
             use_prediction_store (bool, optional): Flag to enable/disable prediction store. Defaults to False.
+            reconciler (Reconciler, optional): Injected reconciliation port (DIP). When
+                None, reconciliation cannot run — a run that configures it fails loud.
+                The concrete reconciler is injected at the composition root (#194/#195).
         """
         super().__init__(ensemble_path, wandb_notifications, use_prediction_store)
+        self._reconciler = reconciler
         self.__activate_reconciliation = True
+
+        # Name-mangled access: ModelManager.__load_config is private (double underscore)
+        config_modelset = self._ModelManager__load_config(
+            "config_modelset.py", "get_modelset_config"
+        )
+        if config_modelset:
+            collisions = set(self._config_manager.config_meta) & set(config_modelset)
+            if collisions:
+                logger.warning(
+                    "config_modelset overlaps config_meta on keys %s — "
+                    "config_modelset values take precedence",
+                    collisions,
+                )
+            self._config_manager.config_meta.update(config_modelset)
 
     # ============================================================
     # EXECUTION METHODS (using self.args and self.configs)
@@ -131,6 +154,11 @@ class EnsembleManager(ForecastingModelManager):
         # Store args first
         self._args = args
 
+        # C-55 bridge fix: CoreConfigSniffer before any side effects (see D-13).
+        CoreConfigSniffer(
+            self.configs, self._partition_dict, target=self._model_path.target
+        ).sniff_all(args.run_type)
+
         self._wandb_module.login()
 
         # Update config
@@ -145,9 +173,11 @@ class EnsembleManager(ForecastingModelManager):
 
         try:
             if not self.args.train:
-                validate_ensemble_model(self.configs)
+                validate_ensemble_model(self.configs, saved=self.args.saved)
 
             self._execute_model_tasks()
+        except PipelineException:
+            raise
         except Exception as e:
             logger.error(
                 f"Error during {self._model_path.target} execution: {e}",
@@ -198,6 +228,8 @@ class EnsembleManager(ForecastingModelManager):
                     title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Ensemble training failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -236,6 +268,8 @@ class EnsembleManager(ForecastingModelManager):
                     title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully.",
                 )
 
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Ensemble evaluation failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -268,6 +302,8 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 self._save_predictions(df_prediction, self._model_path.data_generated)
 
+            except PipelineException:
+                raise
             except Exception:
                 logger.error(f"Ensemble forecasting failed: {traceback.format_exc()}")
                 raise PipelineException(
@@ -403,7 +439,7 @@ class EnsembleManager(ForecastingModelManager):
         model_path = ModelPathManager(model_name)
         run_type = self.configs["run_type"]
         path_generated = model_path.data_generated
-        path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
+        path_artifact = model_path.resolve_artifact_path(run_type=run_type)
 
         ts = path_artifact.stem[-15:]
         preds = []
@@ -450,7 +486,7 @@ class EnsembleManager(ForecastingModelManager):
         model_path = ModelPathManager(model_name)
         run_type = self.configs["run_type"]
         path_generated = model_path.data_generated
-        path_artifact = model_path.get_latest_model_artifact_path(run_type=run_type)
+        path_artifact = model_path.resolve_artifact_path(run_type=run_type)
 
         ts = path_artifact.stem[-15:]
         name = f"{model_name}_predictions_{run_type}_{ts}"
@@ -571,9 +607,9 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 logger.info(f"Loading existing prediction {name} from prediction store")
                 return pred
-            except Exception:
+            except (ImportError, KeyError, IndexError, ValueError, AttributeError, OSError) as e:
                 logger.info(
-                    f"No existing {run_type} predictions found. Generating new predictions..."
+                    f"No existing {run_type} predictions found ({type(e).__name__}). Generating new predictions..."
                 )
         else:
             seq_suffix = (
@@ -585,7 +621,6 @@ class EnsembleManager(ForecastingModelManager):
                 path_generated
                 / f"predictions_{run_type}_{ts}{seq_suffix}{PipelineConfig.dataframe_format}"
             )
-            logger.info(f"REQUESTED FILE PATH: {file_path}")
             if file_path.exists():
                 pred = read_dataframe(file_path)
                 logger.info(f"Loading existing prediction {name} from local file")
@@ -659,13 +694,15 @@ class EnsembleManager(ForecastingModelManager):
                 )
                 return reconciled_pg
             else:
-                self._wandb_module.send_alert(
-                    title=f"{self._model_path.target.title()} Reconciliation Error",
-                    text="Reconciliation returned None. Predictions not reconciled.",
-                    level=wandb.AlertLevel.WARNING,
+                logger.error(
+                    "Reconciliation configured (pgm_cm_point) but failed. "
+                    "Refusing to publish unreconciled predictions as reconciled."
                 )
-                logger.warning(
-                    "Reconciliation returned None. Predictions not reconciled."
+                raise PipelineException(
+                    "Reconciliation configured but failed. C dataset could not be loaded "
+                    "or reconciliation computation returned None. Cannot publish "
+                    "unreconciled predictions as reconciled.",
+                    wandb_module=self._wandb_module,
                 )
         else:
             logger.info(
@@ -692,6 +729,16 @@ class EnsembleManager(ForecastingModelManager):
             logger.info("No reconciliation model specified. Skipping reconciliation.")
             return None
 
+        # Fail loud (no silent-off): reconciliation is configured but no Reconciler
+        # was injected. The concrete frames-native reconciler
+        # (views_frames_reconcile.ReconciliationModule) is injected at the composition
+        # root by views-models (#194/#195, Decision K).
+        if self._reconciler is None:
+            raise PipelineException(
+                RECONCILER_NOT_INJECTED_MSG,
+                wandb_module=self._wandb_module,
+            )
+
         # Load C dataset
         latest_c_dataset = self._load_c_dataset(cm_model, c_dataframe)
         if latest_c_dataset is None:
@@ -714,11 +761,11 @@ class EnsembleManager(ForecastingModelManager):
             )
             return None
 
-        # Perform reconciliation
-        reconciliation_manager = ReconciliationModule(
-            c_dataset=latest_c_dataset, pg_dataset=latest_pg_dataset
-        )
-        return reconciliation_manager.reconcile(lr=0.01, max_iters=500, tol=1e-6)
+        # Reconcile via the injected port + the dataset↔frame adapter (no
+        # views_reporting / views_postprocessing import here — ADP, no cycle).
+        from views_pipeline_core.modules.reconciliation.adapter import reconcile_datasets
+
+        return reconcile_datasets(self._reconciler, latest_c_dataset, latest_pg_dataset)
 
     def _load_c_dataset(
         self, cm_model: str, c_dataframe: Optional[pd.DataFrame]
@@ -758,7 +805,7 @@ class EnsembleManager(ForecastingModelManager):
                         run=run_id, name=reconcile_with_forecast
                     )
                 )
-            except Exception as e:
+            except (ImportError, KeyError, IndexError, ValueError, OSError) as e:
                 logger.warning(
                     f"Could not find latest C dataset for {cm_model} in prediction store: {e}"
                 )
@@ -775,7 +822,7 @@ class EnsembleManager(ForecastingModelManager):
                     0
                 ]
             )
-        except Exception as e:
+        except (IndexError, OSError) as e:
             logger.warning(
                 f"Could not find latest C dataset for {cm_model} locally: {e}"
             )
@@ -802,52 +849,40 @@ class EnsembleManager(ForecastingModelManager):
         if not df_to_aggregate:
             raise ValueError("df_to_aggregate must contain at least one DataFrame.")
 
-        # ---- 1) Define index + target columns -----------------------------------
-
         first_df = next(iter(df_to_aggregate.values()))
-        index_cols = list(first_df.index.names)
-        # target_cols = [c for c in first_df.columns if c not in index_cols] ### This is not right, but how to chose target cols?
-        target_cols = ["pred_" + col for col in self.configs.get("targets")]
+        index_cols = [
+            _ENTITY_RENAME.get(c, c) for c in first_df.index.names
+        ]
+        target_cols = ["pred_" + col for col in combined_targets(self.configs)]
 
-        # ---- 2) Create AggregationModule ---------------------------------------
-        manager = AggregationModule(
+        agg = AggregationModule(
             index_cols=index_cols,
             target_cols=target_cols,
         )
 
-        # ---- 3) Add each model to the manager -----------------------------------
-        # Read weighting behaviour from config
         use_weights = self.configs.get("use_weights", False)
-        weights_cfg = self.configs.get("weights", {})  # dict: {model_name: weight}
+        weights_cfg = self.configs.get("weights", {})
 
         for model_name, df in df_to_aggregate.items():
-            weight = weights_cfg.get(model_name)  # may be None
-            manager.add_model(
+            agg.add_model(
                 data=df,
-                weight=weight,
+                weight=weights_cfg.get(model_name),
                 name=model_name,
             )
 
-        # ---- 4) Decide how to call aggregate() based on prediction type ---------
-        # AggregationModule infers prediction_type ("point" vs "distribution")
-        # when you call add_model().
-        pred_type = manager.prediction_type
+        pred_type = agg.prediction_type
         if pred_type is None:
             raise RuntimeError(
                 "AggregationModule.prediction_type is None. "
                 "Make sure at least one model was added with `add_model`."
             )
 
-        aggregated_pl = manager.aggregate(
+        aggregated_pl = agg.aggregate(
             method=aggregation,
             use_weights=use_weights,
         )
 
-        # ---- 5) Convert back to pandas with MultiIndex -------------------------
         aggregated_pdf = aggregated_pl.to_pandas()
-
-        # AggregationModule returns index columns as normal columns.
-        # To match your previous behaviour, set a MultiIndex again:
         aggregated_pdf = aggregated_pdf.set_index(index_cols).sort_index()
 
         return aggregated_pdf

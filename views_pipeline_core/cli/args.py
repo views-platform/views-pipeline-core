@@ -414,9 +414,21 @@ class ForecastingModelArgs(ModelArgs):
                 "To fix: Add --train or --sweep or --saved flag."
             )
 
-        if self.eval_type not in ["standard", "long", "complete", "live"]:
+        # 'long' retired 2026-08-02 (#378): it requested 37 rolling-origin sequences,
+        # but CoreConfigSniffer enforces a partition window supporting exactly 13, so it
+        # silently reported 12 of 36 steps. Rejected here — at the boundary — rather than
+        # surfacing deep in the run, which is where C-70's sibling defect was found.
+        if self.eval_type not in ["standard", "complete", "live"]:
+            if self.eval_type == "long":
+                self._exit_with_error(
+                    "Error: --eval_type 'long' has been retired. It requested 37 "
+                    "rolling-origin sequences, but the enforced partition geometry "
+                    "supports 13, so it silently truncated step-wise evaluation to "
+                    "12 of 36 steps. See views-pipeline-core#378.",
+                    "To fix: Use --eval_type standard."
+                )
             self._exit_with_error(
-                "Error: --eval_type should be one of 'standard', 'long', 'complete', or 'live'.",
+                "Error: --eval_type should be one of 'standard', 'complete', or 'live'.",
                 "To fix: Set --eval_type to one of the above options."
             )
 

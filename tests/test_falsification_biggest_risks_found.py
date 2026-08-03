@@ -7,6 +7,7 @@ Fix the code to make them pass, then re-run /falsify to verify.
 """
 import ast
 import logging
+import logging.handlers
 import sys
 from unittest.mock import MagicMock
 
@@ -148,42 +149,8 @@ def test_falsify_05_silent_level_override():
     )
 
 
-def test_falsify_06_reconciliation_max_workers_ignored():
-    """
-    Probe 6 (Category E): ReconciliationModule max_workers parameter ignored
-
-    Finding: reconciliation.py computes num_of_workers from max_workers parameter,
-    logs it, then passes max_workers=None to ProcessPoolExecutor(), ignoring the
-    computed value entirely.
-    Severity: Hard falsification
-
-    Expected: ProcessPoolExecutor receives the computed max_workers value.
-    """
-    from pathlib import Path
-    import ast
-
-    src = Path("views_pipeline_core/modules/reconciliation/reconciliation.py")
-    tree = ast.parse(src.read_text())
-
-    # Find the ProcessPoolExecutor call and check its max_workers argument
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Attribute) and func.attr == "ProcessPoolExecutor":
-                for kw in node.keywords:
-                    if kw.arg == "max_workers":
-                        # If it's a Name node referencing the computed variable, PASS
-                        if isinstance(kw.value, ast.Name) and kw.value.id == "num_of_workers":
-                            return  # Fixed!
-                        # If it's None constant, FAIL
-                        if isinstance(kw.value, ast.Constant) and kw.value.value is None:
-                            assert False, (
-                                "ProcessPoolExecutor(max_workers=None) ignores the computed "
-                                "num_of_workers variable. The max_workers parameter is inoperative. "
-                                "CIC guarantee is violated."
-                            )
-
-    assert False, "Could not find ProcessPoolExecutor call in reconciliation.py"
+# test_falsify_06_reconciliation_max_workers_ignored was RETIRED (#316):
+# its subject, views_reporting.reconciliation, was deleted upstream.
 
 
 @pytest.mark.xfail(reason="C-26: EvaluationAdapter silent truncation — known risk, not yet resolved")

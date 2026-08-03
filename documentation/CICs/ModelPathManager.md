@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-04-07
+**Last reviewed:** 2026-06-05
 **File:** `views_pipeline_core/data/model_path.py` (canonical); re-exported from `managers/model/model.py` for backward compatibility
 **Related ADRs:** ADR-001 (Ontology), ADR-002 (Topology), ADR-009 (Boundary Contracts), ADR-045 (Pipeline Stage Architecture, E6)
 
@@ -49,6 +49,10 @@ directory tree to find a `.gitignore` marker. Serves as the base class for
 - Guarantees that `get_latest_model_artifact_path(run_type)` returns the most
   recent artifact file by timestamp-sorted filename. Raises
   `FileNotFoundError` if no artifacts exist.
+- Guarantees that `resolve_artifact_path(run_type, artifact_name)` returns the
+  named artifact when `artifact_name` is provided (raising `FileNotFoundError`
+  if missing), or delegates to `get_latest_model_artifact_path(run_type)` when
+  `artifact_name` is `None`.
 - Guarantees that `get_model_name_from_path(path)` extracts the model name
   from a filesystem path by locating exactly one of the valid parent
   directories (`models`, `ensembles`, `preprocessors`, `postprocessors`,
@@ -81,6 +85,12 @@ directory tree to find a `.gitignore` marker. Serves as the base class for
   `model_dir`, `artifacts`, `configs`, `data`, `data_generated`,
   `data_processed`, `data_raw`, `reports`, `notebooks`, `logging`.
 - Sets `scripts` list with paths to expected config and entry-point files.
+  Mandatory scripts (e.g. `config_deployment.py`, `config_meta.py`, `main.py`)
+  are added via `_build_absolute_directory` which raises `FileNotFoundError`
+  when `validate=True` and the file is missing. Optional scripts (currently
+  only `config_modelset.py` for ensembles) are added conditionally by
+  `_initialize_ensemble_specific_scripts` — the file's existence is checked
+  with `Path.exists()` and it is silently skipped when absent.
 - Sets `queryset_path` for model instances (not ensembles).
 - Loads `.env` from project root (side effect: populates `os.environ`).
 - Increments class-level `__instances__` counter.
@@ -180,7 +190,14 @@ ModelPathManager._root  # -> None (not yet initialized)
 
 - `tests/test_managers/test_model_path.py` -- tests for name validation,
   path extraction from filesystem paths, root discovery, directory
-  initialization, and artifact file resolution.
+  initialization, artifact file resolution, and `resolve_artifact_path()`
+  (named artifact resolution, missing artifact error, timestamp extraction).
+- `tests/test_managers/test_ensemble_path.py` -- 4 tests for
+  `EnsemblePathManager` construction, optional `config_modelset.py`
+  handling (present vs absent), and `get_scripts()` content.
+- `tests/test_falsification_config_modelset_done.py` -- 2 regression tests
+  (C-150 fix) verifying path construction and `_initialize_ensemble_specific_scripts`
+  succeed when `config_modelset.py` is absent; 1 skipped (P5 moot).
 
 ---
 
@@ -207,10 +224,6 @@ ModelPathManager._root  # -> None (not yet initialized)
   parent directory will be mistaken for the project root. This fails in
   monorepo setups where multiple `.gitignore` files exist at different levels.
   `pyprojroot.here()` is used as the fallback but has the same fragility.
-- **`_build_absolute_directory` returns mixed types:** When `validate=True`
-  and a `.py` script path does not exist, the method returns the bare filename
-  string instead of `None` or `Path`. This inconsistency can cause downstream
-  `TypeError` when callers expect `Path`.
 - **`get_queryset()` swallows import errors:** If the queryset module fails
   to import, the error is logged but `None` is returned. This can mask
   configuration errors in model setup.

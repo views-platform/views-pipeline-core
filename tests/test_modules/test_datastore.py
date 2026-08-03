@@ -1,3 +1,4 @@
+import logging
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
@@ -7,6 +8,7 @@ from views_pipeline_core.modules.datastore import (
     FileMetadata,
     DatastoreModule,
 )
+from views_pipeline_core.modules.datastore.datastore import MetadataSearchIncomplete
 from views_pipeline_core.modules.appwrite.file import (
     AppwriteConfig,
     OperationResult,
@@ -187,13 +189,14 @@ def mock_config(mock_path_manager):
         project_id="test_project",
         credentials="test_api_key",
         auth_method=AuthMethod.API_KEY,
-        bucket_id="test_bucket",
-        bucket_name="Test Bucket",
-        collection_name="Test Collection",
-        collection_id="test_collection",
-        database_id="test_database",
         cache_dir="/tmp/test_cache",
         path_manager=mock_path_manager,
+        bucket_id="test_bucket",
+        bucket_name="Test Bucket",
+        collection_id="test_collection",
+        collection_name="Test Collection",
+        database_id="test_database",
+        database_name="Test Database",
     )
 
 
@@ -345,60 +348,23 @@ class TestPredictionStoreManager:
                 category="forecast"
             )
 
-    def test_upload_predictions_bucket_not_found_creates_bucket(self, prediction_store, mock_appwrite_manager, tmp_path):
-        """Test that bucket is created when not found"""
-        test_file = tmp_path / "test.parquet"
-        test_file.write_text("test content")
-        
-        # First upload fails with bucket not found, second succeeds
-        mock_appwrite_manager.upload_file_with_metadata.side_effect = [
-            OperationResult(
-                success=False,
-                error="Bucket not found",
-                code="storage_bucket_not_found"
-            ),
-            OperationResult(
-                success=True,
-                data={"$id": "file123"},
-                code="CREATED"
-            )
-        ]
-        
-        # Mock successful bucket creation
-        mock_appwrite_manager.create_bucket.return_value = OperationResult(
-            success=True,
-            data={"$id": "test_bucket"},
-            code="CREATED"
-        )
-        
-        result = prediction_store.upload_predictions(
-            file=test_file,
-            filename="test.parquet",
-            loa="country",
-            name="test_model",
-            type="fatalities",
-            targets=["target1"],
-            category="forecast"
-        )
-        
-        assert result.success
-        mock_appwrite_manager.create_bucket.assert_called_once()
+    def test_missing_bucket_is_reported_not_created(self, prediction_store, mock_appwrite_manager, tmp_path):
+        """#331 — the delivery path no longer provisions its own destination.
 
-    def test_upload_predictions_bucket_creation_fails(self, prediction_store, mock_appwrite_manager, tmp_path):
-        """Test handling of bucket creation failure"""
+        Previously a `storage_bucket_not_found` made `upload_data` CREATE the bucket
+        and retry into it, so a mistyped or renamed coordinate silently published the
+        forecast to a brand-new bucket nobody reads (register C-228). The failure must
+        now surface, and the bucket must not be created.
+        """
         test_file = tmp_path / "test.parquet"
         test_file.write_text("test content")
-        
-        # Upload fails with bucket not found
+
         mock_appwrite_manager.upload_file_with_metadata.return_value = OperationResult(
             success=False,
             error="Bucket not found",
-            code="storage_bucket_not_found"
+            code="storage_bucket_not_found",
         )
-        
-        # Bucket creation fails
-        mock_appwrite_manager.create_bucket.side_effect = Exception("Creation failed")
-        
+
         result = prediction_store.upload_predictions(
             file=test_file,
             filename="test.parquet",
@@ -406,8 +372,96 @@ class TestPredictionStoreManager:
             name="test_model",
             type="fatalities",
             targets=["target1"],
-            category="forecast"
+            category="forecast",
         )
-        
+
         assert not result.success
-        assert "Creation failed" in result.error
+        assert result.code == "storage_bucket_not_found"
+        mock_appwrite_manager.create_bucket.assert_not_called()
+        # And it is not retried into a bucket that was never made.
+        assert mock_appwrite_manager.upload_file_with_metadata.call_count == 1
+
+    def test_missing_bucket_logs_the_remediation_command(
+        self, prediction_store, mock_appwrite_manager, tmp_path, caplog
+    ):
+        """The operator must be told which coordinate is wrong and how to fix it."""
+        test_file = tmp_path / "test.parquet"
+        test_file.write_text("test content")
+
+        mock_appwrite_manager.upload_file_with_metadata.return_value = OperationResult(
+            success=False,
+            error="Bucket not found",
+            code="storage_bucket_not_found",
+        )
+
+        with caplog.at_level(logging.ERROR):
+            prediction_store.upload_predictions(
+                file=test_file,
+                filename="test.parquet",
+                loa="country",
+                name="test_model",
+                type="fatalities",
+                targets=["target1"],
+                category="forecast",
+            )
+
+        assert "provisioning ensure-bucket" in caplog.text
+        assert "APPWRITE_PROD_FORECASTS_BUCKET_ID" in caplog.text
+
+
+class TestSearchFailureIsNotAbsence:
+    """C-241, consumer half — Cluster J at the FAO delivery's first lookup.
+
+    `search_files_by_metadata` can now return `SEARCH_INCOMPLETE`, because #341 made it
+    refuse to certify a walk it could not complete. The chain below used to convert that
+    into an empty list and then into `None`, so the delivery path would read "there is no
+    such forecast" when the truth was "I could not tell". Swapping a false-stale answer
+    for a false-absent one is not a fix.
+    """
+
+    def test_a_failed_search_raises_rather_than_reporting_no_predictions(
+        self, prediction_store, mock_appwrite_manager
+    ):
+        mock_appwrite_manager.metadata_manager.search_files_by_metadata.return_value = (
+            OperationResult(
+                success=False,
+                error="Search incomplete: enumerated 25 of a reported 461 documents",
+                code="SEARCH_INCOMPLETE",
+            )
+        )
+
+        with pytest.raises(MetadataSearchIncomplete) as excinfo:
+            prediction_store.get_predictions_by_metadata(filters={"loa": "pgm"})
+
+        assert "SEARCH_INCOMPLETE" in str(excinfo.value)
+
+    def test_get_latest_file_id_does_not_answer_none_over_a_failed_search(
+        self, prediction_store, mock_appwrite_manager
+    ):
+        """`None` means "no such file". It must never mean "the lookup broke"."""
+        mock_appwrite_manager.metadata_manager.search_files_by_metadata.return_value = (
+            OperationResult(success=False, error="boom", code="SEARCH_INCOMPLETE")
+        )
+
+        with pytest.raises(MetadataSearchIncomplete):
+            prediction_store.get_latest_file_id(filters={"loa": "pgm"})
+
+    def test_a_genuinely_empty_match_still_returns_none(
+        self, prediction_store, mock_appwrite_manager
+    ):
+        """The other side of the distinction: a real 'no' must stay cheap and quiet."""
+        mock_appwrite_manager.metadata_manager.search_files_by_metadata.return_value = (
+            OperationResult(success=True, data={"documents": [], "total": 0})
+        )
+
+        assert prediction_store.get_latest_file_id(filters={"loa": "pgm"}) is None
+
+    def test_list_all_predictions_unfiltered_also_refuses_to_swallow(
+        self, prediction_store, mock_appwrite_manager
+    ):
+        mock_appwrite_manager.metadata_manager.search_files_by_metadata.return_value = (
+            OperationResult(success=False, error="boom", code="SEARCH_INCOMPLETE")
+        )
+
+        with pytest.raises(MetadataSearchIncomplete):
+            prediction_store.list_all_predictions_unfiltered()

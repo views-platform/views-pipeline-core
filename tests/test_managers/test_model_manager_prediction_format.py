@@ -1,26 +1,5 @@
 """
-Tests for prediction_format dispatch in ModelManager.
-
-Phase 4A — Forecast path dispatch (RED → GREEN after implementing dispatch in
-              _execute_model_forecasting()):
-    test_df_path_calls_sniffer
-    test_pf_path_skips_sniffer
-    test_pf_path_converts_via_pf_to_legacy_dfs
-
-Phase 4B — _audit_parity_ef() unit tests (RED → GREEN after implementing the
-              method on ModelManager):
-    test_audit_parity_ef_matching_frames_passes
-    test_audit_parity_ef_mismatched_y_pred_raises
-    test_audit_parity_ef_mismatched_identifier_raises
-
-Issue 7 — Bridge-period fallback contract (RED → GREEN after .get() harmonisation
-              in _execute_model_forecasting()):
-    TestForecastDispatchFallback.test_absent_prediction_format_falls_back_to_df_path
-    TestForecastDispatchFallback.test_eval_also_falls_back_to_df_when_key_absent
-
-DoD #1 dict interface — multi-target PF support (RED → GREEN after Steps A-E):
-    TestPFDictDispatch — dict eval/forecast dispatch for single and multi-target
-    TestTypeEnforcementGuards — fail-loud type guards at abstract call sites
+Tests for prediction_format dispatch and PredictionFrame evaluation path in ModelManager.
 """
 
 import numpy as np
@@ -29,8 +8,19 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 
+from views_frames import SpatialLevel, SpatioTemporalIndex
 from views_pipeline_core.data.prediction_frame import PredictionFrame
 from views_pipeline_core.managers.model.model import ForecastingModelManager
+
+
+def _pf(y_pred, time, unit):
+    """Construct a leaf PredictionFrame (PGM) from raw arrays."""
+    index = SpatioTemporalIndex(
+        time=np.asarray(time, dtype=np.int64),
+        unit=np.asarray(unit, dtype=np.int64),
+        level=SpatialLevel.PGM,
+    )
+    return PredictionFrame(y_pred, index)
 
 
 # ── Minimal concrete stub ─────────────────────────────────────────────────────
@@ -70,7 +60,7 @@ def _make_stub(prediction_format: str) -> _ForecastStub:
     merged = {
         "name": "stub_model",
         "level": "pgm",
-        "targets": ["lr_sb"],
+        "regression_targets": ["lr_sb"],
         "prediction_format": prediction_format,
         "sweep": False,
     }
@@ -130,8 +120,9 @@ def _run_execute_forecast(manager, mock_df_result=None):
         "views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer"
     ) as MockSniffer:
         with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-            manager._execute_model_forecasting()
-            return MockSniffer
+            with patch("views_pipeline_core.managers.model.model.save_pf"):
+                manager._execute_model_forecasting()
+                return MockSniffer
 
 
 # ── Phase 4A: Forecast dispatch ───────────────────────────────────────────────
@@ -162,10 +153,7 @@ class TestForecastDispatch:
         The PredictionFrame is self-validating at construction; a DF-specific
         sniffer call is meaningless and would raise on a non-DF argument.
         """
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 3)),
-            identifiers={"time": np.array([100, 100]), "unit": np.array([1, 2])},
-        )
+        pf = _pf(np.ones((2, 3)), np.array([100, 100]), np.array([1, 2]))
         manager = _make_stub("prediction_frame")
         manager._test_return = {"lr_sb": pf}  # dict interface (DoD #1)
 
@@ -182,10 +170,7 @@ class TestForecastDispatch:
             PredictionFrameConverter,
         )
 
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 3)),
-            identifiers={"time": np.array([100, 100]), "unit": np.array([1, 2])},
-        )
+        pf = _pf(np.ones((2, 3)), np.array([100, 100]), np.array([1, 2]))
         manager = _make_stub("prediction_frame")
         manager._test_return = {"lr_sb": pf}  # dict interface (DoD #1)
 
@@ -288,10 +273,7 @@ def _valid_df_seq(i: int) -> pd.DataFrame:
 def _valid_pf_seq(i: int) -> PredictionFrame:
     """Minimal single-sample PF whose time value sits in sequence i's window."""
     month = 445 + i
-    return PredictionFrame(
-        y_pred=np.ones((1, 1)),
-        identifiers={"time": np.array([month]), "unit": np.array([1])},
-    )
+    return _pf(np.ones((1, 1)), np.array([month]), np.array([1]))
 
 
 def _rogue_df_seq0() -> pd.DataFrame:
@@ -306,10 +288,7 @@ def _rogue_df_seq0() -> pd.DataFrame:
 
 def _rogue_pf_seq0() -> PredictionFrame:
     """PF for sequence 0 with time 999 (rogue — outside window 445-480)."""
-    return PredictionFrame(
-        y_pred=np.ones((2, 1)),
-        identifiers={"time": np.array([445, 999]), "unit": np.array([1, 2])},
-    )
+    return _pf(np.ones((2, 1)), np.array([445, 999]), np.array([1, 2]))
 
 
 # ── Issue 1: _assert_predictions_in_step_window() PF-awareness ────────────────
@@ -408,11 +387,11 @@ def _make_eval_stub(prediction_format: str) -> _ForecastStub:
     merged = {
         "name": "stub_model",
         "level": "pgm",
-        "targets": ["lr_sb"],
         "regression_targets": ["lr_sb"],
         "classification_targets": [],
         "regression_point_metrics": ["MSE"],
         "prediction_format": prediction_format,
+        "skip_predictions_delivery": True,
         "sweep": False,
         "steps": list(range(1, 37)),
     }
@@ -479,8 +458,8 @@ def _run_execute_eval(manager: _ForecastStub, list_predictions: list) -> Mock:
                 with patch.object(
                     ForecastingModelManager, "_evaluate_prediction_dataframe"
                 ):
-                    with patch.object(PredictionFrame, "save"):
-                        with patch.object(PredictionFrame, "load", return_value=Mock()):
+                    with patch("views_pipeline_core.managers.model.model.save_pf"):
+                        with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
                             manager._execute_model_evaluation()
                             return MockSniffer
 
@@ -569,10 +548,7 @@ class TestEvalDispatch:
         PredictionFrame is self-validating at construction; the DF-centric
         sniffer is inapplicable and skipped.
         """
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 2)),
-            identifiers={"time": np.array([445, 445]), "unit": np.array([1, 2])},
-        )
+        pf = _pf(np.ones((2, 2)), np.array([445, 445]), np.array([1, 2]))
         manager = _make_eval_stub("prediction_frame")
         MockSniffer = _run_execute_eval(manager, {"lr_sb": [pf]})  # dict interface (DoD #1)
         MockSniffer.return_value.sniff_predictions.assert_not_called()
@@ -586,10 +562,7 @@ class TestEvalMetricsDispatch:
         PF path: EvaluationAdapter.from_prediction_frames must be called to build
         the EvaluationFrame from the PredictionFrame list.
         """
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 2)),
-            identifiers={"time": np.array([445, 445]), "unit": np.array([1, 2])},
-        )
+        pf = _pf(np.ones((2, 2)), np.array([445, 445]), np.array([1, 2]))
         manager = _make_eval_stub("prediction_frame")
         mock_fpf, _ = _run_evaluate_prediction_df(manager, {"lr_sb": [pf]})  # dict interface (DoD #1)
         mock_fpf.assert_called()
@@ -623,11 +596,9 @@ def _make_sweep_stub(prediction_format: str) -> _ForecastStub:
     merged = {
         "name": "stub_model",
         "level": "pgm",
-        "targets": ["lr_sb"],
         "regression_targets": ["lr_sb"],
         "classification_targets": [],
         "regression_point_metrics": ["MSE"],
-        "metrics": ["MSE"],
         "prediction_format": prediction_format,
         "sweep": True,
         "steps": list(range(1, 37)),
@@ -706,13 +677,22 @@ class TestSweepDispatch:
         PF path: CorePredictionSniffer.sniff_predictions must NOT be called.
         PredictionFrame is self-validating at construction; sniffer is DF-only.
         """
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 3)),
-            identifiers={"time": np.array([445, 446]), "unit": np.array([1, 2])},
-        )
+        pf = _pf(np.ones((2, 3)), np.array([445, 446]), np.array([1, 2]))
         manager = _make_sweep_stub("prediction_frame")
         MockSniffer = _run_execute_sweep(manager, {"lr_sb": [pf]})  # dict interface (DoD #1)
         MockSniffer.return_value.sniff_predictions.assert_not_called()
+
+    def test_sweep_pf_with_skip_delivery_does_not_crash(self):
+        """Sweep path with PF config + skip_predictions_delivery must not crash.
+        Sweeps use _evaluate_sweep(), not _execute_model_evaluation(), so the
+        mandatory dict access at model.py:1290 is unreachable — but the config
+        key should not cause problems if present."""
+        pf = _pf(np.ones((2, 3)), np.array([445, 446]), np.array([1, 2]))
+        manager = _make_sweep_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ] = True
+        _run_execute_sweep(manager, {"lr_sb": [pf]})
 
     def test_sweep_df_path_calls_sniffer(self):
         """
@@ -744,10 +724,7 @@ def _make_dummy_df(target: str = "lr_sb") -> pd.DataFrame:
 
 def _make_simple_pf() -> PredictionFrame:
     """Minimal two-row PredictionFrame for dispatch tests."""
-    return PredictionFrame(
-        y_pred=np.ones((2, 2)),
-        identifiers={"time": np.array([445, 445]), "unit": np.array([1, 2])},
-    )
+    return _pf(np.ones((2, 2)), np.array([445, 445]), np.array([1, 2]))
 
 
 class TestPFDictDispatch:
@@ -768,6 +745,9 @@ class TestPFDictDispatch:
 
         pf = _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ] = False
         manager._test_eval_return = {"lr_sb": [pf]}
 
         dummy_table = pa.table({"month_id": [445, 445], "priogrid_id": [1, 2],
@@ -778,8 +758,8 @@ class TestPFDictDispatch:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
                     with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-                        with patch.object(PredictionFrame, "save"):
-                            with patch.object(PredictionFrame, "load", return_value=Mock()):
+                        with patch("views_pipeline_core.managers.model.model.save_pf"):
+                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
                                 manager._execute_model_evaluation()
 
         mock_tat.assert_called_once()
@@ -796,6 +776,9 @@ class TestPFDictDispatch:
 
         pf1, pf2 = _make_simple_pf(), _make_simple_pf()
         manager = _make_eval_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ] = False
         manager._test_eval_return = {"lr_sb": [pf1], "ged_ns": [pf2]}
 
         dummy_table = pa.table({"month_id": [445, 445], "priogrid_id": [1, 2],
@@ -806,8 +789,8 @@ class TestPFDictDispatch:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
                     with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-                        with patch.object(PredictionFrame, "save"):
-                            with patch.object(PredictionFrame, "load", return_value=Mock()):
+                        with patch("views_pipeline_core.managers.model.model.save_pf"):
+                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
                                 manager._execute_model_evaluation()
 
         assert mock_tat.call_count == 2
@@ -825,10 +808,11 @@ class TestPFDictDispatch:
         manager._test_return = {"lr_sb": pf}
         dummy_df = _make_dummy_df()
 
-        with patch.object(
-            PredictionFrameConverter, "to_prediction_df", return_value=dummy_df
-        ) as mock_tld:
-            _run_execute_forecast(manager, mock_df_result=dummy_df)
+        with patch("views_pipeline_core.managers.model.model.save_pf"):
+            with patch.object(
+                PredictionFrameConverter, "to_prediction_df", return_value=dummy_df
+            ) as mock_tld:
+                _run_execute_forecast(manager, mock_df_result=dummy_df)
 
         mock_tld.assert_called_once()
 
@@ -843,9 +827,10 @@ class TestPFDictDispatch:
         manager._test_return = {"lr_sb": pf1, "ged_ns": pf2}
         dummy_df = _make_dummy_df()
 
-        with patch.object(PredictionFrameConverter, "to_legacy_dfs", return_value=[dummy_df]):
-            with patch.object(PredictionFrameConverter, "audit_prediction_structure"):
-                _run_execute_forecast(manager, mock_df_result=dummy_df)
+        with patch("views_pipeline_core.managers.model.model.save_pf"):
+            with patch.object(PredictionFrameConverter, "to_legacy_dfs", return_value=[dummy_df]):
+                with patch.object(PredictionFrameConverter, "audit_prediction_structure"):
+                    _run_execute_forecast(manager, mock_df_result=dummy_df)
 
         # E4: saves now go through ForecastingStage → io_manager, not facade._save_predictions
         assert manager._io.save_predictions.call_count == 2
@@ -1208,7 +1193,7 @@ class TestOOMMitigation:
     def test_skip_predictions_delivery_skips_track_b(self):
         """
         When configs['skip_predictions_delivery'] = True, Track B is suppressed:
-        - converter.to_prediction_df must NOT be called
+        - converter.to_arrow_table must NOT be called
         - _save_predictions must NOT be called
         - PredictionFrame.save (Track A) MUST still be called
         """
@@ -1223,7 +1208,7 @@ class TestOOMMitigation:
         ] = True
         manager._test_eval_return = {"lr_sb": [pf]}
 
-        with patch.object(PredictionFrameConverter, "to_prediction_df") as mock_convert:
+        with patch.object(PredictionFrameConverter, "to_arrow_table") as mock_convert:
             with patch.object(
                 ForecastingModelManager, "_assert_predictions_in_step_window"
             ):
@@ -1233,15 +1218,107 @@ class TestOOMMitigation:
                     with patch(
                         "views_pipeline_core.files.utils.handle_single_log_creation"
                     ):
-                        with patch.object(PredictionFrame, "save") as mock_save:
-                            with patch.object(
-                                PredictionFrame, "load", return_value=Mock()
-                            ):
+                        with patch("views_pipeline_core.managers.model.model.save_pf") as mock_save:
+                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
                                 manager._execute_model_evaluation()
 
         mock_convert.assert_not_called()
         manager._save_predictions.assert_not_called()
         mock_save.assert_called()  # Track A must still run
+
+    def test_pf_missing_skip_predictions_delivery_raises(self):
+        """
+        When skip_predictions_delivery is absent from a PF model config,
+        _execute_model_evaluation must crash — no silent default.
+        """
+        from views_pipeline_core.exceptions import ModelEvaluationException
+
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        del manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ]
+        manager._test_eval_return = {"lr_sb": [pf]}
+
+        with pytest.raises(ModelEvaluationException, match="skip_predictions_delivery"):
+            with patch.object(
+                ForecastingModelManager, "_assert_predictions_in_step_window"
+            ):
+                with patch.object(
+                    ForecastingModelManager, "_evaluate_prediction_dataframe"
+                ):
+                    with patch(
+                        "views_pipeline_core.files.utils.handle_single_log_creation"
+                    ):
+                        with patch("views_pipeline_core.managers.model.model.save_pf"):
+                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                                manager._execute_model_evaluation()
+
+    def test_pf_missing_skip_predictions_delivery_crashes_before_save(self):
+        """
+        When skip_predictions_delivery is absent, the crash must happen BEFORE
+        any Track A writes (PredictionFrame.save). Fail-fast guarantee: no
+        partial writes on config error.
+        """
+        from views_pipeline_core.exceptions import ModelEvaluationException
+
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        del manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ]
+        manager._test_eval_return = {"lr_sb": [pf]}
+
+        with pytest.raises(ModelEvaluationException, match="skip_predictions_delivery"):
+            with patch.object(
+                ForecastingModelManager, "_assert_predictions_in_step_window"
+            ):
+                with patch.object(
+                    ForecastingModelManager, "_evaluate_prediction_dataframe"
+                ):
+                    with patch(
+                        "views_pipeline_core.files.utils.handle_single_log_creation"
+                    ):
+                        with patch("views_pipeline_core.managers.model.model.save_pf") as mock_save:
+                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                                manager._execute_model_evaluation()
+
+        mock_save.assert_not_called()
+
+    def test_pf_explicit_false_enables_track_b(self):
+        """
+        When skip_predictions_delivery is explicitly set to False, Track B fires:
+        - to_arrow_table must be called
+        - _save_predictions must be called with correct target_identifier
+        """
+        import pyarrow as pa
+        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+            PredictionFrameConverter,
+        )
+
+        pf = _make_simple_pf()
+        manager = _make_eval_stub("prediction_frame")
+        manager._config_manager.get_combined_config.return_value[
+            "skip_predictions_delivery"
+        ] = False
+        manager._test_eval_return = {"lr_sb": [pf]}
+
+        dummy_table = pa.table({"month_id": [445, 445], "priogrid_id": [1, 2],
+                                 "pred_lr_sb": [[1.0, 1.0], [1.0, 1.0]]})
+        with patch.object(
+            PredictionFrameConverter, "to_arrow_table", return_value=dummy_table
+        ) as mock_tat:
+            with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
+                with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
+                    with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
+                        with patch("views_pipeline_core.managers.model.model.save_pf"):
+                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                                manager._execute_model_evaluation()
+
+        mock_tat.assert_called_once()
+        manager._save_predictions.assert_called()
+        _, kwargs = manager._save_predictions.call_args
+        assert kwargs.get("target_identifier") == "lr_sb"
 
     def test_df_raw_freed_before_target_loop(self):
         """
@@ -1301,8 +1378,8 @@ class TestOOMMitigation:
                 ForecastingModelManager, "_assert_predictions_in_step_window"
             ):
                 with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-                    with patch.object(PredictionFrame, "save"):
-                        with patch.object(PredictionFrame, "load", return_value=Mock()):
+                    with patch("views_pipeline_core.managers.model.model.save_pf"):
+                        with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
                             manager._execute_model_evaluation()
 
         mock_eval_df.assert_not_called()

@@ -37,11 +37,11 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from views_pipeline_core.data.prediction_frame import PredictionFrame
-from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+from views_pipeline_core.data.prediction_frame import PredictionFrame  # noqa: E402
+from views_pipeline_core.managers.prediction.prediction_frame_converter import (  # noqa: E402
     PredictionFrameConverter,
 )
-from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
+from views_pipeline_core.modules.validation.adapter import EvaluationAdapter  # noqa: E402
 
 # ─── PARAMETERS ───────────────────────────────────────────────────────────────
 # Adjust these to test different scales.
@@ -158,7 +158,6 @@ def experiment_1_accumulation() -> None:
             raw_preds[f"target_{t_idx}"].append(pf)
         probe.snap(f"after seq {seq:02d} append  (expected Δ ≈ +{expected_per_seq:.0f} MB)")
 
-    total_delta = rss_mb() - (rss_mb() - N_SEQUENCES * expected_per_seq)
     probe.snap("FINAL after all sequences accumulated")
     print(
         f"\n  H1 verdict: expected total = {N_SEQUENCES * expected_per_seq:.0f} MB  "
@@ -181,7 +180,7 @@ def experiment_2_inference_tensor_release() -> None:
         f"  Simulating inference output {pf_mb:.0f} MB + activations ×{INFERENCE_MULTIPLIER}"
         f" = {total_mb:.0f} MB per sequence"
     )
-    print(f"  Testing: does RSS recover to pre-inference baseline after each del?")
+    print("  Testing: does RSS recover to pre-inference baseline after each del?")
     print()
 
     gc.collect()
@@ -225,8 +224,8 @@ def experiment_2_inference_tensor_release() -> None:
         probe.snap(f"seq {seq:02d}: AFTER gc.collect()")
 
     print(
-        f"\n  H2 check: if RSS does NOT return to baseline after each 'del + gc', "
-        f"memory is leaking/caching."
+        "\n  H2 check: if RSS does NOT return to baseline after each 'del + gc', "
+        "memory is leaking/caching."
     )
     del raw_preds
     gc.collect()
@@ -335,7 +334,7 @@ def experiment_4_input_data_accumulation() -> None:
             f"(expected Δ ≈ +{_pf_size_mb() * N_TARGETS:.0f} MB)"
         )
 
-    probe.snap(f"AFTER 13 seqs WITH del X  (only PFs remain)")
+    probe.snap("AFTER 13 seqs WITH del X  (only PFs remain)")
     del raw_preds2
     gc.collect()
     probe.snap("cleaned up 4B")

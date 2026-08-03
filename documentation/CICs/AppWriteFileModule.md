@@ -48,8 +48,19 @@ until usage patterns stabilize.
   remote `$updatedAt` timestamps before serving them.
 - Guarantees that all public methods return `OperationResult` with `success`, `data`,
   `error`, and `code` fields, providing a uniform result contract.
-- Guarantees that `AppwriteMetadataHandler` creates databases and collections
-  on-demand if they do not already exist.
+- Guarantees that a metadata document is deleted as an orphan **only** on positive
+  evidence of the file's absence (`storage_file_not_found`). A read that FAILED for any
+  other reason -- wrong bucket id, missing read scope, a non-JSON error whose `code` is
+  `None` -- is INDETERMINATE and the operation fails instead (`_classify_storage_presence`;
+  register C-231, þing-02 #329).
+- Guarantees that a paired write (file + metadata document) verifies its containers
+  read-only **before** the file is uploaded, so a missing container cannot leave an
+  orphaned file (`_require_containers`).
+- **NO LONGER GUARANTEED (þing-02 #331):** `AppwriteMetadataHandler` no longer creates
+  databases or collections, and `AppWriteFileModule` no longer creates buckets. Creating
+  storage is a deliberate act, not a side effect of publishing; it moved to
+  `views_pipeline_core.modules.appwrite.provisioning`, which the delivery path must not
+  import (asserted in a subprocess by `tests/test_import_purity.py`, #332).
 
 ---
 
@@ -58,13 +69,24 @@ until usage patterns stabilize.
 - `config: AppwriteConfig` -- dataclass with:
   - `endpoint`, `project_id`, `credentials` (str for API key, dict for session).
   - `auth_method: AuthMethod` -- `API_KEY` or `SESSION`.
-  - `bucket_id`, `collection_name`, `collection_id`, `database_name`, `database_id`.
+  - `bucket_id`, `bucket_name`, `collection_id`, `collection_name`, `database_id`,
+    `database_name` -- **all six are REQUIRED and have no defaults**. Construction raises
+    `ConfigurationException` naming every missing one. Until 2026-07-31 they defaulted to
+    the live production coordinates, so a caller supplying only a key operated against
+    production storage without choosing to (register C-229, #324; PLATFORM-001 §4 forbids
+    baking registry coordinates into dataclass defaults).
   - `cache_ttl_hours: int` (default 24).
   - `allow_metadata_only_updates: bool` (default `True`).
   - `path_manager: Optional[ModelPathManager]` -- used for cache directory resolution.
 - The Appwrite server must be reachable at the configured endpoint.
-- Bucket and database/collection infrastructure is created lazily; no manual setup
-  is required.
+- **Bucket, database and collection must already exist.** They are verified read-only
+  at the first paired write and never created; a missing container raises
+  `ConfigurationException` naming the container and the command that creates it:
+
+      python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection
+
+  (Changed by þing-02 #331: on-demand creation is what forced the platform's API key to
+  carry create scopes, which blocked least privilege.)
 
 ---
 
@@ -75,7 +97,7 @@ until usage patterns stabilize.
   - Uploads files to Appwrite storage buckets.
   - Creates/updates metadata documents in Appwrite databases.
   - Writes cached files and `cache_metadata.json` to the local cache directory.
-  - Creates databases, collections, and bucket infrastructure on-demand.
+  - Verifies (never creates) bucket and collection existence, once per instance.
   - Logs at `INFO` on successful operations, `WARNING` on fallbacks, `ERROR` on
     failures.
 
@@ -169,13 +191,43 @@ if result.success:
 
 ## 10. Test Alignment
 
-- **Green tests:** Unit tests with mocked Appwrite SDK can verify hash computation,
-  deduplication logic, cache validation, and `OperationResult` construction.
-- **Beige tests:** Integration tests against a live or emulated Appwrite instance
-  verify end-to-end upload/download/metadata workflows.
-- **Red tests:** Tests should verify that invalid credentials raise `ValueError`,
-  that duplicate uploads with `allow_metadata_only_updates=True` skip re-upload,
-  and that expired cache entries trigger fresh downloads.
+**Corrected 2026-08-01 (register C-246, story #350).** The previous text promised
+*"Beige tests: Integration tests against a live or emulated Appwrite instance verify
+end-to-end upload/download/metadata workflows."* **No such tier ever existed.** That is
+worse than the §10 drift C-86 fixed elsewhere on 2026-05-21: it asserted a tier that was
+never built, and it was cited as reassurance while the seam's tests could only agree with
+their own mocks. What follows describes what exists.
+
+Tiers are annotated with **fidelity** as well as colour (ADR-005, 2026-08-01 amendment) —
+colour states a test's intent; fidelity states whether it can observe anything the author
+did not already believe.
+
+- **Green — asserted.** `tests/test_modules/test_appwrite.py`: hash computation,
+  deduplication logic, cache validation and `OperationResult` construction, against
+  hand-written doubles.
+- **Green/Beige — derived.** `test_appwrite_pagination.py`, `test_appwrite_audit.py`:
+  doubles built from the SDK's **own** query encoding, which return 25 rows when no
+  `Query.limit` is supplied because that is what the service does. They catch mechanism
+  errors — a walk that forgets to page, mis-advances an offset, or mistakes a capped page
+  for the end.
+- **Beige — recorded.** `test_appwrite_recorded_shape.py`, driven by
+  `tests/fixtures/appwrite/list_documents_shape.json`, captured from the live service on
+  2026-08-01: **25 documents returned of a reported 461** when no limit was supplied. Its
+  provenance is committed; coordinates are fingerprinted rather than published.
+- **Beige — substrate.** `test_appwrite_sdk_contract.py`: drives the **real installed
+  SDK** with the transport patched, pinning content-type dispatch and error types so an
+  SDK upgrade fails at upgrade time rather than mid-run.
+- **Red — asserted and derived.** `test_appwrite_dedup_characterization.py` parametrizes
+  the delete decision over eleven error outcomes including unrecognised ones, asserting
+  the invariant *delete only on a positive `storage_file_not_found`*;
+  `test_credential_redaction.py` and `test_appwrite_timeout.py` cover secret leakage and
+  bounded calls.
+- **Substrate — structural.** `test_import_purity.py` and `test_read_completeness.py`
+  observe the real import graph and the real AST in a subprocess, not a double.
+
+**What is still absent:** no test exercises a live end-to-end upload/download cycle. The
+recorded tier covers the read shape that caused the 2026-08-01 incident; it does not
+cover writes.
 
 ---
 

@@ -1,3 +1,4 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 """
 CorePredictionSniffer: Audit-only validator for prediction DataFrames.
 Called after model inference, before evaluation or storage.

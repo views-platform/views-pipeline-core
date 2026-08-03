@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # 1. Create a dummy EvaluationFrame that behaves like a real object (not a mock)
 class DummyEvaluationFrame:
@@ -11,8 +11,19 @@ class DummyEvaluationFrame:
         self.identifiers = identifiers
         self.metadata = metadata
 
+from views_frames import SpatialLevel, SpatioTemporalIndex  # noqa: E402
 from views_pipeline_core.modules.validation.adapter import EvaluationAdapter  # noqa: E402
 from views_pipeline_core.data.prediction_frame import PredictionFrame  # noqa: E402
+
+
+def _pf(y_pred, time, unit):
+    """Construct a leaf PredictionFrame from raw arrays (integer identifiers)."""
+    index = SpatioTemporalIndex(
+        time=np.asarray(time, dtype=np.int64),
+        unit=np.asarray(unit, dtype=np.int64),
+        level=SpatialLevel.PGM,
+    )
+    return PredictionFrame(y_pred, index)
 
 
 @pytest.fixture(autouse=True)
@@ -44,12 +55,10 @@ class TestEvaluationAdapter:
         df_actual, df_pred = sample_data
         
         # Wrap the prediction dataframe in a PredictionFrame
-        pf = PredictionFrame(
-            y_pred=df_pred[['pred_target']].values,
-            identifiers={
-                'time': df_pred.index.get_level_values(0).values,
-                'unit': df_pred.index.get_level_values(1).values
-            }
+        pf = _pf(
+            df_pred[['pred_target']].values,
+            time=df_pred.index.get_level_values(0).values,
+            unit=df_pred.index.get_level_values(1).values,
         )
         
         ef = EvaluationAdapter.from_prediction_frame(df_actual, pf, 'target')
@@ -309,13 +318,7 @@ def _pf_actual():
 def _pf_seq(months, values, n_samples=2):
     """Build a minimal PredictionFrame for one sequence."""
     y_pred = np.array([[v + 0.1 * s for s in range(n_samples)] for v in values])
-    return PredictionFrame(
-        y_pred=y_pred,
-        identifiers={
-            'time': np.array(months),
-            'unit': np.ones(len(months), dtype=int),
-        }
-    )
+    return _pf(y_pred, time=np.array(months), unit=np.ones(len(months), dtype=int))
 
 
 class TestFromPredictionFrames:
@@ -407,10 +410,7 @@ class TestFromPredictionFrameSingular:
                 [(100, 1), (999, 2)], names=["month_id", "pgm_id"]
             ),
         )
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 2)),
-            identifiers={"time": np.array([100, 999]), "unit": np.array([1, 2])},
-        )
+        pf = _pf(np.ones((2, 2)), time=np.array([100, 999]), unit=np.array([1, 2]))
         mapping = {100: 1, 101: 2}  # month 999 not in mapping
         with pytest.raises(ValueError, match="declared base_origin does not match"):
             EvaluationAdapter.from_prediction_frame(actual, pf, "lr_sb", mapping)
@@ -423,10 +423,7 @@ class TestFromPredictionFrameSingular:
                 [(100, 1), (999, 2)], names=["month_id", "pgm_id"]
             ),
         )
-        pf = PredictionFrame(
-            y_pred=np.ones((2, 2)),
-            identifiers={"time": np.array([100, 999]), "unit": np.array([1, 2])},
-        )
+        pf = _pf(np.ones((2, 2)), time=np.array([100, 999]), unit=np.array([1, 2]))
         # No mapping supplied → window-integrity guard skipped, positional inference used
         ef = EvaluationAdapter.from_prediction_frame(actual, pf, "lr_sb", step_mapping=None)
         assert len(ef.y_true) == 2
@@ -476,3 +473,72 @@ class TestParityClosure:
         np.testing.assert_array_equal(ef_pf.identifiers['unit'],   ef_df.identifiers['unit'])
         np.testing.assert_array_equal(ef_pf.identifiers['step'],   ef_df.identifiers['step'])
         np.testing.assert_array_equal(ef_pf.identifiers['origin'], ef_df.identifiers['origin'])
+
+
+# ---------------------------------------------------------------------------
+# C-89: EvaluationAdapter empty-intersection path tests
+# ---------------------------------------------------------------------------
+
+class TestEmptyIntersection:
+    """Verify fail-loud behavior when all sequences have zero overlap with actuals."""
+
+    def test_all_sequences_zero_overlap_raises(self):
+        """When every sequence has zero overlap, raise ValueError (not return empty)."""
+        idx_actual = pd.MultiIndex.from_tuples(
+            [(100, 1), (101, 1)], names=['month_id', 'country_id'],
+        )
+        idx_pred = pd.MultiIndex.from_tuples(
+            [(999, 1), (998, 1)], names=['month_id', 'country_id'],
+        )
+        df_actual = pd.DataFrame({'target': [1.0, 2.0]}, index=idx_actual)
+        df_pred = pd.DataFrame({'pred_target': [0.1, 0.2]}, index=idx_pred)
+
+        with pytest.raises(ValueError, match="need at least one array to concatenate"):
+            EvaluationAdapter.from_dataframes(df_actual, [df_pred, df_pred], 'target')
+
+    def test_partial_overlap_some_sequences_empty(self):
+        """When some sequences overlap and some don't, the overlapping ones survive."""
+        idx_actual = pd.MultiIndex.from_tuples(
+            [(100, 1), (101, 1)], names=['month_id', 'country_id'],
+        )
+        df_actual = pd.DataFrame({'target': [1.0, 2.0]}, index=idx_actual)
+
+        idx_overlap = pd.MultiIndex.from_tuples(
+            [(100, 1)], names=['month_id', 'country_id'],
+        )
+        df_overlap = pd.DataFrame({'pred_target': [1.1]}, index=idx_overlap)
+
+        idx_disjoint = pd.MultiIndex.from_tuples(
+            [(999, 1)], names=['month_id', 'country_id'],
+        )
+        df_disjoint = pd.DataFrame({'pred_target': [0.0]}, index=idx_disjoint)
+
+        ef = EvaluationAdapter.from_dataframes(
+            df_actual, [df_overlap, df_disjoint], 'target',
+        )
+        assert len(ef.y_true) == 1
+        np.testing.assert_array_equal(ef.identifiers['origin'], np.array([0]))
+
+    def test_zero_overlap_warning_logged(self):
+        """A sequence with zero overlap logs a warning before being skipped."""
+        idx_actual = pd.MultiIndex.from_tuples(
+            [(100, 1)], names=['month_id', 'country_id'],
+        )
+        idx_disjoint = pd.MultiIndex.from_tuples(
+            [(999, 1)], names=['month_id', 'country_id'],
+        )
+        idx_overlap = pd.MultiIndex.from_tuples(
+            [(100, 1)], names=['month_id', 'country_id'],
+        )
+        df_actual = pd.DataFrame({'target': [1.0]}, index=idx_actual)
+        df_disjoint = pd.DataFrame({'pred_target': [0.0]}, index=idx_disjoint)
+        df_overlap = pd.DataFrame({'pred_target': [1.1]}, index=idx_overlap)
+
+        import logging
+        with patch.object(logging.getLogger('views_pipeline_core.modules.validation.adapter'),
+                          'warning') as mock_warn:
+            EvaluationAdapter.from_dataframes(
+                df_actual, [df_disjoint, df_overlap], 'target',
+            )
+            mock_warn.assert_called_once()
+            assert "no overlap" in mock_warn.call_args[0][0].lower()

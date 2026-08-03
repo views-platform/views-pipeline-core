@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-04-01
+**Last reviewed:** 2026-05-20
 **Related ADRs:** ADR-001 (Ontology), ADR-004 (Evolution), ADR-006 (Intent Contracts), ADR-036 (Ensemble Reconciliation)
 
 ---
@@ -48,9 +48,12 @@ hierarchical PGM-CM consistency.
 - Guarantees that `ReconciliationModule` is applied during forecasting when
   `self.__activate_reconciliation` is `True` and `configs["reconciliation"]`
   is `"pgm_cm_point"`.
-- Guarantees that `validate_ensemble_model(configs)` is called before
-  execution when `args.train` is `False` (i.e., when using existing
-  artifacts).
+- Guarantees that `validate_ensemble_model(configs, saved=args.saved)` is
+  called before execution when `args.train` is `False` (i.e., when using
+  existing artifacts). Data freshness checks (Conditions 2+3) are only
+  enforced for forecasting runs with non-saved data (ADR-018 amendment).
+- Guarantees that `_create_model_args()` forces `saved=True` for all
+  non-training subprocess dispatch, independent of the caller's `saved` flag.
 - Guarantees that `handle_ensemble_log_creation` is called after evaluation
   and forecasting for audit trail purposes.
 - Guarantees that WandB alerts are sent on stage completion and on errors,
@@ -64,6 +67,9 @@ hierarchical PGM-CM consistency.
   directory under `ensembles/`.
 - `args: ForecastingModelArgs` -- validated CLI arguments. Must be a
   `ForecastingModelArgs` instance; raises `ValueError` otherwise.
+- `config_modelset.py` -- optional. When present, its keys are merged into
+  `config_meta` (modelset values take precedence). Collision warning logged.
+  Contains the `"models"` list for ensemble constituent models.
 - `configs["models"]` -- a list of sub-model names (strings). Each must be
   a valid model name resolvable by `ModelPathManager`.
 - `configs["aggregation"]` -- the aggregation method (e.g., `"mean"`,
@@ -101,8 +107,8 @@ hierarchical PGM-CM consistency.
 | Sub-models return different numbers of outputs | `ValueError` in `_evaluate_ensemble()` |
 | No prediction files found after subprocess | `PipelineException` |
 | Aggregation with zero DataFrames | `ValueError` in `_get_aggregated_df()` |
-| Reconciliation returns `None` | WandB warning alert; original predictions returned unmodified |
-| C dataset not found for reconciliation | `None` returned from `_load_c_dataset()`; reconciliation skipped with warning |
+| Reconciliation returns `None` | `PipelineException` with WandB `ERROR` alert; unreconciled predictions never published |
+| C dataset not found for reconciliation | `None` from `_load_c_dataset()`; `_apply_reconciliation()` raises `PipelineException` |
 | Training/evaluation/forecasting exception | `PipelineException` with full traceback and WandB alert |
 
 All failures are loud. Subprocess failures propagate via `check=True` on
@@ -183,8 +189,32 @@ manager.execute_single_run(args)
 
 ## 10. Test Alignment
 
-- `tests/test_managers/test_ensemble_manager.py` -- tests for ensemble
-  initialization, sub-model coordination, aggregation, and reconciliation.
+- Covered by `tests/test_managers/test_ensemble_manager.py` (19 test classes,
+  51 test methods).
+- **Initialization:** `TestEnsembleManagerInit` — constructor wiring, attribute
+  assignment.
+- **Execution flow:** `TestExecuteSingleRun` — args validation, WandB login,
+  CoreConfigSniffer call, ensemble validation gate. `TestExecuteModelTasks` —
+  stage dispatch based on args flags.
+- **Stage methods:** `TestTrainEnsemble`, `TestEvaluateEnsemble`,
+  `TestForecastEnsemble` — per-stage orchestration.
+  `TestExecuteModelTraining`, `TestExecuteModelEvaluation`,
+  `TestExecuteModelForecasting` — WandB run lifecycle and error wrapping.
+- **Data operations:** `TestCreateModelArgs` — CLI arg conversion for
+  sub-models. `TestEntityRenameInAggregation` — ADR-034 `priogrid_gid` →
+  `priogrid_id` rename. `TestLoadOrGeneratePrediction` — cache-first
+  prediction loading with sequence matching. `TestLoadCDataset` —
+  reconciliation dataset resolution.
+- **Error handling:** `TestSubprocessTimeout` — subprocess failure propagation.
+  `TestOutputCount` — output count verification.
+  `TestEnsembleFailureModes` — missing predictions, empty aggregation, missing
+  config keys, WandB login failure.
+- **Reconciliation:** `TestApplyReconciliation` — reconciliation dispatch and
+  passthrough when unconfigured. `TestExecuteShellScript` — subprocess
+  invocation mechanics.
+- **Config modelset merge:** `TestConfigModelsetMerge` — verifies
+  config_modelset → config_meta merge precedence, collision warning,
+  in-place dict mutation, and no-op when config_modelset is absent.
 
 ---
 
@@ -214,9 +244,13 @@ manager.execute_single_run(args)
   subprocess exit code; stderr output is not captured or parsed. A sub-model
   that fails silently (exit code 0 but produces garbage) will not be detected
   until aggregation or evaluation.
-- **No `CoreConfigSniffer` call:** `EnsembleManager.execute_single_run()`
-  replaces the parent's pre-flight sniffing with
-  `validate_ensemble_model(configs)`, which has a different (narrower) scope.
+- **`CoreConfigSniffer` call is a bridge fix (2026-05-20):**
+  `EnsembleManager.execute_single_run()` now calls
+  `CoreConfigSniffer.sniff_all()` before WandB login (C-55 bridge fix).
+  However, the override still duplicates the parent's execution sequence —
+  new preconditions added to `ForecastingModelManager.execute_single_run()`
+  will not propagate automatically. Permanent fix: retire EnsembleManager
+  in favour of `DataFrameEnsembleManager` (D-13 trajectory).
 - **Reconciliation is forecasting-only:** The `__activate_reconciliation`
   flag is checked only in `_forecast_ensemble()`. Reconciliation is not
   applied during evaluation, so evaluation metrics reflect un-reconciled

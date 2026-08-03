@@ -65,7 +65,7 @@ Generates self-contained HTML reports with Tailwind CSS styling for the VIEWS fo
 - `add_html()` expects an HTML string. Typically receives `plotly.Figure.to_html()` output.
 - `add_markdown()` requires the `markdown` Python package for full functionality.
 - `export_as_html()` requires `views_pipeline_core.configs.pipeline.PipelineConfig` for version display in footer.
-- The VIEWS header image must exist at `views_pipeline_core/assets/views_header.png`.
+- The VIEWS header image must exist at `views_reporting/assets/headers/views_header.png`.
 
 ---
 
@@ -93,7 +93,7 @@ Generates self-contained HTML reports with Tailwind CSS styling for the VIEWS fo
 
 ## 7. Boundaries and Interactions
 
-- **Depends on**: `pandas` (DataFrame styling), `matplotlib.pyplot` (figure encoding), `html.escape` (XSS prevention in links), `base64` (image embedding), `pathlib.Path`, `datetime`, `views_pipeline_core.configs.pipeline.PipelineConfig` (version string), `views_pipeline_core.modules.reports.styles.tailwind.get_css` (CSS).
+- **Depends on**: `pandas` (DataFrame styling), `matplotlib.pyplot` (figure encoding), `html.escape` (XSS prevention in links), `base64` (image embedding), `pathlib.Path`, `datetime`, `views_pipeline_core.configs.pipeline.PipelineConfig` (version string), `views_reporting.reports.styles.tailwind.get_css` (CSS).
 - **Optionally depends on**: `markdown` package (for `add_markdown()`), `plotly` (for HTML visualizations passed to `add_html()`).
 - **Used by**: Evaluation and forecast reporting pipelines that generate human-readable output.
 - Has no interaction with storage services, model training, or data loading.
@@ -103,7 +103,7 @@ Generates self-contained HTML reports with Tailwind CSS styling for the VIEWS fo
 ## 8. Examples of Correct Usage
 
 ```python
-from views_pipeline_core.modules.reports.report import ReportModule
+from views_reporting.reports import ReportModule
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -173,7 +173,14 @@ report.add_html("")  # Adds empty container, no error
 
 ## 10. Test Alignment
 
-Tests live in `tests/test_modules/test_report.py` (81 tests). Coverage includes:
+> **Update (#316, 2026-07-27):** `tests/test_modules/test_report.py` was pruned
+> from pipeline-core — `ReportModule` lives in views-reporting (ADR-054) and is
+> covered by its own suite there (`tests/test_reports.py`). The suite here never
+> ran in CI (`importorskip`; views-reporting is not a pipeline-core dependency)
+> and pinned upstream behavior from the wrong repo. The inventory below is the
+> historical record of the extracted suite.
+
+Tests lived in `tests/test_modules/test_report.py` (66 tests). Coverage included:
 
 - **`TestReportModuleInit`**: Content list initialization, Plotly JS not loaded, footer is None, header image added.
 - **`TestAddHeading`**: Level 1/2/3 headings, headings with links, special characters.
@@ -193,7 +200,7 @@ Tests live in `tests/test_modules/test_report.py` (81 tests). Coverage includes:
 
 - Plotly HTML embedding relies on CDN (`https://cdn.plot.ly/plotly-latest.min.js`). For offline reports, the Plotly JS could be inlined.
 - The `TABLE_SPLIT_THRESHOLD` and `TABLE_SPLIT_THRESHOLD_COLS` are class-level constants but are also accepted as parameters to `add_table()`, allowing per-call override.
-- The CSS is sourced from `views_pipeline_core.modules.reports.styles.tailwind.get_css()`. Changes to styling are centralized there.
+- The CSS is sourced from `views_reporting.reports.styles.tailwind.get_css()`. Changes to styling are centralized there.
 - The container width was recently changed from `max-w-6xl` to `max-w-7xl` for wider reports.
 
 ---

@@ -21,8 +21,8 @@ The reconciliation is parallelised across all combinations of (country, time ste
 - Does **not** aggregate predictions from multiple models (that is `AggregationManager`'s responsibility).
 - Does **not** decide which models to reconcile or when to reconcile. The orchestrator makes those decisions.
 - Does **not** persist results to disk. It returns the reconciled DataFrame; the caller is responsible for saving.
-- Does **not** implement the reconciliation algorithm itself. It delegates to `ForecastReconciler` from `views_pipeline_core.modules.statistics`.
-- Does **not** handle country-to-grid spatial mappings directly. It relies on `_PGDataset._build_country_to_grids_cache()`.
+- Does **not** implement the reconciliation algorithm itself. It delegates to `ForecastReconciler` from `views_reporting.statistics`.
+- Does **not** handle country-to-grid spatial mappings directly. It relies on `build_country_to_grids_cache()` and `get_subset_by_country_id()` from `views_reporting.metadata`.
 
 ---
 
@@ -101,7 +101,7 @@ Individual task failures are logged and alerted but do **not** abort the overall
 ## 7. Boundaries and Interactions
 
 - **`_CDataset` / `_PGDataset`**: Provides the input data and spatial metadata. `to_reconciler()` extracts tensors; `reconcile()` applies results.
-- **`ForecastReconciler`** (`views_pipeline_core.modules.statistics`): Performs the actual mathematical reconciliation via `reconcile_forecast()`. A new instance is created per worker task.
+- **`ForecastReconciler`** (`views_reporting.statistics`): Performs the actual mathematical reconciliation via `reconcile_forecast()`. A new instance is created per worker task.
 - **`WandBModule`**: Used via static method calls (`WandBModule.send_alert()`) for progress and error reporting.
 - **`torch`**: Used for device detection and tensor computation within `ForecastReconciler`.
 - **`concurrent.futures.ProcessPoolExecutor`**: Used for parallel task execution across CPU cores.
@@ -112,7 +112,7 @@ Individual task failures are logged and alerted but do **not** abort the overall
 
 ```python
 from views_pipeline_core.data.handlers import CMDataset, PGMDataset
-from views_pipeline_core.modules.reconciliation.reconciliation import ReconciliationModule
+from views_reporting.reconciliation import ReconciliationModule
 
 c_ds = CMDataset(country_predictions_df)
 pg_ds = PGMDataset(grid_predictions_df)
@@ -146,12 +146,14 @@ result = reconciler.reconcile()
 
 ## 10. Test Alignment
 
-There is **no dedicated test file** for `ReconciliationModule`. It is tested indirectly through statistics module tests and integration tests.
+Tests live in `tests/test_modules/test_reconciliation.py` (14 tests). Coverage includes:
 
-Key testing gaps:
-- No unit tests for constructor validation (type checks, time step matching, target intersection).
-- No unit tests for `_reconcile_country_worker` in isolation.
-- No tests for partial failure handling (some tasks fail, others succeed).
+- **`TestReconcileCountryWorker`** (4 tests): Worker return shape, output shape matches grid input, output on CPU, no NaN values.
+- **`TestForecastReconcilerDirect`** (2 tests): Grid sums to country total, zeros preserved.
+- **`TestReconcileOrchestration`** (4 tests): Successful result collection, partial failure continues, computed max_workers, completion WandB alert.
+- **`TestReconciliationModuleConstructorValidation`** (4 tests): None and wrong-type rejection for both c_dataset and pg_dataset.
+
+Remaining gaps:
 - No tests for device detection across CPU/CUDA/MPS environments.
 
 ---

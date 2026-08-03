@@ -1,0 +1,389 @@
+# Post-mortem — epic #339, the Appwrite eviction (DRAFT, in progress)
+
+**Status:** DRAFT. Written while S0–S3 are fresh; to be completed when S4–S11 land.
+**Started:** 2026-08-01 · **Covers:** S0 (#353) · S1 (#354) · chore (#355) · S2 (#356) · S3 (#357) · sweep (#358) · S4 (#359) · sweep 2 (#360) · S5 (#361) · sweep 3 (#362)
+**Not yet covered:** S6–S11.
+
+> Notes are being taken *during* the work rather than after it, deliberately. The most
+> useful material in this document is the stuff that would be embarrassing to reconstruct
+> from memory in three weeks, and the honest version of "why did that take four rounds"
+> has a short half-life.
+
+---
+
+## 1. What this epic was, in one paragraph
+
+A vendor SaaS became a hard, non-optional dependency of the platform's most-depended-upon
+package. Two live Tier-1 defects sat on that surface, both of which could deliver a wrong
+answer to an external counterparty without raising anything. Underneath both was a defect
+*class* — twenty instances over nine months — that had never been registered, so every new
+surface reintroduced it. Phases 0–2 (this epic) fix the defects, delete dead surface, and
+install a mechanism so the class fails at authoring time. Phases 3–4 (deferred, recorded
+in `roadmap_appwrite_eviction.md`) shrink and relocate the vendor surface itself.
+
+## 2. What actually shipped in S0–S3
+
+| Story | PR | Substance |
+|---|---|---|
+| S0 | #353 | Roadmap for all five phases; falsification audit that **falsified** the readiness claim |
+| S1 | #354 | **C-241 (T1)** — paging, plus the failed-read-as-absence half nobody had registered |
+| — | #355 | T1-collision correction from the views-appwrite seat; gitignore |
+| S2 | #356 | **C-249 (T1)** + C-242/243/244/250/251; `reconcile` split into a 7-file package |
+| S3 | #357 | The Cluster J AST guard; 8 real sites bounded; found C-257 on its first run |
+| sweep | (this) | **C-258 (T1)** found by the S0–S3 retrospective; C-256 resolved |
+
+Register moved **256 → 258 concerns, 131 → 140 resolved**. Three Tier-1s closed
+(C-241, C-249, C-258). Cluster J has **no live Tier-1s left**.
+
+---
+
+## 3. The finding that matters most: one defect, three scales
+
+This is the thing to carry forward. The same failure recurred at three different
+granularities inside eight days, and **each time it was found by a different mechanism**:
+
+| Scale | What happened | Found by |
+|---|---|---|
+| **Function** | `_list_all_documents` got a total-guard; its sibling `_list_all_files` did not — same function pair, same file, same sitting | expert-code-review (C-242) |
+| **Story** | S1 established the paging rule; S2's walks were written a day later with the old short-page terminator | `/review-diff` on S2 |
+| **File** | S1 fixed `search_files_by_metadata`; nobody asked what *else* in `file.py` pages. `_file_exists_by_hash` had the same defect, unbounded, on the dedup path | the S0–S3 retrospective sweep (C-258) |
+
+**The lesson is not "be more careful."** It is that fixing an instance does not generalise
+by itself, and that *the review scope determines which scale of recurrence you can see*:
+
+- A **changeset review** cannot see a story-scale recurrence — the offending code is not in
+  the diff.
+- A **story review** cannot see a file-scale recurrence — nobody re-reads the untouched
+  parts of a file they are editing.
+- Only an **explicit sweep that enumerates every instance of a shape and checks each one
+  against the rule** finds these.
+
+**Actionable form:** when a fix establishes a rule, the same change should enumerate every
+existing site the rule governs — mechanically, not by memory — and record the count. C-258
+existed because that step was skipped in S1 and nobody noticed for three stories.
+
+### Three sweeps, three findings, and none of them repeatable by the previous method
+
+Each retrospective sweep found something the one before it structurally could not, because
+each enumerated a **different shape**:
+
+| Sweep | Shape enumerated | Found |
+|---|---|---|
+| 1 | paging walks | **C-258** (Tier 1) — a dedup walk answering NOT_FOUND from a short read |
+| 2 | failure→absence, result discards, deletion residue, exemptions | **C-259** (guard watching 2 of 31), **C-260** (stale skip), README residue |
+| 3 | guard *territory*, cross-repo install impact, optional-dep idioms | **C-261** (guard blind to where C-227 happened), **C-262** (views-postprocessing breaks) |
+
+The transferable point is not "do sweeps". It is that **a sweep is only worth running if it
+enumerates a shape no previous sweep did** — running the paging check a third time would
+have found nothing. Choosing the shape is the whole skill, and the best source of candidate
+shapes is *the rules the recent work established*, since those are the ones not yet applied
+everywhere.
+
+### The pattern has a fourth face, and it is the sharpest one
+
+The second sweep applied the same method to shapes the first had not enumerated, and found
+**C-259: the guard's own check 3 watched 2 of 31 functions, and 3 of the 5 names it did
+carry named nothing at all.** It reported green, and a derived set confirms it *was* green —
+by accident. A new discarded result in any of the other 29 functions would have gone unseen.
+
+So the recurring failure is not really about paging. It is:
+
+> **A fact recorded once, correct when written, and never re-derived.**
+
+Its instances so far: C-256's stale worklist (line numbers shifted by the change that
+resolved it), C-249's stale citations, C-258's unenumerated walks, and now C-259 — *inside
+the mechanism built to stop the class*.
+
+**The guard has since been found wrong a second time, differently.** C-261: all three of
+its checks shared one `GOVERNED_DIRS`, which excluded `managers/` — so check 3 could not see
+`io.py`, `savers.py` or `sampled_forecast_publisher.py`, and **C-227's defect was literally
+"both call sites discard the result", in exactly those files.** A guard blind to where its
+own headline instance happened. Nothing was broken by it (a package-wide sweep finds zero
+discards), and saying so plainly matters more than the finding: inflating a preventive gap
+into a live defect is the same over-claim this document already records four times.
+
+**Generalised: a guard needs its TERRITORY audited, not just its logic.** Both guard defects
+this epic found were about scope — which functions it watched (C-259), and which directories
+(C-261) — and neither was visible by reading the checks themselves. The countermeasure is the same every time: **derive,
+do not list.** The guard now re-derives its own name set on every run, so a new
+`OperationResult`-returning function is governed the moment it is written.
+
+---
+
+## 4. What the mechanisms actually caught (evidence, not opinion)
+
+Every defect below was caught **before shipping** by a review step, not by CI and not by
+me while writing the code. That is the case for keeping the ritual expensive.
+
+| Defect | Caught by | Would CI have caught it? |
+|---|---|---|
+| Roadmap arithmetic did not close (4,609 vs 4,503; 975 vs 869) | `/review-diff` on S0 | No |
+| An `xfail(strict=True)` that could never fire — its helper lived in the test file | `/review-diff` on S0 | No |
+| `_unique_by_id` deleted every record after the first lacking an `$id` | `/review-diff` on S2 | No |
+| Both S2 walks kept the short-page terminator S1 had removed | `/review-diff` on S2 | No |
+| Guard accepted `limit=None` as a bound | `/code-review max` on S3 | No |
+| Guard allowlist keys collided across 13 classes in one file | `/code-review max` on S3 | No |
+| A stale exemption allowlisting **correct** code | fallout of fixing the above | No |
+| `_TRACKED_DEFECTS` had no ceiling — escape hatch could grow forever | second `/review-diff` on S3 | No |
+| `_file_exists_by_hash`'s unbounded dedup walk (**Tier 1**) | S0–S3 sweep | No |
+| Guard check 3 watched 2 of 31 functions; 3 of its 5 names did not exist | S0–S4 sweep | No |
+| Guard territory excluded the files where C-227 happened | S0–S5 sweep | No |
+| God-class guard watched 2 of 13, both xfailed — enforcing nothing | S0–S6 sweep | No |
+| A library forced `logger.setLevel(INFO)` on the application at import | S0–S6 sweep | No |
+| Both CI workflows would stop installing `appwrite` after S5 made it an extra | `/review-diff` on S5 | **CI would have caught it — by failing** |
+| S4 deleted the code but its README still documented `AuthMethod.SESSION` and `get_current_user()` | S0–S4 sweep | No |
+| A test permanently skipped for a bug that was fixed — coverage silently withheld | S0–S4 sweep | No |
+
+Sixteen defects. Fifteen were uncatchable by CI; the thirteenth *was* a CI break, found by
+review before it happened rather than by watching it go red. Several were in code written *to prevent that exact
+class of defect*.
+
+### The single most effective technique
+
+**Adversarial probing beat reading, every time.** The S3 guard was read carefully and
+looked right. Then it was attacked with six crafted inputs and three of them walked
+straight through. The four defects in the guard were all found by running code against it,
+none by inspection.
+
+Generalised: for anything whose job is to *detect* something, write the thing it is
+supposed to detect and check that it screams. `test_read_completeness.py` now carries
+eight such self-tests, and the `_TRACKED_DEFECTS` ceiling was verified by injecting a
+second entry and watching the suite go red.
+
+---
+
+## 5. Where I was wrong, and the shape of the errors
+
+Recorded plainly because the pattern is more useful than the individual mistakes.
+
+### 5.1 Counting errors — four in two days, all self-generated
+
+| Claim | Reality |
+|---|---|
+| "4,609 lines, 1,620 docstrings, 975 blank-or-comment" | 4,503 / 1,620 / **869** — breakdown was against a six-file total, the parts were four-file |
+| "~12 unbounded sites" (#343) | wrong |
+| "**16** unbounded sites" (C-256) | belonged to *neither* sweep; measured answers were 8 narrow / 14 broad |
+| "49 stale register citations" (sweep probe) | artifact of basename collision across repos; not reported |
+
+**Common cause:** a number gets measured once, written down, and then *restated* without
+re-measuring — and each restatement inherits the error while sounding more confident. The
+fourth one was caught before it reached the user only because the probe output looked
+implausible.
+
+**Countermeasure adopted:** numbers in durable documents are now re-derived programmatically
+at the moment of writing, and the docstring in `test_read_completeness.py` states which
+question each figure answers. The guard re-derives its own counts on every run, so the
+worklist cannot rot — which is exactly what happened to C-256's, whose line numbers went
+stale *in the same change that resolved it*.
+
+### 5.2 Reasoning from one disjunct
+
+I wrote "D8's trigger has NOT fired" having analysed **one of four** disjuncts. The
+views-appwrite seat caught it: D8 is `T1 ∨ T2 ∨ T3 ∨ (demand ∧ supply)` and its ratified
+text closes with *"The repo-local triggers remain independently sufficient."* The narrow
+claim was true; the sentence was not.
+
+**Shape:** verifying a claim about a compound condition by checking the clause I happened
+to be thinking about. Same shape as the counting errors — a true narrow finding promoted
+to a broad statement without re-deriving the broad one.
+
+### 5.3 Moving a defect instead of removing it
+
+S1's paging fix would have converted C-241 from *"delivers a stale run"* into *"reports no
+run exists"* — because `get_predictions_by_metadata` returned `[]` on a failed search. A
+false-stale answer swapped for a false-absent one is not a fix. Caught while tracing the
+consumer chain, not while writing the fix.
+
+**Generalised:** after fixing a read, follow the value to its consumer and ask what the new
+failure mode *becomes* there.
+
+### 5.4 Deletion residue is wider than the code
+
+S4's review caught a dead `Account` import. The second sweep found what nobody had looked
+for: `modules/appwrite/README.md` still showed `auth_method=AuthMethod.SESSION` and
+`get_current_user()` as working examples — **user-facing documentation, inside the package,
+instructing readers to call symbols that now raise.** A `grep` for the deleted symbol across
+*code* is habit; across `.md`, ADRs, CICs and docstrings is not. It should be.
+
+### 5.4b A cross-repo impact claim needs the consumer's PIN read, not just its imports
+
+I told views-postprocessing their next clean install would break. It will not. They pin
+`views-pipeline-core = ">=2.1.3,<3.0.0"`, so they cannot resolve the release that made
+`appwrite` optional — and the 2.x they do resolve still declares it as a hard dependency.
+
+I had measured their **source** (two imports of our Appwrite modules) and drawn a
+conclusion about their **install**, without reading the one line that decides it. The
+correction came from the other repo, not from me — the fifth counting/scope error of this
+epic and the first found by someone else.
+
+They also corrected the remedy: I offered "declare the extra, or declare `appwrite`
+directly". Declaring it directly would assert a dependency they do not have, since they
+use our wrapper and never touch the SDK. Only `views-pipeline-core[appwrite]` is honest.
+
+**Rule: when claiming a downstream repo breaks, read its pin and the resolved version's
+metadata — not its import lines.**
+
+### 5.5 A packaging change cannot be verified from the environment that has the package
+
+S5 made `appwrite` an optional extra. Nine subprocess probes passed, three of them running
+in an interpreter with `import appwrite` **blocked** — thorough, and blind to the actual
+break: **both CI workflows run bare `poetry install`, which after this change no longer
+installs the SDK.** Every Appwrite test would have failed in CI.
+
+No local probe could have found it. The developer environment has the extra installed, so
+the failing configuration does not exist locally; it exists only in the install command.
+Found by a review question — *"does the extras block need a corresponding change anywhere
+else?"* — rather than by running anything.
+
+**Rule: a dependency or packaging change must be traced to every place that installs the
+package**, not only to every place that imports it. CI workflows, READMEs, install hints,
+and downstream pins.
+
+### 5.6 Test-double errors that produced false alarms
+
+Twice, a probe reported a defect that did not exist:
+- A mutation script reported "test is blind!" — it had introduced a syntax error, not a revert.
+- A test called `_file_exists_by_hash("hash", "name", "bucket")` against the real signature
+  `(bucket_id, file_hash, filename)`, so it searched for `"bucket"` and "failed" correctly.
+
+Both were caught by not believing the first result. **When a probe says the code is broken,
+check the probe before checking the code** — especially when the code was just written to be
+correct.
+
+---
+
+## 5.7 The drill-first rule paid for itself, exactly as þing-01 predicted
+
+#347 made *drill the hang path before shipping a value* a non-optional sequencing
+constraint, on the reasoning that introducing a timeout is itself a behaviour change:
+it converts an indefinite hang into a **raised** timeout on paths that have no handler
+for one.
+
+That is precisely what happened. The drill showed all three Appwrite paths *STILL BLOCKED
+after 3s*. Bounding them then made a transport exception reachable for the first time —
+and six handlers compared against `AppwriteException.message` as though it were always a
+string, when for a transport failure it is the exception **object**. `TypeError: argument
+of type 'ConnectTimeout' is not iterable`.
+
+**Without the drill, S7 ships a crash in place of a hang.** The constraint came from
+another repo's seat, in a þing, months earlier. Worth remembering when a sequencing rule
+looks like ceremony.
+
+## 5.8 The recorded fixture found something on its first use
+
+S8's capture was justified as closing a *known* gap — our fakes agreed with us about
+paging. It did that: the service returned **25 of 461** with no limit supplied, confirming
+in one command what nine green tests had certified the opposite of.
+
+But it also surfaced something nobody was looking for. **`file_size` and `mime_type` are
+null on all 25 production documents**, though `_build_metadata_document` intends to
+populate both. Low severity — both are optional in the schema and nothing reads them for a
+decision — but *no mock could ever have revealed it*, because every mock in this repo
+returns what its author expected the service to hold.
+
+**The general point: a recorded fixture pays for itself twice.** Once for the question you
+asked it, and once for the questions you did not know to ask.
+
+## 6. What worked and should be kept
+
+1. **`/code-review max` → `/review-diff` → fix → `/review-diff` again.** Adopted mid-epic at
+   the maintainer's suggestion; the second `/review-diff` pass caught a real gap in the fix
+   for the first pass's finding. Not ceremonial.
+2. **One story, one branch, full ritual.** Every PR is independently revertible and its
+   reasoning is in its own description.
+3. **Splitting by responsibility as a *fix*, not tidying.** C-249 was a renderer-only defect
+   — the data recorded the read was incomplete, the renderer never consulted it. That is easy
+   to write and near-invisible to review while the renderer lives inside the object it
+   formats. The 7-file split makes the class of bug harder to express.
+4. **Two exemption dictionaries.** `_BOUNDED_BY_REALITY` ("this is fine") kept separate from
+   `_TRACKED_DEFECTS` ("this is broken and registered", capped, must name a register ID).
+   Most allowlists blur those and become lies.
+5. **Registering rather than fixing, when the fix is a design decision.** C-257 needs an
+   ADR-047 policy call; folding it into the guard story would have been scope creep dressed
+   as thoroughness.
+6. **Substrate-faithful doubles.** `_SubstrateFakeDatabases` parses the SDK's real query
+   encoding and returns 25 rows when no limit is supplied. The PR #334 fake that returned
+   everything in one call is what let a broken walk pass nine green tests.
+
+## 7. What to change
+
+1. **A rule-establishing fix must enumerate its own population.** See §3. This is the single
+   highest-value change and would have prevented C-258.
+2. **Re-derive numbers at the point of writing them.** See §5.1.
+3. **Guards need their limits written next to them.** The Cluster J guard checks whether a
+   limit is *supplied*, not whether the walk *terminates* — and C-258 sailed through it
+   green. That limitation is now in the docstring, but it was discovered rather than
+   declared.
+4. **Distrust the probe first.** See §5.6.
+5. **Derive, do not list.** Any set a guard consults — function names, file paths, site
+   inventories — must be computed from the code on every run. Three of this epic's findings
+   are the same snapshot-rot failure, one of them inside a guard. See §3.
+6. **Grep deleted symbols across `.md` too**, not just `.py`. See §5.4.
+7. **A `@pytest.mark.skip` for a code defect must name a register entry.** C-260's bug
+   existed nowhere but in its own skip reason, and the skip outlived the fix — a coverage
+   hole that reports as healthy.
+8. **Trace a packaging change to every INSTALL site, not just every import site.** See
+   §5.5. Nine passing probes did not see that CI would break — and the same change broke a
+   *downstream* repo (C-262), found only by checking each consumer on disk.
+9. **Audit a guard's SCOPE, not only its logic — this has now happened three times.**
+   C-259 (which functions it watched), C-261 (which directories), and S6's dotenv check
+   (which *spelling* — it banned `find_dotenv` while `load_dotenv()` with no arguments does
+   the same thing). Every one was a guard written against the instance in front of the
+   author rather than the class the rule names. Ask: *where could this defect occur?* then
+   *where does the check look?* They were different sets all three times.
+
+   **Confirmed by the S0–S6 sweep, and this is the part that generalises:** the same error
+   exists in `test_falsification_no_god_classes.py`, which **nobody on this epic wrote**.
+   It names two classes literally; thirteen exceed its threshold; both named ones are
+   xfailed, so its live output was `1 passed, 2 xfailed` — it enforced nothing, and the
+   largest class in the package (1630 LOC) was unwatched. Four instances now, and the
+   fourth proves the pattern is about **how guards get written**, not about who wrote the
+   first three.
+
+   Superseded phrasing kept for the record: **audit a guard's territory, not only its logic.** Both guard defects here were scope
+   errors — which functions (C-259), which directories (C-261). Ask "where could this defect
+   occur?" and compare against "where does the check look?" — they were not the same set
+   either time.
+
+---
+
+## 7b. The thing "Resolved" does not mean
+
+views-postprocessing's reply surfaced something that applies to **nine** of this epic's
+resolutions at once: C-241 is marked Resolved here and #341 is closed, but the fix ships in
+**3.0.0, which is unpublished**, and the consumer pins `<3.0.0`. *The delivery path that
+actually experiences the Tier 1 is still running the defective code.*
+
+They reached the same conclusion from their seat, unprompted: *"we do not have the Tier-1
+fix either, despite #341 being closed."*
+
+The status is accurate for this repo and misleading at platform level. That is not a defect
+in the fixes; it is a gap in what a register serving a **platform** can mean by "Resolved"
+when it lives in a **package**. Registered as C-263, with the cheap countermeasure — an
+entry whose remedy is unpublished says so in its status — rather than a mechanism.
+
+## 8. Open items carried out of S0–S3
+
+| Item | Where |
+|---|---|
+| **C-257** — swallowed delete of the old metadata card leaves a dangling document | needs an ADR-047 write-failure policy call; **still the only entry in `_TRACKED_DEFECTS`, and the ceiling is 1** |
+| **Four page-size constants with one value** (`DEFAULT_PAGE_LIMIT`, `_CONTAINER_PAGE`, `_PROVISION_PAGE`, `PAGE_SIZE`) plus `MAX_METADATA_PAGES`/`MAX_PAGES` duplicated | WET's named trigger has now fired *four* times; extract in S11 close-out |
+| **T1 has effectively fired** — the views-crafdapi cut is the second consumer-API clone | operator scheduling decision; views-appwrite#23 |
+| **S5 (#345) is time-boxed** — `appwrite` → optional extra is free only while 3.0.0 is unpublished and five repos are pinned | sequence before the crafdapi cut |
+| Two register tier decisions still unanswered | C-26 promotion, C-05 demotion |
+| **`savers.py` still holds six classes in 213 lines** — S5's plan assumed it needed splitting, but removing one module-scope import achieved the packaging goal entirely. The file-structure question is now cleanly separable from the packaging one | S11, or when a seventh saver arrives |
+| **`pytest` is a hard runtime dependency** (`pyproject.toml`, pre-existing) — every consumer installs a test framework | own issue; out of #345's scope |
+| **`get_user_preferences` has no caller on the platform** — it survived S4 because it had a live API-key branch, but "live" meant reachable, not reached. `get_current_user` went because it could only ever *fail*, which is a stronger justification | genuine deletion candidate for S11 |
+| **`AuthManager` is an ABC with exactly one implementation** after S4 — speculative generality by this repo's own WET-before-DRY rule. Flagged, not removed: #345 reshapes this area | revisit after S5 |
+| **The F4 cross-repo ratchet enforces nothing in CI** — `pytest.skip()` inside `xfail(strict=True)` reports SKIPPED, so it fires only for a developer with both repos checked out. A limit, not a defect: no CI mechanism here can see another repo's file | stated in the test |
+
+---
+
+## 9. To finish when S4–S11 land
+
+- [ ] Did the guard catch anything else on its own?
+- [ ] Did any S0–S3 fix get reverted, worked around, or found wrong?
+- [ ] Cross-repo consequences of the three breaking changes, once views-postprocessing bumps
+- [ ] Whether the "enumerate the population" rule (§7.1) actually got applied in S4–S11
+- [ ] Final register delta and Cluster J status
+- [ ] Whether Phases 3–4 still look right from the far side of Phases 0–2

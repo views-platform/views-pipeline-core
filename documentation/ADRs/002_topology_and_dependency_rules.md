@@ -29,9 +29,12 @@ Layer 2: Validators (Sniffers), File I/O
          files/utils.py
 
 Layer 3: Domain Logic Modules
-         modules/statistics/, modules/transformations/,
-         modules/dataloaders/, modules/reconciliation/,
-         modules/reports/, modules/mapping/, modules/visualizations/
+         modules/dataloaders/
+         modules/statistics/,
+         modules/reconciliation/, modules/reports/,
+         modules/mapping/, modules/visualizations/
+           (above 6 extracted to views-reporting, ADR-054;
+            __init__.py re-export shims remain at Layer 3)
 
 Layer 4: Integration Modules
          modules/wandb/, modules/logging/, modules/appwrite/,
@@ -58,7 +61,7 @@ Layer 7: Templates and Package Management
 
 ### Known Deviations
 
-- `data/handlers.py` (Layer 1) imports `modules/statistics/PosteriorDistributionAnalyzer` (Layer 3) for MAP computation. This is a topology violation.
+- ~~`data/handlers.py` (Layer 1) imports `modules/statistics/PosteriorDistributionAnalyzer` (Layer 3) for MAP computation.~~ **Resolved (ADR-054, PR 8):** `PosteriorDistributionAnalyzer` extracted to views-reporting; `handlers.py` no longer imports from Layer 3.
 - `configs/pipeline.py` (Layer 1) lazily imports `managers/package/PackageManager` (Layer 7) for version fetching. This uses lazy import to avoid circular dependency but violates the spirit of the rule.
 - `ForecastingModelManager` (Layer 6) directly calls sniffer methods (Layer 2) — this is acceptable as orchestrators coordinate all layers.
 - `modules/validation/ensemble/check.py::validate_ensemble_model` (Layer 2/5) imports `ModelManager` from `managers.model` (Layer 6) and `EnsembleManager`, `EnsemblePathManager` from `managers.ensemble` (Layer 6) to run partition-alignment validation. This is a real L2/L5 → L6 short-cut. It is enforced via a *granular* exemption in `tests/test_boundary_enforcement.py` (only the three named symbols are allowed; any additional manager import still fails the test). Correct fix is moving the function into `managers/ensemble/` with a deprecation shim — tracked as risk C-50 and deferred to a dedicated PR.
@@ -67,7 +70,7 @@ Layer 7: Templates and Package Management
 
 The layer rules above are enforced by `tests/test_boundary_enforcement.py`, which runs as part of the standard pytest suite in CI (`.github/workflows/run_pytest.yml`). The test uses AST parsing to detect forbidden inter-layer imports and scans:
 
-- `data/` must not import from `managers/` or `modules/` (except `modules.statistics` / `modules.visualizations` for the handlers.py deviation above).
+- `data/` must not import from `managers/` or `modules/` (the former `modules.statistics` / `modules.visualizations` exemption is no longer needed — resolved by ADR-054 extraction).
 - `configs/` must not import from `managers/` (except `managers.package` for the pipeline.py deviation above).
 - `files/` must not import from `managers/`.
 - `modules/` must not import from `managers/` (except the granular `check.py` exemption above).

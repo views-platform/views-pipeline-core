@@ -67,6 +67,10 @@ Domain decisions specific to `views-pipeline-core`.
 | [048](048_prediction_saver_protocol.md) | PredictionSaver Protocol | Accepted |
 | [049](049_rolling_origin_evaluation.md) | Rolling-Origin Evaluation Protocol | Accepted |
 | [050](050_wandb_cross_cutting_integration.md) | WandB Cross-Cutting Integration | Accepted |
+| [051](051_composition_based_ensemble_architecture.md) | Composition-Based Ensemble Architecture | Accepted |
+| [052](052_artifact_prediction_timestamp_contract.md) | Artifact Prediction Timestamp Contract | Accepted |
+| [053](053_eval_path_track_b_retirement.md) | Eval Path Track B Retirement | Accepted |
+| [054](054_visualization_and_reporting_extraction.md) | Visualization and Reporting Extraction | Implemented |
 
 ---
 

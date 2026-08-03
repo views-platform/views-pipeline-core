@@ -3,7 +3,6 @@ import subprocess
 from pathlib import Path
 import re
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.managers.model import ModelPathManager
 import requests
 import logging
 import time
@@ -38,6 +37,7 @@ class PackageManager:
             latest_version (str): The latest release version of the package from GitHub (if initialized with package name).
         """
         self._validate = validate
+        from views_pipeline_core.data.model_path import ModelPathManager
         if ModelPathManager._is_path(path_input=package_path, validate=self._validate):
             if self._validate:
                 if not Path(package_path).is_dir():
@@ -180,7 +180,7 @@ class PackageManager:
             )
             raise
 
-        except Exception as e:
+        except (KeyError, TypeError, ValueError) as e:
             logging.error(
                 f"An unexpected error occurred while getting the latest version from GitHub: {type(e).__name__} - {e}",
                 exc_info=True,

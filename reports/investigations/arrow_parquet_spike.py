@@ -417,7 +417,7 @@ def block5_fix_c_arrow_buffer(
     print("\n  Buffer layout (documenting for the codebase):")
     all_buffers = arrow_col.buffers()
     print(f"    Arrow type:    {arrow_col.type}")
-    print(f"    Offset dtype:  int64 (LargeList) vs int32 (List)")
+    print("    Offset dtype:  int64 (LargeList) vs int32 (List)")
     print(f"    Total buffers in depth-first listing: {len(all_buffers)}")
     expected_values_size = N * S * 4   # float32 values
     expected_offsets_int32 = (N + 1) * 4   # int32 offsets
@@ -468,9 +468,9 @@ def block5_fix_c_arrow_buffer(
 
     # ── Also try the buffers() approach described in the plan ──
     print("\n  [Fix C alt] buffers() approach (scanning by size to find values):")
-    print(f"    NOTE: The plan says buffers()[1] = values, but that's only true for")
-    print(f"    specific Arrow versions/types. Polars emits LargeListArray (int64 offsets).")
-    print(f"    Correct approach: use arrow_col.flatten().to_numpy() for portability.")
+    print("    NOTE: The plan says buffers()[1] = values, but that's only true for")
+    print("    specific Arrow versions/types. Polars emits LargeListArray (int64 offsets).")
+    print("    Correct approach: use arrow_col.flatten().to_numpy() for portability.")
     values_buf_found = None
     values_buf_idx = None
     for i, buf in enumerate(all_buffers):
@@ -616,7 +616,7 @@ def block6_end_to_end(
     except AssertionError as e:
         c3 = _check(False, f"ensemble_mean mismatch: {e}")
 
-    c4 = _check(ensemble_mean.dtype == np.float32, f"output dtype is float32")
+    c4 = _check(ensemble_mean.dtype == np.float32, "output dtype is float32")
 
     passed = c1 and c2 and c3 and c4
     total_peak = r6 - r0
@@ -704,7 +704,8 @@ def main() -> None:
             results["2"] = (passed, write_pk, "Fix A: pyarrow direct write")
         except Exception as e:
             print(f"\n  ✗ Block 2 ERROR: {type(e).__name__}: {e}")
-            import traceback; traceback.print_exc()
+            import traceback
+            traceback.print_exc()
             results["2"] = (False, float("inf"), "Fix A: pyarrow direct write (ERROR)")
             arrow_path = None
 
@@ -716,7 +717,8 @@ def main() -> None:
                 results["3"] = (passed, read_pk, "Fix B: pl.read_parquet()")
             except Exception as e:
                 print(f"\n  ✗ Block 3 ERROR: {type(e).__name__}: {e}")
-                import traceback; traceback.print_exc()
+                import traceback
+                traceback.print_exc()
                 results["3"] = (False, float("inf"), "Fix B: pl.read_parquet() (ERROR)")
         else:
             results["3"] = (False, float("inf"), "Fix B: pl.read_parquet() (SKIPPED — no arrow_path)")
@@ -728,7 +730,8 @@ def main() -> None:
                 results["4"] = (passed, scan_pk, "Fix B+: pl.scan_parquet() column pushdown")
             except Exception as e:
                 print(f"\n  ✗ Block 4 ERROR: {type(e).__name__}: {e}")
-                import traceback; traceback.print_exc()
+                import traceback
+                traceback.print_exc()
                 results["4"] = (False, float("inf"), "Fix B+: pl.scan_parquet() (ERROR)")
         else:
             results["4"] = (False, float("inf"), "Fix B+: pl.scan_parquet() (SKIPPED)")
@@ -740,7 +743,8 @@ def main() -> None:
                 results["5"] = (passed, buf_pk, "Fix C: Arrow buffer → numpy")
             except Exception as e:
                 print(f"\n  ✗ Block 5 ERROR: {type(e).__name__}: {e}")
-                import traceback; traceback.print_exc()
+                import traceback
+                traceback.print_exc()
                 results["5"] = (False, float("inf"), "Fix C: Arrow buffer → numpy (ERROR)")
         else:
             results["5"] = (False, float("inf"), "Fix C: Arrow buffer → numpy (SKIPPED — no df_pl)")
@@ -751,7 +755,8 @@ def main() -> None:
             results["6"] = (passed, e2e_pk, "End-to-end: M=2 models × K=2 targets")
         except Exception as e:
             print(f"\n  ✗ Block 6 ERROR: {type(e).__name__}: {e}")
-            import traceback; traceback.print_exc()
+            import traceback
+            traceback.print_exc()
             results["6"] = (False, float("inf"), "End-to-end simulation (ERROR)")
 
     finally:

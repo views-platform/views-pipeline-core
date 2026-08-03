@@ -31,12 +31,16 @@ def generate(script_path: Path, model_name: str) -> bool:
     \"""
     meta_config = {{
         "name": "{model_name}", # Eg. "happy_kitten"
-        "models": [], # Eg. ["model1", "model2", "model3"]
-        "targets": ["ln_ged_sb_dep"],
+        "regression_targets": ["ln_ged_sb_dep"],
+        "classification_targets": [],
         "level": "pgm", # Eg. "pgm", "cm"
-        "aggregation": "median", # Eg. "median", "mean"
-        "metrics": ["RMSLE", "CRPS", "MSE", "MSLE", "y_hat_bar"],
-        "creator": "Your name here" 
+        "prediction_format": "dataframe", # "dataframe" for parquet-based, "prediction_frame" for numpy
+        "aggregation": "median", # DataFrame: "median", "mean". PredictionFrame: "arithmetic_mean", "concat"
+        "regression_point_metrics": ["RMSLE", "MSE", "MSLE", "y_hat_bar"],
+        # "metrics" was retired in views-evaluation 0.4.0 and its validator
+        # now raises on it (#380). CRPS is a SAMPLE metric — declare it under
+        # "regression_sample_metrics" if the model emits distributions.
+        "creator": "Your name here"
     }}
     return meta_config
 """

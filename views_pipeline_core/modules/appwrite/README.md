@@ -19,8 +19,12 @@ The `AppWriteFileModule` provides a full-featured interface for interacting with
 ## Installation
 
 ```bash
-pip install views-pipeline-core
+pip install 'views-pipeline-core[appwrite]'
 ```
+
+This module requires the optional `appwrite` extra (#345, register C-253) — the SDK is
+not installed by default, so that repos which never deliver to Appwrite do not carry it.
+
 
 ## Quick Start
 
@@ -143,25 +147,19 @@ config = AppwriteConfig(
 
 ### Session Authentication
 
-For user-specific access with email/password:
+### Session authentication was removed (#344)
 
-```python
-config = AppwriteConfig(
-    endpoint="https://cloud.appwrite.io/v1",
-    project_id="my_project",
-    credentials={
-        "email": "user@example.com",
-        "password": "secure_password"
-    },
-    auth_method=AuthMethod.SESSION
-)
+`AuthMethod.SESSION`, `SessionAuth` and `get_current_user()` no longer exist. This
+section used to show how to authenticate with an email and password; that mode was
+never constructed anywhere on the platform, and it carried a credential shape the seam
+contract has no slot for (þing-01 open item **O3**, register **C-255**).
 
-file_manager = AppWriteFileModule(config)
+`AuthMethod` now has exactly one member, `API_KEY`. A config still asking for
+`auth_method="session"` fails at construction with
+`ValueError: 'session' is not a valid AuthMethod` — deliberately, rather than falling
+back to something that appears to work.
 
-# Get current user info
-user = file_manager.get_current_user()
-print(f"Logged in as: {user.data['email']}")
-```
+If you need per-user access, that is a new design question, not a revival of this one.
 
 ## Core Classes
 

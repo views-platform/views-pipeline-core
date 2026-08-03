@@ -1,0 +1,48 @@
+name: Tests (minimal — no views-reporting)
+
+on:
+  push:
+    branches:
+      - main
+      - development
+  pull_request:
+    branches:
+      - main
+      - development
+  workflow_dispatch:
+
+jobs:
+  test-core-only:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install Poetry
+      run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+
+    - name: Install dependencies
+      run: |
+        # --extras appwrite: the SDK became OPTIONAL in #345 (C-253) so that
+        # views-hydranet, views-baseline and views-evaluation stop installing a
+        # vendor SDK they never reference. CI still needs it, because the suite
+        # covers the Appwrite modules. The WITHOUT-extra path is covered by the
+        # blocked-import probes in tests/test_import_purity.py, which do not
+        # depend on the SDK being absent from the environment.
+        poetry install --extras appwrite
+
+    - name: Remove views-reporting and heavyweight deps
+      run: |
+        pip uninstall -y views-reporting torch matplotlib geopandas plotly seaborn properscoring scipy shapely markdown || true
+
+    - name: Run core-only tests (without views-reporting)
+      run: |
+        set -e
+        poetry run pytest tests/ -v --tb=short -k "not test_falsification"

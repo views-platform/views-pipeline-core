@@ -24,7 +24,7 @@ A class requires a CIC if it meets any of these criteria:
 - Orchestrates other components (e.g., `ForecastingModelManager`, `EnsembleManager`)
 - Owns state (e.g., `ConfigurationManager`, `AggregationManager`)
 - Enforces invariants (e.g., `CoreConfigSniffer`, `CoreDataSniffer`)
-- Modifies semantics or transformation (e.g., `DatasetTransformationModule`)
+- Modifies semantics or transformation (e.g., `UpdateViewser`)
 
 ### CIC Structure (11 Sections + Known Deviations)
 
@@ -62,7 +62,7 @@ A class requires a CIC if it meets any of these criteria:
 | ReconciliationModule | Active |
 | DatastoreModule | Active |
 | ForecastingModelArgs | Active |
-| DatasetTransformationModule | Active |
+| DatasetTransformationModule | Retired — extracted (ADR-054), shim + CIC removed (#183, 2026-07-24) |
 | PosteriorDistributionAnalyzer | Active |
 | ReportModule | Active |
 

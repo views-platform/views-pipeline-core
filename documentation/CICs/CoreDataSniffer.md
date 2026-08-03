@@ -69,8 +69,12 @@ the training/evaluation layer.
 
 ## 6. Failure Modes and Loudness
 
-- `ValueError` — flat (non-Multi) index; wrong index names; month range mismatch.
-- `NotImplementedError` — `level` is not in `EXPECTED_INDEX_NAMES`.
+- `ValueError` — flat (non-Multi) index; wrong index names; incomplete month
+  coverage (every month in the expected range must be present — interior holes
+  fail, #288); at **construction**: unknown partition string (the legacy silent
+  forecasting fallback was tightened to fail loud, #288).
+- `NotImplementedError` — `level` is not in `EXPECTED_INDEX_NAMES` (raised at
+  construction, and again defensively at sniff time via `_check_multiindex`).
 - A bool-returning or "soft failure" path does not exist; replace any code that checks
   the return value of this sniffer.
 
@@ -129,9 +133,11 @@ CoreDataSniffer(...).sniff_loaded_data(df_predictions)  # use CorePredictionSnif
 - `_check_multiindex()` is a module-level utility function in `core_data_sniffer.py`
   shared with `CorePredictionSniffer`. It must remain in that module (composition
   over inheritance).
-- `_TRAINING_RUN_TYPES`, `_PARTITION_TRAIN`, `_PARTITION_TEST` are internal
-  constants. If the partition dict contract ever changes, update them — not the
-  inline strings they replaced.
+- Partition keys and run-type spellings live in `data/constants.py`; the
+  month-range rule itself is `data/partitions.resolve_month_range` — the single
+  implementation shared by the fetch path, this sniffer, and `CoreFrameSniffer`
+  (C-209, #288). If the partition contract ever changes, change it THERE — this
+  module no longer carries its own copy.
 
 ## 12. Known Deviations
 

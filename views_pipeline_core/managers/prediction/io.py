@@ -1,3 +1,4 @@
+# LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
 """Prediction I/O — single-responsibility persistence for predictions and evaluations.
 
 Extracted from ForecastingModelManager to isolate I/O concerns from orchestration.
@@ -16,6 +17,9 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.files.utils import save_dataframe
 from views_pipeline_core.managers.prediction.file_namer import PredictionFileNamer
+from views_pipeline_core.managers.prediction.vendor_faults import (
+    upload_transport_faults,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +129,11 @@ class PredictionIOManager:
         df_predictions.forecasts.to_store(name=name, overwrite=True)
 
         if self._datastore is not None:
+            # ADR-047: Appwrite is SECONDARY EXTERNAL — log at error, never raise.
+            # But `upload_data` reports failure by RETURN VALUE, so the result must be
+            # inspected or a failed delivery reads as a successful one (C-227, #330).
             try:
-                self._datastore.upload_data(
+                result = self._datastore.upload_data(
                     file=path_generated / predictions_name,
                     filename=predictions_name,
                     loa=level,
@@ -136,10 +143,21 @@ class PredictionIOManager:
                     description="",
                     type=self._model_path.target,
                 )
-                logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
-            except Exception as e:
+            except upload_transport_faults() as e:
                 logger.error(
                     f"Error uploading predictions to datastore: {e}", exc_info=True
+                )
+                return
+
+            if result is None or getattr(result, "success", False):
+                logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
+            else:
+                logger.error(
+                    "Appwrite upload FAILED for %s — the forecast was NOT delivered. "
+                    "code=%s error=%s",
+                    predictions_name,
+                    getattr(result, "code", None),
+                    getattr(result, "error", None),
                 )
 
     def save_evaluations(

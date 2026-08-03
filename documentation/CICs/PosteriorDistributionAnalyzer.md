@@ -103,6 +103,8 @@ Computes Maximum A Posteriori (MAP) estimates and Highest Density Intervals (HDI
 
 ## 7. Boundaries and Interactions
 
+- **Canonical location**: `views_reporting.statistics` (extracted from pipeline-core via ADR-054).
+- **Re-export shim**: `views_pipeline_core.modules.statistics` re-exports from `views_reporting` for backwards compatibility. The shim raises `ImportError` if `views-reporting` is not installed.
 - **Depends on**: `numpy`, `scipy.stats` (used only in `test_posterior_analyzer()`), `matplotlib.pyplot`, `torch` (imported but not used by `PosteriorDistributionAnalyzer` -- used by `ForecastReconciler` in the same module).
 - **Co-located with**: `ForecastReconciler` in the same `statistics.py` module. These are independent classes.
 - **Used by**: Pipeline reporting and analysis code that works with probabilistic model outputs.
@@ -114,7 +116,7 @@ Computes Maximum A Posteriori (MAP) estimates and Highest Density Intervals (HDI
 
 ```python
 import numpy as np
-from views_pipeline_core.modules.statistics.statistics import PosteriorDistributionAnalyzer
+from views_reporting.statistics import PosteriorDistributionAnalyzer
 
 # Basic analysis
 analyzer = PosteriorDistributionAnalyzer()
@@ -163,18 +165,17 @@ fig = analyzer.plot_summary()  # Returns None (return fig is commented out)
 
 ## 10. Test Alignment
 
-Tests live in `tests/test_modules/test_statistics.py` (71 tests across `PosteriorDistributionAnalyzer` and `ForecastReconciler`). Coverage for `PosteriorDistributionAnalyzer` includes:
-
-- **`_validate_samples`**: Valid list, valid array, removes NaN, removes Inf, all-invalid raises `ValueError`, empty array raises `ValueError`, mixed valid/invalid.
-- **`_validate_credible_masses`**: Valid values, sorting, invalid zero, invalid one, negative, greater than one, single value.
-- **`_validate_zero_mass_threshold`**: Valid values, boundary values, out-of-range.
-- **`_validate_bins`**: Valid values, zero, negative.
-- **`analyze()`**: Normal distribution, zero-dominated distribution (MAP forced to 0), custom credible masses, custom bins, HDI structure (nesting, MAP containment).
-- **`summary_dict()`**: Before and after `analyze()`.
-- **`print_summary()`**: Before and after `analyze()`, output format validation.
-- **`plot_summary()`**: Before `analyze()`, basic plot creation.
-- **`_enforce_hdi_structure()`**: MAP outside HDI, nesting enforcement.
-- **`test_posterior_analyzer()`**: Static validation suite execution.
+**Update (#316, 2026-07-27):** the pipeline-core suite `tests/test_modules/test_statistics.py`
+(71 tests) was pruned — the class lives in views-reporting (ADR-054), which
+covers `analyze()`, the validators, and thread safety in its own suite
+(`tests/test_c01_layer1_specification.py`, `tests/test_c01_thread_safety.py`).
+**Known gap:** the presentation methods `print_summary()` and `plot_summary()`
+currently have no coverage in either repo (flagged to views-reporting when the
+suite was pruned). The re-export shim that remained after #316 was retired on
+2026-07-28 (C-222; pre-release step of the 3.0.0 runbook, #313) — pipeline-core
+now has no stake in this class beyond this historical contract. `ForecastReconciler`
+was deleted upstream entirely. The pruned suite's full
+coverage inventory is in git history (`git show <pre-#316>:tests/test_modules/test_statistics.py`).
 
 ---
 
@@ -182,7 +183,7 @@ Tests live in `tests/test_modules/test_statistics.py` (71 tests across `Posterio
 
 - `plot_summary()` has a commented-out `return fig` statement. If re-enabled, callers could chain plotting with further customization.
 - The `__init__` has commented-out `samples` parameter and `auto_analyze` flag, suggesting a possible future API where analysis runs at construction.
-- `torch` is imported at module level but only used by `ForecastReconciler`, not by `PosteriorDistributionAnalyzer`. A future module split could remove this dependency.
+- ~~`torch` is imported at module level but only used by `ForecastReconciler`~~ Resolved upstream (#316 note): `ForecastReconciler` was deleted from views-reporting, which removed the co-location that forced the torch import.
 
 ---
 
@@ -190,8 +191,8 @@ Tests live in `tests/test_modules/test_statistics.py` (71 tests across `Posterio
 
 - None significant. The class is well-tested and focused. The only notable points are:
   - `plot_summary()` does not return the `Figure` object (the `return fig` line is commented out).
-  - `torch` is imported at module level due to co-location with `ForecastReconciler`.
   - The `_enforce_hdi_structure()` method contains a commented-out recursive call block that was apparently considered and rejected.
+  - (Historical: a module-level `torch` import forced by co-location with `ForecastReconciler` was resolved when upstream deleted that class — see §11.)
 
 ---
 
