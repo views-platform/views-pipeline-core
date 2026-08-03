@@ -182,6 +182,21 @@ def wire(monkeypatch):
     return _wire
 
 
+def _assert_refused_because(capsys, fragment: str) -> None:
+    """A refusal must fire for the REASON the test is about.
+
+    Four distinct paths now return exit code 2. Asserting only the code would let a
+    regression that collapsed them into a single early refusal keep every one of these
+    tests green — the tests would agree the tool refused, and be wrong about why.
+    """
+    message = capsys.readouterr().err
+    assert "REFUSING TO RUN" in message, f"Expected a refusal; got:\n{message}"
+    assert fragment in message, (
+        f"The tool refused, but not for the reason under test. Expected the message to "
+        f"mention {fragment!r}. Got:\n{message}"
+    )
+
+
 def test_dry_run_deletes_nothing(wire):
     """The default must be safe to run on anything."""
     tool, manager = wire()
@@ -203,7 +218,7 @@ def test_confirm_deletes_every_document_and_file(wire):
     assert len(manager.deleted_files) == len(FILES)
 
 
-def test_refuses_to_delete_anything_after_an_incomplete_read(wire):
+def test_refuses_to_delete_anything_after_an_incomplete_read(wire, capsys):
     """A short listing makes present records look absent — deleting on it is silent damage."""
     tool, manager = wire(short_read=True)
 
@@ -215,12 +230,13 @@ def test_refuses_to_delete_anything_after_an_incomplete_read(wire):
     assert manager.deleted_files == []
 
 
-def test_refuses_when_the_target_resolves_to_the_internal_forecasts_shelf(wire, monkeypatch):
+def test_refuses_when_the_target_resolves_to_the_internal_forecasts_shelf(wire, capsys, monkeypatch):
     """The one mistake with no undo: a mis-set env var pointing at the clean 461/461 shelf."""
     tool, manager = wire()
     monkeypatch.setenv("APPWRITE_PROD_FORECASTS_BUCKET_ID", _Config.bucket_id)
 
-    assert tool.main(["--confirm"]) == 2, (
+    assert tool.main(["--confirm"]) == 2
+    _assert_refused_because(capsys, "resolved bucket"), (
         "The tool wiped a bucket that matched APPWRITE_PROD_FORECASTS_BUCKET_ID. That is "
         "the internal forecasts shelf and this tool must never be able to reach it."
     )
@@ -245,7 +261,7 @@ def test_a_failed_delete_is_reported_and_not_counted_as_success(wire):
     )
 
 
-def test_refuses_when_the_protected_coordinates_cannot_be_resolved(wire):
+def test_refuses_when_the_protected_coordinates_cannot_be_resolved(wire, capsys):
     """An absent guard is not a passed guard (C-271).
 
     The first version compared `if protected and bucket == protected`, so an operator
@@ -259,11 +275,12 @@ def test_refuses_when_the_protected_coordinates_cannot_be_resolved(wire):
         "It cannot assert 'this is not the forecasts shelf' while blind to what the "
         "forecasts shelf is."
     )
+    _assert_refused_because(capsys, "not in the environment")
     assert manager.databases.deleted == []
     assert manager.deleted_files == []
 
 
-def test_refuses_when_the_collection_belongs_to_the_internal_shelf(wire, monkeypatch):
+def test_refuses_when_the_collection_belongs_to_the_internal_shelf(wire, capsys, monkeypatch):
     """Bucket AND collection. The two shelves share one database (C-271).
 
     A correct FAO bucket with a forecasts collection walks 130 FAO files against 461
@@ -274,11 +291,12 @@ def test_refuses_when_the_collection_belongs_to_the_internal_shelf(wire, monkeyp
     monkeypatch.setenv("APPWRITE_PROD_FORECASTS_COLLECTION_ID", _Config.collection_id)
 
     assert tool.main(["--confirm"]) == 2
+    _assert_refused_because(capsys, "resolved collection")
     assert manager.databases.deleted == []
     assert manager.deleted_files == []
 
 
-def test_refuses_when_the_two_sides_reference_none_of_each_other(wire):
+def test_refuses_when_the_two_sides_reference_none_of_each_other(wire, capsys):
     """A bucket and a collection sharing no file id are two shelves read as one.
 
     This is what a mis-set coordinate looks like when neither coordinate happens to be
@@ -289,6 +307,7 @@ def test_refuses_when_the_two_sides_reference_none_of_each_other(wire):
     tool, manager = wire(documents=unrelated)
 
     assert tool.main(["--confirm"]) == 2
+    _assert_refused_because(capsys, "metadata documents reference any of")
     assert manager.databases.deleted == []
     assert manager.deleted_files == []
 
@@ -356,7 +375,7 @@ def test_an_already_empty_shelf_is_a_no_op(wire):
     assert manager.deleted_files == []
 
 
-def test_a_torn_snapshot_refuses_even_though_the_count_guard_is_silent(wire):
+def test_a_torn_snapshot_refuses_even_though_the_count_guard_is_silent(wire, capsys):
     """The C-270 fix, pinned: dedup must run BEFORE `indeterminate` is consulted.
 
     `unique_by_id` is the only detector of an offset-unstable walk. A collection shifting
@@ -382,5 +401,27 @@ def test_a_torn_snapshot_refuses_even_though_the_count_guard_is_silent(wire):
         "and an equal number of records were missed — deleting on that reports success "
         "while leaving records behind."
     )
+    _assert_refused_because(capsys, "listing came back incomplete")
     assert manager.databases.deleted == []
     assert manager.deleted_files == []
+
+
+def test_accept_unpaired_shelf_allows_the_genuinely_broken_case_through(wire, capsys):
+    """The escape hatch for the second explanation, and only when asked for.
+
+    Zero overlap means either two shelves read as one, or one shelf that is genuinely
+    broken. The tool cannot tell, so it refuses and names both; this flag is how an
+    operator who HAS told them apart (by running the audit) proceeds. It is deliberately
+    not implied by --confirm, because the two situations differ by whether deleting
+    destroys another shelf's index.
+    """
+    unrelated = [{"$id": "dX", "fileId": "fSOMEWHERE_ELSE", "category": "forecast"}]
+    tool, manager = wire(documents=unrelated)
+
+    assert tool.main(["--confirm", "--accept-unpaired-shelf"]) == 0
+    assert manager.databases.deleted == ["dX"]
+    assert len(manager.deleted_files) == len(FILES)
+    assert "--accept-unpaired-shelf" in capsys.readouterr().out, (
+        "Proceeding on an operator override must say so in the output; a silent "
+        "override is indistinguishable from the check not having run."
+    )

@@ -3,8 +3,14 @@
 ## SPENT — kept as the record of how the question was answered, not as a live tool
 
 **Answered 2026-08-02: CURRENT.** The newest historical file *was* indexed
-(`historical_dataset_20260727_211747.parquet`, 19:18), 97 minutes after the orphan. Nothing
-stale was ever served; the orphan was litter.
+(`historical_dataset_20260727_211747.parquet`, 19:18), 97 minutes after the orphan — so
+nothing stale was being served *at the time of the probe*, and the orphan was litter.
+
+**Not "nothing stale was ever served".** That is what this docstring said until C-273
+caught it. The orphan was created at 17:41:14 and the superseding indexed file at
+19:18:03; for those 96m49s the newest *indexed* historical was strictly older than the
+newest *present* one, which is precisely the window in which stale history would have been
+served. A present-tense probe answers a present-tense question.
 
 The FAO shelf was then wiped entirely (views-faoapi#353, 144 documents and 130 files), so
 there is no orphan left for this to reason about and running it today will report an empty

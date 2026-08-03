@@ -46,10 +46,15 @@ and guarded by nothing is how the ordering rule below survived unchecked (C-276)
    agrees with itself). Consulting `indeterminate` first made those notes write-only,
    which was C-249 recurring inside a tool that cites C-249 (C-270).
 
-3. **Refuses when the two sides are not one shelf.** If no metadata document references
-   any file in the bucket, and both sets are non-empty, the coordinates name two
-   different shelves being read as one — the shape a mis-set pair produces when neither
-   coordinate happens to be the protected one.
+3. **Refuses when the two sides may not be one shelf.** If no metadata document
+   references any file in the bucket, and both sets are non-empty, there are two
+   explanations and this tool cannot distinguish them: the coordinates name two
+   *different* shelves (deleting destroys the other one's index), or this single shelf is
+   genuinely broken (a wipe is the remedy). It names both and refuses;
+   ``--accept-unpaired-shelf`` is the escape hatch for the second, and is deliberately not
+   implied by ``--confirm``. Asserting one cause where the evidence supports a disjunction
+   is C-273's defect, which would be an embarrassing thing to commit inside the fix for
+   C-271.
 
 4. **Dry run by default.** Without ``--confirm`` it prints what it would delete and exits
    without calling a single delete.
@@ -96,6 +101,19 @@ order once, and that disagreement was C-270.
 
     python tools/wipe_fao_shelf.py             # shows what it would delete, deletes nothing
     python tools/wipe_fao_shelf.py --confirm   # deletes
+
+## Exit codes
+
+    0  nothing to do, a dry run, or a complete success
+    1  some deletes failed, or the run stopped between phases — a receipt was printed
+       and a re-run is safe
+    2  REFUSED before touching anything: unresolvable or forbidden coordinates, an
+       incomplete read, or two shelves being read as one
+    3  the run finished but the accounting did not balance — some record was neither
+       deleted nor recorded as failed. Do NOT trust the counts; re-run the audit.
+
+A wrapper scripting on `$?` should treat 2 as "nothing happened" and 3 as "state
+unknown". Those are very different situations and used to be indistinguishable.
 """
 
 from __future__ import annotations
@@ -149,6 +167,16 @@ def main(argv: List[str] | None = None) -> int:
         "--confirm",
         action="store_true",
         help="Actually delete. Without this the script only reports what it would do.",
+    )
+    parser.add_argument(
+        "--accept-unpaired-shelf",
+        action="store_true",
+        help=(
+            "Proceed when no metadata document references any file in the bucket. That "
+            "state means EITHER the coordinates name two different shelves (do not "
+            "delete) OR this one shelf is genuinely broken (a wipe is the remedy). Pass "
+            "this only after running the audit and confirming the latter."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -228,19 +256,43 @@ def main(argv: List[str] | None = None) -> int:
         )
 
     # Do the two sides actually describe ONE shelf? `audit()` already computes this
-    # correlation; the wipe tool walked the same containers without ever asking. A
-    # bucket and a collection that share no file id are two different shelves being
-    # read as one — the shape a mis-set coordinate produces, and the shape that
-    # survives both checks above when neither coordinate is the protected one.
+    # correlation; the wipe tool walked the same containers without ever asking.
+    #
+    # Zero overlap has TWO explanations and the tool cannot tell them apart:
+    #   (i)  a mis-set bucket/collection pair — two shelves being read as one, which is
+    #        what survives both checks above when neither coordinate is the protected
+    #        one, and where deleting would destroy the other shelf's index;
+    #   (ii) a genuinely broken shelf where every file is an orphan and every document
+    #        dangles — which is a real state, and one a wipe is the REMEDY for.
+    #
+    # So it refuses and names both, rather than asserting (i) and sending the operator to
+    # check coordinates that may be perfectly correct. Stating one cause where the
+    # evidence supports a disjunction is register C-273's defect, and it would be
+    # embarrassing to commit it in the fix for C-271. `--accept-unpaired-shelf` is the
+    # escape hatch for (ii), deliberately verbose and deliberately not implied by
+    # `--confirm`.
     referenced_ids = {d.get("fileId") for d in documents if d.get("fileId")}
     present_ids = {f.get("$id") for f in files if f.get("$id")}
     if files and documents and not (referenced_ids & present_ids):
-        return _fail(
-            f"none of the {len(documents)} metadata documents reference any of the "
-            f"{len(files)} files in this bucket. That is not one shelf — it is two, "
-            f"being read as one, which is what a mis-set bucket/collection pair looks "
-            f"like. Verify APPWRITE_UNFAO_BUCKET_ID and APPWRITE_UNFAO_COLLECTION_ID "
-            f"name the same shelf before deleting anything."
+        if not args.accept_unpaired_shelf:
+            return _fail(
+                f"none of the {len(documents)} metadata documents reference any of the "
+                f"{len(files)} files in this bucket. Two explanations, and this tool "
+                f"cannot distinguish them:\n"
+                f"  (1) the coordinates name two DIFFERENT shelves being read as one — "
+                f"deleting would destroy the other shelf's index. Check "
+                f"APPWRITE_UNFAO_BUCKET_ID and APPWRITE_UNFAO_COLLECTION_ID.\n"
+                f"  (2) this shelf is genuinely broken — every file an orphan, every "
+                f"document dangling — which is a state a wipe is the remedy for.\n"
+                f"Run the audit to see which:\n"
+                f"  python -m views_pipeline_core.modules.appwrite.audit "
+                f"--target unfao --list\n"
+                f"If it is (2), re-run with --accept-unpaired-shelf."
+            )
+        print(
+            "  proceeding on --accept-unpaired-shelf: no document references any file "
+            "in this bucket, and the operator has asserted this is one broken shelf "
+            "rather than two shelves read as one.\n"
         )
 
     print(f"  files to delete     : {len(files)}")
@@ -270,7 +322,37 @@ def main(argv: List[str] | None = None) -> int:
     print("=" * 70)
 
     failures: List[str] = []
+    deleted_documents = 0
+    deleted_files = 0
+    receipt_printed = False
 
+    try:
+        deleted_documents, deleted_files, receipt_printed, code = _delete(
+            file_manager, bucket, collection, files, documents, failures
+        )
+    except BaseException:
+        # Ctrl-C is the interruption the documents-first ordering is reasoned about, and
+        # it is exactly when knowing what was already deleted matters most. `except
+        # Exception` would not catch it, so the receipt is guaranteed here and the
+        # signal is then re-raised unchanged.
+        _receipt(deleted_documents, len(documents), deleted_files, len(files), failures)
+        print(
+            "\n  INTERRUPTED. The counts above are what completed. Documents are "
+            "deleted before files, so the remainder is inert; re-run when ready.",
+            file=sys.stderr,
+        )
+        raise
+
+    if not receipt_printed:
+        _receipt(deleted_documents, len(documents), deleted_files, len(files), failures)
+    return code
+
+
+def _delete(file_manager, bucket, collection, files, documents, failures):
+    """Perform the deletion. Returns (deleted_documents, deleted_files, printed, code).
+
+    Split out so the caller can guarantee a receipt on ANY exit, including a signal.
+    """
     # Documents first: remove the index, then the content. An interruption then leaves
     # files without documents (inert) rather than documents pointing at nothing.
     deleted_documents = 0
@@ -305,7 +387,7 @@ def main(argv: List[str] | None = None) -> int:
             f"then re-run: no file has been touched.",
             file=sys.stderr,
         )
-        return 1
+        return deleted_documents, 0, True, 1
 
     deleted_files = 0
     for f in files:
@@ -349,7 +431,7 @@ def main(argv: List[str] | None = None) -> int:
             f"trust the counts above; re-run the audit before acting on them.",
             file=sys.stderr,
         )
-        return 3
+        return deleted_documents, deleted_files, True, 3
 
     if failures:
         print(f"\n  {len(failures)} FAILURE(S):")
@@ -357,12 +439,12 @@ def main(argv: List[str] | None = None) -> int:
             print(f"    - {failure}")
         print("\n  Re-run to retry the remainder. Files are deleted only after every "
               "document is, so a re-run cannot make the pairing worse.")
-        return 1
+        return deleted_documents, deleted_files, True, 1
 
     print("\n  Shelf is empty. Re-run the audit to confirm:")
     print("    python -m views_pipeline_core.modules.appwrite.audit "
           "--target unfao --list")
-    return 0
+    return deleted_documents, deleted_files, True, 0
 
 
 if __name__ == "__main__":
