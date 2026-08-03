@@ -1,18 +1,43 @@
 [tool.poetry]
 name = "views_pipeline_core"
 version = "3.0.0"
-description = ""
+description = "Core orchestration, data and model-management library for the VIEWS conflict forecasting platform."
 authors = [
     "Borbála Farkas <borbala.farkas@pcr.uu.se>",
     "Dylan Pinheiro <dylpin@prio.org>",
     "Xiaolong Sun <xiaolong.sun@pcr.uu.se>"
 ]
 readme = "README.md"
+license = "MIT"
+homepage = "https://github.com/views-platform/views-pipeline-core"
+repository = "https://github.com/views-platform/views-pipeline-core"
+documentation = "https://github.com/views-platform/views-pipeline-core/tree/main/documentation"
+keywords = ["conflict-forecasting", "views", "pipeline", "machine-learning", "forecasting"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Operating System :: OS Independent",
+]
 
 [tool.poetry.dependencies]
+# Platform envelope (>=3.11,<3.15) — matches views-evaluation 1.0.0 and views-reporting
+# 0.3.3, so this repo neither under- nor over-declares relative to the platform.
+#
+# TESTED ON 3.11 ONLY. Every CI workflow here and in both sibling repos hardcodes 3.11;
+# there is no version matrix. On 3.12-3.14 an install RESOLVES and then fails LOUDLY at
+# BUILD time, in the transitive chain rather than here:
+#
+#   ingester3 =2.1.1 -> levenshtein 0.20.9   cp311 is its last wheel; the sdist build fails
+#   viewser / v-t-l   -> pandas <2.0          pandas 1.5.3 ships no wheel past cp311
+#
+# Both upstreams declare a permissive `requires_python` they do not have wheels for, which
+# is why the resolver does not catch it. Narrowing our own ceiling would not fix the wall —
+# it would only re-create the under-declaration views-reporting deliberately widened away
+# from — and a build error is loud, not silent. The fix is upstream. See register C-112
+# (the pandas <2.0 ecosystem lock across eight views-* packages, tracked as #308).
 python = ">=3.11,<3.15"
 viewser = "^6.6.4"
-pytest = "^9.0.3"
 ingester3 = "=2.1.1"
 wandb = "^0.18.7"
 pyprojroot="^0.3.0"
@@ -44,6 +69,14 @@ appwrite = { version = ">=13.4.1,<14.0.0", optional = true }
 
 [tool.poetry.extras]
 appwrite = ["appwrite"]
+
+# `pytest` sat in the RUNTIME dependencies until 3.0.0, so every consumer of the platform's
+# most-depended-upon package installed a test framework it never imports — five repos
+# directly and ~45 downstream. It is a build/test tool, not a runtime one, and this is the
+# release where moving it costs nothing. `poetry install` includes dev groups by default,
+# so both CI workflows keep working unchanged (verified, not assumed).
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.3"
 
 [tool.pytest.ini_options]
 filterwarnings = ["ignore::DeprecationWarning", "ignore::RuntimeWarning", "ignore::UserWarning"]
