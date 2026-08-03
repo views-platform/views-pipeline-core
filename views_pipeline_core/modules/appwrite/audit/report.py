@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 
 @dataclass
-class ReconciliationReport:
+class AuditReport:
     """The pairing between bucket files and metadata documents, as observed.
 
     ``indeterminate`` is the field that matters most: any listing that failed, was
@@ -72,12 +72,12 @@ class ReconciliationReport:
 
     def render(self, list_detail: bool = False) -> str:
         """Format the report. Delegates; see ``render.py`` for why they are apart."""
-        from views_pipeline_core.modules.appwrite.reconcile.render import render_report
+        from views_pipeline_core.modules.appwrite.audit.render import render_report
 
         return render_report(self, list_detail=list_detail)
 
 
-def exit_code(report: ReconciliationReport) -> int:
+def exit_code(report: AuditReport) -> int:
     """0 clean or hygiene-only, 1 broken pairing, 2 could not complete.
 
     Hygiene findings exit 0 on purpose. The previous version returned 1 for *any*

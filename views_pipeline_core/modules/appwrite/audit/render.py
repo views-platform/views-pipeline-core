@@ -1,4 +1,4 @@
-"""Turning a reconciliation report into text an operator will act on.
+"""Turning an audit report into text an operator will act on.
 
 **This module is where C-249 lived, and the ordering below is the fix.** The previous
 renderer printed the "IS THIS HISTORY, OR IS IT A DEFECT?" interpretation *first*,
@@ -21,8 +21,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from views_pipeline_core.modules.appwrite.reconcile.report import ReconciliationReport
-from views_pipeline_core.modules.appwrite.reconcile.timeline import UNDATED_KEY
+from views_pipeline_core.modules.appwrite.audit.report import AuditReport
+from views_pipeline_core.modules.appwrite.audit.timeline import UNDATED_KEY
 
 _RULE = "-" * 68
 _MAX_LISTED = 25
@@ -32,7 +32,7 @@ def _stamp(value: Optional[datetime]) -> str:
     return value.isoformat() if value else ""
 
 
-def _header(report: ReconciliationReport) -> List[str]:
+def _header(report: AuditReport) -> List[str]:
     files_range = (
         f"   {_stamp(report.files_earliest)} -> {_stamp(report.files_latest)}"
         if report.files_earliest
@@ -44,7 +44,7 @@ def _header(report: ReconciliationReport) -> List[str]:
         else ""
     )
     return [
-        "Appwrite reconciliation report",
+        "Appwrite shelf audit",
         "=" * 68,
         f"bucket     : {report.bucket_id}",
         f"collection : {report.collection_id}",
@@ -54,7 +54,7 @@ def _header(report: ReconciliationReport) -> List[str]:
     ]
 
 
-def _incompleteness(report: ReconciliationReport) -> List[str]:
+def _incompleteness(report: AuditReport) -> List[str]:
     """Printed FIRST, above everything it qualifies. See the module docstring."""
     if not report.indeterminate:
         return []
@@ -71,7 +71,7 @@ def _incompleteness(report: ReconciliationReport) -> List[str]:
     ]
 
 
-def _history_or_defect(report: ReconciliationReport) -> List[str]:
+def _history_or_defect(report: AuditReport) -> List[str]:
     """The interpretation — suppressed entirely when the read was incomplete."""
     if not report.orphan_files:
         return []
@@ -144,7 +144,7 @@ def _history_or_defect(report: ReconciliationReport) -> List[str]:
     return lines
 
 
-def _totals(report: ReconciliationReport) -> List[str]:
+def _totals(report: AuditReport) -> List[str]:
     lines = [
         _RULE,
         "TOTALS" + (" (lower bounds — see above)" if report.indeterminate else ""),
@@ -170,7 +170,7 @@ def _totals(report: ReconciliationReport) -> List[str]:
     return lines
 
 
-def _detail(report: ReconciliationReport, list_detail: bool) -> List[str]:
+def _detail(report: AuditReport, list_detail: bool) -> List[str]:
     if list_detail:
         lines = ["", "orphan files (full list):"]
         lines += [
@@ -195,7 +195,7 @@ def _detail(report: ReconciliationReport, list_detail: bool) -> List[str]:
     return []
 
 
-def _verdict(report: ReconciliationReport) -> List[str]:
+def _verdict(report: AuditReport) -> List[str]:
     if report.indeterminate:
         return ["", "VERDICT: INDETERMINATE — the audit could not complete; see the top."]
     if report.pairing_is_broken:
@@ -211,7 +211,7 @@ def _verdict(report: ReconciliationReport) -> List[str]:
     return ["", "VERDICT: CLEAN — every file has a document and vice versa."]
 
 
-def render_report(report: ReconciliationReport, list_detail: bool = False) -> str:
+def render_report(report: AuditReport, list_detail: bool = False) -> str:
     return "\n".join(
         _header(report)
         + _incompleteness(report)

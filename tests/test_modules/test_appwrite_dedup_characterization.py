@@ -387,7 +387,7 @@ def test_the_replace_path_delete_is_classified_by_the_same_rule(manager, payload
     different hash — so the old file is deleted and replaced. That delete's result is
     classified by the same helper, and a failure read as "the file is gone" would delete
     the document too, orphaning a file that is still there. One of the three
-    pairing-breaking paths `modules/appwrite/reconcile` exists to enumerate.
+    pairing-breaking paths `modules/appwrite/audit` exists to enumerate.
 
     Note this drives the real `upload_file_with_metadata` rather than `_run_dedup`,
     which stubs out the branch under test.

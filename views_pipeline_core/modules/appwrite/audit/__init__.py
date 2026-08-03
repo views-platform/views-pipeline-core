@@ -1,4 +1,4 @@
-"""Read-only reconciliation audit for the Appwrite seam. RUNNABLE, NEVER IMPORTABLE.
+"""Read-only shelf audit for the Appwrite seam. RUNNABLE, NEVER IMPORTABLE.
 
 Forecasts live on the seam as two things: the **file** in a bucket, and a **metadata
 document** ("index card") describing it. Consumers select by metadata, so a file whose
@@ -19,7 +19,7 @@ because nothing could enumerate the damage. This module is that enumeration (C-2
 
 **It performs no writes and no provisioning.** Run it:
 
-    python -m views_pipeline_core.modules.appwrite.reconcile --target forecasts
+    python -m views_pipeline_core.modules.appwrite.audit --target forecasts
 
 Coordinates and credentials come from the process environment, which fails loud naming
 any missing variable. Nothing is defaulted — a wrong coordinate must not be reachable
@@ -46,36 +46,30 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from views_pipeline_core.modules.appwrite.reconcile.report import (
-    ReconciliationReport,
+from views_pipeline_core.modules.appwrite.audit.report import (
+    AuditReport,
     exit_code,
 )
-from views_pipeline_core.modules.appwrite.reconcile.targets import (
+from views_pipeline_core.modules.appwrite.audit.targets import (
     TARGETS,
     build_file_manager,
 )
-from views_pipeline_core.modules.appwrite.reconcile.timeline import add_timeline
-from views_pipeline_core.modules.appwrite.reconcile.walk import (
+from views_pipeline_core.modules.appwrite.audit.timeline import add_timeline
+from views_pipeline_core.modules.appwrite.audit.walk import (
     list_all_documents,
     list_all_files,
 )
 
 __all__ = [
-    "ReconciliationReport",
-    "reconcile",
+    "AuditReport",
+    "audit",
     "exit_code",
     "build_file_manager",
     "TARGETS",
 ]
 
-# Kept as private aliases because the tests and the CLI already reach for these names;
-# renaming them is churn that would obscure the split in review.
-_build_file_manager = build_file_manager
-_exit_code = exit_code
-_TARGETS = TARGETS
 
-
-def reconcile(file_manager, bucket_id: Optional[str] = None) -> ReconciliationReport:
+def audit(file_manager, bucket_id: Optional[str] = None) -> AuditReport:
     """Compare the bucket's files against the metadata collection's documents.
 
     Args:
@@ -83,12 +77,12 @@ def reconcile(file_manager, bucket_id: Optional[str] = None) -> ReconciliationRe
         bucket_id: Bucket to audit. Defaults to the manager's configured bucket.
 
     Returns:
-        A :class:`ReconciliationReport`. Never raises on a substrate error — an
+        A :class:`AuditReport`. Never raises on a substrate error — an
         unreadable or short listing becomes an ``indeterminate`` entry, so the caller
         can tell "clean" apart from "could not check".
     """
     bucket = bucket_id or file_manager.config.bucket_id
-    report = ReconciliationReport(
+    report = AuditReport(
         bucket_id=bucket, collection_id=file_manager.config.collection_id
     )
 
@@ -125,7 +119,7 @@ def reconcile(file_manager, bucket_id: Optional[str] = None) -> ReconciliationRe
 
 
 def _unique_by_id(
-    items: List[Dict[str, Any]], report: ReconciliationReport, what: str
+    items: List[Dict[str, Any]], report: AuditReport, what: str
 ) -> List[Dict[str, Any]]:
     """Collapse records sharing an ``$id``, recording that it happened.
 
