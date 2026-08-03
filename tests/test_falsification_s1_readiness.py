@@ -71,18 +71,118 @@ def test_s1_disk_headroom_for_rusty_bucket_at_declared_samples():
 
 
 # --- HARD #2 (probe P1): proof must run engine code slated for publication ---
-@_ENV_GATED
-def test_s1_hydranet_worktree_on_development():
-    """The publish-gate proof is invalid if the editable views-hydranet runs an
-    experimental branch (feat/zinb-distributional-head, 62 ahead / 2 behind)."""
-    out = subprocess.run(
-        ["git", "-C", "/home/simon/Documents/scripts/views_platform/views-hydranet",
-         "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True, text=True, check=True,
+#
+# Branches a proof may legitimately run. This is the platform's branching model — a stated
+# convention that does not rot — NOT a list of repositories, which does. The repositories
+# are derived below. A hardcoded inventory of repos is the failure this codebase has now
+# shipped five times (C-259, C-261, C-264, #346, C-277), and the previous version of this
+# check was one: a single absolute path to views-hydranet.
+_PUBLISHABLE_BRANCHES = frozenset({"development", "main"})
+
+
+def _editable_source_trees() -> dict:
+    """Every installed distribution served from a working tree on this machine.
+
+    Derived from each distribution's `direct_url.json`, which pip writes with
+    `"editable": true` for `pip install -e` / `.pth` installs. That is the actual
+    definition of the risk C-206 names — "the proof runs whatever is in that folder right
+    now" — so it is the right thing to enumerate, and it cannot go stale as repos are
+    added or removed.
+    """
+    import importlib.metadata as md
+    import json
+
+    trees = {}
+    for dist in md.distributions():
+        try:
+            raw = dist.read_text("direct_url.json")
+        except Exception:  # noqa: BLE001 — a malformed dist must not hide the others
+            continue
+        if not raw:
+            continue
+        try:
+            info = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not info.get("dir_info", {}).get("editable"):
+            continue
+        url = info.get("url", "")
+        if url.startswith("file://"):
+            trees[dist.metadata["Name"]] = url[len("file://"):]
+    return trees
+
+
+def _git(path: str, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", path, *args], capture_output=True, text=True, check=True
     ).stdout.strip()
-    assert out == "development", (
-        f"views-hydranet editable worktree is on '{out}', not 'development' — "
-        f"the S1 proof would validate unpublished experimental engine code."
+
+
+@_ENV_GATED
+def test_s1_every_editable_source_tree_is_publishable_state():
+    """C-206: a proof validates whatever branch each editable tree happens to be on.
+
+    The original check named ONE absolute path (views-hydranet) and asserted ONE thing
+    (branch == development). It was written when that tree sat on
+    `feat/zinb-distributional-head`, 62 ahead and dirty — a green S1 run would have
+    "proven" unpublished experimental engine code, indistinguishable from a valid proof.
+
+    Three ways that check was too narrow, all fixed here:
+
+    * **It named one repo.** Every editable install carries the same risk; the set is now
+      derived from `direct_url.json` rather than listed.
+    * **It ignored uncommitted changes.** A clean `development` with dirty files validates
+      code that exists nowhere but this laptop, and no reviewer can ever see it.
+    * **It ignored unpushed commits.** Likewise: a proof that cannot be reproduced from the
+      remote is not evidence anyone else can check.
+
+    Not run in CI by design — there are no editable installs there, so the check would be
+    vacuous rather than reassuring.
+    """
+    trees = _editable_source_trees()
+    assert trees, (
+        "No editable source trees found, so this check verified nothing. On a proof "
+        "machine the sibling repos are installed editable; if that is no longer true, "
+        "C-206 is resolved by construction and this test should be deleted deliberately."
+    )
+
+    problems = []
+    for name, path in sorted(trees.items()):
+        if not os.path.isdir(os.path.join(path, ".git")):
+            continue  # installed from a directory that is not a checkout — nothing to assert
+        branch = _git(path, "rev-parse", "--abbrev-ref", "HEAD")
+        dirty = _git(path, "status", "--porcelain")
+        if branch not in _PUBLISHABLE_BRANCHES:
+            problems.append(f"{name}: on '{branch}', not one of {sorted(_PUBLISHABLE_BRANCHES)}")
+        if dirty:
+            problems.append(f"{name}: {len(dirty.splitlines())} uncommitted path(s)")
+
+        try:
+            ahead = _git(path, "rev-list", "--count", "@{u}..HEAD")
+        except subprocess.CalledProcessError:
+            # No upstream at all — worse than being ahead of one, because there is no
+            # remote state to compare against or to reproduce the run from.
+            problems.append(f"{name}: branch '{branch}' tracks no remote")
+        else:
+            if ahead != "0":
+                problems.append(f"{name}: {ahead} commit(s) not pushed")
+
+    assert not problems, (
+        "Editable source trees are not in a state a proof can stand on:\n  "
+        + "\n  ".join(problems)
+        + "\n\nA proof run against these validates code that is not what will be "
+        "published, and its output is indistinguishable from a valid proof.\n\n"
+        "Two ways out (issue #274):\n"
+        "  (1) Bring each tree to a clean, pushed, publishable branch.\n"
+        "  (2) Point the proof environment at dedicated worktrees, so an operator's\n"
+        "      feature branch is never in the way:\n\n"
+        "        git -C <repo> worktree add ../<repo>-proof development\n"
+        "        # then repoint the proof env's .pth at <repo>-proof\n\n"
+        "      Option 2 costs ~2.5 GB per repo. It was NOT set up in advance "
+        "deliberately: this volume is at 95% with 46 GB free, and C-207/#273 puts the "
+        "proof's own requirement at ~300 GB — so the worktrees are a step to take when "
+        "the proof is actually scheduled and the disk problem is solved, not a directory "
+        "to leave sitting."
     )
 
 
