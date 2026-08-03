@@ -696,10 +696,10 @@ class TestDedupDoesNotDestroyRecords:
     """
 
     def test_records_without_an_id_are_kept_not_collapsed(self):
-        from views_pipeline_core.modules.appwrite.audit import _unique_by_id
+        from views_pipeline_core.modules.appwrite.audit import unique_by_id
 
         report = AuditReport(bucket_id="b", collection_id="c")
-        kept = _unique_by_id(
+        kept = unique_by_id(
             [{"name": "a"}, {"name": "b"}, {"name": "c"}], report, "file"
         )
 
@@ -711,10 +711,10 @@ class TestDedupDoesNotDestroyRecords:
         assert any("identif" in r.lower() for r in report.indeterminate)
 
     def test_genuine_repeats_are_still_collapsed(self):
-        from views_pipeline_core.modules.appwrite.audit import _unique_by_id
+        from views_pipeline_core.modules.appwrite.audit import unique_by_id
 
         report = AuditReport(bucket_id="b", collection_id="c")
-        kept = _unique_by_id([{"$id": "f1"}, {"$id": "f1"}, {"$id": "f2"}], report, "file")
+        kept = unique_by_id([{"$id": "f1"}, {"$id": "f1"}, {"$id": "f2"}], report, "file")
 
         assert len(kept) == 2
         assert any("more than once" in r for r in report.indeterminate)

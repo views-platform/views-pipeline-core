@@ -101,7 +101,7 @@ def _show(label: str, record: Optional[Dict[str, Any]], name_key: str = "name") 
 
 def main() -> int:
     from views_pipeline_core.modules.appwrite.audit import (
-        _unique_by_id,
+        unique_by_id,
         build_file_manager,
     )
     from views_pipeline_core.modules.appwrite.audit.report import AuditReport
@@ -123,8 +123,8 @@ def main() -> int:
     # Deduplicate exactly as the audit does. Offset-based paging can return a record
     # twice, which would inflate the counts below and could make an indexed file look
     # like two (C-251). Reusing the audit's helper keeps the two tools in agreement.
-    files = _unique_by_id(files, report, "file")
-    documents = _unique_by_id(documents, report, "document")
+    files = unique_by_id(files, report, "file")
+    documents = unique_by_id(documents, report, "document")
 
     # The audit's walkers record an "indeterminate" note when a listing came back short of
     # the total the service reported. If that happened, every count below is unsafe and the

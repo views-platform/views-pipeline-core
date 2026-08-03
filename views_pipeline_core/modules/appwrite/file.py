@@ -2354,8 +2354,9 @@ class AppWriteFileModule:
             # Rollback: delete the uploaded file if metadata fails. `delete_file`
             # reports failure by RETURN VALUE, so the `except` below never sees one —
             # inspect the result, or a failed rollback leaves an orphaned file in the
-            # bucket and says nothing (the fourth route to the state audit.py
-            # exists to detect; register C-227's disease at this site).
+            # bucket and says nothing (the fourth route to the state the
+            # `modules/appwrite/audit/` package exists to detect; register C-227's
+            # disease at this site).
             try:
                 rollback = self.delete_file(bucket_id, file_id)
                 if not rollback.success:

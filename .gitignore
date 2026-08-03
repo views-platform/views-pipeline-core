@@ -227,3 +227,10 @@ graphify-out/
 
 # Agent working instructions — local to each operator's checkout, not a repo artifact.
 CLAUDE.md
+
+# Appwrite audit/tooling scratch caches. The audit and the operator tools set
+# `cache_dir` on their client, which materialises a directory on first run. Ignored so a
+# read-only audit does not leave the working tree dirty. (`.appwrite_reconcile_cache` was
+# the pre-#390 name and is listed so an older checkout stays clean too.)
+.appwrite_audit_cache/
+.appwrite_reconcile_cache/

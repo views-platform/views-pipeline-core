@@ -1,4 +1,12 @@
-"""Read-only shelf audit for the Appwrite seam. RUNNABLE, NEVER IMPORTABLE.
+"""Read-only shelf audit for the Appwrite seam. RUNNABLE, NEVER IMPORTABLE BY THE
+DELIVERY PATH.
+
+The qualifier matters and was missing. `tools/wipe_fao_shelf.py` and
+`tools/is_the_fao_serving_stale_history.py` both import this package — they are operator
+scripts, not the delivery path, so they are not what the rule forbids. The bare slogan
+was copied from `provisioning.py`, which states the qualifier AND is enforced in a
+subprocess by `tests/test_import_purity.py`; this package has neither, so the phrase read
+as violated the moment a tool imported it (register C-277).
 
 Forecasts live on the seam as two things: the **file** in a bucket, and a **metadata
 document** ("index card") describing it. Consumers select by metadata, so a file whose
@@ -44,7 +52,7 @@ the object it formats, that failure is easy to write and nearly invisible to rev
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 
 from views_pipeline_core.modules.appwrite.audit.report import (
     AuditReport,
@@ -56,6 +64,7 @@ from views_pipeline_core.modules.appwrite.audit.targets import (
 )
 from views_pipeline_core.modules.appwrite.audit.timeline import add_timeline
 from views_pipeline_core.modules.appwrite.audit.walk import (
+    unique_by_id,
     list_all_documents,
     list_all_files,
 )
@@ -66,6 +75,7 @@ __all__ = [
     "exit_code",
     "build_file_manager",
     "TARGETS",
+    "unique_by_id",
 ]
 
 
@@ -93,8 +103,8 @@ def audit(file_manager, bucket_id: Optional[str] = None) -> AuditReport:
     # a set, so a file returned twice by offset-unstable paging inflated `files_total`
     # and could appear twice in `orphan_files` — the displayed count and the compared
     # set disagreeing is its own small credibility problem (C-251).
-    files = _unique_by_id(files, report, "file")
-    documents = _unique_by_id(documents, report, "document")
+    files = unique_by_id(files, report, "file")
+    documents = unique_by_id(documents, report, "document")
 
     report.files_total = len(files)
     report.documents_total = len(documents)
@@ -116,44 +126,3 @@ def audit(file_manager, bucket_id: Optional[str] = None) -> AuditReport:
 
     add_timeline(report, files, documents)
     return report
-
-
-def _unique_by_id(
-    items: List[Dict[str, Any]], report: AuditReport, what: str
-) -> List[Dict[str, Any]]:
-    """Collapse records sharing an ``$id``, recording that it happened.
-
-    A repeat is not necessarily an error — paging under concurrent writes can return
-    one twice — but it means the walk saw a shifting collection, which is worth saying
-    out loud rather than quietly averaging away.
-    """
-    seen, unique, unidentified = set(), [], 0
-    for item in items:
-        key = item.get("$id")
-        if not key:
-            # No id, so no way to tell this record from another one — which is NOT the
-            # same as it being a repeat. Keying them all on None collapsed three
-            # untagged records into one and reported the two it destroyed as
-            # duplicates: a de-duplicator deleting distinct records, inside the tool
-            # whose whole job is enumerating completely. Keep it and declare it.
-            unidentified += 1
-            unique.append(item)
-            continue
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(item)
-
-    repeats = len(items) - len(unique)
-    if repeats:
-        report.indeterminate.append(
-            f"{repeats} {what}(s) were returned more than once by paging; the "
-            f"collection changed during the walk, so these counts are a snapshot of a "
-            f"moving target"
-        )
-    if unidentified:
-        report.indeterminate.append(
-            f"{unidentified} {what}(s) carry no $id and cannot be identified; they are "
-            f"counted but cannot be matched against the other side of the pairing"
-        )
-    return unique

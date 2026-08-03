@@ -101,7 +101,7 @@ def test_a_config_still_asking_for_session_fails_loudly(tmp_path):
         _build("session")
 
     # The surviving mode still coerces, so the refusal is specific rather than a blanket
-    # rejection of string auth methods — `reconcile/targets.py` passes "api_key".
+    # rejection of string auth methods — `audit/targets.py` passes "api_key".
     assert _build("api_key").auth_method.value == "api_key"
 
 
