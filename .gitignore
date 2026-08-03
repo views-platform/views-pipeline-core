@@ -234,3 +234,5 @@ CLAUDE.md
 # the pre-#390 name and is listed so an older checkout stays clean too.)
 .appwrite_audit_cache/
 .appwrite_reconcile_cache/
+.appwrite_provisioning_cache/
+.appwrite_cache/

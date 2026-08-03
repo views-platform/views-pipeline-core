@@ -27,9 +27,12 @@ degrades loudly and 503s past the freshness SLA (ADR-033 / views-faoapi#264).
 
 ## Safety properties
 
-Each is pinned by a test in `tests/test_tools_wipe_fao_shelf.py`; the numbers below and
-that file's docstring are kept in step deliberately, because a property claimed in prose
-and guarded by nothing is how the ordering rule below survived unchecked (C-276).
+Each is pinned by a test in `tests/test_tools_wipe_fao_shelf.py` — **except the accounting
+assertion in property 6, which is unreachable by construction** and therefore untested. The
+numbers below and that file's docstring are kept in step deliberately, because a property
+claimed in prose and guarded by nothing is how the ordering rule survived unchecked (C-276),
+and stating "each is pinned" while one is not would be that same defect in the sentence
+disclaiming it.
 
 1. **The FAO shelf only — and it must be able to PROVE that.** The target name is
    hardcoded to ``unfao``, but the *address* is resolved entirely from the environment,

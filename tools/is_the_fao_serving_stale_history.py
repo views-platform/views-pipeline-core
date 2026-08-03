@@ -30,7 +30,7 @@ metadata document:
     historical_dataset_20260727_194059.parquet   created 2026-07-27T17:41:14
 
 views-faoapi finds historical artifacts by **metadata lookup**, not by listing the
-bucket. `managers/dataset_service.py:206` calls
+bucket. `managers/dataset_service.py:209` calls
 ``manager.get_latest_file_id({"category": category})`` for every non-forecast category,
 specifically so it can notice a newer upload and drop its cache. Its own comment records
 what happens when that fails: *"a cached historical entry kept being served until TTL
