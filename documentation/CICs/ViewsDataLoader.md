@@ -97,6 +97,10 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
     where `{source}` is `viewser` or `datafactory`.
   - Creates a timestamped fetch log via `create_data_fetch_log_file()`.
   - Logs drift alerts as warnings (viewser path only).
+  - Logs a warning naming the NaN count, the model and the affected columns before
+    `fillna(0.0)` (datafactory path only — the viewser and synthetic paths do not fill,
+    and the FeatureFrame path deliberately does not either). The fill is not prevented;
+    what is guaranteed is that a manufactured zero is never silent. See #366, C-278.
   - Sets instance state: `self.partition`, `self.partition_dict`, `self.month_first`,
     `self.month_last`, `self.drift_config_dict`, `self.override_month`,
     `self._cached_data_path` (exposed as `cached_data_path` property).
