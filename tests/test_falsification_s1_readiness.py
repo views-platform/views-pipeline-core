@@ -57,16 +57,99 @@ def test_pfe_concat_homogeneous_still_pools():
     assert out.sample_count == 24  # 3 × 8, nothing dropped
 
 
+_PLATFORM_ROOT = "/home/simon/Documents/scripts/views_platform"
+
+# Land cells in the PGM grid. Not derivable from any config — it is a property of the
+# grid — so it is named here with its provenance: measured from a real evaluation
+# artifact, 471,960 rows / 36 steps = 13,110. (views-models' own calibration report
+# states the same figure independently.)
+_PGM_LAND_CELLS = 13_110
+
+# `y_pred` is float32 and views-frames COERCES float64 down to it on construction, so
+# this cannot silently become 8 without the leaf changing.
+_BYTES_PER_VALUE = 4
+
+
+def _rusty_bucket_disk_estimate_gb() -> tuple:
+    """Derive the S1 output size from the ensemble's CURRENT config. Returns (gb, how).
+
+    **Derived, never hardcoded.** The previous version of this check asserted a flat
+    `required_gb = 320`, taken from a 2026-07-05 estimate. Fifteen days later the ensemble
+    was thinned from 128 samples per constituent to 16 (for a MEMORY reason — see the
+    comment in `config_hyperparameters.py`), and it declares three regression targets, not
+    the six the estimate assumed. Nobody propagated either change, so the gate went on
+    demanding 320 GB for a run that needs about 19 — and S1 sat blocked for six weeks on a
+    number that was 16x too large.
+
+    That is the same defect this repo has now shipped six times in guards (C-259, C-261,
+    C-264, #346, C-277, and the editable-tree check): a hand-written figure that the code
+    it describes has moved away from. So this reads the config instead.
+    """
+    import ast
+
+    cfg_dir = os.path.join(_PLATFORM_ROOT, "views-models", "ensembles", "rusty_bucket", "configs")
+    hyper = os.path.join(cfg_dir, "config_hyperparameters.py")
+    meta = os.path.join(cfg_dir, "config_meta.py")
+    if not (os.path.exists(hyper) and os.path.exists(meta)):
+        return (None, f"rusty_bucket configs not found under {cfg_dir}")
+
+    def _literal(path: str, key: str):
+        """Pull one key out of a config module without importing views-models."""
+        tree = ast.parse(open(path).read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                for k, v in zip(node.keys, node.values):
+                    if isinstance(k, ast.Constant) and k.value == key:
+                        try:
+                            return ast.literal_eval(v)
+                        except ValueError:
+                            return None
+        return None
+
+    constituents = _literal(hyper, "expected_models")
+    samples_each = _literal(hyper, "expected_samples_per_model")
+    targets = _literal(meta, "regression_targets")
+    steps = _literal(hyper, "steps")
+
+    if not all((constituents, samples_each, targets)):
+        return (None, "could not read expected_models / expected_samples_per_model / regression_targets")
+
+    n_steps = len(steps) if isinstance(steps, list) else 36
+    n_targets = len(targets)
+    origins = 13  # ADR-013 rolling-origin count; see config_partitions.generate()
+    rows = _PGM_LAND_CELLS * n_steps
+    pooled_draws = constituents * samples_each
+
+    constituent_bytes = constituents * samples_each * rows * n_targets * origins * _BYTES_PER_VALUE
+    pooled_bytes = pooled_draws * rows * n_targets * origins * _BYTES_PER_VALUE
+    total_gb = (constituent_bytes + pooled_bytes) / 1e9
+
+    how = (
+        f"{constituents} constituents x {samples_each} samples x {rows:,} rows "
+        f"({_PGM_LAND_CELLS:,} cells x {n_steps} steps) x {n_targets} targets x "
+        f"{origins} origins x {_BYTES_PER_VALUE}B, plus a pooled S={pooled_draws} output"
+    )
+    return (total_gb, how)
+
+
 # --- HARD #1 (probe P4): disk headroom for the S1 run ---
 @_ENV_GATED
 def test_s1_disk_headroom_for_rusty_bucket_at_declared_samples():
-    """rusty_bucket @ n_samples=128: ~151 GB constituent evals + ~151 GB ensemble
-    output ≈ 300 GB. Fails while the volume holds < the required headroom."""
-    required_gb = 320
-    free_gb = shutil.disk_usage("/home/simon/Documents/scripts/views_platform").free / 1e9
+    """Enough room for the S1 outputs, at the scale the ensemble ACTUALLY declares."""
+    estimate_gb, how = _rusty_bucket_disk_estimate_gb()
+    if estimate_gb is None:
+        pytest.skip(f"cannot derive the S1 estimate ({how}) — refusing to assert a guessed number")
+
+    # 2x the derived output, so a run is not one surprise away from filling the volume.
+    # A margin is honest; a second hardcoded total would not be.
+    required_gb = estimate_gb * 2
+    free_gb = shutil.disk_usage(_PLATFORM_ROOT).free / 1e9
+
     assert free_gb >= required_gb, (
-        f"S1 disk headroom: {free_gb:.0f} GB free < {required_gb} GB required "
-        f"(reduce n_samples / constituent count, or free space)."
+        f"S1 disk headroom: {free_gb:.0f} GB free < {required_gb:.0f} GB required "
+        f"(2x the {estimate_gb:.0f} GB of output derived from the current config: {how}). "
+        f"Reclaim superseded prediction runs, reduce n_samples or constituent count, or "
+        f"free space."
     )
 
 
