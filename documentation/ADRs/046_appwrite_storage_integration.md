@@ -4,8 +4,8 @@
 **Date:** 2026-04-08
 **Deciders:** Project maintainers
 **Amended by:** þing-02 (the platform Identity/Secrets/Configuration assembly, ratified
-2026-07-31) via **PLATFORM-001 §6** — [views-appwrite `docs/ADRs/platform/PLATFORM-001_identity_secrets_configuration_contract.md`](https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/PLATFORM-001_identity_secrets_configuration_contract.md)
-(pinned at tag `platform-001-v1.2.0`). Implemented in this repo by #329–#332 (PR #334).
+2026-07-31) via **PLATFORM-001 §6** — [views-appwrite `docs/ADRs/platform/appwrite_seam_contract.md`](https://github.com/views-platform/views-appwrite/blob/appwrite-seam-v1.4.1/docs/ADRs/platform/appwrite_seam_contract.md)
+(pinned at tag `appwrite-seam-v1.4.1`). Implemented in this repo by #329–#332 (PR #334).
 
 > **Amendment summary — read this before any clause below.** Four clauses of the original
 > decision no longer describe the code, and one never did. **Original text is preserved
@@ -98,7 +98,7 @@ begins while transient network issues are tolerated.
 >
 > **The table is deliberately not replaced with a corrected list.** Duplicating coordinate
 > names into prose is how this drifted, and þing-01 settled where they live:
-> [`coordinate_registry.toml`](https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/coordinate_registry.toml)
+> [`coordinate_registry.toml`](https://github.com/views-platform/views-appwrite/blob/appwrite-seam-v1.4.1/docs/ADRs/platform/coordinate_registry.toml)
 > is **the** canonical source, referenced by pinned URL, never copied
 > (PLATFORM-001 §4). The authority in this repo is the one place the code actually reads:
 > **`views_pipeline_core/configs/prediction_store.py::_ENV_MAP`**, which is validated
@@ -277,15 +277,15 @@ amendment makes Appwrite's failures *visible*, not *blocking*.
 - **ADR-009:** Boundary Contracts and Configuration Validation
 - **ADR-047:** Three-destination persistence and partial-failure semantics — governs why
   Appwrite failures are logged rather than raised
-- **PLATFORM-001** (views-appwrite, þing-02): [identity, secrets & configuration contract](https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/PLATFORM-001_identity_secrets_configuration_contract.md)
-  and its [coordinate registry](https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/coordinate_registry.toml) — both pinned at tag `platform-001-v1.2.0`
+- **PLATFORM-001** (views-appwrite, þing-02): [identity, secrets & configuration contract](https://github.com/views-platform/views-appwrite/blob/appwrite-seam-v1.4.1/docs/ADRs/platform/appwrite_seam_contract.md)
+  and its [coordinate registry](https://github.com/views-platform/views-appwrite/blob/appwrite-seam-v1.4.1/docs/ADRs/platform/coordinate_registry.toml) — both pinned at tag `appwrite-seam-v1.4.1`
 
   > **On the pin and the name — do not "tidy" either.**
   >
   > **Tag, not sha, not `main`.** The seam's own onboarding checklist requires a tag: a
   > published tag is never moved (contract §10), so what we pin today means the same thing
   > forever, and upgrading becomes a deliberate act — read the diff, accept it, repoint.
-  > `platform-001-v1.2.0` is the newest *published* tag; `main` carries v1.3.0, untagged
+  > `appwrite-seam-v1.4.1` is the newest *published* tag; `main` carries v1.3.0, untagged
   > until the operator cuts it (views-appwrite#21). A `/blob/main/` link is not a pin, and
   > has already burned a sibling repo: when v1.2.0 struck §5.7, two views-datafactory guides
   > linked to `main` and silently began describing rules their authors had never read
