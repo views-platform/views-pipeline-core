@@ -20,7 +20,6 @@ import importlib
 import hashlib
 from pathlib import Path
 
-import dotenv
 
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.data.constants import CACHE_SOURCES
@@ -367,8 +366,21 @@ class ModelPathManager:
         self._instance_hash = self.generate_hash(
             self.model_name, self._validate, self.target
         )
+        # The PATH is recorded; the file is NOT loaded here. Until #377 this line was
+        # followed by `dotenv.load_dotenv(dotenv_path=self.dotenv)`, so constructing a
+        # *path object* mutated `os.environ` process-wide — and this class is constructed
+        # by validation code (`modules/validation/ensemble/check.py`) and by file
+        # utilities, neither of which wants credentials loaded on its behalf.
+        #
+        # It survived the #346 sweep (register C-177) that established the rule, because
+        # the guard there looks for `load_dotenv()` with no path — a search from the
+        # working directory — and this call passed one. Right about the search hazard,
+        # blind to the side effect. `test_no_constructor_loads_a_dotenv` now covers it.
+        #
+        # Callers that need the environment populated must do it in their entry point.
+        # `PredictionStoreConfig.from_environment` already fails loud with the list of
+        # missing variables, so nothing here can fail silently.
         self.dotenv = self.root / ".env"
-        dotenv.load_dotenv(dotenv_path=self.dotenv)
         self._initialize_directories()
         self._initialize_scripts()
         logger.debug(
