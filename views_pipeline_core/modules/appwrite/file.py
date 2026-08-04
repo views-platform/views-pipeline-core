@@ -13,13 +13,14 @@ The module consists of several key components:
 GOVERNING CONTRACT — this module sits on the VIEWS Appwrite *seam*, whose identity,
 credential and coordinate rules are platform surface, not this repo's to set:
 
-    PLATFORM-001, Identity, Secrets & Configuration Contract (views-appwrite),
-    pinned at tag platform-001-v1.2.0:
-    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/PLATFORM-001_identity_secrets_configuration_contract.md
+    The Appwrite Seam Contract — Identity, Secrets & Configuration (views-appwrite),
+    pinned at tag appwrite-seam-v1.4.1. Renamed from `PLATFORM-001` in v1.3.0; clause
+    citations below stay `PLATFORM-001 §N`, which the contract states still resolve:
+    https://github.com/views-platform/views-appwrite/blob/appwrite-seam-v1.4.1/docs/ADRs/platform/appwrite_seam_contract.md
 
     Coordinate registry (THE canonical source for bucket/collection/database ids —
     read and validate against it; never copy values into code or defaults):
-    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/coordinate_registry.toml
+    https://github.com/views-platform/views-appwrite/blob/appwrite-seam-v1.4.1/docs/ADRs/platform/coordinate_registry.toml
 
 Two clauses bear directly on the code below. **§6 (raise, never provision):** this module
 creates no containers — provisioning lives in the sibling `provisioning.py`, runnable and

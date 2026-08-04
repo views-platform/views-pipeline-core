@@ -316,7 +316,7 @@ looked) · D-41.
 views-models#307.
 
 **Contracts:** ADR-046 (amended 2026-07-31) · ADR-047 (three-destination authority) · ADR-013 (the wire
-contract and its manifests) · The Appwrite Seam Contract, pinned at tag `platform-001-v1.2.0`.
+contract and its manifests) · The Appwrite Seam Contract, pinned at tag `appwrite-seam-v1.4.1`.
 
 **þing records:** `views_platform/þingit/01_identity_secrets_config/`,
 `02_credential_identity_key_ownership/`.
