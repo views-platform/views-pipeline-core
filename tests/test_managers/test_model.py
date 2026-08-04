@@ -28,6 +28,12 @@ def mock_model_path():
     mock.configs = Path("/test/root/models/purple_alien/configs")
     mock.data = Path("/test/root/models/purple_alien/data")
     mock.data_raw = Path("/test/root/models/purple_alien/data/raw")
+    # `data_processed` is created at RUNTIME by `_initialize_directories`, so it is not on
+    # the class and `spec=ModelPathManager` does not know it exists. Its absence made
+    # `ViewsDataLoader.__init__` raise AttributeError on every one of these tests — and
+    # `_initialize_data_loader` swallowed it, so they passed while the data loader
+    # silently failed to construct. #367 removed the swallow; this completes the mock.
+    mock.data_processed = Path("/test/root/models/purple_alien/data/processed")
     mock.data_generated = Path("/test/root/models/purple_alien/data/generated")
     mock.reports = Path("/test/root/models/purple_alien/reports")
     mock.dotenv = Path("/test/root/.env")
