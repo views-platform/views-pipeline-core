@@ -251,35 +251,43 @@ _NARROWING_CATEGORIES = frozenset(
 )
 
 
-def _argument(node: ast.Call, name: str, slots: dict[int, str]) -> tuple[bool, object]:
-    """Return `(present, value)` for one argument, keyword or positional.
+ABSENT = "absent"  # the argument was not supplied
+LITERAL = "literal"  # supplied and its value is known
+IDENTIFIER = "identifier"  # supplied as a bare name; only the identifier is known
+OPAQUE = "opaque"  # supplied as something this guard cannot read at all
 
-    `value` is the literal if it could be evaluated and the sentinel `NotImplemented` if
-    it could not. Refusing to evaluate is not the same as finding nothing, and the caller
-    must not treat the two alike — that conflation is the whole reason #366 existed.
+
+def _argument(node: ast.Call, name: str, slots: dict[int, str]) -> tuple[str, object]:
+    """Return `(kind, value)` for one argument, whether keyword or positional.
+
+    `kind` distinguishes four states that a two-valued answer would collapse. In
+    particular a literal `"ignore"` and a variable *named* `ignore` are different facts,
+    and so are "not supplied" and "supplied, unreadable". Every caller below branches on
+    all four, because reporting "I could not tell" as "fine" is the exact defect #366
+    was raised about — see ADR-056.
     """
+    supplied = None
     for keyword in node.keywords:
         if keyword.arg == name:
-            try:
-                return True, ast.literal_eval(keyword.value)
-            except (ValueError, SyntaxError):
-                return True, _name_of(keyword.value)
-    for index, slot in slots.items():
-        if slot == name and len(node.args) > index:
-            try:
-                return True, ast.literal_eval(node.args[index])
-            except (ValueError, SyntaxError):
-                return True, _name_of(node.args[index])
-    return False, None
+            supplied = keyword.value
+            break
+    if supplied is None:
+        for index, slot in slots.items():
+            if slot == name and len(node.args) > index:
+                supplied = node.args[index]
+                break
+    if supplied is None:
+        return ABSENT, None
 
-
-def _name_of(node: ast.expr) -> object:
-    """The dotted name of a non-literal expression, or `NotImplemented` if it has none."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return NotImplemented
+    try:
+        return LITERAL, ast.literal_eval(supplied)
+    except (ValueError, SyntaxError):
+        pass
+    if isinstance(supplied, ast.Name):
+        return IDENTIFIER, supplied.id
+    if isinstance(supplied, ast.Attribute):
+        return IDENTIFIER, supplied.attr
+    return OPAQUE, None
 
 
 def _blanket_reason(node: ast.Call) -> str | None:
@@ -291,22 +299,32 @@ def _blanket_reason(node: ast.Call) -> str | None:
     category=Warning)`, which silences every warning that exists, and would have missed
     `simplefilter("ignore")` entirely because it only ever looked at one function name.
     """
-    function = getattr(node.func, "attr", None)
+    # Matches both `warnings.filterwarnings(...)` and a bare `filterwarnings(...)` from
+    # `from warnings import filterwarnings`. Looking only at `.attr`, as the first version
+    # did, would miss the imported form entirely.
+    function = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
     if function not in ("filterwarnings", "simplefilter"):
         return None
     slots = _FILTERWARNINGS_SLOTS if function == "filterwarnings" else _SIMPLEFILTER_SLOTS
 
-    action_present, action = _argument(node, "action", {0: "action"})
-    if action_present and action != "ignore":
-        return None  # not a suppression at all
+    action_kind, action = _argument(node, "action", {0: "action"})
+    if action_kind is ABSENT:
+        return f"`{function}` is called with no action, which this guard cannot read"
+    if action_kind is not LITERAL:
+        return (
+            f"`{function}`'s action is not a literal, so this guard cannot tell whether "
+            f"it suppresses anything"
+        )
+    if action != "ignore":
+        return None  # "error", "default", "always" — not a suppression at all
 
-    category_present, category = _argument(node, "category", slots)
-    if category_present:
-        if category is NotImplemented:
-            return (
-                f"`category` is neither a literal nor a name, so this guard cannot tell "
-                f"what {function} silences"
-            )
+    category_kind, category = _argument(node, "category", slots)
+    if category_kind is OPAQUE:
+        return (
+            f"`category` is neither a literal nor a name, so this guard cannot tell "
+            f"what {function} silences"
+        )
+    if category_kind is not ABSENT:
         if category in _NARROWING_CATEGORIES:
             return None  # a named, non-universal category — the permitted form
         if category != "Warning":
@@ -322,18 +340,17 @@ def _blanket_reason(node: ast.Call) -> str | None:
     if function == "simplefilter":
         return "`simplefilter` takes no message filter, and its category is `Warning`"
 
-    message_present, message = _argument(node, "message", slots)
-    if message_present:
-        if message is NotImplemented:
-            return "`message` is not a literal, so this guard cannot tell what it matches"
-        if message not in _MATCH_EVERY_MESSAGE:
-            return None
-    module_present, module = _argument(node, "module", slots)
-    if module_present:
-        if module is NotImplemented:
-            return "`module` is not a literal, so this guard cannot tell what it matches"
-        if module not in _MATCH_EVERY_MESSAGE:
-            return None
+    for argument in ("message", "module"):
+        kind, value = _argument(node, argument, slots)
+        if kind is ABSENT:
+            continue
+        if kind is not LITERAL:
+            return (
+                f"`{argument}` is not a literal, so this guard cannot tell what it "
+                f"matches — a regex it cannot read may match everything"
+            )
+        if value not in _MATCH_EVERY_MESSAGE:
+            return None  # a real regex that excludes something
 
     return "`category` is `Warning` (the base class of every warning) and no message or module narrows it"
 
