@@ -1222,6 +1222,36 @@ class ViewsDataLoader:
             if "col" not in df.columns:
                 df["col"] = ((pgids - 1) % _PRIOGRID_NCOL + 1).astype(float)
 
+        # SAY WHAT IS BEING FABRICATED. A zero that means "no conflict was observed" and a
+        # zero that means "nobody looked" are the same float, and this is the seam where
+        # the second silently becomes the first (#366).
+        #
+        # The fill is NOT removed, deliberately. views-datafactory pre-allocates its
+        # compilation grids with `fill_value=0.0` (their ADR-047: coverage gaps are
+        # "structurally indistinguishable from months where the source observed zero
+        # events"), so most gaps are already zero before this loader sees them. Removing
+        # the fill here would change little and would break models that assume float32
+        # without NaN handling. What was missing is the COUNT — and note the asymmetry
+        # this exposes: `_fetch_data_from_viewser` and `_fetch_data_from_synthetic` do NOT
+        # fill, so the same `get_data()` call has two different NaN policies depending on
+        # the source, which is undocumented and is its own finding.
+        #
+        # Whether coverage gaps should be expressible at all is views-datafactory's
+        # decision, not ours — filed there. Until the input schema can distinguish the two
+        # kinds of zero, this repo does not attempt to.
+        _nan_per_column = df.isna().sum()
+        _nan_total = int(_nan_per_column.sum())
+        if _nan_total:
+            _affected = {c: int(n) for c, n in _nan_per_column.items() if n}
+            logger.warning(
+                "Filling %d NaN value(s) with 0.0 for %s across %d column(s): %s. "
+                "These become indistinguishable from an observed zero. If a column is "
+                "mostly filled, check the source's coverage before trusting the run.",
+                _nan_total,
+                self._model_name,
+                len(_affected),
+                _affected,
+            )
         df = df.fillna(0.0)
         df = df.sort_index()
         df = ensure_float64(df)

@@ -50,6 +50,7 @@ only confirm the string we just wrote.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
 import subprocess
@@ -77,7 +78,7 @@ def _generate(template_path: Path, destination: Path) -> str:
     """
     family = template_path.parent.name
     module = importlib.import_module(
-        f"views_pipeline_core.templates.{family}.template_run_sh"
+        f"views_pipeline_core.templates.{family}.{template_path.stem}"
     )
 
     parameters = list(inspect.signature(module.generate).parameters)
@@ -208,4 +209,63 @@ def test_the_guard_found_every_run_script_generator() -> None:
         f"found {sorted(families) or 'none'} under {TEMPLATES_ROOT}. Either a template "
         f"was moved or the discovery glob is wrong — in both cases this file is now "
         f"checking less than it appears to."
+    )
+
+
+# ---------------------------------------------------------------------------
+# #366 — a generated main must not silence the only signal upstream provides
+# ---------------------------------------------------------------------------
+
+MAIN_TEMPLATES = sorted(TEMPLATES_ROOT.glob("*/template_main.py"))
+
+
+@pytest.mark.parametrize(
+    "template_path", MAIN_TEMPLATES, ids=[p.parent.name for p in MAIN_TEMPLATES]
+)
+def test_generated_main_does_not_blanket_suppress_warnings(
+    template_path: Path, tmp_path: Path
+) -> None:
+    """`warnings.filterwarnings("ignore")` in a generated main eats upstream's only signal.
+
+    views-datafactory zero-fills coverage gaps by design — their ADR-047 states that a
+    filled month is *"structurally indistinguishable from months where the source observed
+    zero events"*. The mitigation they shipped for that is a `UserWarning` from
+    `load_dataset()`, plus `first_valid_*_month_id` / `last_valid_*_month_id` provenance.
+
+    A bare `filterwarnings("ignore")` at the top of every generated model main discards
+    that warning in exactly the process that needed it. So the platform's answer to
+    "how do I know these zeros are real?" was suppressed by the scaffolding, not by a
+    decision — and it reached ~130 generated scripts per consuming repo.
+
+    A targeted suppression is fine and this check permits it: silence the categories you
+    have decided are noise, by name. What it refuses is the blanket form, which silences
+    categories nobody has considered — including ones that do not exist yet.
+
+    The template module holds the generated code as a *string literal*, so parsing the
+    template file finds no calls at all — a guard written that way passes unconditionally.
+    This one generates the file first and parses the output, which is what ships.
+    """
+    source = _generate(template_path, tmp_path / "main.py")
+    tree = ast.parse(source)
+
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if getattr(node.func, "attr", None) != "filterwarnings":
+            continue
+        # A blanket suppression is `filterwarnings("ignore")` with nothing narrowing it:
+        # no `category=`, no `module=`, no `message=`.
+        narrowed = {kw.arg for kw in node.keywords} & {"category", "module", "message"}
+        positional_filter = len(node.args) > 1
+        if not narrowed and not positional_filter:
+            offenders.append(
+                f"{template_path.relative_to(REPO_ROOT)} -> generated main.py:{node.lineno}"
+            )
+
+    assert not offenders, (
+        f"generated mains blanket-suppress every warning: {offenders}. This discards "
+        f"views-datafactory's coverage `UserWarning` (their ADR-047), which is the only "
+        f"signal distinguishing a real zero from a filled gap — in the process that "
+        f"consumes the data. Narrow it: name the categories you have decided are noise."
     )
