@@ -49,7 +49,12 @@ def _make_manager():
     with patch(
         "views_pipeline_core.managers.model.model.ForecastingModelManager"
         "._ModelManager__load_config",
-        return_value={},
+        # `steps` is not decoration. `_initialize_data_loader` reads `configs["steps"]`,
+        # and with `{}` that raised KeyError on every run — which
+        # `_initialize_data_loader` then swallowed, so these tests passed while asserting
+        # an ordering they never actually exercised (#367). A real run always has it:
+        # `CoreConfigSniffer.sniff_all()` runs first and guarantees it.
+        return_value={"steps": list(range(1, 37))},
     ):
         with patch(
             "views_pipeline_core.modules.logging.LoggingModule.get_logger",

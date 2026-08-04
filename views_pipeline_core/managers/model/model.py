@@ -968,11 +968,33 @@ class ForecastingModelManager(ModelManager):
                 partition_dict=self._partition_dict,
             )
         except Exception:
+            # Log WITH the traceback, then RE-RAISE. Until #367 this swallowed the
+            # exception, logged "No Queryset detected for ViewsDataLoader. Skipping..."
+            # with `exc_info=False`, and set `self._data_loader = None`.
+            #
+            # Every part of that was wrong. `ViewsDataLoader.__init__` is assignment-only
+            # — it cannot detect a queryset, so it cannot fail for the reason claimed.
+            # What it CAN raise is an ImportError from the import above (inside this same
+            # try, so any dependency bump that breaks the module lands here), a KeyError
+            # from `configs["steps"]`, or a TypeError from a signature change. All three
+            # were reported as a missing queryset, without a traceback.
+            #
+            # And nothing handles the None: `_execute_model_tasks` calls
+            # `self._data_loader.get_feature_frame(...)` unguarded, so the failure did not
+            # go away — it relocated. views-postprocessing's FAO delivery hit
+            # `AttributeError: 'NoneType' object has no attribute 'get_feature_frame'`
+            # three repos from the cause. There is no survivable "no queryset" state here;
+            # both callers proceed straight to a run that needs data.
+            #
+            # Cluster J, "failed read reported as absence": a construction that did not
+            # happen, recorded as a loader that is legitimately absent. Register C-170.
             logger.error(
-                "No Queryset detected for ViewsDataLoader. Skipping...",
-                exc_info=False,
+                "ViewsDataLoader construction failed for %s. This is not recoverable — "
+                "the run needs a data loader. The traceback below names the real cause.",
+                getattr(self._model_path, "model_name", "<unknown model>"),
+                exc_info=True,
             )
-            self._data_loader = None
+            raise
 
     def _get_cached_data_path(self):
         """Return the path to the cached raw DataFrame for the current partition.
