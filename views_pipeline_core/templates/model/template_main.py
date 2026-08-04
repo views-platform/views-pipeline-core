@@ -45,7 +45,16 @@ from views_pipeline_core.managers.model import ModelPathManager
 # Import your model manager class here
 # E.g. from views_stepshifter.manager.stepshifter_manager import StepshifterManager
 
-warnings.filterwarnings("ignore")
+# Narrowed from a bare `warnings.filterwarnings("ignore")` (#366). The blanket form
+# silenced EVERY category in the process that consumes the data — including
+# views-datafactory's coverage `UserWarning`, which under their ADR-047 is the only signal
+# distinguishing an observed zero from a zero-filled gap. Their own words: a filled month
+# is "structurally indistinguishable from months where the source observed zero events".
+#
+# The noise this was hiding is real, so it is silenced BY NAME rather than removed. What is
+# no longer silenced is the category nobody considered — which is the one that mattered.
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 try:
     model_path = ModelPathManager(Path(__file__))
