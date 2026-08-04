@@ -7,6 +7,7 @@ content incl. the §7a wire-target mapping, (e) round-trip identity (archive →
 """
 import json
 import zipfile
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -277,3 +278,108 @@ def test_pfe_datastore_starts_unbuilt():
     import inspect
     src = inspect.getsource(PredictionFrameEnsembleManager.__init__)
     assert "_datastore = None" in src
+
+
+# ---------------------------------------------------------------------------
+# #279 — the provenance field's authority, and what it must refuse to claim
+# ---------------------------------------------------------------------------
+
+
+class TestProvenanceVersionAuthority:
+    """`pipeline_core_version` must never carry a number it did not establish.
+
+    ADR-013 §2.2 told consumers to disregard this field until a real release existed.
+    3.0.0 shipped on 2026-08-03, so for a consumer installing from PyPI the field is now
+    authoritative — the metadata was written by the release that built the wheel.
+
+    An editable install is the case that made this worth a test rather than a docstring
+    edit. Its `.dist-info` records the version current when `pip install -e` was last run
+    and never tracks the source again. Measured here on 2026-08-04: metadata `2.3.0`,
+    `pyproject.toml` `3.0.0`. A developer run would have stamped `2.3.0` into a published
+    artifact's provenance — a value the system never established, published as one it
+    measured, which is the whole Cluster J shape.
+    """
+
+    def _version_module(self):
+        from views_pipeline_core.managers.ensemble import sampled_forecast_publisher
+
+        return sampled_forecast_publisher
+
+    def test_an_editable_install_reports_unknown_not_its_stale_metadata(
+        self, monkeypatch
+    ):
+        module = self._version_module()
+
+        class _Editable:
+            version = "2.3.0"  # what this repo's own dev env actually reported
+
+            def read_text(self, name):
+                assert name == "direct_url.json"
+                return json.dumps(
+                    {"dir_info": {"editable": True}, "url": "file:///somewhere"}
+                )
+
+        monkeypatch.setattr(
+            module, "distributions_metadata", lambda _name: _Editable(), raising=True
+        )
+        assert module._pipeline_core_version() == "unknown", (
+            "an editable install reported its stale metadata as the producing version"
+        )
+
+    def test_a_released_install_reports_its_real_version(self, monkeypatch):
+        module = self._version_module()
+
+        class _Released:
+            version = "3.0.0"
+
+            def read_text(self, name):
+                return None  # a wheel from PyPI carries no direct_url.json
+
+        monkeypatch.setattr(
+            module, "distributions_metadata", lambda _name: _Released(), raising=True
+        )
+        assert module._pipeline_core_version() == "3.0.0"
+
+    def test_a_non_editable_direct_url_still_reports_its_version(self, monkeypatch):
+        """`pip install .` from a local path writes direct_url.json with editable false.
+
+        That is a real build of a real version, so it is not the case this guard refuses.
+        """
+        module = self._version_module()
+
+        class _LocalBuild:
+            version = "3.0.0"
+
+            def read_text(self, name):
+                return json.dumps({"dir_info": {"editable": False}, "url": "file:///x"})
+
+        monkeypatch.setattr(
+            module, "distributions_metadata", lambda _name: _LocalBuild(), raising=True
+        )
+        assert module._pipeline_core_version() == "3.0.0"
+
+    def test_unreadable_or_malformed_metadata_reports_unknown(self, monkeypatch):
+        """Refusing to conclude is not the same as concluding a version."""
+        module = self._version_module()
+
+        class _Malformed:
+            version = "3.0.0"
+
+            def read_text(self, name):
+                return "{not json"
+
+        monkeypatch.setattr(
+            module, "distributions_metadata", lambda _name: _Malformed(), raising=True
+        )
+        assert module._pipeline_core_version() == "unknown"
+
+    def test_no_distribution_at_all_reports_unknown(self, monkeypatch):
+        module = self._version_module()
+
+        def _absent(_name):
+            raise PackageNotFoundError("views_pipeline_core")
+
+        monkeypatch.setattr(
+            module, "distributions_metadata", _absent, raising=True
+        )
+        assert module._pipeline_core_version() == "unknown"

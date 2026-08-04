@@ -32,7 +32,8 @@ import logging
 import tempfile
 import zipfile
 from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import distribution as distributions_metadata
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -85,12 +86,50 @@ def wire_target(internal_target: str) -> str:
 
 
 def _pipeline_core_version() -> str:
-    """Self-reported version for the §2 provenance caveat (wrong until the release train
-    (#261) cuts real releases — consumers must not treat it as authoritative)."""
+    """Self-reported version for the ADR-013 §2.2 provenance field.
+
+    **Authoritative when this package was installed as a released distribution.** That
+    became true on 2026-08-03, when 3.0.0 was published to PyPI; before then no real
+    release existed and the contract told consumers to disregard the field entirely
+    (#279). A consumer installing from PyPI reads metadata written by the release that
+    built the wheel, so it cannot disagree with the code beside it.
+
+    **Not authoritative from an editable install, which reports `unknown`.** An editable
+    install's `.dist-info` records the version that was current when `pip install -e` was
+    last run, and it does **not** track the source afterwards. Measured in this repo's own
+    development environment on 2026-08-04: the metadata said `2.3.0` while `pyproject.toml`
+    said `3.0.0` — one major version stale, and nothing anywhere would have said so. Left
+    alone, a developer run would stamp `2.3.0` into a published wire artifact's provenance:
+    a value the system never established, published as one it measured.
+
+    So an editable install is treated as *unknown* rather than as its stale metadata. That
+    is not a downgrade in information — `2.3.0` here carried none, it only looked like it
+    did. `unknown` is already this field's sentinel for "no distribution installed", and
+    both cases mean the same thing to a consumer: do not infer the producing version from
+    this artifact.
+
+    Note the release train (#261) is still open. What closed is its *first* release, which
+    is the only condition this field's authority depended on.
+    """
     try:
-        return version("views_pipeline_core")
-    except PackageNotFoundError:  # editable/dev edge case
+        distribution = distributions_metadata("views_pipeline_core")
+    except PackageNotFoundError:  # not installed at all
         return "unknown"
+
+    try:
+        direct_url = distribution.read_text("direct_url.json")
+    except (OSError, ValueError):  # metadata unreadable — cannot confirm it is a release
+        return "unknown"
+
+    if direct_url:
+        try:
+            editable = json.loads(direct_url).get("dir_info", {}).get("editable", False)
+        except json.JSONDecodeError:
+            return "unknown"  # cannot tell; do not guess in a consumer's favour
+        if editable:
+            return "unknown"
+
+    return distribution.version
 
 
 def build_header(
