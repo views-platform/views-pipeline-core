@@ -42,6 +42,26 @@ MAX_SHIFT_COUNT      = 12
 # Supported prediction output formats — extend here when new formats are supported
 SUPPORTED_PREDICTION_FORMATS = frozenset({"dataframe", "prediction_frame"})
 
+#: Formats still accepted everywhere, but deprecated **for report-enabled runs** (#211,
+#: register C-191 / D-36). `dataframe` reports densify list-in-cell values inside
+#: views-reporting, which is the #181 OOM; `prediction_frame` is bounded. Choosing a
+#: format therefore chooses a memory-safety posture, which is what C-191 objects to.
+#:
+#: Warning now, rejection later — D-36 already settled the direction, and #211 makes the
+#: reject conditional on report-bearing models having somewhere to go, which is a
+#: views-models audit that has not happened. Keeping the two sets separate is what lets
+#: the reject land by moving one name, rather than by editing a condition.
+DEPRECATED_REPORT_PREDICTION_FORMATS = frozenset({"dataframe"})
+
+# Derived, not asserted by hand: a format cannot be deprecated for reports without being
+# a format at all. If someone renames one and not the other, this fails at import rather
+# than leaving a set that silently matches nothing.
+assert DEPRECATED_REPORT_PREDICTION_FORMATS <= SUPPORTED_PREDICTION_FORMATS, (
+    "DEPRECATED_REPORT_PREDICTION_FORMATS names "
+    f"{sorted(DEPRECATED_REPORT_PREDICTION_FORMATS - SUPPORTED_PREDICTION_FORMATS)}, "
+    "which is not a supported prediction format. The deprecation would match nothing."
+)
+
 # Evaluation mode — optional config key; controls whether samples are kept or collapsed
 SUPPORTED_EVALUATION_MODES  = frozenset({"stochastic", "point"})
 SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
