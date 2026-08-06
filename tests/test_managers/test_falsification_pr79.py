@@ -145,6 +145,9 @@ class TestLoadCDatasetLocalPathResilience:
             mock_path._get_generated_predictions_data_file_paths.side_effect = (
                 PermissionError("Permission denied: /data/generated")
             )
+            mock_path.get_generated_predictions_data_file_paths.side_effect = (
+                PermissionError("Permission denied: /data/generated")
+            )
             MockEPM.return_value = mock_path
 
             try:
@@ -169,6 +172,9 @@ class TestLoadCDatasetLocalPathResilience:
         ) as MockEPM:
             mock_path = MagicMock()
             mock_path._get_generated_predictions_data_file_paths.side_effect = (
+                OSError("Disk I/O error")
+            )
+            mock_path.get_generated_predictions_data_file_paths.side_effect = (
                 OSError("Disk I/O error")
             )
             MockEPM.return_value = mock_path

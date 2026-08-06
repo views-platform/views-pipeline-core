@@ -176,7 +176,7 @@ def test_f2b_the_naive_check_flags_correct_code():
     only to prove the naive specification is inadequate, so nobody ships it.
     """
     sites = _unbounded_list_sites()
-    false_positives = [s for s in sites if "file.py" in s and s.endswith("list_files")]
+    false_positives = [s for s in sites if "storage.py" in s and s.endswith("list_files")]
     assert false_positives, (
         "expected the naive check to flag list_files, which binds Query.limit before the "
         "call — if this stops being true, re-derive #343's specification"
@@ -266,7 +266,7 @@ def test_f4_deleting_sessionauth_must_not_orphan_the_seam_registry():
 
     cites_sessionauth = "SessionAuth" in registry.read_text()
     source_has_sessionauth = "class SessionAuth" in (
-        PKG / "modules" / "appwrite" / "file.py"
+        PKG / "modules" / "appwrite" / "storage.py"
     ).read_text()
 
     assert cites_sessionauth == source_has_sessionauth, (

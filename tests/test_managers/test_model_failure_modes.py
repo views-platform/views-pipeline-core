@@ -205,11 +205,15 @@ class TestPipelineOrdering:
                     ForecastingModelManager,
                     "_assert_partition_config_accessible",
                 ):
-                    with patch(
-                        "views_pipeline_core.managers.model.model.CoreConfigSniffer"
+                    with patch.object(
+                        ForecastingModelManager,
+                        "_initialize_data_loader",
                     ):
-                        mgr.configs = {"name": "test"}
-                        mgr.execute_single_run(args)
+                        with patch(
+                            "views_pipeline_core.managers.model.mixins._execute.CoreConfigSniffer"
+                        ):
+                            mgr.configs = {"name": "test"}
+                            mgr.execute_single_run(args)
 
         assert call_order == ["data_fetch", "model_tasks"], (
             f"Expected data_fetch before model_tasks, got {call_order}"

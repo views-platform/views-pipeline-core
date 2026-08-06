@@ -39,6 +39,7 @@ def mock_deps():
 def get_test_manager():
     mock_path_manager = MagicMock()
     mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+    mock_path_manager.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
     mock_path_manager.root = Path(".")
     
     with patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={}):

@@ -16,8 +16,12 @@ import views_pipeline_core.managers.ensemble.cm_forecast_loader as cfl
 
 def _fake_epm(paths):
     """Replace EnsemblePathManager(name) with a stub exposing the path locator."""
+    _fn = lambda run_type: list(paths)
     return lambda name: types.SimpleNamespace(
-        _get_generated_predictions_data_file_paths=lambda run_type: list(paths)
+        # Public method (post-C-3 promotion)
+        get_generated_predictions_data_file_paths=_fn,
+        # Backward-compat private alias
+        _get_generated_predictions_data_file_paths=_fn,
     )
 
 

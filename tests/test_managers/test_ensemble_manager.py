@@ -49,7 +49,7 @@ def mock_ensemble_path():
         "main.py": "/test/root/ensembles/test_ensemble/main.py",
     }
     
-    mock._get_generated_predictions_data_file_paths.return_value = [
+    mock.get_generated_predictions_data_file_paths.return_value = [
         Path("/test/root/ensembles/test_ensemble/data/generated/predictions_forecasting_20241105.parquet")
     ]
     mock.get_latest_model_artifact_path.return_value = Path(
@@ -747,6 +747,7 @@ class TestLoadCDataset:
         
         with patch('views_pipeline_core.managers.ensemble.ensemble.EnsemblePathManager') as MockPath:
             mock_path = MagicMock()
+            mock_path.get_generated_predictions_data_file_paths.side_effect = FileNotFoundError("Not found")
             mock_path._get_generated_predictions_data_file_paths.side_effect = FileNotFoundError("Not found")
             MockPath.return_value = mock_path
             
@@ -1048,6 +1049,7 @@ class TestEnsembleFailureModes:
             "/test/artifacts/forecasting_model_20241105_120000.pt"
         )
         mock_model_path._get_generated_predictions_data_file_paths.return_value = []
+        mock_model_path.get_generated_predictions_data_file_paths.return_value = []
 
         with patch("views_pipeline_core.managers.ensemble.ensemble.ModelPathManager", return_value=mock_model_path):
             with patch.object(manager, "_execute_shell_script"):

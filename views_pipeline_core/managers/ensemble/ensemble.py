@@ -19,7 +19,7 @@ from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfi
 from views_pipeline_core.files.utils import handle_ensemble_log_creation, read_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.handlers import _PGDataset, _CDataset, _ViewsDataset
-from views_pipeline_core.domain.reconciliation_port import Reconciler, RECONCILER_NOT_INJECTED_MSG
+from views_pipeline_core.modules.reconciliation import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.modules.aggregation.aggregator import (
     AggregationModule,
@@ -540,36 +540,24 @@ class EnsembleManager(ForecastingModelManager):
         model_name: str,
         model_args: ForecastingModelArgs,
     ) -> None:
-        """
-        Executes a shell script for a model artifact using ForecastingModelArgs.
+        """Execute a shell script for a model artifact.
+
+        Delegates to :func:`execute_model_subprocess` (C-2 audit: shared helper).
 
         Args:
             model_path (ModelPathManager): The path manager for the model.
             model_name (str): The name of the model.
             model_args (ForecastingModelArgs): The arguments for the model execution.
         """
-        try:
-            shell_command = model_args.to_shell_command(model_path)
-            logger.info(f"Executing shell command: {' '.join(shell_command)}")
-            subprocess.run(shell_command, check=True, timeout=7200)
-        except subprocess.TimeoutExpired:
-            logger.error(
-                f"Shell command timed out for model {model_name} after 7200s",
-            )
-            raise PipelineException(
-                f"Shell command timed out for model {model_name} after 7200s. "
-                "Consider increasing the timeout or investigating the model script.",
-                wandb_module=self._wandb_module,
-            )
-        except Exception as e:
-            logger.error(
-                f"Error during shell command execution for model {model_name}: {e}",
-                exc_info=True,
-            )
-            raise PipelineException(
-                f"Error during shell command execution for model {model_name}: {e}",
-                wandb_module=self._wandb_module,
-            )
+        from views_pipeline_core.modules.ensemble.subprocess_runner import (
+            execute_model_subprocess,
+        )
+        execute_model_subprocess(
+            model_path=model_path,
+            model_name=model_name,
+            model_args=model_args,
+            wandb_module=self._wandb_module,
+        )
 
     def _load_or_generate_prediction(
         self,
@@ -641,7 +629,7 @@ class EnsembleManager(ForecastingModelManager):
             )
         else:
             # Get the latest prediction file (shell script generates with new timestamp)
-            prediction_files = model_path._get_generated_predictions_data_file_paths(
+            prediction_files = model_path.get_generated_predictions_data_file_paths(
                 run_type
             )
             if not prediction_files:
@@ -747,7 +735,7 @@ class EnsembleManager(ForecastingModelManager):
         # Load PG dataset
         latest_pg_dataset = (
             _PGDataset(
-                source=self._model_path._get_generated_predictions_data_file_paths(
+                source=self._model_path.get_generated_predictions_data_file_paths(
                     run_type=self.configs["run_type"]
                 )[0]
             )
@@ -816,7 +804,7 @@ class EnsembleManager(ForecastingModelManager):
             return _CDataset(
                 source=EnsemblePathManager(
                     cm_model
-                )._get_generated_predictions_data_file_paths(
+                ).get_generated_predictions_data_file_paths(
                     run_type=self.configs["run_type"]
                 )[
                     0

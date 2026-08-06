@@ -29,6 +29,7 @@ def mock_model_path():
     mock.data = Path("/test/root/models/purple_alien/data")
     mock.data_raw = Path("/test/root/models/purple_alien/data/raw")
     mock.data_generated = Path("/test/root/models/purple_alien/data/generated")
+    mock.data_processed = Path("/test/root/models/purple_alien/data/processed")
     mock.reports = Path("/test/root/models/purple_alien/reports")
     mock.dotenv = Path("/test/root/.env")
     mock.logging = Path("/test/root/models/purple_alien/logs")  # Add logging attribute
@@ -43,10 +44,10 @@ def mock_model_path():
         "main.py": "/test/root/models/purple_alien/main.py",
     }
     
-    mock._get_raw_data_file_paths.return_value = [
+    mock.get_raw_data_file_paths.return_value = [
         Path("/test/root/models/purple_alien/data/raw/calibration_viewser_df.parquet")
     ]
-    mock._get_generated_predictions_data_file_paths.return_value = [
+    mock.get_generated_predictions_data_file_paths.return_value = [
         Path("/test/root/models/purple_alien/data/generated/predictions_forecasting_20241105.parquet")
     ]
     mock.get_latest_model_artifact_path.return_value = Path(
@@ -834,7 +835,7 @@ class TestSaveMethods:
 
         with patch('pathlib.Path.mkdir'):
             with patch('views_pipeline_core.managers.prediction.io.save_dataframe') as mock_save:
-                with patch('views_pipeline_core.managers.prediction.file_namer.generate_output_file_name', return_value="predictions.parquet"):
+                with patch('views_pipeline_core.modules.files.naming.generate_output_file_name', return_value="predictions.parquet"):
                     manager._save_predictions(df, mock_model_path.data_generated)
 
                     mock_save.assert_called_once()

@@ -97,6 +97,7 @@ class TestP2TimestampFromArtifact:
         mock_path._target = "model"
         mock_path.model_name = "test_model"
         mock_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+        mock_path.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
 
         with patch(
             "views_pipeline_core.managers.model.model.ForecastingModelManager"

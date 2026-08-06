@@ -761,8 +761,10 @@ class TestValidateEnsembleRawDataAlignment:
             "views_pipeline_core.data.model_path.ModelPathManager"
         ) as MockMPM:
             mock_a = Mock()
+            mock_a.get_raw_data_file_paths.return_value = [file_a]
             mock_a._get_raw_data_file_paths.return_value = [file_a]
             mock_b = Mock()
+            mock_b.get_raw_data_file_paths.return_value = [file_b]
             mock_b._get_raw_data_file_paths.return_value = [file_b]
             MockMPM.side_effect = [mock_a, mock_b]
 

@@ -19,10 +19,10 @@ from views_pipeline_core.data.prediction_frame import PredictionFrame
 from views_pipeline_core.managers.prediction.vendor_faults import (
     upload_transport_faults,
 )
-from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+from views_pipeline_core.modules.frames.prediction_frame_converter import (
     PredictionFrameConverter,
 )
-from views_pipeline_core.managers.prediction.prediction_frame_io import save_pf
+from views_pipeline_core.modules.frames.prediction_frame_io import save_pf
 
 logger = logging.getLogger(__name__)
 

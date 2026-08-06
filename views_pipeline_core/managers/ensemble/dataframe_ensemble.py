@@ -27,7 +27,7 @@ import wandb
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset, _ViewsDataset
-from views_pipeline_core.domain.reconciliation_port import Reconciler, RECONCILER_NOT_INJECTED_MSG
+from views_pipeline_core.modules.reconciliation import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.files.utils import (
     handle_ensemble_log_creation,
@@ -116,7 +116,6 @@ class DataFrameEnsembleManager:
 
         self._logger = LoggingModule(model_path=ensemble_path).get_logger()
         self._wandb_module = WandBModule(
-            entity=self._entity,
             notifications_enabled=wandb_notifications,
             models_path=ensemble_path.models,
         )
@@ -459,7 +458,6 @@ class DataFrameEnsembleManager:
                     configs=ctx.configs,
                     model_path=self._ensemble_path,
                     run_type=ctx.run_type,
-                    entity=self._entity,
                     prediction_format=ctx.prediction_format,
                 )
                 self._reporting_stage.generate_forecast_report(reporting_ctx)
@@ -487,7 +485,6 @@ class DataFrameEnsembleManager:
                     configs=ctx.configs,
                     model_path=self._ensemble_path,
                     run_type=ctx.run_type,
-                    entity=self._entity,
                     prediction_format=ctx.prediction_format,
                 )
                 self._reporting_stage.generate_evaluation_report(reporting_ctx)
@@ -709,28 +706,16 @@ class DataFrameEnsembleManager:
         model_name: str,
         model_args: ForecastingModelArgs,
     ) -> None:
-        try:
-            shell_command = model_args.to_shell_command(model_path)
-            logger.info(f"Executing shell command: {' '.join(shell_command)}")
-            subprocess.run(shell_command, check=True, timeout=7200)
-        except subprocess.TimeoutExpired:
-            logger.error(
-                f"Shell command timed out for model {model_name} after 7200s",
-            )
-            raise PipelineException(
-                f"Shell command timed out for model {model_name} after 7200s. "
-                "Consider increasing the timeout or investigating the model script.",
-                wandb_module=self._wandb_module,
-            )
-        except Exception as e:
-            logger.error(
-                f"Error during shell command execution for model {model_name}: {e}",
-                exc_info=True,
-            )
-            raise PipelineException(
-                f"Error during shell command execution for model {model_name}: {e}",
-                wandb_module=self._wandb_module,
-            )
+        """Delegate to :func:`execute_model_subprocess` (C-2 audit: shared helper)."""
+        from views_pipeline_core.modules.ensemble.subprocess_runner import (
+            execute_model_subprocess,
+        )
+        execute_model_subprocess(
+            model_path=model_path,
+            model_name=model_name,
+            model_args=model_args,
+            wandb_module=self._wandb_module,
+        )
 
     def _load_or_generate_prediction(
         self,
@@ -791,7 +776,7 @@ class DataFrameEnsembleManager:
             )
         else:
             prediction_files = (
-                model_path._get_generated_predictions_data_file_paths(run_type)
+                model_path.get_generated_predictions_data_file_paths(run_type)
             )
             if not prediction_files:
                 raise PipelineException(
@@ -986,7 +971,7 @@ class DataFrameEnsembleManager:
             return _CDataset(
                 source=EnsemblePathManager(
                     cm_model
-                )._get_generated_predictions_data_file_paths(
+                ).get_generated_predictions_data_file_paths(
                     run_type=ctx.run_type
                 )[0]
             )

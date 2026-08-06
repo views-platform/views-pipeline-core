@@ -122,6 +122,7 @@ class TestEvaluationStageContract:
         stage = _make_stage()
         ctx = _make_context()
         ctx.model_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+        ctx.model_path.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
         mock_read.return_value = pd.DataFrame(
             {"lr_sb": [0.1]},
             index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "e"]),
@@ -146,6 +147,7 @@ class TestEvaluationStageContract:
         stage = _make_stage()
         ctx = _make_context()
         ctx.model_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+        ctx.model_path.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
         mock_read.return_value = pd.DataFrame(
             {"lr_sb": [0.1]},
             index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "e"]),
@@ -168,6 +170,7 @@ class TestEvaluationStageContract:
         stage = _make_stage()
         ctx = _make_context()
         ctx.model_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+        ctx.model_path.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
         mock_read.return_value = pd.DataFrame(
             {"lr_sb": [0.1]},
             index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "e"]),
@@ -195,6 +198,7 @@ class TestEvaluationStageContract:
 
         with patch("views_pipeline_core.files.utils.read_dataframe"):
             ctx.model_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+            ctx.model_path.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
             # Should not crash, just do nothing
             stage.evaluate([], ctx)
 
@@ -213,6 +217,7 @@ class TestEvaluationStagePFPath:
         stage = _make_stage()
         ctx = _make_context(prediction_format="prediction_frame")
         ctx.model_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+        ctx.model_path.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
         mock_read.return_value = pd.DataFrame(
             {"lr_sb": [0.1]},
             index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "e"]),
@@ -243,6 +248,7 @@ class TestEvaluationStagePFPath:
         stage = _make_stage()
         ctx = _make_context(prediction_format="prediction_frame")
         ctx.model_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+        ctx.model_path.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
         mock_read.return_value = pd.DataFrame(
             {"lr_sb": [0.1]},
             index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "e"]),
@@ -403,6 +409,7 @@ class TestMultipleTargets:
             "run_type": "calibration",
         })
         ctx.model_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+        ctx.model_path.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
         idx = pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "e"])
         mock_read.return_value = pd.DataFrame(
             {"lr_sb": [0.1], "lr_ns": [0.2]}, index=idx,
@@ -449,23 +456,30 @@ class TestContextContract:
             f"Missing fields: {required - field_names}"
         )
 
-    def test_model_path_protocol_compliance(self):
-        """ModelPathManager must satisfy ModelPathProtocol at runtime."""
-        from views_pipeline_core.types import ModelPathProtocol
-        # MagicMock satisfies any Protocol, so test the structural check
-        # by verifying Protocol is runtime_checkable and has expected members
-        import inspect
-        members = {
-            name for name, _ in inspect.getmembers(ModelPathProtocol)
-            if not name.startswith("_")
-        }
-        expected = {
-            "model_name", "target", "data_generated", "data_raw",
-            "models", "root", "artifacts", "reports",
-        }
-        assert expected.issubset(members), (
-            f"Protocol missing members: {expected - members}"
-        )
+    def test_model_path_manager_exposes_public_surface(self):
+        """ModelPathManager must expose the public surface stages consume.
+
+        The former ModelPathProtocol has been removed (C-3 audit decision);
+        ModelPathManager now exposes the path-discovery methods as public
+        members directly. Backward-compat private aliases are still present.
+        """
+        from views_pipeline_core.data.model_path import ModelPathManager
+        # Path-discovery methods live on the class — check directly
+        # Public path-discovery methods (post-C-3 promotion)
+        for meth in ("get_raw_data_file_paths",
+                     "get_generated_predictions_data_file_paths",
+                     "get_generated_pf_prediction_paths",
+                     "get_latest_model_artifact_path"):
+            assert hasattr(ModelPathManager, meth), (
+                f"ModelPathManager missing public method {meth!r}"
+            )
+        # Backward-compat private aliases still present
+        for meth in ("_get_raw_data_file_paths",
+                     "_get_generated_predictions_data_file_paths",
+                     "_get_generated_pf_prediction_paths"):
+            assert hasattr(ModelPathManager, meth), (
+                f"ModelPathManager missing backward-compat alias {meth!r}"
+            )
 
 
 # ── S2 (#226): MetricFrame evaluation-of-record emit ─────────────────────────

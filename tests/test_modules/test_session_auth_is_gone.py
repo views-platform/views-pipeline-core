@@ -19,7 +19,7 @@ import pathlib
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
-FILE_PY = REPO / "views_pipeline_core" / "modules" / "appwrite" / "file.py"
+FILE_PY = REPO / "views_pipeline_core" / "modules" / "appwrite" / "storage.py"
 PKG_INIT = REPO / "views_pipeline_core" / "modules" / "appwrite" / "__init__.py"
 
 # The three operations that leave with SessionAuth. `users.get_prefs` is deliberately

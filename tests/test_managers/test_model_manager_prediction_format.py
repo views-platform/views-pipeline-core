@@ -120,7 +120,7 @@ def _run_execute_forecast(manager, mock_df_result=None):
         "views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer"
     ) as MockSniffer:
         with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-            with patch("views_pipeline_core.managers.model.model.save_pf"):
+            with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
                 manager._execute_model_forecasting()
                 return MockSniffer
 
@@ -458,8 +458,8 @@ def _run_execute_eval(manager: _ForecastStub, list_predictions: list) -> Mock:
                 with patch.object(
                     ForecastingModelManager, "_evaluate_prediction_dataframe"
                 ):
-                    with patch("views_pipeline_core.managers.model.model.save_pf"):
-                        with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                    with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
+                        with patch("views_pipeline_core.managers.model.mixins._forecast.load_pf", return_value=Mock()), patch("views_pipeline_core.managers.model.mixins._evaluate.load_pf", return_value=Mock()):
                             manager._execute_model_evaluation()
                             return MockSniffer
 
@@ -758,8 +758,8 @@ class TestPFDictDispatch:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
                     with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-                        with patch("views_pipeline_core.managers.model.model.save_pf"):
-                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                        with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
+                            with patch("views_pipeline_core.managers.model.mixins._forecast.load_pf", return_value=Mock()), patch("views_pipeline_core.managers.model.mixins._evaluate.load_pf", return_value=Mock()):
                                 manager._execute_model_evaluation()
 
         mock_tat.assert_called_once()
@@ -789,8 +789,8 @@ class TestPFDictDispatch:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
                     with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-                        with patch("views_pipeline_core.managers.model.model.save_pf"):
-                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                        with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
+                            with patch("views_pipeline_core.managers.model.mixins._forecast.load_pf", return_value=Mock()), patch("views_pipeline_core.managers.model.mixins._evaluate.load_pf", return_value=Mock()):
                                 manager._execute_model_evaluation()
 
         assert mock_tat.call_count == 2
@@ -808,7 +808,7 @@ class TestPFDictDispatch:
         manager._test_return = {"lr_sb": pf}
         dummy_df = _make_dummy_df()
 
-        with patch("views_pipeline_core.managers.model.model.save_pf"):
+        with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
             with patch.object(
                 PredictionFrameConverter, "to_prediction_df", return_value=dummy_df
             ) as mock_tld:
@@ -827,7 +827,7 @@ class TestPFDictDispatch:
         manager._test_return = {"lr_sb": pf1, "ged_ns": pf2}
         dummy_df = _make_dummy_df()
 
-        with patch("views_pipeline_core.managers.model.model.save_pf"):
+        with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
             with patch.object(PredictionFrameConverter, "to_legacy_dfs", return_value=[dummy_df]):
                 with patch.object(PredictionFrameConverter, "audit_prediction_structure"):
                     _run_execute_forecast(manager, mock_df_result=dummy_df)
@@ -1218,9 +1218,10 @@ class TestOOMMitigation:
                     with patch(
                         "views_pipeline_core.files.utils.handle_single_log_creation"
                     ):
-                        with patch("views_pipeline_core.managers.model.model.save_pf") as mock_save:
-                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
-                                manager._execute_model_evaluation()
+                        with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"):
+                            with patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf") as mock_save:
+                                with patch("views_pipeline_core.managers.model.mixins._forecast.load_pf", return_value=Mock()), patch("views_pipeline_core.managers.model.mixins._evaluate.load_pf", return_value=Mock()):
+                                    manager._execute_model_evaluation()
 
         mock_convert.assert_not_called()
         manager._save_predictions.assert_not_called()
@@ -1250,8 +1251,8 @@ class TestOOMMitigation:
                     with patch(
                         "views_pipeline_core.files.utils.handle_single_log_creation"
                     ):
-                        with patch("views_pipeline_core.managers.model.model.save_pf"):
-                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                        with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
+                            with patch("views_pipeline_core.managers.model.mixins._forecast.load_pf", return_value=Mock()), patch("views_pipeline_core.managers.model.mixins._evaluate.load_pf", return_value=Mock()):
                                 manager._execute_model_evaluation()
 
     def test_pf_missing_skip_predictions_delivery_crashes_before_save(self):
@@ -1279,9 +1280,10 @@ class TestOOMMitigation:
                     with patch(
                         "views_pipeline_core.files.utils.handle_single_log_creation"
                     ):
-                        with patch("views_pipeline_core.managers.model.model.save_pf") as mock_save:
-                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
-                                manager._execute_model_evaluation()
+                        with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf") as mock_save:
+                            with patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
+                                with patch("views_pipeline_core.managers.model.mixins._forecast.load_pf", return_value=Mock()), patch("views_pipeline_core.managers.model.mixins._evaluate.load_pf", return_value=Mock()):
+                                    manager._execute_model_evaluation()
 
         mock_save.assert_not_called()
 
@@ -1311,8 +1313,8 @@ class TestOOMMitigation:
             with patch.object(ForecastingModelManager, "_assert_predictions_in_step_window"):
                 with patch.object(ForecastingModelManager, "_evaluate_prediction_dataframe"):
                     with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-                        with patch("views_pipeline_core.managers.model.model.save_pf"):
-                            with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                        with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
+                            with patch("views_pipeline_core.managers.model.mixins._forecast.load_pf", return_value=Mock()), patch("views_pipeline_core.managers.model.mixins._evaluate.load_pf", return_value=Mock()):
                                 manager._execute_model_evaluation()
 
         mock_tat.assert_called_once()
@@ -1378,8 +1380,8 @@ class TestOOMMitigation:
                 ForecastingModelManager, "_assert_predictions_in_step_window"
             ):
                 with patch("views_pipeline_core.files.utils.handle_single_log_creation"):
-                    with patch("views_pipeline_core.managers.model.model.save_pf"):
-                        with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                    with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
+                        with patch("views_pipeline_core.managers.model.mixins._forecast.load_pf", return_value=Mock()), patch("views_pipeline_core.managers.model.mixins._evaluate.load_pf", return_value=Mock()):
                             manager._execute_model_evaluation()
 
         mock_eval_df.assert_not_called()

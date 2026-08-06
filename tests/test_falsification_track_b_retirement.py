@@ -83,8 +83,8 @@ class TestF4StaleMethodPatch:
                         with patch(
                             "views_pipeline_core.files.utils.handle_single_log_creation"
                         ):
-                            with patch("views_pipeline_core.managers.model.model.save_pf"):
-                                with patch("views_pipeline_core.managers.model.model.load_pf", return_value=Mock()):
+                            with patch("views_pipeline_core.managers.model.mixins._forecast.save_pf"), patch("views_pipeline_core.managers.model.mixins._evaluate.save_pf"):
+                                with patch("views_pipeline_core.managers.model.mixins._forecast.load_pf", return_value=Mock()), patch("views_pipeline_core.managers.model.mixins._evaluate.load_pf", return_value=Mock()):
                                     manager._execute_model_evaluation()
 
         # This is the point: to_prediction_df is NEVER called, even when

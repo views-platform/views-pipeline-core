@@ -4,15 +4,17 @@ import re
 logger = logging.getLogger(__name__)
 
 
-class _PipelineConfigImpl:
+class PipelineConfig:
     """Pipeline configuration singleton.
 
-    Access via the module-level ``PipelineConfig`` instance::
+    Accessed via the module-level ``PipelineConfig`` instance (created
+    at the bottom of this file). All attributes are instance properties
+    backed by private state set in ``__init__``.
+
+    Usage::
 
         from views_pipeline_core.configs.pipeline import PipelineConfig
         fmt = PipelineConfig.dataframe_format   # '.parquet'
-
-    Do NOT instantiate this class directly.
     """
 
     def __init__(self):
@@ -64,8 +66,11 @@ class _PipelineConfigImpl:
         return self._current_version
 
 
-# Module-level singleton — the only instance that should ever exist.
-PipelineConfig = _PipelineConfigImpl()
+# Module-level singleton instance.
+# The class is named PipelineConfig; this instance shadows the class name
+# so that `from views_pipeline_core.configs.pipeline import PipelineConfig`
+# gives callers the singleton instance (not the class).
+PipelineConfig = PipelineConfig()
 
 
 # regex validation function to follow ".type" pattern

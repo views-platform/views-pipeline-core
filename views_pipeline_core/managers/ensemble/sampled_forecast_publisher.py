@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from views_frames import PredictionFrame
 
-from views_pipeline_core.managers.prediction.prediction_frame_io import save_pf
+from views_pipeline_core.modules.frames.prediction_frame_io import save_pf
 
 logger = logging.getLogger(__name__)
 

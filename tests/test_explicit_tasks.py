@@ -43,6 +43,7 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
     """
     mock_path_manager = MagicMock()
     mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+    mock_path_manager.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
 
     manager = ForecastingModelManager(mock_path_manager)
     manager._args = MagicMock()
@@ -95,6 +96,7 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
     """Verify that point estimates pass the scalar gate safely."""
     mock_path_manager = MagicMock()
     mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+    mock_path_manager.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
     
     manager = ForecastingModelManager(mock_path_manager)
     manager._args = MagicMock()
@@ -144,6 +146,7 @@ def test_scalar_gate_distribution_with_sample_metrics(mock_read, mock_splash, mo
     """Verify distribution predictions + uncertainty metrics → NativeEvaluator IS called."""
     mock_path_manager = MagicMock()
     mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+    mock_path_manager.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
 
     manager = ForecastingModelManager(mock_path_manager)
     manager._args = MagicMock()

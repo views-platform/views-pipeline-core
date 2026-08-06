@@ -198,7 +198,7 @@ def validate_ensemble_raw_data_alignment(model_names, run_type):
     sizes = {}
     for name in model_names:
         mp = ModelPathManager(name)
-        raw_paths = mp._get_raw_data_file_paths(run_type)
+        raw_paths = mp.get_raw_data_file_paths(run_type)
         if not raw_paths:
             logger.warning("Raw data file missing for model %s", name)
             continue

@@ -261,13 +261,13 @@ class EvaluationStage:
         from views_pipeline_core.files.utils import read_dataframe
 
         if not ensemble:
-            raw_paths = context.model_path._get_raw_data_file_paths(
+            raw_paths = context.model_path.get_raw_data_file_paths(
                 run_type=context.run_type
             )
         else:
             from views_pipeline_core.managers.model import ModelPathManager
             mp = ModelPathManager(context.configs["models"][0])
-            raw_paths = mp._get_raw_data_file_paths(
+            raw_paths = mp.get_raw_data_file_paths(
                 run_type=context.configs["run_type"]
             )
 
@@ -327,7 +327,14 @@ class EvaluationStage:
             gc.collect()
             return ef
         else:
-            # DF path: df_predictions is List[pd.DataFrame].
+            # DF path: model emits List[pd.DataFrame] with list-in-cell pred cells.
+            # Normalise to dense PredictionFrames at the boundary and evaluate through
+            # the SAME adapter core as the PF path (from_prediction_frames): one code
+            # path, and the list-in-cell memory explosion is avoided (ADR-042).
+            from views_pipeline_core.modules.frames.prediction_frame_converter import (
+                PredictionFrameConverter,
+            )
+
             raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
             first_df = raw_preds[0]
             if f"pred_{target}" not in first_df.columns:
@@ -335,13 +342,15 @@ class EvaluationStage:
                     f"Column pred_{target} not found in prediction columns. Skipping."
                 )
                 return None
-            pred_slices = [df[[f"pred_{target}"]] for df in raw_preds]
-            step_mappings = self._get_evaluation_step_mappings(
-                n_sequences=len(pred_slices), context=context,
+            prediction_frames = PredictionFrameConverter().from_legacy_dfs(
+                raw_preds, target, context.configs["level"],
             )
-            return EvaluationAdapter.from_dataframes(
+            step_mappings = self._get_evaluation_step_mappings(
+                n_sequences=len(prediction_frames), context=context,
+            )
+            return EvaluationAdapter.from_prediction_frames(
                 actual=actual_slice,
-                predictions=pred_slices,
+                predictions=prediction_frames,
                 target=target,
                 step_mapping=step_mappings,
             )

@@ -1,20 +1,22 @@
-"""
-Tests for PipelineConfig singleton access contract.
+"""Tests for PipelineConfig singleton access contract.
 
 PipelineConfig is a module-level singleton instance. These tests enforce that:
 - Attribute access returns the correct values
 - The setter works for mutable config
 - The singleton is not accidentally re-instantiable
 """
-from views_pipeline_core.configs.pipeline import PipelineConfig, _PipelineConfigImpl
+from views_pipeline_core.configs.pipeline import PipelineConfig
 
 
 class TestPipelineConfigSingleton:
     """PipelineConfig must be a singleton with direct attribute access."""
 
     def test_is_instance_not_class(self):
-        """PipelineConfig is an instance, not a class."""
-        assert isinstance(PipelineConfig, _PipelineConfigImpl)
+        """PipelineConfig is an instance (singleton), not a class."""
+        # PipelineConfig is the singleton instance; it should NOT be a class.
+        assert not isinstance(PipelineConfig, type)
+        # It should have the expected attributes.
+        assert hasattr(PipelineConfig, "dataframe_format")
 
     def test_dataframe_format_returns_string(self):
         """PipelineConfig.dataframe_format must return a string."""

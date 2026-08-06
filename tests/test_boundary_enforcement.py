@@ -113,10 +113,27 @@ class TestInnerLayerBoundaries:
     """data/ and configs/ (Layers 0-1) must not import from managers/ or modules/."""
 
     def test_data_does_not_import_managers(self):
+        # PathManager and ModelPathManager were moved to managers/ per the
+        # user's directive: "Path.py does not belong in /data. It belongs
+        # in /managers/path instead. ModelPathManager belongs in managers/model.py."
+        # data/model_path.py and data/path.py are now re-export shims that
+        # import from managers/ — this is an intentional, deliberate layer
+        # crossing sanctioned by the user.
+        granular_exemptions = {
+            (
+                "data/model_path.py",
+                "views_pipeline_core.managers.model",
+            ): {"ModelPathManager"},
+            (
+                "data/path.py",
+                "views_pipeline_core.managers.path",
+            ): {"PathManager"},
+        }
         violations = _check_layer_violations(
             _PKG / "data",
             ["views_pipeline_core.managers"],
             "data/ (Layer 1)",
+            granular_exemptions=granular_exemptions,
         )
         assert violations == [], (
             "Layer violation: data/ imports managers/:\n"
@@ -169,6 +186,24 @@ class TestModuleLayerBoundaries:
                 "modules/validation/ensemble/check.py",
                 "views_pipeline_core.managers.model",
             ): {"ModelManager"},
+            # Path managers moved to managers/ per user directive;
+            # lower layers need to import them.
+            (
+                "modules/appwrite/config.py",
+                "views_pipeline_core.managers.model",
+            ): {"ModelPathManager"},
+            (
+                "modules/dataloaders/dataloaders.py",
+                "views_pipeline_core.managers.model",
+            ): {"ModelPathManager"},
+            (
+                "modules/logging/logging.py",
+                "views_pipeline_core.managers.model",
+            ): {"ModelPathManager"},
+            (
+                "modules/appwrite/config.py",
+                "views_pipeline_core.managers.path",
+            ): {"PathManager"},
             (
                 "modules/validation/ensemble/check.py",
                 "views_pipeline_core.managers.ensemble",

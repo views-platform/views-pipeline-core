@@ -455,20 +455,24 @@ class TestPostEvalLogReadAssumption:
 
 
 # ============================================================================
-# Test 9: _get_raw_data_file_paths only matches _viewser_df
+# Test 9: get_raw_data_file_paths only matches _viewser_df
 # (PR 4 Change 5 will broaden this to also match _datafactory_df)
 # ============================================================================
 
 class TestGetRawDataFilePathsFilter:
-    """_get_raw_data_file_paths() finds both *_viewser_df* and *_datafactory_df* files.
+    """get_raw_data_file_paths() finds both *_viewser_df* and *_datafactory_df* files.
     Updated in PR 4 to support dual-source dispatch."""
 
     @staticmethod
     def _call_get_raw(tmp_path, run_type):
-        """Call the real _get_raw_data_file_paths with a mock whose data_raw is tmp_path."""
+        """Call the real get_raw_data_file_paths with a mock whose data_raw is tmp_path.
+
+        Uses the public name (post-C-3 promotion). The private
+        ``_get_raw_data_file_paths`` alias delegates to this method.
+        """
         mock = MagicMock(spec=ModelPathManager)
         mock.data_raw = tmp_path
-        return ModelPathManager._get_raw_data_file_paths(mock, run_type)
+        return ModelPathManager.get_raw_data_file_paths(mock, run_type)
 
     def test_finds_viewser_df_file(self, tmp_path):
         (tmp_path / "calibration_viewser_df.parquet").touch()

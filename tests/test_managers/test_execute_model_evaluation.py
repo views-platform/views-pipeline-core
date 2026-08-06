@@ -59,6 +59,7 @@ def _make_manager():
     """Build a ForecastingModelManager with all internals mocked."""
     mock_path_manager = MagicMock()
     mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+    mock_path_manager.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
     mock_path_manager.data_generated = Path("/tmp/data_generated")
     mock_path_manager.root = Path("/tmp")
     mock_path_manager.target = "model"

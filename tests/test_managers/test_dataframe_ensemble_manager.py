@@ -94,10 +94,10 @@ def mock_ensemble_path():
         "main.py": "/test/main.py",
     }
 
-    mock._get_generated_predictions_data_file_paths.return_value = [
+    mock.get_generated_predictions_data_file_paths.return_value = [
         Path("/test/data/generated/predictions_forecasting_20241105_120000.parquet")
     ]
-    mock._get_raw_data_file_paths.return_value = [
+    mock.get_raw_data_file_paths.return_value = [
         Path("/test/data/raw/raw_calibration.parquet")
     ]
     mock.get_latest_model_artifact_path.return_value = Path(

@@ -23,12 +23,12 @@ import wandb
 
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.data.prediction_frame import PredictionFrame
-from views_pipeline_core.domain.reconciliation_port import (
+from views_pipeline_core.modules.reconciliation import (
     RECONCILER_NOT_INJECTED_MSG,
     Reconciler,
 )
 from views_pipeline_core.exceptions import PipelineException
-from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
+from views_pipeline_core.modules.frames.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.files.utils import handle_ensemble_log_creation
 from views_pipeline_core.modules.reconciliation.reconcile_frames import reconcile_frames
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
@@ -224,7 +224,6 @@ class PredictionFrameEnsembleManager:
 
         self._logger = LoggingModule(model_path=ensemble_path).get_logger()
         self._wandb_module = WandBModule(
-            entity=self._entity,
             notifications_enabled=wandb_notifications,
             models_path=ensemble_path.models,
         )
@@ -495,7 +494,6 @@ class PredictionFrameEnsembleManager:
                     configs=ctx.configs,
                     model_path=self._ensemble_path,
                     run_type=ctx.run_type,
-                    entity=self._entity,
                     prediction_format=ctx.prediction_format,
                 )
                 self._reporting_stage.generate_forecast_report(reporting_ctx)
@@ -523,7 +521,6 @@ class PredictionFrameEnsembleManager:
                     configs=ctx.configs,
                     model_path=self._ensemble_path,
                     run_type=ctx.run_type,
-                    entity=self._entity,
                     prediction_format=ctx.prediction_format,
                 )
                 self._reporting_stage.generate_evaluation_report(reporting_ctx)
@@ -860,28 +857,16 @@ class PredictionFrameEnsembleManager:
         model_name: str,
         model_args: ForecastingModelArgs,
     ) -> None:
-        try:
-            shell_command = model_args.to_shell_command(model_path)
-            logger.info(f"Executing shell command: {' '.join(shell_command)}")
-            subprocess.run(shell_command, check=True, timeout=7200)
-        except subprocess.TimeoutExpired:
-            logger.error(
-                f"Shell command timed out for model {model_name} after 7200s",
-            )
-            raise PipelineException(
-                f"Shell command timed out for model {model_name} after 7200s. "
-                "Consider increasing the timeout or investigating the model script.",
-                wandb_module=self._wandb_module,
-            )
-        except Exception as e:
-            logger.error(
-                f"Error during shell command execution for model {model_name}: {e}",
-                exc_info=True,
-            )
-            raise PipelineException(
-                f"Error during shell command execution for model {model_name}: {e}",
-                wandb_module=self._wandb_module,
-            )
+        """Delegate to :func:`execute_model_subprocess` (C-2 audit: shared helper)."""
+        from views_pipeline_core.modules.ensemble.subprocess_runner import (
+            execute_model_subprocess,
+        )
+        execute_model_subprocess(
+            model_path=model_path,
+            model_name=model_name,
+            model_args=model_args,
+            wandb_module=self._wandb_module,
+        )
 
     def _load_or_generate_pf(
         self,

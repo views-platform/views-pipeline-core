@@ -184,7 +184,7 @@ def _result_returning_names() -> Set[str]:
 # ---------------------------------------------------------------------------
 _BOUNDED_BY_REALITY: Dict[Tuple[str, str, str], str] = {
     (
-        "file.py",
+        "storage.py",
         "AppWriteFileModule.debug_collection_attributes",
         "list_attributes",
     ): "a debug helper that logs a collection's schema; attribute count is bounded by "
@@ -215,18 +215,18 @@ _RECORDED_NOT_SWALLOWED: Dict[Tuple[str, str], str] = {
     ): "records the failure in `report.indeterminate` and returns what it has; the audit "
     "must survive any substrate error in order to report that it could not complete",
     (
-        "file.py",
+        "storage.py",
         "AppWriteFileModule.upload_file",
     ): "returns OperationResult(success=False) carrying the error — converting an "
     "unpredictable substrate failure into a value the caller must inspect is the shape "
     "this guard is FOR, not one it should ban",
     (
-        "file.py",
+        "storage.py",
         "AppWriteFileModule.upload_file_from_bytes_with_metadata",
     ): "logs at error level that a rollback failed. The rollback is already the failure "
     "path; there is no further action available, and the log is the record",
     (
-        "file.py",
+        "storage.py",
         "AppWriteFileModule._setup_cache",
     ): "local filesystem setup, not a substrate read. Falls back to a default cache "
     "directory and warns; no data read is being turned into an absence",
@@ -250,7 +250,7 @@ _MAX_TRACKED_DEFECTS = 1
 
 _TRACKED_DEFECTS: Dict[Tuple[str, str], str] = {
     (
-        "file.py",
+        "storage.py",
         "AppWriteFileModule.upload_file_with_metadata",
     ): "C-257 — a failed `delete_document` of the OLD metadata card is swallowed with "
     "logger.warning, leaving a document pointing at a file that was just replaced: a "

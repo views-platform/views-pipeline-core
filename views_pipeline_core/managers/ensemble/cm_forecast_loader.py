@@ -55,7 +55,7 @@ def load_cm_frame(cm_model: str, target: str, run_type: str) -> PredictionFrame:
     # path scan does an unguarded `data_generated.iterdir()` (FileNotFoundError if the model
     # has never produced a forecast). Wrap both so the failure is loud AND actionable.
     try:
-        paths = EnsemblePathManager(cm_model)._get_generated_predictions_data_file_paths(
+        paths = EnsemblePathManager(cm_model).get_generated_predictions_data_file_paths(
             run_type=run_type
         )
     except OSError as e:

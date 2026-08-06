@@ -37,7 +37,7 @@ from views_frames import PredictionFrame, SpatioTemporalIndex
 from views_frames_reconcile import ALIGNED_DRAWS, POINT_BROADCAST
 
 if TYPE_CHECKING:  # the port is a lightweight Protocol; keep concrete imports out of runtime
-    from views_pipeline_core.domain.reconciliation_port import Reconciler
+    from views_pipeline_core.modules.reconciliation.port import Reconciler
 
 __all__ = ["reconcile_frames", "POINT_BROADCAST", "ALIGNED_DRAWS"]
 

@@ -135,7 +135,7 @@ class TestCoreConfigSnifferRunsOnAllPaths:
             mgr._config_manager = mock_config_mgr
 
             with patch(
-                "views_pipeline_core.managers.model.model.CoreConfigSniffer"
+                "views_pipeline_core.managers.model.mixins._execute.CoreConfigSniffer"
             ) as mock_sniffer:
                 mock_sniffer.return_value.sniff_all.return_value = None
                 with patch.object(mgr, "_assert_partition_config_accessible"):

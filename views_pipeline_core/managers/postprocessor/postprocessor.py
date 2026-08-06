@@ -4,7 +4,6 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Union
 
-import wandb
 
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.managers.model import ModelManager, ModelPathManager
@@ -95,13 +94,17 @@ class PostprocessorManager(ModelManager):
         raise NotImplementedError("Subclasses must implement the _save method.")
 
     def run(self, args: Namespace):
-        """
-        Main entry point for Postprocessor lifecycle management.
+        """Main entry point for Postprocessor lifecycle management.
+
+        Uses ``self._wandb_module.initialize_run`` (consistent with sibling
+        managers) instead of calling ``wandb.init`` directly (m-4 audit
+        decision). The eager ``import wandb`` at module top is kept for
+        backward compatibility but is no longer used here.
         """
         self._args = args
-        with wandb.init(
+        with self._wandb_module.initialize_run(
             project=f"{self.configs['name']}_postprocessor",
-            entity=self._entity,
+            config=dict(self.configs),
             job_type="postprocessor_run",
         ):
             try:

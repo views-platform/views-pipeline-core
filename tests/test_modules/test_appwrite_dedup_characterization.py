@@ -67,10 +67,10 @@ def config(tmp_path):
 
 @pytest.fixture
 def manager(config):
-    with patch("views_pipeline_core.modules.appwrite.file.Client"), patch(
-        "views_pipeline_core.modules.appwrite.file.Storage"
-    ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
-        "views_pipeline_core.modules.appwrite.file.Users"
+    with patch("views_pipeline_core.modules.appwrite.storage.Client"), patch(
+        "views_pipeline_core.modules.appwrite.storage.Storage"
+    ), patch("views_pipeline_core.modules.appwrite.storage.Databases"), patch(
+        "views_pipeline_core.modules.appwrite.storage.Users"
     ):
         yield AppWriteFileModule(config)
 
@@ -299,11 +299,11 @@ class TestErrorTypePropagation:
     """The information the fix depends on is produced correctly today."""
 
     def test_get_file_preserves_the_server_error_type(self, config):
-        with patch("views_pipeline_core.modules.appwrite.file.Client"), patch(
-            "views_pipeline_core.modules.appwrite.file.Storage"
+        with patch("views_pipeline_core.modules.appwrite.storage.Client"), patch(
+            "views_pipeline_core.modules.appwrite.storage.Storage"
         ) as storage, patch(
-            "views_pipeline_core.modules.appwrite.file.Databases"
-        ), patch("views_pipeline_core.modules.appwrite.file.Users"):
+            "views_pipeline_core.modules.appwrite.storage.Databases"
+        ), patch("views_pipeline_core.modules.appwrite.storage.Users"):
             mgr = AppWriteFileModule(config)
             storage.return_value.get_file.side_effect = AppwriteException(
                 "missing scope", 401, "general_unauthorized_scope"

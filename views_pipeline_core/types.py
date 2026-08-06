@@ -1,69 +1,30 @@
 """
-Shared type definitions for views-pipeline-core.
+Shared type definitions for views_pipeline_core.
 
-Protocols live here to break the dependency inversion caused by
-ModelPathManager living in managers/ while lower layers need to
-reference its interface.  Stages, contexts, and validators should
-type against these protocols — never import ModelPathManager directly.
+The previous ``ModelPathProtocol`` and ``DataFetchStrategy`` Protocols have
+been removed (C-3 audit decision). Stages now type against
+``ModelPathManager`` directly via ``TYPE_CHECKING`` imports — the path
+manager's public surface (``data_raw``, ``artifacts``, ``target``,
+``get_raw_data_file_paths``, ``get_generated_predictions_data_file_paths``,
+``get_generated_pf_prediction_paths``, ``get_latest_model_artifact_path``,
+etc.) is the contract.
 
-See ADR-045 Root Cause #1 for background.
+The private-name aliases (``_get_raw_data_file_paths`` etc.) are kept on
+``ModelPathManager`` for backward compatibility with older callers but
+should not be referenced by new code.
+
+See ADR-045 (E6 relocation shipped; private→public promotion now applied).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict
 
-
-# ---------------------------------------------------------------------------
-# ModelPathManager protocol — the interface that stages actually consume
-# ---------------------------------------------------------------------------
-
-@runtime_checkable
-class ModelPathProtocol(Protocol):
-    """Structural sub-type of ModelPathManager / EnsemblePathManager.
-
-    Lists only the properties and methods that pipeline stages access
-    via their frozen context objects.  Any class that exposes these
-    members satisfies the protocol — no inheritance required.
-
-    Kept deliberately narrow: add members only when a new stage
-    genuinely needs them.  Broader access should go through the
-    facade (ForecastingModelManager), not through the context.
-    """
-
-    @property
-    def model_name(self) -> str: ...
-
-    @property
-    def target(self) -> str: ...
-
-    @property
-    def data_generated(self) -> Path: ...
-
-    @property
-    def data_raw(self) -> Path: ...
-
-    @property
-    def models(self) -> Path: ...
-
-    @property
-    def root(self) -> Path: ...
-
-    @property
-    def artifacts(self) -> Path: ...
-
-    @property
-    def reports(self) -> Path: ...
-
-    # These methods are underscore-prefixed (private) on ModelPathManager today.
-    # They are included in the Protocol because stages genuinely call them.
-    # When ModelPathManager is relocated to data/ (E6), promote to public API.
-    def _get_raw_data_file_paths(self, run_type: str) -> List[Path]: ...
-
-    def _get_generated_predictions_data_file_paths(
-        self, run_type: str,
-    ) -> List[Path]: ...
+if TYPE_CHECKING:  # pragma: no cover — static analysis only
+    # Avoid an eager runtime import cycle: stages/contexts reference this
+    # type-only and ModelPathManager is the concrete implementation.
+    from views_pipeline_core.data.model_path import ModelPathManager
 
 
 # ---------------------------------------------------------------------------
@@ -83,40 +44,5 @@ class BaseStageContext:
     future ``run_id`` for idempotency tracking).
     """
     configs: Dict[str, Any]
-    model_path: ModelPathProtocol
+    model_path: "ModelPathManager"
     run_type: str
-
-
-# ---------------------------------------------------------------------------
-# Data fetch strategy — protocol for pluggable data sources (C-51, C-48)
-# ---------------------------------------------------------------------------
-
-@runtime_checkable
-class DataFetchStrategy(Protocol):
-    """Strategy for fetching data from a specific source.
-
-    Implementations wrap a concrete data source (viewser, views-datafactory,
-    or future sources) behind a uniform fetch interface. ViewsDataLoader
-    dispatches to the appropriate strategy based on the return type of
-    get_queryset().
-    """
-
-    @property
-    def source_name(self) -> str:
-        """Short identifier used in cache filenames (e.g. 'viewser', 'datafactory')."""
-        ...
-
-    def fetch(
-        self,
-        month_first: int,
-        month_last: int,
-        drift_config_dict: Optional[Dict],
-        self_test: bool,
-    ) -> tuple[Any, Optional[list]]:
-        """Fetch data for the given month range.
-
-        Returns:
-            Tuple of (DataFrame, alerts_or_None). Alerts may be None if the
-            source does not support drift detection.
-        """
-        ...

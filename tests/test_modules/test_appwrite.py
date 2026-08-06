@@ -55,7 +55,7 @@ def api_key_config(mock_path_manager):
 @pytest.fixture
 def mock_client():
     """Mock Appwrite Client"""
-    with patch("views_pipeline_core.modules.appwrite.file.Client") as mock:
+    with patch("views_pipeline_core.modules.appwrite.storage.Client") as mock:
         client = mock.return_value
         client.set_endpoint.return_value = client
         client.set_project.return_value = client
@@ -66,14 +66,14 @@ def mock_client():
 @pytest.fixture
 def mock_storage():
     """Mock Storage service"""
-    with patch("views_pipeline_core.modules.appwrite.file.Storage") as mock:
+    with patch("views_pipeline_core.modules.appwrite.storage.Storage") as mock:
         yield mock.return_value
 
 
 @pytest.fixture
 def mock_databases():
     """Mock Databases service"""
-    with patch("views_pipeline_core.modules.appwrite.file.Databases") as mock:
+    with patch("views_pipeline_core.modules.appwrite.storage.Databases") as mock:
         yield mock.return_value
 
 
@@ -325,10 +325,10 @@ class TestMetadataManager:
 class TestAppWriteFileManager:
     @pytest.fixture
     def file_manager(self, api_key_config):
-        with patch("views_pipeline_core.modules.appwrite.file.Client"), \
-             patch("views_pipeline_core.modules.appwrite.file.Storage"), \
-             patch("views_pipeline_core.modules.appwrite.file.Databases"), \
-             patch("views_pipeline_core.modules.appwrite.file.Users"):
+        with patch("views_pipeline_core.modules.appwrite.storage.Client"), \
+             patch("views_pipeline_core.modules.appwrite.storage.Storage"), \
+             patch("views_pipeline_core.modules.appwrite.storage.Databases"), \
+             patch("views_pipeline_core.modules.appwrite.storage.Users"):
             manager = AppWriteFileModule(api_key_config)
             yield manager
 
@@ -360,7 +360,7 @@ class TestAppWriteFileManager:
             "sizeOriginal": 12,
         }
         
-        with patch("views_pipeline_core.modules.appwrite.file.InputFile"):
+        with patch("views_pipeline_core.modules.appwrite.storage.InputFile"):
             result = file_manager.upload_file(
                 "bucket1",
                 str(test_file),
@@ -402,7 +402,7 @@ class TestAppWriteFileManager:
             "sizeOriginal": len(test_content),
         }
         
-        with patch("views_pipeline_core.modules.appwrite.file.InputFile"):
+        with patch("views_pipeline_core.modules.appwrite.storage.InputFile"):
             result = file_manager.upload_file_from_bytes(
                 "bucket1",
                 test_content,
@@ -598,10 +598,10 @@ class TestAppWriteFileManager:
 # Test Error Handling
 class TestErrorHandling:
     def test_appwrite_exception_handling(self, api_key_config):
-        with patch("views_pipeline_core.modules.appwrite.file.Client"), \
-             patch("views_pipeline_core.modules.appwrite.file.Storage") as mock_storage, \
-             patch("views_pipeline_core.modules.appwrite.file.Databases"), \
-             patch("views_pipeline_core.modules.appwrite.file.Users"):
+        with patch("views_pipeline_core.modules.appwrite.storage.Client"), \
+             patch("views_pipeline_core.modules.appwrite.storage.Storage") as mock_storage, \
+             patch("views_pipeline_core.modules.appwrite.storage.Databases"), \
+             patch("views_pipeline_core.modules.appwrite.storage.Users"):
             
             manager = AppWriteFileModule(api_key_config)
             mock_storage.return_value.get_file.side_effect = AppwriteException(

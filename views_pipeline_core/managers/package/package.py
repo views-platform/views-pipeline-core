@@ -3,9 +3,11 @@ import subprocess
 from pathlib import Path
 import re
 from views_pipeline_core.configs.pipeline import PipelineConfig
-import requests
+from views_pipeline_core.exceptions import PipelineException
+# requests is now imported lazily inside versioning.get_latest_release_version_from_github
+# (per the M-4 audit decision: make `requests` a lazy import so this module
+# doesn't eagerly pull the HTTP library at module scope).
 import logging
-import time
 from typing import Union
 
 logger = logging.getLogger(__name__)
@@ -112,80 +114,17 @@ class PackageManager:
     def get_latest_release_version_from_github(
         repository_name: str, organization_name: str = "views-platform"
     ) -> str:
+        """Fetch the latest release version of a repository from GitHub.
+
+        Delegates to :func:`views_pipeline_core.managers.package.versioning.get_latest_release_version_from_github`
+        (M-4 audit decision: extracted to a dedicated helper so the HTTP
+        logic is testable in isolation and ``requests`` is imported
+        lazily).
         """
-        Fetches the latest release version of a given repository from GitHub.
-
-        Args:
-            repository_name (str): The name of the repository.
-            organization_name (str, optional): The name of the organization. Defaults to "views-platform".
-
-        Returns:
-            str: The tag name of the latest release if found, otherwise None.
-
-        Raises:
-            requests.exceptions.RequestException: If an error occurs while making the request to GitHub.
-        """
-
-        # **Step 1: Try getting the latest version using `git ls-remote`**
-        repo_url = f"https://github.com/{organization_name}/{repository_name}"
-        try:
-            cmd = f"git ls-remote --tags {repo_url}"
-            output = subprocess.check_output(cmd, shell=True).decode()
-            tags = [line.split("refs/tags/")[-1] for line in output.split("\n") if "refs/tags/" in line]
-            if tags:
-                latest_tag = sorted(tags, key=lambda v: v.lstrip("v"))[-1]
-                # logger.info(f"Latest tag found using `git ls-remote`: {latest_tag}")
-                return latest_tag.lstrip("v")
-
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Failed to get latest version using `git ls-remote`: {e}. Falling back to GitHub API.")
-        
-        # **Step 2: If `git` fails, fallback to GitHub API**
-        # Define the GitHub URL for the package
-        github_url = f"""https://api.github.com/repos/{organization_name}/{repository_name}/releases/latest"""
-        # Get the latest release information from GitHub
-        try:
-            response = requests.get(github_url)
-            # print(response.json())
-
-            if response.status_code == 200:
-                data = response.json()
-                if "tag_name" in data and data["tag_name"] != "":
-                    return data["tag_name"].lstrip("v")
-                elif "name" in data and data["name"] != "":
-                    return data["name"].lstrip("v")
-                else:
-                    logging.error("No releases found for this repository.")
-                    return None
-
-            elif response.status_code == 403 and "X-RateLimit-Reset" in response.headers:
-                reset_time = int(response.headers["X-RateLimit-Reset"])
-                logging.error(
-                    f"API rate limit exceeded. Retry after {reset_time - int(time.time())} seconds.", exc_info=False
-                )
-                return None
-
-            else:
-                logging.error(
-                    f"Failed to get latest version from GitHub: {response.status_code}",
-                    f"Response: {response.text}",
-                    exc_info=False,
-                )
-                return None
-                
-        except requests.exceptions.RequestException as e:
-            logging.error(
-                f"An error occurred while getting the latest version from GitHub: {e}",
-                exc_info=False,
-            )
-            raise
-
-        except (KeyError, TypeError, ValueError) as e:
-            logging.error(
-                f"An unexpected error occurred while getting the latest version from GitHub: {type(e).__name__} - {e}",
-                exc_info=True,
-            )
-            return None
+        from views_pipeline_core.managers.package.versioning import (
+            get_latest_release_version_from_github as _impl,
+        )
+        return _impl(repository_name, organization_name)
 
     @staticmethod
     def validate_package_name(name: str) -> bool:
@@ -207,8 +146,13 @@ class PackageManager:
         return False
 
     def create_views_package(self):
-        """
-        Create a new Poetry package with the specified details.
+        """Create a new Poetry package with the specified details.
+
+        Raises:
+            PipelineException: If any subprocess call fails (M-4 audit
+                decision: previously swallowed silently with 4-clause
+                log-and-continue; now raises so package-creation failures
+                are loud).
         """
         self._ensure_init_with_package_path()
         try:
@@ -220,7 +164,7 @@ class PackageManager:
             try:
                 subprocess.run(["poetry", "--version"], capture_output=True, check=True)
             except (subprocess.CalledProcessError, FileNotFoundError):
-                logging.info(
+                logger.info(
                     "Poetry is not installed or not found in the system PATH. Installing Poetry..."
                 )
                 subprocess.run(["pip", "install", "poetry"], check=True)
@@ -242,7 +186,7 @@ class PackageManager:
                 version=PipelineConfig.views_pipeline_core_version_range,
             )
             if result.returncode != 0:
-                logging.error(f"Poetry run failed with error: {result.stderr}")
+                logger.error(f"Poetry run failed with error: {result.stderr}")
                 raise subprocess.CalledProcessError(
                     result.returncode,
                     result.args,
@@ -250,27 +194,35 @@ class PackageManager:
                     stderr=result.stderr,
                 )
             else:
-                logging.info(f"Poetry init output: {result.stdout}")
+                logger.info(f"Poetry init output: {result.stdout}")
         except subprocess.CalledProcessError as e:
-            logging.error(
-            f"Subprocess error occurred while creating the package with command '{e.cmd}': {e.stderr}"
+            logger.error(
+                f"Subprocess error occurred while creating the package with command '{e.cmd}': {e.stderr}"
             )
+            raise PipelineException(
+                f"Failed to create Poetry package '{self.package_name}': {e.stderr}"
+            ) from e
         except FileNotFoundError as e:
-            logging.error(f"File not found error: {e.filename} - {e}")
+            logger.error(f"File not found error: {e.filename} - {e}")
+            raise PipelineException(
+                f"Required file not found while creating package: {e.filename}"
+            ) from e
         except OSError as e:
-            logging.error(f"OS error: {e.strerror}")
-        except Exception as e:
-            logging.error(
-            f"An unexpected error occurred while creating the package: {type(e).__name__} - {e}"
-            )
+            logger.error(f"OS error: {e.strerror}")
+            raise PipelineException(
+                f"OS error while creating package: {e.strerror}"
+            ) from e
 
     def add_dependency(self, package_name: str, version: str = None):
-        """
-        Add a dependency to the Poetry package.
+        """Add a dependency to the Poetry package.
 
         Parameters:
             package_name (str): The name of the package to add as a dependency.
             version (str): The version of the package to add as a dependency.
+
+        Raises:
+            PipelineException: If the ``poetry add`` subprocess fails (M-4
+                audit decision: previously swallowed silently).
         """
         self._ensure_init_with_package_path()
         try:
@@ -286,7 +238,7 @@ class PackageManager:
                 text=True,
             )
             if result.returncode != 0:
-                logging.error(f"Poetry add failed with error: {result.stderr}")
+                logger.error(f"Poetry add failed with error: {result.stderr}")
                 raise subprocess.CalledProcessError(
                     result.returncode,
                     result.args,
@@ -294,23 +246,31 @@ class PackageManager:
                     stderr=result.stderr,
                 )
             else:
-                logging.info(f"Poetry add output: {result.stdout}")
+                logger.info(f"Poetry add output: {result.stdout}")
         except subprocess.CalledProcessError as e:
-            logging.error(
+            logger.error(
                 f"Subprocess error occurred while adding the dependency with command '{e.cmd}': {e.stderr}"
             )
+            raise PipelineException(
+                f"Failed to add dependency '{package_name}=={version}': {e.stderr}"
+            ) from e
         except FileNotFoundError as e:
-            logging.error(f"File not found error: {e.filename} - {e}")
+            logger.error(f"File not found error: {e.filename} - {e}")
+            raise PipelineException(
+                f"Required file not found while adding dependency: {e.filename}"
+            ) from e
         except OSError as e:
-            logging.error(f"OS error: {e.strerror}")
-        except Exception as e:
-            logging.error(
-                f"An unexpected error occurred while adding the dependency: {type(e).__name__} - {e}"
-            )
+            logger.error(f"OS error: {e.strerror}")
+            raise PipelineException(
+                f"OS error while adding dependency: {e.strerror}"
+            ) from e
 
     def validate_views_package(self):
-        """
-        Validate the Poetry package by checking its dependencies and configuration.
+        """Validate the Poetry package by checking its dependencies and configuration.
+
+        Raises:
+            PipelineException: If validation fails (M-4 audit decision:
+                previously swallowed silently).
         """
         try:
             # Check if Poetry is installed
@@ -326,6 +286,14 @@ class PackageManager:
             os.chdir(self.package_path)
             # Check the package dependencies
             subprocess.run(["poetry", "check"], check=True)
-            logging.info(f"Package {self.package_name} is valid.")
-        except Exception as e:
-            logging.error(f"An error occurred while validating the package: {e}")
+            logger.info(f"Package {self.package_name} is valid.")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Poetry validation failed: {e}")
+            raise PipelineException(
+                f"Package '{self.package_name}' failed validation: {e}"
+            ) from e
+        except OSError as e:
+            logger.error(f"OS error during validation: {e.strerror}")
+            raise PipelineException(
+                f"OS error while validating package: {e.strerror}"
+            ) from e

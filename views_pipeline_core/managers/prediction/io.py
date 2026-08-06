@@ -16,7 +16,7 @@ import pyarrow.parquet as pq
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.files.utils import save_dataframe
-from views_pipeline_core.managers.prediction.file_namer import PredictionFileNamer
+from views_pipeline_core.modules.files.naming import PredictionFileNamer
 from views_pipeline_core.managers.prediction.vendor_faults import (
     upload_transport_faults,
 )

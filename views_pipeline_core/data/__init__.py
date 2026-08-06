@@ -17,21 +17,15 @@ from .constants import CACHE_SOURCES as CACHE_SOURCES
 if TYPE_CHECKING:  # pragma: no cover — static-analysis convenience only
     from .handlers import _ViewsDataset  # noqa: F401
     from .model_path import ModelPathManager  # noqa: F401
-    from .utils import (  # noqa: F401
-        convert_json_to_list_of_dicts,
-        download_json,
-        ensure_float64,
-        replace_nan_values,
-    )
+    from .path import PathManager  # noqa: F401
+    from .utils import ensure_float64  # noqa: F401
 
 #: name → defining submodule. Single source of truth for __all__/__getattr__/__dir__.
 _LAZY_EXPORTS = {
     "_ViewsDataset": "handlers",
     "ModelPathManager": "model_path",
+    "PathManager": "path",
     "ensure_float64": "utils",
-    "download_json": "utils",
-    "convert_json_to_list_of_dicts": "utils",
-    "replace_nan_values": "utils",
 }
 _LAZY_SUBMODULES = {
     "constants",
@@ -39,6 +33,7 @@ _LAZY_SUBMODULES = {
     "handlers",
     "model_path",
     "partitions",
+    "path",
     "utils",
 }
 

@@ -74,9 +74,10 @@ class ReportingContext(BaseStageContext):
 
     Extends BaseStageContext (configs, model_path, run_type) with
     reporting-specific fields.
+
+    The former ``entity`` field was removed per the m-2 audit decision:
+    no stage method reads it (the eval path retired ``get_latest_run``).
     """
-    entity: str  # WandB entity; set at wandb.init() upstream. No stage method reads it now
-    # (the eval path retired get_latest_run); retained for call-site/back-compat.
     prediction_format: str = "dataframe"
 
 
@@ -134,7 +135,7 @@ class ReportingStage:
             _require_dense_report_consumer()
             try:
                 prediction_path = (
-                    context.model_path._get_generated_pf_prediction_paths(
+                    context.model_path.get_generated_pf_prediction_paths(
                         run_type=context.run_type
                     )[0]
                 )
@@ -155,7 +156,7 @@ class ReportingStage:
 
             try:
                 forecast_df = read_dataframe(
-                    context.model_path._get_generated_predictions_data_file_paths(
+                    context.model_path.get_generated_predictions_data_file_paths(
                         run_type=context.run_type
                     )[0]
                 )
@@ -280,7 +281,7 @@ class ReportingStage:
                     use_prediction_store=False,
                 ).configs
                 df = read_dataframe(
-                    file_path=mp._get_raw_data_file_paths(
+                    file_path=mp.get_raw_data_file_paths(
                         run_type=context.run_type
                     )[0]
                 )
@@ -303,7 +304,7 @@ class ReportingStage:
 
         elif context.model_path.target == "model":
             return read_dataframe(
-                context.model_path._get_raw_data_file_paths(
+                context.model_path.get_raw_data_file_paths(
                     run_type=context.run_type
                 )[0]
             )

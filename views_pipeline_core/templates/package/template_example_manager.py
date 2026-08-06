@@ -157,7 +157,7 @@ class ExampleForecastingModelManager(ForecastingModelManager):
         path_artifacts = self._model_path.artifacts # Path to save model artifacts
         run_type = self.config["run_type"] # e.g., "calibration", "validation", "forecasting"
         # Raw data always present after get_data() has been called (fetched or cached)
-        raw_path = self._model_path._get_raw_data_file_paths(run_type)[0]
+        raw_path = self._model_path.get_raw_data_file_paths(run_type)[0]
         df_raw = read_dataframe(raw_path)
         partitioner_dict = self._data_loader.partition_dict # Partition dict from ViewsDataLoader
 
@@ -216,7 +216,7 @@ class ExampleForecastingModelManager(ForecastingModelManager):
 
         self.config["timestamp"] = path_artifact.stem[-15:]
         # Raw data always present after get_data() has been called (fetched or cached)
-        raw_path = self._model_path._get_raw_data_file_paths(run_type)[0]
+        raw_path = self._model_path.get_raw_data_file_paths(run_type)[0]
         df_raw = read_dataframe(raw_path)
 
         # --- USER IMPLEMENTATION STARTS HERE ---
@@ -268,7 +268,7 @@ class ExampleForecastingModelManager(ForecastingModelManager):
 
         self.config["timestamp"] = path_artifact.stem[-15:]
         # Raw data always present after get_data() has been called (fetched or cached)
-        raw_path = self._model_path._get_raw_data_file_paths(run_type)[0]
+        raw_path = self._model_path.get_raw_data_file_paths(run_type)[0]
         df_raw = read_dataframe(raw_path)
 
         # --- USER IMPLEMENTATION STARTS HERE ---
@@ -297,7 +297,7 @@ class ExampleForecastingModelManager(ForecastingModelManager):
         # Common setup (provided)
         run_type = self.config["run_type"]
         # Raw data always present after get_data() has been called (fetched or cached)
-        raw_path = self._model_path._get_raw_data_file_paths(run_type)[0]
+        raw_path = self._model_path.get_raw_data_file_paths(run_type)[0]
         df_raw = read_dataframe(raw_path)
 
         # --- USER IMPLEMENTATION STARTS HERE ---

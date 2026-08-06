@@ -45,10 +45,10 @@ def config(tmp_path):
 
 @pytest.fixture
 def manager(config):
-    with patch("views_pipeline_core.modules.appwrite.file.Client"), patch(
-        "views_pipeline_core.modules.appwrite.file.Storage"
-    ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
-        "views_pipeline_core.modules.appwrite.file.Users"
+    with patch("views_pipeline_core.modules.appwrite.storage.Client"), patch(
+        "views_pipeline_core.modules.appwrite.storage.Storage"
+    ), patch("views_pipeline_core.modules.appwrite.storage.Databases"), patch(
+        "views_pipeline_core.modules.appwrite.storage.Users"
     ):
         yield AppWriteFileModule(config)
 

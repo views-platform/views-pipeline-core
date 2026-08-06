@@ -13,7 +13,6 @@ import pandas as pd
 import pytest
 from views_frames import PredictionFrame, SpatioTemporalIndex
 
-from views_pipeline_core.domain.reconciliation_invariants import ReconciliationInvariants
 from views_pipeline_core.modules.reconciliation.adapter import reconcile_datasets
 
 
@@ -51,10 +50,9 @@ def test_reconcile_datasets_scales_to_country_total_and_holds_invariants():
     reconciled = np.array([c[0] for c in out["pred_sb"]])  # (N,)
     np.testing.assert_allclose(reconciled, [2.0, 4.0, 0.0])  # 1,2,0 scaled by 6/3=2
 
-    inv = ReconciliationInvariants()
-    assert inv.check_sum_constraint(float(reconciled.sum()), 6.0)          # sums to cm total
-    assert inv.check_zero_preservation(0.0, float(reconciled[2]))          # zero stayed zero
-    assert (reconciled >= 0).all()                                         # non-negative
+    assert abs(float(reconciled.sum()) - 6.0) <= 1e-2                      # sums to cm total
+    assert float(reconciled[2]) == 0.0                                    # zero stayed zero
+    assert (reconciled >= 0).all()                                        # non-negative
 
 
 def test_reconcile_datasets_does_not_mutate_input():
