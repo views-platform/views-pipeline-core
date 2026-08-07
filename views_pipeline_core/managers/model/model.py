@@ -38,7 +38,12 @@ from views_pipeline_core.modules.dataloaders.datafactory_contract import (
 )
 
 from views_pipeline_core.configs import PipelineConfig
-from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
+from views_pipeline_core.modules.validation.core_config_sniffer import (
+    CoreConfigSniffer,
+    LEGACY_MATURITY_CONFIG_FILENAME,
+    MATURITY_CONFIG_FILENAME,
+    MAX_SHIFT_COUNT,
+)
 
 from views_pipeline_core.managers.configuration.configuration import combined_targets
 logger = logging.getLogger(__name__)
@@ -200,9 +205,7 @@ class ModelManager:
         )
 
         self._script_paths = self._model_path.get_scripts()
-        self._config_deployment = self.__load_config(
-            "config_deployment.py", "get_deployment_config"
-        )
+        self._config_deployment = self.__load_maturity_config()
         self._config_hyperparameters = self.__load_config(
             "config_hyperparameters.py", "get_hp_config"
         )
@@ -261,6 +264,38 @@ class ModelManager:
             [f"\033[{random.choice(range(31, 37))}m{char}\033[0m" for char in text]
         )
         print(colored_text)
+
+    def __load_maturity_config(self) -> Union[Dict, None]:
+        """Load the maturity config under either name, preferring the new one (ADR-057).
+
+        views-models ADR-017 renames `config_deployment.py` to `config_maturity.py`. For
+        one transition window both are accepted, so the rename does not have to land in
+        two repositories simultaneously.
+
+        Preference is for the new name. Finding both is not an error — a half-finished
+        rename is a normal intermediate state — but it warns, because a file that is
+        being silently ignored is how the wrong config gets edited for a week.
+        """
+        scripts = self._script_paths
+        has_new = scripts.get(MATURITY_CONFIG_FILENAME) is not None
+        has_legacy = scripts.get(LEGACY_MATURITY_CONFIG_FILENAME) is not None
+
+        if has_new and has_legacy:
+            logger.warning(
+                "Both %s and %s exist for '%s'. Reading %s and IGNORING %s — delete the "
+                "legacy file once the rename is confirmed (ADR-057).",
+                MATURITY_CONFIG_FILENAME,
+                LEGACY_MATURITY_CONFIG_FILENAME,
+                self._model_path.model_name,
+                MATURITY_CONFIG_FILENAME,
+                LEGACY_MATURITY_CONFIG_FILENAME,
+            )
+
+        if has_new:
+            return self.__load_config(MATURITY_CONFIG_FILENAME, "get_maturity_config")
+        return self.__load_config(
+            LEGACY_MATURITY_CONFIG_FILENAME, "get_deployment_config"
+        )
 
     def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
         """

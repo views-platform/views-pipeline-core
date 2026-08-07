@@ -56,8 +56,20 @@ echo "--- Checking cross-ADR references ---"
 while IFS= read -r ref; do
     [[ -z "$ref" ]] && continue
     file=$(echo "$ref" | cut -d: -f1)
-    # Check every ADR-NNN on the line, not just the first
+    # Check every ADR-NNN on the line, not just the first.
+    #
+    # A reference qualified with another repository's name is that repo's ADR and cannot
+    # resolve here. ADR numbers are per-repo and DO collide — this repo's ADR-047 is
+    # three-destination persistence while views-datafactory's ADR-047 is the temporal
+    # anchor, and both are cited in this codebase. Before this exemption the only way to
+    # cite a sibling repo's ADR was to avoid writing its number, which is how the
+    # citations in file.py ended up as untraceable prose. Requiring the qualifier makes
+    # the collision explicit at the point of citation, which is where a reader needs it.
+    line_body=$(echo "$ref" | cut -d: -f3-)
     for adr_tag in $(echo "$ref" | grep -oE 'ADR-0[0-9][0-9]'); do
+        if echo "$line_body" | grep -qE "views-[a-z]+'?s? +(own +)?${adr_tag}"; then
+            continue
+        fi
         adr_num=${adr_tag#ADR-}
         match_count=$(find ADRs -name "${adr_num}_*.md" 2>/dev/null | wc -l)
         if [ "$match_count" -eq 0 ]; then
