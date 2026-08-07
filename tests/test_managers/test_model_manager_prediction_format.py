@@ -175,7 +175,7 @@ class TestForecastDispatch:
         The PF is persisted directly as a combined parquet without going
         through the per-target DataFrame conversion.
         """
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
 
@@ -476,7 +476,7 @@ def _run_evaluate_prediction_df(
     can assert on which adapter path was taken.
     """
     from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
-    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+    from views_pipeline_core.modules.frames.prediction_frame_converter import (
         PredictionFrameConverter,
     )
 
@@ -774,7 +774,7 @@ class TestPFDictDispatch:
 
     def test_pf_forecast_single_target_dict_calls_to_legacy_dfs(self):
         """Unified path: to_combined_arrow_table is called (not to_prediction_df)."""
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
 
@@ -793,7 +793,7 @@ class TestPFDictDispatch:
 
     def test_pf_forecast_multi_target_dict_saves_each_target(self):
         """Unified path: one combined parquet write (not per-target saves)."""
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
 
@@ -875,7 +875,7 @@ def _run_pf_eval_clean_path(manager: _ForecastStub, list_predictions: dict) -> t
     - which EF object flows into evaluate()
     """
     from views_pipeline_core.modules.validation.adapter import EvaluationAdapter
-    from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+    from views_pipeline_core.modules.frames.prediction_frame_converter import (
         PredictionFrameConverter,
     )
 
@@ -1172,7 +1172,7 @@ class TestOOMMitigation:
         - _save_predictions must NOT be called
         - PredictionFrame.save (Track A) MUST still be called
         """
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
 
@@ -1263,7 +1263,7 @@ class TestOOMMitigation:
         Unified path: when skip_predictions_delivery=False, combined eval
         parquets are written via _save_combined_eval_parquets.
         """
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
 

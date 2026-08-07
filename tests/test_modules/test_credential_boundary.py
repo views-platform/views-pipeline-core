@@ -24,7 +24,7 @@ import sys
 import pytest
 
 from views_pipeline_core.exceptions.exceptions import ConfigurationException
-from views_pipeline_core.modules.appwrite.file import AppwriteConfig, AuthMethod
+from views_pipeline_core.modules.appwrite import AppwriteConfig, AuthMethod
 
 
 # ---------------------------------------------------------------------------

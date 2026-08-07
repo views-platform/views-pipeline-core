@@ -36,7 +36,7 @@ def test_the_session_auth_class_is_gone():
 
 
 def test_the_session_enum_member_is_gone():
-    from views_pipeline_core.modules.appwrite.file import AuthMethod
+    from views_pipeline_core.modules.appwrite import AuthMethod
 
     assert not hasattr(AuthMethod, "SESSION"), (
         "AuthMethod.SESSION survived; a config can still ask for an auth mode with no "
@@ -59,7 +59,7 @@ def test_the_three_session_operations_are_no_longer_called():
 
 
 def test_the_factory_rejects_the_retired_method_by_name():
-    from views_pipeline_core.modules.appwrite.file import AuthFactory
+    from views_pipeline_core.modules.appwrite import AuthFactory
 
     with pytest.raises((ValueError, KeyError, AttributeError)):
         AuthFactory.create_auth("session")
@@ -76,7 +76,7 @@ def test_a_config_still_asking_for_session_fails_loudly(tmp_path):
     """
     from unittest.mock import Mock
 
-    from views_pipeline_core.modules.appwrite.file import AppwriteConfig
+    from views_pipeline_core.modules.appwrite import AppwriteConfig
 
     path_manager = Mock()
     path_manager.cache = tmp_path
@@ -116,7 +116,7 @@ def test_no_dead_vendor_import_is_left_behind():
 
 
 def test_the_api_key_path_is_untouched():
-    from views_pipeline_core.modules.appwrite.file import ApiKeyAuth, AuthFactory, AuthMethod
+    from views_pipeline_core.modules.appwrite import ApiKeyAuth, AuthFactory, AuthMethod
 
     assert isinstance(AuthFactory.create_auth(AuthMethod.API_KEY), ApiKeyAuth)
 
@@ -152,7 +152,7 @@ def test_email_password_credentials_have_no_supported_auth_mode():
     contract has no slot for. Deleting the class is what closes it; this test is what
     keeps it closed.
     """
-    from views_pipeline_core.modules.appwrite.file import AuthFactory, AuthMethod
+    from views_pipeline_core.modules.appwrite import AuthFactory, AuthMethod
 
     assert [m.value for m in AuthMethod] == ["api_key"]
     with pytest.raises((ValueError, KeyError, AttributeError)):

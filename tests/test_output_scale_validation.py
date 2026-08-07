@@ -48,7 +48,7 @@ class TestOutputScaleConsistency:
             configs[name] = _write_config_meta(d, output_scale="log")
 
         with patch(
-            "views_pipeline_core.data.model_path.ModelPathManager",
+            "views_pipeline_core.managers.model.path.ModelPathManager",
             side_effect=_mock_path_manager(configs),
         ):
             validate_output_scale_consistency(["model_a", "model_b", "model_c"])
@@ -59,7 +59,7 @@ class TestOutputScaleConsistency:
         configs["model_b"] = _write_config_meta(tmp_path / "model_b", output_scale="natural")
 
         with patch(
-            "views_pipeline_core.data.model_path.ModelPathManager",
+            "views_pipeline_core.managers.model.path.ModelPathManager",
             side_effect=_mock_path_manager(configs),
         ):
             with pytest.raises(ValueError, match="output_scale mismatch"):
@@ -71,7 +71,7 @@ class TestOutputScaleConsistency:
         configs["model_b"] = _write_config_meta(tmp_path / "model_b", output_scale=None)
 
         with patch(
-            "views_pipeline_core.data.model_path.ModelPathManager",
+            "views_pipeline_core.managers.model.path.ModelPathManager",
             side_effect=_mock_path_manager(configs),
         ), patch(
             "views_pipeline_core.modules.validation.ensemble.check.logger"
@@ -86,7 +86,7 @@ class TestOutputScaleConsistency:
         configs["model_b"] = _write_config_meta(tmp_path / "model_b", output_scale=None)
 
         with patch(
-            "views_pipeline_core.data.model_path.ModelPathManager",
+            "views_pipeline_core.managers.model.path.ModelPathManager",
             side_effect=_mock_path_manager(configs),
         ), patch(
             "views_pipeline_core.modules.validation.ensemble.check.logger"

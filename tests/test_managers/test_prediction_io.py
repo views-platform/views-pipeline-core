@@ -258,7 +258,7 @@ class TestArrowAggregatorContract:
     def test_converter_parquet_loadable_by_aggregator(self, output_dir):
         from views_frames import SpatialLevel, SpatioTemporalIndex
         from views_pipeline_core.data.prediction_frame import PredictionFrame
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
         import pyarrow.parquet as pq_mod

@@ -38,7 +38,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from views_pipeline_core.data.prediction_frame import PredictionFrame  # noqa: E402
-from views_pipeline_core.managers.prediction.prediction_frame_converter import (  # noqa: E402
+from views_pipeline_core.modules.frames.prediction_frame_converter import (  # noqa: E402
     PredictionFrameConverter,
 )
 from views_pipeline_core.modules.validation.adapter import EvaluationAdapter  # noqa: E402

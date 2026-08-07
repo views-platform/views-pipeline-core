@@ -32,14 +32,14 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from views_pipeline_core.modules.appwrite.file import (
+from views_pipeline_core.modules.appwrite import (
     APPWRITE_FILE_NOT_FOUND,
     _classify_storage_presence,
     _StoragePresence,
 )
 from appwrite.exception import AppwriteException
 
-from views_pipeline_core.modules.appwrite.file import (
+from views_pipeline_core.modules.appwrite import (
     AppwriteConfig,
     AppWriteFileModule,
     AuthMethod,

@@ -89,7 +89,7 @@ def _run_forbidden_probe(imports: str, forbidden: str = _PROVISIONING):
 def test_storage_module_does_not_import_provisioning():
     """`file.py` is the delivery path's storage surface; it must not reach provisioning."""
     result = _run_forbidden_probe(
-        "import views_pipeline_core.modules.appwrite.file"
+        "import views_pipeline_core.modules.appwrite"
     )
     assert result.returncode == 0, result.stderr
 

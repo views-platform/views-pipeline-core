@@ -19,7 +19,7 @@ from views_pipeline_core.exceptions import PipelineException
 
 if TYPE_CHECKING:  # pragma: no cover — annotation-only
     from views_pipeline_core.cli import ForecastingModelArgs
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
     from views_pipeline_core.modules.wandb import WandBModule
 
 logger = logging.getLogger(__name__)

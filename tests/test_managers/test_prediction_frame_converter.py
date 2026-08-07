@@ -42,7 +42,7 @@ sys.modules.setdefault(
 
 import pandas as pd  # noqa: E402
 
-from views_pipeline_core.managers.prediction.prediction_frame_converter import (  # noqa: E402
+from views_pipeline_core.modules.frames.prediction_frame_converter import (  # noqa: E402
     PredictionFrameConverter,
 )
 

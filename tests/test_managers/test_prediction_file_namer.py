@@ -1,5 +1,5 @@
 """Tests for PredictionFileNamer — canonical filename generation."""
-from views_pipeline_core.managers.prediction.file_namer import PredictionFileNamer
+from views_pipeline_core.modules.files.naming import PredictionFileNamer
 
 
 class TestPredictionName:

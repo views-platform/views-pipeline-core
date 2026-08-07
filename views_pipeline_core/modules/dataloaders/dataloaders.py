@@ -10,12 +10,12 @@ from views_pipeline_core.files.utils import create_data_fetch_log_file
 from views_pipeline_core.data.utils import ensure_float64
 from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.data.constants import (
+from views_pipeline_core.constants.data import (
     CACHE_FILENAME_TEMPLATE,
     PARTITION_TEST,
     PARTITION_TRAIN,
 )
-from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.managers.model.path import ModelPathManager
 from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
 from views_pipeline_core.modules.dataloaders.fetch_context import (
     FetchContext,

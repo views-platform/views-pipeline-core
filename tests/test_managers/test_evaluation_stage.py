@@ -272,6 +272,32 @@ class TestEvaluationStagePFPath:
         # No metrics should be computed (target missing → skipped)
         mock_evaluator.evaluate.assert_not_called()
 
+    @patch("views_pipeline_core.files.utils.read_dataframe")
+    def test_pf_payload_routes_even_with_dataframe_context(self, mock_read):
+        """Regression: dict payload must use PF adapter even if context says dataframe."""
+        stage = _make_stage()
+        ctx = _make_context(prediction_format="dataframe")
+        ctx.model_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+        ctx.model_path.get_raw_data_file_paths.return_value = [Path("raw.parquet")]
+        mock_read.return_value = pd.DataFrame(
+            {"lr_sb": [0.1]},
+            index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "e"]),
+        )
+
+        pf_dict = {"lr_sb": [MagicMock()]}
+        mock_report = _make_mock_report()
+        eval_mod = sys.modules["views_evaluation"]
+        eval_mod.NativeEvaluator.return_value.evaluate.return_value = mock_report
+
+        with patch(
+            "views_pipeline_core.modules.validation.adapter.EvaluationAdapter"
+        ) as mock_adapter:
+            mock_adapter.from_prediction_frames.return_value = MagicMock()
+            stage.evaluate(pf_dict, ctx)
+
+            mock_adapter.from_prediction_frames.assert_called_once()
+            mock_adapter.from_dataframes.assert_not_called()
+
 
 # ── GREEN: Ensemble actuals loading ────────────────────────────────────────
 
@@ -463,7 +489,7 @@ class TestContextContract:
         ModelPathManager now exposes the path-discovery methods as public
         members directly. Backward-compat private aliases are still present.
         """
-        from views_pipeline_core.data.model_path import ModelPathManager
+        from views_pipeline_core.managers.model.path import ModelPathManager
         # Path-discovery methods live on the class — check directly
         # Public path-discovery methods (post-C-3 promotion)
         for meth in ("get_raw_data_file_paths",

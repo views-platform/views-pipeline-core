@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from views_pipeline_core.data.constants import (
+from views_pipeline_core.constants.data import (
     PARTITION_TRAIN as _PARTITION_TRAIN,
     PARTITION_TEST as _PARTITION_TEST,
 )
@@ -61,7 +61,7 @@ SUPPORTED_OUTPUT_SCALES = frozenset({"log", "natural"})
 _FALLBACK_STRIDE = 1
 
 # Run-type identifiers — canonical spelling lives in data/constants.py (#286).
-from views_pipeline_core.data.constants import (  # noqa: E402
+from views_pipeline_core.constants.data import (  # noqa: E402
     RUN_TYPE_FORECASTING as FORECASTING_RUN_TYPE,  # used in sniff_all() guard
 )
 

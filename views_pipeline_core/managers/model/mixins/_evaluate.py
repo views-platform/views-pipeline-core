@@ -276,10 +276,17 @@ class EvaluationMixin:
         """Calculate evaluation metrics from predictions."""
         from views_pipeline_core.managers.evaluation.stage import EvaluationContext
 
+        # Runtime payload shape is authoritative: unified evaluation can pass
+        # Dict[target, List[PredictionFrame]] even when the configured format is
+        # legacy "dataframe".
+        prediction_format = (
+            "prediction_frame" if isinstance(df_predictions, dict) else self._prediction_format
+        )
+
         context = EvaluationContext(
             configs=self.configs,
             model_path=self._model_path,
-            prediction_format=self._prediction_format,
+            prediction_format=prediction_format,
             partition_dict=self._partition_dict,
             run_type=self.args.run_type,
             data_loader=getattr(self, '_data_loader', None),

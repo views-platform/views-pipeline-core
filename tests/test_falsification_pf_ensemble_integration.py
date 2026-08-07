@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from views_frames import SpatialLevel, SpatioTemporalIndex
-from views_pipeline_core.managers.prediction.prediction_frame_io import (
+from views_pipeline_core.modules.frames.prediction_frame_io import (
     load_pf,
     save_pf,
 )
@@ -38,7 +38,7 @@ class TestP1DiscoveryNestingLevel:
 
     def test_discovery_finds_forecast_layout(self, tmp_path):
         """Forecast layout: predictions_{run_type}_{ts}/{target}/y_pred.npy"""
-        from views_pipeline_core.data.model_path import ModelPathManager
+        from views_pipeline_core.managers.model.path import ModelPathManager
 
         with patch.object(ModelPathManager, "__init__", lambda self, *a, **kw: None):
             mgr = object.__new__(ModelPathManager)
@@ -57,7 +57,7 @@ class TestP1DiscoveryNestingLevel:
 
     def test_discovery_finds_eval_layout(self, tmp_path):
         """Eval layout: predictions_{run_type}_{ts}/origin_{i}/{target}/y_pred.npy"""
-        from views_pipeline_core.data.model_path import ModelPathManager
+        from views_pipeline_core.managers.model.path import ModelPathManager
 
         with patch.object(ModelPathManager, "__init__", lambda self, *a, **kw: None):
             mgr = object.__new__(ModelPathManager)

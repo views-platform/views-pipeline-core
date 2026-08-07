@@ -59,7 +59,7 @@ def build_file_manager(
     false alarm on demand is worse than no flag (C-250).
     """
     from views_pipeline_core.exceptions.exceptions import ConfigurationException
-    from views_pipeline_core.modules.appwrite.file import AppWriteFileModule, AppwriteConfig
+    from views_pipeline_core.modules.appwrite import AppWriteFileModule, AppwriteConfig
 
     if bool(bucket_override) != bool(collection_override):
         supplied, missing = (

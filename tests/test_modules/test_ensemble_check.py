@@ -562,7 +562,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.data.model_path.ModelPathManager')
+    @patch('views_pipeline_core.managers.model.path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_success(
@@ -600,7 +600,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.data.model_path.ModelPathManager')
+    @patch('views_pipeline_core.managers.model.path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_conditions_fail(
@@ -632,7 +632,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.data.model_path.ModelPathManager')
+    @patch('views_pipeline_core.managers.model.path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_deployment_fail(
@@ -664,7 +664,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.data.model_path.ModelPathManager')
+    @patch('views_pipeline_core.managers.model.path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_partition_fail(
@@ -697,7 +697,7 @@ class TestValidateEnsembleModel:
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_ensemble_model_deployment_status')
     @patch('views_pipeline_core.modules.validation.ensemble.check.validate_model_conditions')
     @patch('views_pipeline_core.managers.model.ModelManager')
-    @patch('views_pipeline_core.data.model_path.ModelPathManager')
+    @patch('views_pipeline_core.managers.model.path.ModelPathManager')
     @patch('views_pipeline_core.managers.ensemble.EnsembleManager')
     @patch('views_pipeline_core.managers.ensemble.EnsemblePathManager')
     def test_validate_ensemble_model_threads_saved_flag(
@@ -737,7 +737,7 @@ class TestValidateEnsembleRawDataAlignment:
     def test_single_model_passes(self):
         """Single model has nothing to compare against — should pass."""
         with patch(
-            "views_pipeline_core.data.model_path.ModelPathManager"
+            "views_pipeline_core.managers.model.path.ModelPathManager"
         ) as MockMPM:
             mock_path = Mock()
             mock_path.data_raw = Path("/project/models/model_a/data/raw")
@@ -758,7 +758,7 @@ class TestValidateEnsembleRawDataAlignment:
         file_b.write_bytes(b"x" * 2000)
 
         with patch(
-            "views_pipeline_core.data.model_path.ModelPathManager"
+            "views_pipeline_core.managers.model.path.ModelPathManager"
         ) as MockMPM:
             mock_a = Mock()
             mock_a.get_raw_data_file_paths.return_value = [file_a]

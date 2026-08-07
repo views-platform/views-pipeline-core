@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
-from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.managers.model.path import ModelPathManager
 from viewser import Queryset
 
 

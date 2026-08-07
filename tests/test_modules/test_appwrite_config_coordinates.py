@@ -12,7 +12,7 @@ every one that is missing, in the `PredictionStoreConfig.from_environment()` idi
 import pytest
 
 from views_pipeline_core.exceptions.exceptions import ConfigurationException
-from views_pipeline_core.modules.appwrite.file import AppwriteConfig, AuthMethod
+from views_pipeline_core.modules.appwrite import AppwriteConfig, AuthMethod
 
 _COORDINATES = {
     "bucket_id": "test_bucket",

@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
 
-from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
+from views_pipeline_core.modules.frames.prediction_frame_io import load_pf, save_pf
 
 
 def _pf(n=4, s=3, level=SpatialLevel.PGM):

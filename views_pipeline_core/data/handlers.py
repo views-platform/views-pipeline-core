@@ -35,7 +35,7 @@ class _ViewsDataset:
         ValueError: If the source is not a pandas DataFrame, string, or Path object.
         """
         self.__preprocess_input_dataframe = True
-        from views_pipeline_core.data.model_path import ModelPathManager
+        from views_pipeline_core.managers.model.path import ModelPathManager
 
         self.broadcast_features = broadcast_features
         if isinstance(source, pd.DataFrame):

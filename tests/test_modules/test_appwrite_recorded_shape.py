@@ -114,7 +114,7 @@ class TestTheRecordedShape:
         is currently 25 because that is what the documentation and a sibling repo's
         comment say. Here it is checked against what the service actually did.
         """
-        from views_pipeline_core.modules.appwrite.file import APPWRITE_DEFAULT_PAGE_SIZE
+        from views_pipeline_core.modules.appwrite import APPWRITE_DEFAULT_PAGE_SIZE
 
         probe = recorded["no_limit_supplied"]
         returned, total = probe["documents_returned"], probe["total_reported"]

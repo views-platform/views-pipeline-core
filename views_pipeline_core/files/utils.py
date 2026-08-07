@@ -134,7 +134,7 @@ def create_log_file(path_generated,
     create_specific_log_file(path_generated, run_type, model_name, deployment_status,
                     model_timestamp, data_generation_timestamp, data_fetch_timestamp, model_type)
     if models:
-        from views_pipeline_core.data.model_path import ModelPathManager
+        from views_pipeline_core.managers.model.path import ModelPathManager
         for m_name in models:
             model_path = ModelPathManager(m_name)
             model_path_generated = model_path.data_generated

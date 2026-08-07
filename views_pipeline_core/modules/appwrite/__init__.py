@@ -24,17 +24,49 @@ except ImportError as e:  # pragma: no cover - exercised in a subprocess probe
         f"Underlying import error: {e}"
     ) from e
 
-from .file import (
-    AuthMethod as AuthMethod,
-    CacheValidationResult as CacheValidationResult,
-    OperationResult as OperationResult,
-    FileMetadata as FileMetadata,
-    AppwriteConfig as AppwriteConfig,
-    AuthManager as AuthManager,
+from appwrite.client import Client as Client
+from appwrite.exception import AppwriteException as AppwriteException
+from appwrite.id import ID as ID
+from appwrite.input_file import InputFile as InputFile
+from appwrite.query import Query as Query
+from appwrite.services.account import Account as Account
+from appwrite.services.databases import Databases as Databases
+from appwrite.services.storage import Storage as Storage
+from appwrite.services.users import Users as Users
+
+from .auth import (
     ApiKeyAuth as ApiKeyAuth,
     AuthFactory as AuthFactory,
-    CacheMetadata as CacheMetadata,
+    AuthManager as AuthManager,
+    AuthMethod as AuthMethod,
+)
+from .cache import (
     CacheManager as CacheManager,
-    AppwriteMetadataHandler as AppwriteMetadataHandler,
-    AppWriteFileModule as AppWriteFileModule,
+    CacheMetadata as CacheMetadata,
+    CacheValidationResult as CacheValidationResult,
+)
+from .config import (
+    APPWRITE_BUCKET_NOT_FOUND as APPWRITE_BUCKET_NOT_FOUND,
+    APPWRITE_DEFAULT_PAGE_SIZE as APPWRITE_DEFAULT_PAGE_SIZE,
+    APPWRITE_FILE_NOT_FOUND as APPWRITE_FILE_NOT_FOUND,
+    AppwriteConfig as AppwriteConfig,
+    DEFAULT_CACHE_TTL_HOURS as DEFAULT_CACHE_TTL_HOURS,
+    DEFAULT_PAGE_LIMIT as DEFAULT_PAGE_LIMIT,
+    FileMetadata as FileMetadata,
+    INITIAL_RETRY_DELAY as INITIAL_RETRY_DELAY,
+    MAX_ATTRIBUTE_CREATION_RETRIES as MAX_ATTRIBUTE_CREATION_RETRIES,
+    MAX_METADATA_PAGES as MAX_METADATA_PAGES,
+    OperationResult as OperationResult,
+    _CONTAINER_PAGE as _CONTAINER_PAGE,
+    _REQUIRED_COORDINATES as _REQUIRED_COORDINATES,
+    _StoragePresence as _StoragePresence,
+    _classify_storage_presence as _classify_storage_presence,
+    exception_message as exception_message,
+)
+from .metadata import AppwriteMetadataHandler as AppwriteMetadataHandler
+from .storage import AppWriteFileModule as AppWriteFileModule
+from .transport import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS as DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    install_request_timeout as install_request_timeout,
+    resolve_timeout_seconds as resolve_timeout_seconds,
 )

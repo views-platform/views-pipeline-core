@@ -17,7 +17,7 @@ import inspect
 
 def test_base_mandatory_configs_are_four():
     """ADR-011 corrected: 4 base configs mandatory for all types."""
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
 
     source = inspect.getsource(ModelPathManager._initialize_scripts)
     for cfg in [
@@ -31,7 +31,7 @@ def test_base_mandatory_configs_are_four():
 
 def test_config_queryset_is_model_only():
     """ADR-011 corrected: config_queryset.py is model-only, not base."""
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
 
     base_source = inspect.getsource(ModelPathManager._initialize_scripts)
     model_source = inspect.getsource(
@@ -43,7 +43,7 @@ def test_config_queryset_is_model_only():
 
 def test_config_sweep_is_model_only():
     """ADR-011 corrected: config_sweep.py is model-only, not base."""
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
 
     base_source = inspect.getsource(ModelPathManager._initialize_scripts)
     model_source = inspect.getsource(
@@ -55,7 +55,7 @@ def test_config_sweep_is_model_only():
 
 def test_config_inputdata_stale_name_absent():
     """ADR-011 corrected: config_inputdata.py no longer referenced."""
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
 
     all_source = (
         inspect.getsource(ModelPathManager._initialize_scripts)

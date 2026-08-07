@@ -614,7 +614,7 @@ class TestPredictionFrameTrainingFlow:
     def test_train_passes_train_flag_to_submodel(self, pf_manager, ensemble_context):
         with patch.object(pf_manager, "_create_model_args", return_value=MagicMock()) as mock_args, \
              patch.object(pf_manager, "_execute_shell_script"), \
-             patch("views_pipeline_core.data.model_path.ModelPathManager"):
+             patch("views_pipeline_core.managers.model.path.ModelPathManager"):
             pf_manager._train_model_artifact("hydra_alpha", ensemble_context)
             mock_args.assert_called_once_with(ensemble_context, train=True)
 

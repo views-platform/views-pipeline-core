@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Dict
 if TYPE_CHECKING:  # pragma: no cover — static analysis only
     # Avoid an eager runtime import cycle: stages/contexts reference this
     # type-only and ModelPathManager is the concrete implementation.
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
 
 
 # ---------------------------------------------------------------------------

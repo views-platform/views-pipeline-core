@@ -13,7 +13,7 @@ import json
 from datetime import datetime, timedelta
 import hashlib
 import logging
-from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.managers.model.path import ModelPathManager
 from views_pipeline_core.exceptions.exceptions import ConfigurationException
 
 logger = logging.getLogger(__name__)

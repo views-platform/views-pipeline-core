@@ -20,7 +20,7 @@ from views_frames import (  # noqa: E402
     SpatialLevel,
     SpatioTemporalIndex,
 )
-from views_pipeline_core.managers.prediction.prediction_frame_io import (  # noqa: E402
+from views_pipeline_core.modules.frames.prediction_frame_io import (  # noqa: E402
     load_pf,
 )
 from views_pipeline_core.managers.prediction.savers import (  # noqa: E402
@@ -334,7 +334,7 @@ class TestViewsForecastsSaverArgCount:
         self, tmp_path, sample_pf, sample_metadata,
     ):
         """to_prediction_df accepts (pf, target) — not (pf, target, level)."""
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
         real_converter = PredictionFrameConverter()

@@ -8,7 +8,7 @@ this re-export.
 
 Two things that used to live on the local class moved:
   * on-disk persistence in pipeline-core's ``y_pred.npy`` layout →
-    ``views_pipeline_core.managers.prediction.prediction_frame_io``
+    ``views_pipeline_core.modules.frames.prediction_frame_io``
     (``save_pf`` / ``load_pf``) — kept as the cross-repo contract views-reporting
     reads (the leaf's own ``save`` uses a different ``values.npy`` layout);
   * sample-axis reduction (the old ``collapse``) → ``views_frames_summarize``

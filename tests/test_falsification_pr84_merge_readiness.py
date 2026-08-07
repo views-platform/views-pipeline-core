@@ -35,7 +35,7 @@ class TestF1DocstringAccuracy:
     def test_docstring_does_not_mention_y_pred_existence_check(self):
         """Docstring must accurately reflect that discovery is by naming
         convention only, not by y_pred.npy existence."""
-        from views_pipeline_core.data.model_path import ModelPathManager
+        from views_pipeline_core.managers.model.path import ModelPathManager
 
         doc = ModelPathManager._get_generated_pf_prediction_paths.__doc__
         assert "contain y_pred.npy" not in doc, (

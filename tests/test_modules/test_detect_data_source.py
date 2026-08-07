@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 from pathlib import Path
 
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
-from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.managers.model.path import ModelPathManager
 
 
 @pytest.fixture

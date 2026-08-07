@@ -597,7 +597,7 @@ class DataFrameEnsembleManager:
     def _train_model_artifact(
         self, model_name: str, ctx: EnsembleContext
     ) -> None:
-        from views_pipeline_core.data.model_path import ModelPathManager
+        from views_pipeline_core.managers.model.path import ModelPathManager
 
         logger.info(f"Training single model {model_name}...")
         model_path = ModelPathManager(model_name)
@@ -607,7 +607,7 @@ class DataFrameEnsembleManager:
     def _evaluate_model_artifact(
         self, model_name: str, ctx: EnsembleContext
     ) -> List[pd.DataFrame]:
-        from views_pipeline_core.data.model_path import ModelPathManager
+        from views_pipeline_core.managers.model.path import ModelPathManager
         from views_pipeline_core.managers.model import ForecastingModelManager
 
         logger.info(f"Evaluating single model {model_name}...")
@@ -648,7 +648,7 @@ class DataFrameEnsembleManager:
     def _forecast_model_artifact(
         self, model_name: str, ctx: EnsembleContext
     ) -> pd.DataFrame:
-        from views_pipeline_core.data.model_path import ModelPathManager
+        from views_pipeline_core.managers.model.path import ModelPathManager
 
         logger.info(f"Forecasting single model {model_name}...")
         model_path = ModelPathManager(model_name)

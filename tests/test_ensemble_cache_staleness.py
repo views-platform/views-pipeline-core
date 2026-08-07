@@ -19,7 +19,7 @@ from views_pipeline_core.managers.ensemble.prediction_frame_ensemble import (
     PredictionFrameEnsembleManager,
     _cached_sample_count,
 )
-from views_pipeline_core.managers.prediction.prediction_frame_io import save_pf
+from views_pipeline_core.modules.frames.prediction_frame_io import save_pf
 
 
 def _write_pf(pf_dir, n_rows, n_samples, seed=0):

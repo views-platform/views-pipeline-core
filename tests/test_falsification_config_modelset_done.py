@@ -66,7 +66,7 @@ def test_validate_true_does_not_crash_on_missing_config_modelset():
     _build_absolute_directory for config_modelset.py — it checks
     existence directly and skips when absent.
     """
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
 
     with tempfile.TemporaryDirectory() as tmpdir:
         model_dir = Path(tmpdir) / "ensembles" / "test_ensemble"

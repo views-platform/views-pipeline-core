@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from views_frames import FeatureFrame
 
-from views_pipeline_core.data.constants import FRAME_CACHE_DIRNAME_TEMPLATE
+from views_pipeline_core.constants.data import FRAME_CACHE_DIRNAME_TEMPLATE
 from views_pipeline_core.modules.dataloaders.frame_cache import (
     frame_cache_path,
     load_frame_cache,

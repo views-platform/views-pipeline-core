@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
-from views_pipeline_core.managers.prediction.prediction_frame_io import (
+from views_pipeline_core.modules.frames.prediction_frame_io import (
     load_pf,
     save_pf,
 )

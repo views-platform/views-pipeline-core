@@ -20,7 +20,7 @@ from views_frames.conformance import assert_frame_contract
 from views_pipeline_core.managers.ensemble.prediction_frame_ensemble import (
     _aggregate_prediction_frames,
 )
-from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
+from views_pipeline_core.modules.frames.prediction_frame_io import load_pf, save_pf
 
 _LEVELS = {"cm": SpatialLevel.CM, "pgm": SpatialLevel.PGM}
 

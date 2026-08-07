@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional
 
-from views_pipeline_core.data.constants import (
+from views_pipeline_core.constants.data import (
     PARTITION_TRAIN,
     PARTITION_TEST,
     RUN_TYPE_CALIBRATION,

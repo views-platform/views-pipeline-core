@@ -837,20 +837,20 @@ class ForecastingModelManager(
             "_evaluate_sweep method must be implemented by subclasses."
         )
 
-    @staticmethod
-    def dataset_class(loa: str) -> type:
-        # DataFrame-path only: the dataset classes live in the legacy tier
-        # (frozen handlers.py, pandas + files.utils chain), so importing them
-        # here — not at module scope — keeps the frame path pandas-free (#320).
-        from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+    # @staticmethod
+    # def dataset_class(loa: str) -> type:
+    #     # DataFrame-path only: the dataset classes live in the legacy tier
+    #     # (frozen handlers.py, pandas + files.utils chain), so importing them
+    #     # here — not at module scope — keeps the frame path pandas-free (#320).
+    #     from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 
-        dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
-        dataset_cls = dataset_classes.get(loa)
-        if dataset_cls:
-            return partial(dataset_cls)
-        raise ValueError(
-            f"Unknown level-of-analysis '{loa}'. Expected one of: {list(dataset_classes.keys())}"
-        )
+    #     dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
+    #     dataset_cls = dataset_classes.get(loa)
+    #     if dataset_cls:
+    #         return partial(dataset_cls)
+    #     raise ValueError(
+    #         f"Unknown level-of-analysis '{loa}'. Expected one of: {list(dataset_classes.keys())}"
+    #     )
 
     def __repr__(self) -> str:
         """

@@ -30,7 +30,7 @@ from views_pipeline_core.managers.ensemble.sampled_forecast_publisher import (
     publish_sampled_forecast,
     wire_target,
 )
-from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
+from views_pipeline_core.modules.frames.prediction_frame_io import load_pf, save_pf
 
 
 def _pf(times, n_cells=4, n_samples=8, seed=0):

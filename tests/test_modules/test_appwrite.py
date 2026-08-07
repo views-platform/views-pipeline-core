@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import hashlib
 
-from views_pipeline_core.modules.appwrite.file import (
+from views_pipeline_core.modules.appwrite import (
     AppWriteFileModule,
     AppwriteConfig,
     AuthMethod,
@@ -80,7 +80,7 @@ def mock_databases():
 @pytest.fixture
 def mock_account():
     """Mock Account service"""
-    with patch("views_pipeline_core.modules.appwrite.file.Account") as mock:
+    with patch("views_pipeline_core.modules.appwrite.Account") as mock:
         yield mock.return_value
 
 

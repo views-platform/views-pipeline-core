@@ -28,7 +28,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from views_pipeline_core.modules.appwrite.file import (
+from views_pipeline_core.modules.appwrite import (
     APPWRITE_DEFAULT_PAGE_SIZE,
     AppwriteConfig,
     AppwriteMetadataHandler,
@@ -277,7 +277,7 @@ class TestDedupFallbackWalkIsComplete:
             return OperationResult(success=False, code="NOT_FOUND")
 
     def _manager(self, config, storage):
-        from views_pipeline_core.modules.appwrite.file import AppWriteFileModule
+        from views_pipeline_core.modules.appwrite import AppWriteFileModule
 
         manager = AppWriteFileModule.__new__(AppWriteFileModule)
         manager.config = config

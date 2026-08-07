@@ -447,7 +447,7 @@ class TestParityClosure:
         """
         PF → from_prediction_frames == dispatcher.to_legacy_dfs → from_dataframes.
         """
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
         actual = _pf_actual()

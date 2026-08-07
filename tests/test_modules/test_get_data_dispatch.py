@@ -13,7 +13,7 @@ import pandas as pd
 import numpy as np
 
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
-from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.managers.model.path import ModelPathManager
 from views_pipeline_core.files.utils import handle_single_log_creation
 
 

@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from views_frames import FeatureFrame, SpatialLevel
 
-from views_pipeline_core.data.constants import PARTITION_TRAIN, PARTITION_TEST
+from views_pipeline_core.constants.data import PARTITION_TRAIN, PARTITION_TEST
 from views_pipeline_core.modules.validation.core_data_sniffer import (
     EXPECTED_INDEX_NAMES,
 )

@@ -9,7 +9,7 @@ from views_pipeline_core.modules.datastore import (
     DatastoreModule,
 )
 from views_pipeline_core.modules.datastore.datastore import MetadataSearchIncomplete
-from views_pipeline_core.modules.appwrite.file import (
+from views_pipeline_core.modules.appwrite import (
     AppwriteConfig,
     OperationResult,
     AuthMethod,

@@ -305,8 +305,18 @@ class EvaluationStage:
         self, df_predictions, actual_slice, target, context, EvaluationAdapter,
     ):
         """Build EvaluationFrame from predictions via the appropriate adapter path."""
-        if context.prediction_format == "prediction_frame":
+        is_pf_payload = isinstance(df_predictions, dict)
+
+        if context.prediction_format == "prediction_frame" or is_pf_payload:
             # PF path: df_predictions is Dict[str, List[PredictionFrame]].
+            if context.prediction_format != "prediction_frame" and is_pf_payload:
+                logger.info(
+                    "Prediction payload is dict-like for target '%s'; routing "
+                    "through PredictionFrame evaluation path despite "
+                    "prediction_format='%s'.",
+                    target,
+                    context.prediction_format,
+                )
             raw_preds = df_predictions.pop(target, None)
             if raw_preds is None:
                 logger.warning(
@@ -335,7 +345,16 @@ class EvaluationStage:
                 PredictionFrameConverter,
             )
 
-            raw_preds = df_predictions if isinstance(df_predictions, list) else [df_predictions]
+            if isinstance(df_predictions, list):
+                raw_preds = df_predictions
+            elif hasattr(df_predictions, "columns"):
+                raw_preds = [df_predictions]
+            else:
+                raise TypeError(
+                    "DataFrame evaluation path expected a pandas DataFrame or "
+                    f"List[pandas.DataFrame], but received {type(df_predictions).__name__}."
+                )
+
             first_df = raw_preds[0]
             if f"pred_{target}" not in first_df.columns:
                 logger.warning(

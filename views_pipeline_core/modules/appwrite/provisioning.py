@@ -47,7 +47,7 @@ from appwrite.permission import Permission
 from appwrite.query import Query
 from appwrite.role import Role
 
-from views_pipeline_core.modules.appwrite.file import (
+from views_pipeline_core.modules.appwrite import (
     INITIAL_RETRY_DELAY,
     MAX_ATTRIBUTE_CREATION_RETRIES,
     OperationResult,
@@ -488,7 +488,7 @@ class AppwriteProvisioner:
 def build_provisioner(bucket_override: Optional[str] = None) -> AppwriteProvisioner:
     """Construct a provisioner from the validated process environment."""
     from views_pipeline_core.configs.prediction_store import PredictionStoreConfig
-    from views_pipeline_core.modules.appwrite.file import (
+    from views_pipeline_core.modules.appwrite import (
         AppWriteFileModule,
         AppwriteConfig,
     )

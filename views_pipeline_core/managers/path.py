@@ -19,7 +19,7 @@ owns the cross-target concerns:
   * pretty-printing (``view_directories``, ``view_scripts``,
     ``get_directories``, ``get_scripts``)
 
-``ModelPathManager`` (in :mod:`views_pipeline_core.data.model_path`)
+``ModelPathManager`` (in :mod:`views_pipeline_core.managers.model.path`)
 inherits from this base and adds the ``target == "model"`` specific
 directory layout (``data_raw``, ``notebooks``) plus the queryset and
 sweep config scripts. The three subclass path managers

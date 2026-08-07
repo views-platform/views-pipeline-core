@@ -190,7 +190,7 @@ def validate_ensemble_raw_data_alignment(model_names, run_type):
     Returns:
         True if all models have consistent raw data, False otherwise
     """
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
 
     if len(model_names) <= 1:
         return True
@@ -233,7 +233,7 @@ def validate_output_scale_consistency(model_names):
     """
     import importlib.util
     import sys
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
 
     if len(model_names) <= 1:
         return
@@ -299,7 +299,7 @@ def validate_ensemble_model(config, saved=False):
     Raises:
         ValueError: If any constituent model fails validation
     """
-    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.managers.model.path import ModelPathManager
     from views_pipeline_core.managers.model import ModelManager
     from views_pipeline_core.managers.ensemble import EnsembleManager, EnsemblePathManager
 

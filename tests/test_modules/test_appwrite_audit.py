@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from views_pipeline_core.modules.appwrite.file import OperationResult
+from views_pipeline_core.modules.appwrite import OperationResult
 from views_pipeline_core.modules.appwrite.audit import AuditReport, audit
 
 

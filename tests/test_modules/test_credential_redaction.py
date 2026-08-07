@@ -19,7 +19,7 @@ leaving it to be discovered.
 import pytest
 
 from views_pipeline_core.configs.prediction_store import PredictionStoreConfig
-from views_pipeline_core.modules.appwrite.file import AppwriteConfig, AuthMethod
+from views_pipeline_core.modules.appwrite import AppwriteConfig, AuthMethod
 
 _SECRET = "standard_e7c1a9b4deadbeefcafe0123456789abcdef0123456789abcdef0123456789ab"
 

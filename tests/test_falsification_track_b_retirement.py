@@ -40,7 +40,7 @@ class TestF4StaleMethodPatch:
         This proves the existing test's to_prediction_df mock is a no-op.
         """
         import pyarrow as pa
-        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
         from views_pipeline_core.managers.model.model import ForecastingModelManager

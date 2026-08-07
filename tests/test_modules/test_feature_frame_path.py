@@ -11,14 +11,14 @@ import pandas as pd
 import pytest
 from views_frames import FeatureFrame
 
-from views_pipeline_core.data.constants import PARTITION_TRAIN, PARTITION_TEST
+from views_pipeline_core.constants.data import PARTITION_TRAIN, PARTITION_TEST
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
 from views_pipeline_core.modules.dataloaders.feature_frame_path import (
     FRAME_CAPABLE_SOURCES,
     rename_features,
 )
 from views_pipeline_core.modules.dataloaders.frame_cache import save_frame_cache
-from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.managers.model.path import ModelPathManager
 
 DESCRIPTOR = {
     "name": "test_model",

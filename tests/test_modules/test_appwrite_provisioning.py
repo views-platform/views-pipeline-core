@@ -13,7 +13,7 @@ import pytest
 from appwrite.exception import AppwriteException
 
 from views_pipeline_core.exceptions.exceptions import ConfigurationException
-from views_pipeline_core.modules.appwrite.file import (
+from views_pipeline_core.modules.appwrite import (
     AppwriteConfig,
     AppWriteFileModule,
     AuthMethod,

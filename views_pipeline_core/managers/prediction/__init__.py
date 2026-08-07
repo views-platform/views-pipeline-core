@@ -10,9 +10,9 @@ site behaves identically. Guard: tests/test_import_purity.py (C-225).
 from typing import TYPE_CHECKING
 
 from views_pipeline_core._lazy import lazy_attach
+from views_pipeline_core.modules.files.naming import PredictionFileNamer
 
 if TYPE_CHECKING:  # pragma: no cover — static-analysis convenience only
-    from .file_namer import PredictionFileNamer  # noqa: F401
     from .io import PredictionIOManager  # noqa: F401
     from .savers import (  # noqa: F401
         AppwriteSaver,
@@ -25,7 +25,6 @@ if TYPE_CHECKING:  # pragma: no cover — static-analysis convenience only
 
 #: name → defining submodule. Single source of truth for __all__/__getattr__/__dir__.
 _LAZY_EXPORTS = {
-    "PredictionFileNamer": "file_namer",
     "PredictionIOManager": "io",
     "AppwriteSaver": "savers",
     "LocalParquetSaver": "savers",
@@ -35,11 +34,8 @@ _LAZY_EXPORTS = {
     "ViewsForecastsSaver": "savers",
 }
 _LAZY_SUBMODULES = {
-    "file_namer",
     "io",
-    "prediction_frame_converter",
-    "prediction_frame_io",
     "savers",
 }
-__all__ = sorted(_LAZY_EXPORTS)
+__all__ = sorted({"PredictionFileNamer", *_LAZY_EXPORTS})
 __getattr__, __dir__ = lazy_attach(__name__, _LAZY_EXPORTS, _LAZY_SUBMODULES)

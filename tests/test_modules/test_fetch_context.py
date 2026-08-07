@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from views_pipeline_core.data.constants import PARTITION_TRAIN, PARTITION_TEST
-from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.constants.data import PARTITION_TRAIN, PARTITION_TEST
+from views_pipeline_core.managers.model.path import ModelPathManager
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
 from views_pipeline_core.modules.dataloaders.fetch_context import (
     resolve_default_partition_dict,

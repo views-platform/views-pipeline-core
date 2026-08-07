@@ -32,7 +32,7 @@ from pathlib import Path
 
 from views_frames import FeatureFrame
 
-from views_pipeline_core.data.constants import FRAME_CACHE_DIRNAME_TEMPLATE
+from views_pipeline_core.constants.data import FRAME_CACHE_DIRNAME_TEMPLATE
 from views_pipeline_core.data.frame_invariants import assert_frame_nonempty
 
 logger = logging.getLogger(__name__)

@@ -32,7 +32,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from views_pipeline_core.modules.appwrite.file import (
+from views_pipeline_core.modules.appwrite import (
     AppwriteConfig,
     AppWriteFileModule,
     AuthMethod,
@@ -217,7 +217,7 @@ class TestTransportExceptionsDoNotCrashTheHandlers:
         from appwrite.exception import AppwriteException
         from requests.exceptions import ConnectTimeout
 
-        from views_pipeline_core.modules.appwrite.file import exception_message
+        from views_pipeline_core.modules.appwrite import exception_message
 
         wrapped = AppwriteException(ConnectTimeout("timed out"))
         assert isinstance(exception_message(wrapped), str)
@@ -226,7 +226,7 @@ class TestTransportExceptionsDoNotCrashTheHandlers:
     def test_an_api_error_message_is_unchanged(self):
         from appwrite.exception import AppwriteException
 
-        from views_pipeline_core.modules.appwrite.file import exception_message
+        from views_pipeline_core.modules.appwrite import exception_message
 
         assert exception_message(AppwriteException("plain text")) == "plain text"
 

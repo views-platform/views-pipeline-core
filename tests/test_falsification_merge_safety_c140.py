@@ -35,7 +35,7 @@ def test_f2_get_meta_config_returns_none_crashes():
         return mod
 
     with patch(
-        "views_pipeline_core.data.model_path.ModelPathManager"
+        "views_pipeline_core.managers.model.path.ModelPathManager"
     ) as MockMPM:
         MockMPM.side_effect = lambda name: _make_mock_mp(name)
 
