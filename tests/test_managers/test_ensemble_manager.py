@@ -214,12 +214,12 @@ class TestExecuteSingleRun:
     
     def test_execute_single_run_invalid_args_raises(self, manager):
         """Test execute_single_run with invalid args raises ValueError."""
-        with pytest.raises(ValueError, match="must be an instance of ForecastingModelArgs"):
+        with pytest.raises(ValueError, match="must be ForecastingModelArgs"):
             manager.execute_single_run("invalid")
     
     def test_execute_single_run_invalid_args_type(self, manager):
         """Test execute_single_run with wrong type raises ValueError."""
-        with pytest.raises(ValueError, match="must be an instance of ForecastingModelArgs"):
+        with pytest.raises(ValueError, match="must be ForecastingModelArgs"):
             manager.execute_single_run({"run_type": "calibration"})
     
     def test_execute_single_run_sets_args(self, manager):
@@ -453,7 +453,7 @@ class TestEntityRenameInAggregation:
             "weights": {},
         }
 
-        with patch("views_pipeline_core.managers.ensemble.ensemble.AggregationModule") as MockAgg:
+        with patch("views_pipeline_core.managers.ensemble.mixins._aggregation.AggregationModule") as MockAgg:
             mock_agg = MagicMock()
             mock_agg.prediction_type = "point"
             mock_pl = MagicMock()
@@ -480,7 +480,7 @@ class TestEntityRenameInAggregation:
             "weights": {},
         }
 
-        with patch("views_pipeline_core.managers.ensemble.ensemble.AggregationModule") as MockAgg:
+        with patch("views_pipeline_core.managers.ensemble.mixins._aggregation.AggregationModule") as MockAgg:
             mock_agg = MagicMock()
             mock_agg.prediction_type = "point"
             mock_pl = MagicMock()
@@ -618,8 +618,8 @@ class TestTrainEnsemble:
         manager._config_manager.get_combined_config.return_value = configs
         
         with patch.object(manager, '_train_model_artifact') as mock_train:
-            with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
-                with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm.write'):
+            with patch('views_pipeline_core.managers.ensemble.mixins._constituent.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
+                with patch('views_pipeline_core.managers.ensemble.mixins._constituent.tqdm.tqdm.write'):
                     manager._train_ensemble()
                     
                     assert mock_train.call_count == 3
@@ -656,8 +656,8 @@ class TestEvaluateEnsemble:
         
         with patch.object(manager, '_evaluate_model_artifact', side_effect=model_preds) as mock_eval:
             with patch.object(manager, '_get_aggregated_df', return_value=sample_dataframes_list[0]):
-                with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
-                    with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm.write'):
+                with patch('views_pipeline_core.managers.ensemble.mixins._constituent.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
+                    with patch('views_pipeline_core.managers.ensemble.mixins._constituent.tqdm.tqdm.write'):
                         manager._evaluate_ensemble()
                         
                         # Verify _evaluate_model_artifact was called for each model
@@ -687,13 +687,13 @@ class TestForecastEnsemble:
         
         with patch.object(manager, '_forecast_model_artifact', return_value=sample_dataframe):
             with patch.object(EnsembleManager, '_get_aggregated_df', return_value=sample_dataframe):
-                with patch('views_pipeline_core.managers.ensemble.ensemble._ViewsDataset') as MockDataset:
+                with patch('views_pipeline_core.managers.ensemble.mixins._aggregation._ViewsDataset') as MockDataset:
                     mock_dataset = MagicMock()
                     mock_dataset.dataframe = sample_dataframe
                     MockDataset.return_value = mock_dataset
                     
-                    with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
-                        with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm.write'):
+                    with patch('views_pipeline_core.managers.ensemble.mixins._constituent.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
+                        with patch('views_pipeline_core.managers.ensemble.mixins._constituent.tqdm.tqdm.write'):
                             with patch.object(manager, '_apply_reconciliation', return_value=sample_dataframe):
                                 result = manager._forecast_ensemble()
                                 
@@ -714,11 +714,11 @@ class TestForecastEnsemble:
         # Create a non-DataFrame result for aggregation
         with patch.object(manager, '_forecast_model_artifact', return_value=sample_dataframe):
             with patch.object(EnsembleManager, '_get_aggregated_df', return_value="not_a_dataframe"):
-                with patch('views_pipeline_core.managers.ensemble.ensemble._ViewsDataset') as MockDataset:
+                with patch('views_pipeline_core.managers.ensemble.mixins._aggregation._ViewsDataset') as MockDataset:
                     MockDataset.side_effect = ValueError("Invalid input type for ViewsDataset")
                     
-                    with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
-                        with patch('views_pipeline_core.managers.ensemble.ensemble.tqdm.tqdm.write'):
+                    with patch('views_pipeline_core.managers.ensemble.mixins._constituent.tqdm.tqdm', side_effect=lambda x, **kwargs: x):
+                        with patch('views_pipeline_core.managers.ensemble.mixins._constituent.tqdm.tqdm.write'):
                             with pytest.raises(ValueError, match="Invalid input type for ViewsDataset"):
                                 manager._forecast_ensemble()
 
@@ -732,7 +732,7 @@ class TestLoadCDataset:
     
     def test_load_c_dataset_with_provided_dataframe(self, manager, sample_cm_dataframe):
         """Test loading C dataset from provided DataFrame."""
-        with patch('views_pipeline_core.managers.ensemble.ensemble._CDataset') as MockCDataset:
+        with patch('views_pipeline_core.managers.ensemble.mixins._prediction_loader._CDataset') as MockCDataset:
             mock_dataset = MagicMock()
             MockCDataset.return_value = mock_dataset
             
@@ -870,11 +870,11 @@ class TestLoadOrGeneratePrediction:
         manager._use_prediction_store = False
         mock_model_path = MagicMock(spec=ModelPathManager)
         
-        with patch('views_pipeline_core.managers.ensemble.ensemble.PipelineConfig') as MockConfig:
+        with patch('views_pipeline_core.managers.ensemble.mixins._prediction_loader.PipelineConfig') as MockConfig:
             MockConfig.return_value.dataframe_format = ".parquet"
             
             with patch('pathlib.Path.exists', return_value=True):
-                with patch('views_pipeline_core.managers.ensemble.ensemble.read_dataframe', return_value=sample_dataframe):
+                with patch('views_pipeline_core.managers.ensemble.mixins._prediction_loader.read_dataframe', return_value=sample_dataframe):
                     result = manager._load_or_generate_prediction(
                         model_path=mock_model_path,
                         model_name="purple_alien",
@@ -896,14 +896,14 @@ class TestLoadOrGeneratePrediction:
         args = ForecastingModelArgs(run_type="forecasting", forecast=True, saved=True)
         manager._args = args
         
-        with patch('views_pipeline_core.managers.ensemble.ensemble.PipelineConfig') as MockConfig:
+        with patch('views_pipeline_core.managers.ensemble.mixins._prediction_loader.PipelineConfig') as MockConfig:
             MockConfig.return_value.dataframe_format = ".parquet"
             
             # First check returns False (file doesn't exist), then after generation it exists
             with patch('pathlib.Path.exists', side_effect=[False, True]):
                 with patch.object(manager, '_create_model_args', return_value=args):
                     with patch.object(manager, '_execute_shell_script'):
-                        with patch('views_pipeline_core.managers.ensemble.ensemble.read_dataframe', return_value=sample_dataframe):
+                        with patch('views_pipeline_core.managers.ensemble.mixins._prediction_loader.read_dataframe', return_value=sample_dataframe):
                             result = manager._load_or_generate_prediction(
                                 model_path=mock_model_path,
                                 model_name="purple_alien",
@@ -977,7 +977,7 @@ class TestOutputCount:
 
         with patch.object(manager, "_forecast_model_artifact", return_value=mock_df):
             with patch.object(manager, "_get_aggregated_df", return_value=mock_df):
-                with patch("views_pipeline_core.managers.ensemble.ensemble._ViewsDataset") as MockVDS:
+                with patch("views_pipeline_core.managers.ensemble.mixins._aggregation._ViewsDataset") as MockVDS:
                     MockVDS.return_value.dataframe = mock_df
                     manager.configs = {
                         "name": "test", "models": ["m1", "m2"],
@@ -1051,7 +1051,7 @@ class TestEnsembleFailureModes:
         mock_model_path._get_generated_predictions_data_file_paths.return_value = []
         mock_model_path.get_generated_predictions_data_file_paths.return_value = []
 
-        with patch("views_pipeline_core.managers.ensemble.ensemble.ModelPathManager", return_value=mock_model_path):
+        with patch("views_pipeline_core.managers.ensemble.mixins._constituent.ModelPathManager", return_value=mock_model_path):
             with patch.object(manager, "_execute_shell_script"):
                 with pytest.raises(PipelineException, match="No prediction files found"):
                     manager._forecast_model_artifact("m1")

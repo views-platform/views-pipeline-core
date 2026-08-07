@@ -222,4 +222,3 @@ class ExecutionMixin:
         end_t = time.time()
         minutes = (end_t - start_t) / 60
         logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
-

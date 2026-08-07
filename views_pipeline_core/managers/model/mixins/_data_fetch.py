@@ -182,4 +182,3 @@ class DataFetchMixin:
                 "run before engines access the frame cache."
             )
         return path
-

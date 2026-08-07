@@ -414,5 +414,3 @@ class AppwriteMetadataHandler:
             )
 
 # Main File Manager
-
-

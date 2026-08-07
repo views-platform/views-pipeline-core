@@ -79,4 +79,3 @@ def test_h3_hydranet_input_consumes_feature_frames():
         "Zero FeatureFrame references in views_hydranet — the input path is "
         "entirely pandas (data_fetcher reads the parquet cache)."
     )
-

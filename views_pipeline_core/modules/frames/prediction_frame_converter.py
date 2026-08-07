@@ -18,7 +18,7 @@ frame is never materialised in memory.
 import json
 import logging
 from pathlib import Path
-from typing import Any, List, Union
+from typing import Any, Dict, List, Union
 
 import numpy as np
 import pandas as pd
@@ -439,3 +439,60 @@ class PredictionFrameConverter:
                 f"pred_{target}":  list_array,
             }
         )
+
+    def to_combined_arrow_table(
+        self,
+        predictions: Dict[str, Any],   # Dict[str, PredictionFrame]
+        level: str,
+    ) -> pa.Table:
+        """Convert multiple PredictionFrames to ONE combined multi-target pa.Table.
+
+        Produces the same on-disk layout as the legacy DataFrame path:
+        a single parquet file with columns ``month_id``, ``{entity_col}``,
+        and one ``pred_{target}`` List<float32> column per target.
+
+        This is the unified persistence format: both the DF track (after
+        conversion via ``from_prediction_df``) and the PF track write this
+        same combined file, so every downstream reader
+        (``get_generated_predictions_data_file_paths()[0]``,
+        ``load_cm_frame``, ensemble constituent loaders) sees the same
+        layout regardless of which track the model declared.
+
+        Args:
+            predictions: ``{target: PredictionFrame}`` — one PF per target.
+            level:       Spatial level — ``"cm"`` or ``"pgm"``.
+
+        Returns:
+            ``pa.Table`` with columns
+            ``[month_id, {entity_col}, pred_{t1}, pred_{t2}, ...]``.
+
+        Raises:
+            ValueError: If ``level`` is not ``"cm"`` or ``"pgm"``.
+        """
+        if level not in _LEVEL_TO_ENTITY_COL:
+            raise ValueError(
+                f"Unsupported level '{level}'. "
+                f"Expected one of {sorted(_LEVEL_TO_ENTITY_COL)}"
+            )
+        entity_col = _LEVEL_TO_ENTITY_COL[level]
+
+        # Use the first target's identifiers for the shared index columns.
+        first_pf = next(iter(predictions.values()))
+        time = first_pf.identifiers["time"]
+        unit = first_pf.identifiers["unit"]
+        n_rows = first_pf.values.shape[0]
+
+        columns: Dict[str, Any] = {
+            _TIME_COL: time,
+            entity_col: unit,
+        }
+
+        for target, pf in predictions.items():
+            n_r, n_s = pf.values.shape
+            flat_values = pa.array(pf.values.reshape(-1), type=pa.float32())
+            offsets = pa.array(
+                np.arange(0, (n_r + 1) * n_s, n_s, dtype=np.int32)
+            )
+            columns[f"pred_{target}"] = pa.ListArray.from_arrays(offsets, flat_values)
+
+        return pa.table(columns)

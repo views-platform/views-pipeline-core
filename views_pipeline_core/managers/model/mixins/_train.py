@@ -79,4 +79,3 @@ class TrainingMixin:
                 )
             finally:
                 self._wandb_module.finish_run()
-

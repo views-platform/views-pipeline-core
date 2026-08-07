@@ -124,4 +124,3 @@ class PostprocessorManager(ModelManager):
                 raise PipelineException(message=f"Error occurred during postprocessor run. Error details: {e}", wandb_module=self._wandb_module)
             finally:
                 self._wandb_module.finish_run()
-

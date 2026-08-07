@@ -982,4 +982,3 @@ class ForecastingModelManager(
         """Delegate to :meth:`PredictionIOManager.generate_evaluation_table`."""
         from views_pipeline_core.managers.prediction.io import PredictionIOManager
         return PredictionIOManager.generate_evaluation_table(metric_dict)
-

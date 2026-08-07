@@ -542,4 +542,3 @@ class EvaluationAdapter:
             },
             metadata={'target': target}
         )
-

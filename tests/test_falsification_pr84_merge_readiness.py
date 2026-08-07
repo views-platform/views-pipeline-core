@@ -137,6 +137,7 @@ class TestF3ArtifactTimestampAgreement:
         pf = _pf(np.ones((10, 4), dtype=np.float32), np.arange(10), np.arange(10))
         mgr._forecast_model_artifact = MagicMock(return_value={"ged_sb": pf})
         mgr._forecasting_stage = MagicMock()
+        mgr._save_combined_forecast = MagicMock()
         mgr._execute_model_forecasting()
 
         named_ts = old_artifact.stem[-15:]

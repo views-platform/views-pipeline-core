@@ -240,4 +240,3 @@ class PreflightMixin:
             return MAX_SHIFT_COUNT + 1       # 13: same as standard
         else:
             raise ValueError(f"Invalid evaluation type: {eval_type}")
-

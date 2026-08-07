@@ -157,4 +157,3 @@ class TestGenerateOutputFileNameTarget:
             target_identifier="acled_sb_count",
         )
         assert name_a != name_b
-

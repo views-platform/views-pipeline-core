@@ -343,7 +343,7 @@ class EvaluationStage:
                 )
                 return None
             prediction_frames = PredictionFrameConverter().from_legacy_dfs(
-                raw_preds, target, context.configs["level"],
+                raw_preds, target, context.configs.get("level", "pgm"),
             )
             step_mappings = self._get_evaluation_step_mappings(
                 n_sequences=len(prediction_frames), context=context,

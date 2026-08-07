@@ -894,4 +894,3 @@ class ConfigurationManager:
         self._runtime_config["run_type"] = args.run_type
         self._runtime_config["eval_type"] = args.eval_type
         self._runtime_config["sweep"] = args.sweep
-

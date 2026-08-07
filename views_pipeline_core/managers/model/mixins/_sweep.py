@@ -127,4 +127,3 @@ class SweepMixin:
                     raise PipelineException("No evaluation metrics specified in config_meta.py")
             finally:
                 self._wandb_module.finish_run()
-

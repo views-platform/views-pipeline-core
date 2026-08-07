@@ -1589,5 +1589,3 @@ class AppWriteFileModule:
                 error=e.message,
                 code=e.type
             )
-
-

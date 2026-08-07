@@ -61,4 +61,3 @@ def generate(steps: int = 36) -> dict:
     }
 '''
     return save_python_script(script_path, code)
-

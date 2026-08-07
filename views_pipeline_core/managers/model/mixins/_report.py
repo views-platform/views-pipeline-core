@@ -107,4 +107,3 @@ class ReportingMixin:
                 )
             finally:
                 self._wandb_module.finish_run()
-

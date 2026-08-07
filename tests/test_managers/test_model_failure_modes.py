@@ -119,7 +119,8 @@ class TestEvaluationExceptionPropagation:
         }
 
         with pytest.raises(ModelEvaluationException, match="Evaluation failed"):
-            mgr._execute_model_evaluation()
+            with patch.object(ForecastingModelManager, "_save_combined_eval_parquets"):
+                mgr._execute_model_evaluation()
 
 
 class TestForecastingExceptionPropagation:
@@ -265,4 +266,5 @@ class TestPipelineOrdering:
         # _data_loader is not set (no _execute_data_fetching was called).
         # This should fail — either AttributeError or a wrapped exception.
         with pytest.raises((AttributeError, ModelEvaluationException)):
-            mgr._execute_model_evaluation()
+            with patch.object(ForecastingModelManager, "_save_combined_eval_parquets"):
+                mgr._execute_model_evaluation()

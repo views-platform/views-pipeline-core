@@ -5,6 +5,7 @@ Originally falsification audit stubs (5 hard falsifications). Converted
 to passing regression tests after fixes for C-94, C-95, C-96.
 """
 import numpy as np
+from views_pipeline_core.managers.model.model import ForecastingModelManager
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -166,7 +167,8 @@ class TestP2TimestampFromArtifact:
             origin_sink(0, {"ged_sb": pf})
 
         mgr._evaluate_model_artifact_streaming = MagicMock(side_effect=fake_streaming)
-        mgr._execute_model_evaluation()
+        with patch.object(ForecastingModelManager, "_save_combined_eval_parquets"):
+            mgr._execute_model_evaluation()
 
         artifact_ts = artifact_stem[-15:]
         expected = (
@@ -197,6 +199,7 @@ class TestP2TimestampFromArtifact:
         pf = _pf(np.ones((10, 4), dtype=np.float32), np.arange(10), np.arange(10))
         mgr._forecast_model_artifact = MagicMock(return_value={"ged_sb": pf})
         mgr._forecasting_stage = MagicMock()
+        mgr._save_combined_forecast = MagicMock()
         mgr._execute_model_forecasting()
 
         artifact_ts = artifact_stem[-15:]

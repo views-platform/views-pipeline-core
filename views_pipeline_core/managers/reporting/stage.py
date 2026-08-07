@@ -129,48 +129,27 @@ class ReportingStage:
             run_type=context.run_type,
         )
 
-        if context.prediction_format == "prediction_frame":
-            # C-190: fail loud at the boundary if the installed views-reporting
-            # can't consume the dense path, rather than crash deep in the template.
-            _require_dense_report_consumer()
-            try:
-                prediction_path = (
-                    context.model_path.get_generated_pf_prediction_paths(
-                        run_type=context.run_type
-                    )[0]
-                )
-            except (FileNotFoundError, IndexError) as e:
-                raise FileNotFoundError(
-                    f"No PredictionFrame prediction directory found. Run the "
-                    f"pipeline in forecasting mode with '--run_type forecasting' "
-                    f"to generate predictions. More info: {e}"
-                ) from e
-            logger.info("Using PredictionFrame predictions from %s", prediction_path)
-            report_path = forecast_template.generate(
-                historical_dataframe=historical_df,
-                prediction_format="prediction_frame",
-                prediction_path=prediction_path,
-            )
-        else:
-            from views_pipeline_core.files.utils import read_dataframe
+        # Unified: always read the combined multi-target parquet.
+        # Both DF and PF tracks now write the same combined file.
+        from views_pipeline_core.files.utils import read_dataframe
 
-            try:
-                forecast_df = read_dataframe(
-                    context.model_path.get_generated_predictions_data_file_paths(
-                        run_type=context.run_type
-                    )[0]
-                )
-                logger.info("Using latest forecast dataframe")
-            except (FileNotFoundError, IndexError) as e:
-                raise FileNotFoundError(
-                    f"Forecast dataframe was probably not found. Please run the "
-                    f"pipeline in forecasting mode with '--run_type forecasting' "
-                    f"to generate the forecast dataframe. More info: {e}"
-                ) from e
-            report_path = forecast_template.generate(
-                forecast_dataframe=forecast_df,
-                historical_dataframe=historical_df,
+        try:
+            forecast_df = read_dataframe(
+                context.model_path.get_generated_predictions_data_file_paths(
+                    run_type=context.run_type
+                )[0]
             )
+            logger.info("Using latest forecast dataframe (unified path)")
+        except (FileNotFoundError, IndexError) as e:
+            raise FileNotFoundError(
+                f"Forecast not found. Run the pipeline in forecasting mode "
+                f"with '--run_type forecasting' to generate it. More info: {e}"
+            ) from e
+
+        report_path = forecast_template.generate(
+            forecast_dataframe=forecast_df,
+            historical_dataframe=historical_df,
+        )
 
         self._wandb_module.send_alert(
             title="Forecast Report Generated",

@@ -314,9 +314,3 @@ class ExampleForecastingModelManager(ForecastingModelManager):
         # --- USER IMPLEMENTATION ENDS HERE ---
 """
     return save_python_script(script_path, code)
-
-
-
-
-
-

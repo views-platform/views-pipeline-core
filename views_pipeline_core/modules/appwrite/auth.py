@@ -114,5 +114,3 @@ class AuthFactory:
         raise ValueError(f"Unsupported auth method: {auth_method}")
 
 # Cache Management
-
-
