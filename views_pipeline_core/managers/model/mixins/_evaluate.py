@@ -214,8 +214,8 @@ class EvaluationMixin:
         This produces the same on-disk layout as the legacy DF evaluation
         path, so every downstream reader works unchanged.
         """
-        import pyarrow.parquet as pq
         from views_pipeline_core.configs.pipeline import PipelineConfig
+        from views_pipeline_core.files.utils import save_dataframe
         from views_pipeline_core.modules.frames.prediction_frame_converter import (
             PredictionFrameConverter,
         )
@@ -223,6 +223,12 @@ class EvaluationMixin:
         converter = PredictionFrameConverter()
         data_generated = self._model_path.data_generated
         data_generated.mkdir(parents=True, exist_ok=True)
+        level_to_entity_col = {"cm": "country_id", "pgm": "priogrid_id"}
+        if level not in level_to_entity_col:
+            raise ValueError(
+                f"Unsupported level '{level}'. Expected one of {sorted(level_to_entity_col)}"
+            )
+        entity_col = level_to_entity_col[level]
 
         for i in range(n_sequences):
             pf_dict = {}
@@ -238,13 +244,13 @@ class EvaluationMixin:
                 f"predictions_{run_type}_{ts}_{i:02d}"
                 f"{PipelineConfig.dataframe_format}"
             )
-            pq.write_table(combined_table, data_generated / combined_name)
+            combined_df = combined_table.to_pandas().set_index(["month_id", entity_col])
+            save_dataframe(combined_df, data_generated / combined_name)
             logger.info(f"Saved combined eval parquet: {combined_name}")
 
             # Upload to prediction store if enabled
             if self._use_prediction_store:
                 try:
-                    combined_df = combined_table.to_pandas()
                     store_name = f"{self._model_path.model_name}_predictions_{run_type}_{ts}_{i:02d}"
                     combined_df.forecasts.set_run(self._pred_store_name)
                     combined_df.forecasts.to_store(name=store_name, overwrite=True)

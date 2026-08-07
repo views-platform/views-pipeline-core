@@ -772,6 +772,38 @@ class TestPFDictDispatch:
 
         mock_save_eval.assert_called_once()
 
+    def test_combined_eval_parquet_keeps_two_level_index_for_reporting(self, tmp_path):
+        """Combined eval parquet must persist a 2-level index for views-reporting.
+
+        Regression guard for reporting graph rendering failures like:
+        "Too many levels: Index has only 1 level, not 2".
+        """
+        from views_pipeline_core.modules.frames.prediction_frame_io import save_pf
+
+        manager = _make_eval_stub("prediction_frame")
+        manager._model_path.data_generated = tmp_path / "generated"
+        manager._use_prediction_store = False
+        manager._datastore = None
+
+        staging_path = tmp_path / "staging"
+        save_pf(_make_simple_pf(), staging_path / "origin_0" / "lr_sb")
+
+        manager._save_combined_eval_parquets(
+            staging_path=staging_path,
+            all_targets=["lr_sb"],
+            level="pgm",
+            run_type="validation",
+            ts="20260807_114641",
+            n_sequences=1,
+        )
+
+        out = pd.read_parquet(
+            manager._model_path.data_generated / "predictions_validation_20260807_114641_00.parquet"
+        )
+        assert isinstance(out.index, pd.MultiIndex)
+        assert out.index.nlevels == 2
+        assert list(out.index.names) == ["month_id", "priogrid_id"]
+
     def test_pf_forecast_single_target_dict_calls_to_legacy_dfs(self):
         """Unified path: to_combined_arrow_table is called (not to_prediction_df)."""
         from views_pipeline_core.modules.frames.prediction_frame_converter import (
