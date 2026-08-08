@@ -107,5 +107,5 @@ Six mutations verified to fail the suite, including the one that matters most: g
 ## Related
 
 - **views-models ADR-017** (the vocabulary change) — their #341 and #342
-- **#400** — the ensemble member rules, which use this vocabulary (its ADR is written with it)
+- **ADR-058** — the ensemble member rules, which use this vocabulary
 - Issues **#398** (epic), **#399** (this), **#400** (the member rules)
