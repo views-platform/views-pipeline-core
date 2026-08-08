@@ -39,7 +39,7 @@ classifiers = [
 python = ">=3.11,<3.15"
 viewser = "^6.6.4"
 ingester3 = "=2.1.1"
-wandb = "^0.18.7"
+wandb = "^0.28.0"
 pyprojroot="^0.3.0"
 # views-evaluation 1.0.0 is an API-STABILITY declaration, not a rewrite: the diff from
 # v0.5.0 touches zero lines under `views_evaluation/` — only tests, CI, ADR-022 and the
@@ -54,6 +54,16 @@ views-transformation-library = "^2.7.2"
 art = "^6.4"
 polars = ">=1.34.0,<2.0.0"
 views-frames = "^1.10.2"
+
+# Disk-backed dataset tier (views_pipeline_core/modules/dataset). The Zarr store +
+# lazy xarray/Dask reads replace the pandas-in-RAM _ViewsDataset so datasets larger
+# than memory stay bounded by chunk size, not row count. Open lower bounds only:
+# this guard (test_declared_dependencies_match_reality) checks the INSTALLED version
+# is permitted, and these libraries keep a stable public surface across releases.
+xarray = ">=2024.1.0"
+zarr = ">=2.16.0"
+dask = ">=2024.1.0"
+pyarrow = ">=15.0.0"
 
 # OPTIONAL (#345, register C-253). Appwrite is the SECONDARY EXTERNAL destination under
 # ADR-047 — local disk is authoritative and views-forecasts is the primary external
