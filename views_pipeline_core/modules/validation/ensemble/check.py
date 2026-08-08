@@ -2,7 +2,9 @@ from datetime import datetime
 import logging
 from pathlib import Path
 from views_pipeline_core.files.utils import read_log_file
-from views_pipeline_core.modules.validation.core_config_sniffer import DEPRECATED_STATUS
+from views_pipeline_core.modules.validation.ensemble.member_maturity import (
+    ensemble_may_contain_member,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,21 +149,19 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     model_name = log_data["Single Model Name"]
     single_model_dp_status = log_data["Deployment Status"]
 
-    # More check conditions can be added here
-    if ensemble_deployment_status == DEPRECATED_STATUS:
-        logger.error("Deployment status is deprecated. Exiting.")
-        return False
-
-    if single_model_dp_status == DEPRECATED_STATUS:
-        logger.error(f"Model {model_name} deployment status is deprecated. Exiting.")
-        return False
-
-    if single_model_dp_status == "production" and ensemble_deployment_status != "production":
-        logger.error(f"Model {model_name} deployment status is deployed "
-                     f"but the ensemble is not. Exiting.")
-        return False
-
-    return True
+    # The rules themselves live in `member_maturity` (#400, ADR-058). This function keeps
+    # its name, signature and return contract — every caller treats False as "skip this
+    # member", and changing that would be a behaviour change riding on a refactor.
+    #
+    # What was removed here is the branch comparing against "production", a value
+    # views-models has never written. It could not execute. Its own message said
+    # "deployed" while its condition said "production"; the two had disagreed since it was
+    # written. Its intent is now R2, expressed against maturities that actually exist.
+    return ensemble_may_contain_member(
+        ensemble_status=ensemble_deployment_status,
+        member_status=single_model_dp_status,
+        member_name=model_name,
+    )
 
 
 def validate_partition_config(ensemble_manager, model_manager, run_type):

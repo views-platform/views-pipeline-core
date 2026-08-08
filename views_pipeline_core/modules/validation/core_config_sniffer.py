@@ -72,6 +72,27 @@ assert set(LEGACY_STATUS_TO_MATURITY.values()) <= SUPPORTED_MATURITIES, (
     "which is not a supported maturity."
 )
 
+def normalise_maturity(value: str | None) -> str | None:
+    """Read a maturity or legacy status as a maturity, or `None` if it cannot be told.
+
+    `None` means **indeterminate**, not absent, and callers must not treat it as benign:
+
+    - `deployed` has no safe equivalent (see LEGACY_STATUSES_WITHOUT_A_SAFE_MAPPING), so
+      what it means in the new vocabulary is genuinely unknown until someone says.
+    - an unrecognised value is also unknown; `CoreConfigSniffer` rejects those at config
+      load, but the ensemble rules read member status out of a **run log**, which is
+      written by whatever version of the pipeline produced it.
+
+    Reporting either case as a maturity would be inventing a fact. Reporting them as
+    "fine" would be worse — that is the Cluster J shape this codebase keeps finding.
+    """
+    if value is None:
+        return None
+    if value in SUPPORTED_MATURITIES:
+        return value
+    return LEGACY_STATUS_TO_MATURITY.get(value)
+
+
 #: The file that carries the field, old name and new. `model_path` and the config loader
 #: accept both during the transition window; the new name wins when both are present.
 LEGACY_MATURITY_CONFIG_FILENAME = "config_deployment.py"

@@ -423,21 +423,46 @@ class TestValidateEnsembleModelDeploymentStatus:
         assert result is False
 
     @patch('views_pipeline_core.modules.validation.ensemble.check.read_log_file')
-    def test_validate_deployment_status_mismatch(self, mock_read_log):
-        """Test failure when production model is in non-production ensemble."""
-        log_data = {
-            "Single Model Name": "prod_model",
-            "Deployment Status": "production"
+    def test_a_non_graduate_member_in_a_graduate_ensemble_is_rejected(self, mock_read_log):
+        """R2, and the rule the deleted `== "production"` branch was reaching for (#400).
+
+        The test this replaces asserted that a member with status ``"production"`` in a
+        ``"shadow"`` ensemble was rejected. It passed — but only because both the branch
+        and the test invented a value views-models has never written. It writes ``shadow``,
+        ``deployed``, ``baseline``, ``deprecated``. So the rule was real, the enforcement
+        was real, and neither had ever met real data. C-218's shape exactly: a test that
+        can only fail when the code disagrees with our mock.
+
+        Restated against maturities that exist.
+        """
+        mock_read_log.return_value = {
+            "Single Model Name": "candidate_model",
+            "Deployment Status": "candidate",
         }
-        mock_read_log.return_value = log_data
 
         result = validate_ensemble_model_deployment_status(
             Path("/test/path/generated"),
             "forecasting",
-            "shadow"
+            "graduate",
         )
 
         assert result is False
+
+    @patch('views_pipeline_core.modules.validation.ensemble.check.read_log_file')
+    def test_a_graduate_member_in_a_graduate_ensemble_is_accepted(self, mock_read_log):
+        """The negative control for the rule above. A rule that always fires is not a rule."""
+        mock_read_log.return_value = {
+            "Single Model Name": "graduate_model",
+            "Deployment Status": "graduate",
+        }
+
+        result = validate_ensemble_model_deployment_status(
+            Path("/test/path/generated"),
+            "forecasting",
+            "graduate",
+        )
+
+        assert result is True
 
     @patch('views_pipeline_core.modules.validation.ensemble.check.read_log_file')
     def test_validate_deployment_status_shadow_in_shadow(self, mock_read_log):
