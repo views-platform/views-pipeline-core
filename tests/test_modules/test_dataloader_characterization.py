@@ -237,13 +237,15 @@ class TestEnsureFloat64Guarantee:
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.read_dataframe")
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64")
     def test_not_called_on_cache_hit(
-        self, mock_f64, mock_read, mock_log, mock_save, loader, sample_df, tmp_path
-    ):
+        self, mock_f64, mock_read, mock_log, mock_save, loader, sample_df, tmp_path, plant_cache_record):
         """Cached data is returned as-is — no ensure_float64 on the read path."""
         loader._path_raw = tmp_path
         loader._model_path.data_raw = tmp_path
         cache_path = tmp_path / "calibration_viewser_df.parquet"
         sample_df.to_parquet(cache_path)
+        # Precondition since #413: an unrecorded cache is refetched, which would defeat
+        # the "cache hit" this test is about.
+        plant_cache_record(loader, cache_path, "calibration")
 
         mock_read.return_value = sample_df
 
@@ -343,13 +345,15 @@ class TestFetchLogCreation:
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.read_dataframe")
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
     def test_log_not_created_on_cache_hit(
-        self, mock_f64, mock_read, mock_log, mock_save, loader, sample_df, tmp_path
-    ):
+        self, mock_f64, mock_read, mock_log, mock_save, loader, sample_df, tmp_path, plant_cache_record):
         """use_saved=True with existing cache does NOT create a fetch log."""
         loader._path_raw = tmp_path
         loader._model_path.data_raw = tmp_path
         cache_path = tmp_path / "calibration_viewser_df.parquet"
         sample_df.to_parquet(cache_path)
+        # Precondition since #413: an unrecorded cache is refetched, which would defeat
+        # the "cache hit" this test is about.
+        plant_cache_record(loader, cache_path, "calibration")
         mock_read.return_value = sample_df
 
         loader.get_data(

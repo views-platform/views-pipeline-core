@@ -151,11 +151,13 @@ class TestCacheFilenames:
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.save_dataframe")
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.create_data_fetch_log_file")
     def test_datafactory_cache_read(
-        self, mock_log, mock_save, datafactory_loader, sample_df, tmp_path
-    ):
+        self, mock_log, mock_save, datafactory_loader, sample_df, tmp_path, plant_cache_record):
         """use_saved=True with existing datafactory cache reads from disk."""
         cache_path = tmp_path / "calibration_datafactory_df.parquet"
         sample_df.to_parquet(cache_path)
+        # Precondition, not the thing under test: since #413 a cache with no provenance
+        # record is refetched, so a hand-planted cache needs one to be served at all.
+        plant_cache_record(datafactory_loader, cache_path, "calibration")
 
         with patch.object(datafactory_loader, "_fetch_data_from_datafactory") as mock_fetch:
             df, _ = datafactory_loader.get_data(

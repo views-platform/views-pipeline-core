@@ -54,3 +54,58 @@ def make_provenance():
         return CacheProvenance(**base)
 
     return _make
+
+
+@pytest.fixture
+def expected_cache_record():
+    """The provenance record a loader would compute for a given partition and level.
+
+    For tests that need a cache to be SERVED so they can assert on what happens next —
+    the record has to match, or #413 refuses before their assertion is reached.
+    """
+    from views_pipeline_core.modules.dataloaders.provenance_builder import provenance_for
+
+    def _expected(loader, partition, level=None):
+        return provenance_for(loader._resolve_fetch_context(partition, None), level)
+
+    return _expected
+
+
+@pytest.fixture
+def plant_cache_record():
+    """Write the provenance record a loader would expect beside a hand-planted cache.
+
+    Many tests plant a cache file directly (`touch()`, `to_parquet`) and assert that the
+    loader serves it. Since #413 a cache with no record is refetched, so those tests need
+    a record as a *precondition* — not as the thing under test.
+
+    Built with the production `provenance_for` and the loader's own resolved context, so
+    the precondition cannot drift from what the loader computes. That would be circular if
+    this were testing provenance; it is not. The record's own behaviour is tested with
+    hand-built records in `test_cache_provenance_verification.py`, where the expected
+    values are written out and can therefore disagree with the code.
+    """
+    from views_pipeline_core.data.provenance_sidecar import (
+        directory_sidecar_path,
+        file_sidecar_path,
+        write_provenance,
+    )
+    from views_pipeline_core.modules.dataloaders.provenance_builder import provenance_for
+
+    def _plant(loader, artifact, partition, level=None, **overrides):
+        # `level` defaults to None because `get_data`'s does. Defaulting to "pgm" here
+        # would plant a record that disagrees with a `get_data(...)` call that omitted
+        # level — a manufactured mismatch, in a fixture whose job is the opposite.
+        ctx = loader._resolve_fetch_context(partition, None)
+        record = provenance_for(ctx, level)
+        if overrides:
+            record = type(record)(**{**record.to_dict(), **overrides})
+        sidecar = (
+            directory_sidecar_path(artifact)
+            if artifact.is_dir()
+            else file_sidecar_path(artifact)
+        )
+        write_provenance(record, sidecar)
+        return record
+
+    return _plant

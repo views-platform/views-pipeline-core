@@ -17,7 +17,10 @@ from views_pipeline_core.data.constants import (
 )
 from views_pipeline_core.data.model_path import ModelPathManager
 from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
-from views_pipeline_core.modules.dataloaders.provenance_builder import provenance_for
+from views_pipeline_core.modules.dataloaders.provenance_builder import (
+    cache_matches_current_context,
+    provenance_for,
+)
 from views_pipeline_core.data.provenance_sidecar import (
     file_sidecar_path,
     write_provenance,
@@ -1621,7 +1624,17 @@ class ViewsDataLoader:
         alerts = None
 
         if use_saved:
-            if path_cached_df.exists():
+            # #413: a cache is only served if its provenance record matches this run.
+            # `cache_matches_current_context` raises on a genuine mismatch and returns
+            # False for the cases that should refetch (no record, or one from another
+            # version). The `exists()` check stays first — no record is expected when
+            # there is no artifact either.
+            serve_cache = path_cached_df.exists() and cache_matches_current_context(
+                provenance_for(ctx, level),
+                file_sidecar_path(path_cached_df),
+                path_cached_df,
+            )
+            if serve_cache:
                 try:
                     df = read_dataframe(path_cached_df)
                     # Upgrade legacy caches written before the consolidation: an on-disk
@@ -1633,7 +1646,7 @@ class ViewsDataLoader:
                         f"Use of saved data was specified but getting {path_cached_df} failed with: {e}"
                     )
             else:
-                logger.info(f"Saved data not found at {path_cached_df}, fetching from {source}...")
+                logger.info(f"Fetching from {source} — no usable cache at {path_cached_df}...")
                 df, alerts = self._fetch_data(self_test, source)
                 data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 create_data_fetch_log_file(
