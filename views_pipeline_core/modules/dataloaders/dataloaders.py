@@ -70,15 +70,20 @@ def _save_df_cache_with_provenance(
     happened rather than surfacing as an unexplained refetch days later.
     """
     save_dataframe(df, path_cached_df)
+    sidecar_path = file_sidecar_path(path_cached_df)
     try:
-        write_provenance(
-            provenance_for(ctx, level), file_sidecar_path(path_cached_df)
-        )
+        write_provenance(provenance_for(ctx, level), sidecar_path)
     except Exception:
-        # Best-effort cleanup: if the artifact cannot be removed either, the original
-        # failure is still the one worth reporting, so the removal never masks it.
+        # Best-effort cleanup of BOTH artifacts. A partially-flushed sidecar (disk full
+        # mid-write) would otherwise survive as unparseable JSON — and #413 reads a
+        # present-but-unparseable record as CORRUPT, which stops the run, where the
+        # honest state here is simply "this cache was never written".
+        #
+        # If either removal fails the original failure is still the one worth reporting,
+        # so neither ever masks it.
         try:
             path_cached_df.unlink(missing_ok=True)
+            sidecar_path.unlink(missing_ok=True)
         except OSError:
             logger.error(
                 "Could not remove %s after its provenance record failed to write. "

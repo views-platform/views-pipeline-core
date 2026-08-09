@@ -19,7 +19,12 @@ its own. It owns exactly three things:
   ``managers/prediction/prediction_frame_io.load_pf``): a transient empty fetch
   must never become a poison cache served on every subsequent hit.
 
-Import-light by design (falsify P4): views-frames + stdlib + data.constants only.
+Import-light by design (falsify P4): views-frames, stdlib, and ``data`` submodules —
+no managers, no modules siblings, no pandas. Stated as the invariant rather than as a
+list of module names, because the list drifted the first time a sibling was added (#412
+brought in ``data.cache_provenance`` and ``data.provenance_sidecar``) and a comment that
+enumerates its own imports is stale the moment one changes. The layering is enforced by
+``tests/test_boundary_enforcement.py``; this line says what it means.
 Loader-free by design (falsify P1): explicit values, never a ViewsDataLoader.
 """
 from __future__ import annotations
@@ -95,7 +100,34 @@ def save_frame_cache(
     _remove(retired)
 
     frame.save(staging)  # staging starts absent: leaf save() merges into dirs
-    write_provenance(provenance, directory_sidecar_path(staging))
+    try:
+        write_provenance(provenance, directory_sidecar_path(staging))
+    except Exception:
+        # The committed cache is untouched either way — both os.replace calls are still
+        # ahead of us — so this is about not leaving a mess. Without it the staged frame
+        # sits on disk until the NEXT save's `_remove(staging)` eats it silently, which
+        # is indistinguishable from the ordinary empty-staging case and destroys the
+        # evidence of what failed. The pandas path cleans up synchronously and says so;
+        # this now matches.
+        logger.error(
+            "Provenance record failed to write for %s; discarding the staged frame. "
+            "The existing cache (if any) is untouched.",
+            cache_dir,
+        )
+        try:
+            _remove(staging)
+        except OSError:
+            # Guarded for the same reason the pandas path guards its unlink: an
+            # unguarded cleanup REPLACES the original exception as the one callers see,
+            # so the disk-full that actually caused this would surface as a permissions
+            # error from rmtree. The docstring claimed parity with the pandas path before
+            # this guard existed, which made the claim false.
+            logger.error(
+                "Could not remove the staged frame at %s either; it will be cleared by "
+                "the next save.",
+                staging,
+            )
+        raise
 
     if cache_dir.is_dir():
         os.replace(cache_dir, retired)  # keep the old cache whole until the swap lands

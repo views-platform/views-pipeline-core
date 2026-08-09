@@ -22,27 +22,6 @@ from views_pipeline_core.managers.evaluation.stage import (
 )
 
 
-def _provenance(**overrides):
-    """A provenance record for cache-write tests.
-
-    `save_frame_cache` requires one (#412): a cache without a record is the state #413
-    refetches, so an optional argument would make "every cache carries its provenance" an
-    aspiration rather than something the signature enforces.
-    """
-    from views_pipeline_core.data.cache_provenance import CacheProvenance
-
-    base = dict(
-        queryset_digest="a" * 64,
-        source="datafactory",
-        partition="forecasting",
-        month_first=121,
-        month_last=550,
-        level="pgm",
-    )
-    base.update(overrides)
-    return CacheProvenance(**base)
-
-
 
 @pytest.fixture(autouse=True, scope="module")
 def _mock_optional_deps():
@@ -605,7 +584,9 @@ class TestFrameNativeActuals:
     """
 
     @staticmethod
-    def _cache_frame(tmp_path, features=("lr_sb",), months=(445, 446), n_samples=1):
+    def _cache_frame(
+        tmp_path, make_provenance, features=("lr_sb",), months=(445, 446), n_samples=1
+    ):
         import numpy as np
         from views_frames import FeatureFrame, SpatialLevel, SpatioTemporalIndex
 
@@ -622,7 +603,7 @@ class TestFrameNativeActuals:
             feature_names=list(features),
         )
         cache = tmp_path / "calibration_datafactory_ff"
-        save_frame_cache(frame, cache, provenance=_provenance())
+        save_frame_cache(frame, cache, provenance=make_provenance())
         return cache
 
     @staticmethod
@@ -650,8 +631,8 @@ class TestFrameNativeActuals:
         defaults.update(overrides)
         return _make_context(**defaults), tripwire
 
-    def test_frame_evaluate_is_pandas_free(self, tmp_path):
-        cache = self._cache_frame(tmp_path)
+    def test_frame_evaluate_is_pandas_free(self, tmp_path, make_provenance):
+        cache = self._cache_frame(tmp_path, make_provenance)
         context, tripwire = self._frame_context(cache)
         stage = _make_stage()
         predictions = {"lr_sb": [self._pf()]}
@@ -666,14 +647,14 @@ class TestFrameNativeActuals:
         stage._wandb_module.log_evaluation_results.assert_called_once()
         stage._io.save_evaluations.assert_not_called()  # legacy egress gated off
 
-    def test_frame_requires_prediction_frame_format(self, tmp_path):
-        cache = self._cache_frame(tmp_path)
+    def test_frame_requires_prediction_frame_format(self, tmp_path, make_provenance):
+        cache = self._cache_frame(tmp_path, make_provenance)
         context, _ = self._frame_context(cache, prediction_format="dataframe")
         with pytest.raises(ValueError, match="unsupported combination"):
             _make_stage().evaluate({}, context, ensemble=False)
 
-    def test_frame_ensemble_unsupported(self, tmp_path):
-        cache = self._cache_frame(tmp_path)
+    def test_frame_ensemble_unsupported(self, tmp_path, make_provenance):
+        cache = self._cache_frame(tmp_path, make_provenance)
         context, _ = self._frame_context(cache)
         with pytest.raises(ValueError, match="ensemble constituents"):
             _make_stage().evaluate({}, context, ensemble=True)
@@ -683,14 +664,14 @@ class TestFrameNativeActuals:
         with pytest.raises(ValueError, match="no frame_cache_path"):
             _make_stage().evaluate({}, context, ensemble=False)
 
-    def test_missing_target_fails_loud(self, tmp_path):
-        cache = self._cache_frame(tmp_path, features=("other_feature",))
+    def test_missing_target_fails_loud(self, tmp_path, make_provenance):
+        cache = self._cache_frame(tmp_path, make_provenance, features=("other_feature",))
         context, _ = self._frame_context(cache)
         with pytest.raises(ValueError, match=r"Targets \['lr_sb'\] not present"):
             _make_stage().evaluate({"lr_sb": [self._pf()]}, context, ensemble=False)
 
-    def test_multi_sample_actuals_fail_loud(self, tmp_path):
-        cache = self._cache_frame(tmp_path, n_samples=3)
+    def test_multi_sample_actuals_fail_loud(self, tmp_path, make_provenance):
+        cache = self._cache_frame(tmp_path, make_provenance, n_samples=3)
         context, _ = self._frame_context(cache)
         with pytest.raises(ValueError, match="sample_count=3"):
             _make_stage().evaluate({"lr_sb": [self._pf()]}, context, ensemble=False)

@@ -34,12 +34,23 @@ from views_pipeline_core.data.constants import (
 def file_sidecar_path(artifact: Path) -> Path:
     """The record for a single-file artifact — a sibling beside it.
 
-    ``forecasting_viewser_df.parquet`` → ``forecasting_viewser_df.provenance.json``.
-    The extension is replaced rather than appended so the record does not read as a
-    parquet variant to anything globbing the raw directory.
+    ``forecasting_viewser_df.parquet`` → ``forecasting_viewser_df.parquet.provenance.json``.
+
+    The suffix is **appended to the full filename**, not substituted for the extension.
+    The first version replaced it, and that collided: ``CACHE_FILENAME_TEMPLATE`` varies
+    only by ``PipelineConfig.dataframe_format``, which is a *mutable* singleton
+    (`ModelManager.set_dataframe_format`), so ``…_df.parquet`` and ``…_df.pkl`` — two
+    genuinely different caches — mapped to one record. Whichever was written last
+    silently described both, and #413 would then have "verified" a parquet against a
+    record of a pickle.
+
+    Replacing the extension was done to keep the record out of the raw-directory scan.
+    That worry was unfounded: `ModelPathManager._get_raw_data_file_paths` filters on
+    ``f.suffix == PipelineConfig.dataframe_format``, and the suffix here is ``.json``
+    either way. A speculative concern had been traded against a real collision.
     """
     artifact = Path(artifact)
-    return artifact.with_name(artifact.stem + PROVENANCE_SIDECAR_SUFFIX)
+    return artifact.with_name(artifact.name + PROVENANCE_SIDECAR_SUFFIX)
 
 
 def directory_sidecar_path(cache_dir: Path) -> Path:
