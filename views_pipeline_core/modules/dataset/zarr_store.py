@@ -67,7 +67,7 @@ class ZarrStore:
         """Open a group from the scratch directory as a lazy, Dask-backed Dataset."""
         if self._closed:
             raise RuntimeError("ZarrStore is closed")
-        return xr.open_zarr(self._resolve(path), chunks="auto", consolidated=False)
+        return xr.open_zarr(self._resolve(path), chunks={}, consolidated=False)
 
     def close(self) -> None:
         """Remove the scratch directory (idempotent)."""

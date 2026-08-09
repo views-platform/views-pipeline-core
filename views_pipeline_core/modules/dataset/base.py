@@ -9,6 +9,7 @@ supported input kind and delegates the on-disk write to the matching converter.
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,10 @@ class ViewsDataset:
         source: Any,
         targets: list[str] | None = None,
         broadcast_features: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self.broadcast_features = broadcast_features
+        self._user_metadata = metadata or {}
         self._store = ZarrStore()
         zarr_path = self._ingest(source, targets, broadcast_features)
         self._ds = readers.open_zarr_dir(zarr_path)
@@ -42,24 +45,28 @@ class ViewsDataset:
         self, source: Any, targets: list[str] | None, broadcast_features: bool
     ) -> Path:
         kind = readers.detect_source_type(source)
-        target = self._store.path / "dataset.zarr"
+        target = self._store.path / f"dataset_{uuid.uuid4().hex[:8]}.zarr"
+        extra_attrs = self._user_metadata
+
         if kind == "dataframe":
             return converters.DataFrameConverter.to_zarr(
-                source, target, targets=targets, broadcast_features=broadcast_features
+                source, target, targets=targets,
+                broadcast_features=broadcast_features, extra_attrs=extra_attrs,
             )
         if kind == "parquet":
             return converters.ParquetConverter.to_zarr(
                 Path(source), target, targets=targets,
-                broadcast_features=broadcast_features,
+                broadcast_features=broadcast_features, extra_attrs=extra_attrs,
             )
         if kind == "prediction_frame":
             name = _single_target(targets, "PredictionFrame")
             return converters.PredictionFrameConverter.to_zarr(
-                source, target, target=name
+                source, target, target=name, extra_attrs=extra_attrs,
             )
         if kind == "feature_frame":
             return converters.FeatureFrameConverter.to_zarr(
-                source, target, broadcast_features=broadcast_features
+                source, target, targets=targets,
+                broadcast_features=broadcast_features, extra_attrs=extra_attrs,
             )
         if kind == "zarr_dir":
             readers.open_zarr_dir(source).to_zarr(target, mode="w", consolidated=False)
@@ -83,6 +90,10 @@ class ViewsDataset:
         self.pred_vars = list(attrs["pred_vars"])
         self.text_cols = list(attrs.get("text_cols", []))
         self.broadcast_features = bool(attrs.get("broadcast_features", self.broadcast_features))
+        self.metadata = {k: v for k, v in attrs.items()
+                         if k not in ("is_prediction", "sample_size", "targets",
+                                       "features", "pred_vars", "text_cols",
+                                       "time_id", "entity_id", "broadcast_features")}
 
     # ---- column roles -------------------------------------------------------
     def get_pred_vars(self) -> list[str]:
@@ -148,7 +159,7 @@ class ViewsDataset:
         """Materialize a subset into a new, independent dataset object."""
         ds = self._apply_selection(self._ds, time_ids, entity_ids, sample_idx)
         if features is not None:
-            keep = set(_as_list(features)) | set(self.text_cols)
+            keep = set(_as_list(features)) | set(self.text_cols) | set(self.targets)
             ds = ds[[c for c in ds.data_vars if c in keep]]
         ds = ds.copy()
         ds.attrs = dict(self._ds.attrs)
@@ -212,8 +223,8 @@ class ViewsDataset:
     def to_predictionframe(self) -> Any:
         """Convert to a ``views_frames.PredictionFrame`` (prediction mode only).
 
-        Streams one time-step at a time from disk — peak memory is one slice,
-        not the full (T, E, S) grid.
+        Uses ``to_tensor()`` (a single lazy dask operation) and reshapes
+        the result — one compute call instead of T separate disk reads.
         """
         if not self.is_prediction:
             raise ValueError("to_predictionframe requires prediction mode")
@@ -221,72 +232,41 @@ class ViewsDataset:
             raise ValueError(
                 f"PredictionFrame needs exactly one target, got {self.targets}"
             )
-        from views_frames import PredictionFrame
+        from views_frames import PredictionFrame, FrameMetadata
 
-        # Build flat arrays by iterating over time slices (lazy reads)
-        time_vals = self._ds[self._time_id].values
-        entity_vals = self._ds[self._entity_id].values
-        var_name = self.targets[0]
-
-        # Determine sample size from the first slice
-        first_slice = self._ds[var_name].isel({self._time_id: 0}).compute()
-        sample_size = first_slice.shape[-1] if "sample" in first_slice.dims else 1
-
-        # Pre-allocate output arrays
-        n_total = len(time_vals) * len(entity_vals)
-        y_pred = np.empty((n_total, sample_size), dtype=np.float32)
-
-        idx = 0
-        for t_val in time_vals:
-            slice_da = self._ds[var_name].sel({self._time_id: t_val}).compute()
-            if "sample" not in slice_da.dims:  # scalar pred — expand
-                slice_da = slice_da.expand_dims("sample", axis=-1)
-            n_entities = slice_da.shape[0]
-            y_pred[idx:idx + n_entities, :] = slice_da.values
-            idx += n_entities
+        tensor = self.to_tensor()  # (T, E, S, 1) lazy
+        computed = tensor.compute()
+        t, e, s, _ = computed.shape
+        y_pred = np.ascontiguousarray(computed.values.reshape(t * e, s))
 
         index = self._build_index()
-        return PredictionFrame(y_pred, index)
+        meta = FrameMetadata.from_dict(self.metadata) if self.metadata else None
+        return PredictionFrame(y_pred.astype(np.float32), index, metadata=meta)
 
     def to_featureframe(self) -> Any:
         """Convert to a ``views_frames.FeatureFrame`` (feature mode only).
 
-        Streams one time-step at a time from disk — peak memory is one slice,
-        not the full (T, E, S, F) tensor.
+        Uses ``to_tensor()`` (a single lazy dask operation) and reshapes
+        the result — one compute call instead of T×F separate disk reads.
         """
         if self.is_prediction:
             raise ValueError("to_featureframe requires feature mode")
-        from views_frames import FeatureFrame
+        from views_frames import FeatureFrame, FrameMetadata
 
-        names = self.features
-        time_vals = self._ds[self._time_id].values
-        entity_vals = self._ds[self._entity_id].values
+        names = list(self.features) + list(self.targets)
+        if not names:
+            raise ValueError("No feature or target variables to convert")
 
-        # Determine shapes from first slice
-        first_slices = {}
-        for name in names:
-            sl = self._ds[name].isel({self._time_id: 0}).compute()
-            if "sample" not in sl.dims:
-                sl = sl.expand_dims("sample", axis=-1)
-            first_slices[name] = sl
-        sample_size = first_slices[names[0]].shape[-1]
-
-        n_total = len(time_vals) * len(entity_vals)
-        n_features = len(names)
-        values = np.empty((n_total, n_features, sample_size), dtype=np.float32)
-
-        idx = 0
-        for t_val in time_vals:
-            for fi, name in enumerate(names):
-                sl = self._ds[name].sel({self._time_id: t_val}).compute()
-                if "sample" not in sl.dims:
-                    sl = sl.expand_dims("sample", axis=-1)
-                n_entities = sl.shape[0]
-                values[idx:idx + n_entities, fi, :] = sl.values
-            idx += n_entities
+        tensor = self._stack_variables(names)  # (T, E, S, F) lazy
+        computed = tensor.compute()
+        t, e, s, f = computed.shape
+        values = np.ascontiguousarray(
+            computed.values.transpose(0, 1, 3, 2).reshape(t * e, f, s)
+        )
 
         index = self._build_index()
-        return FeatureFrame(values, index, names)
+        meta = FrameMetadata.from_dict(self.metadata) if self.metadata else None
+        return FeatureFrame(values.astype(np.float32), index, names, metadata=meta)
 
     def _dense_values_and_index(self, name: str) -> tuple[np.ndarray, Any]:
         var = self._var_as_3d(name).transpose(self._time_id, self._entity_id, "sample")
@@ -300,7 +280,13 @@ class ViewsDataset:
         level = SpatialLevel[_ENTITY_LEVEL[self._entity_id]]
         times = self._ds[self._time_id].values.astype("int64")
         entities = self._ds[self._entity_id].values.astype("int64")
-        return SpatioTemporalIndex.cartesian(times, entities, level)
+
+        t_grid, e_grid = np.meshgrid(times, entities, indexing="ij")
+        return SpatioTemporalIndex(
+            time=t_grid.ravel(),
+            unit=e_grid.ravel(),
+            level=level,
+        )
 
     # ---- persistence --------------------------------------------------------
     def save_parquet(self, path: str | Path) -> Path:
@@ -351,15 +337,11 @@ class ViewsDataset:
         with tempfile.TemporaryDirectory() as tmp:
             store_dir = Path(tmp) / "store.zarr"
             self._ds.to_zarr(store_dir, mode="w", consolidated=False)
-            # A plain zip of the Zarr directory is duplicate-free and reads back
-            # cleanly through ZipStore (direct xarray->ZipStore duplicates keys).
             with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_STORED) as zf:
                 for file in sorted(store_dir.rglob("*")):
                     if file.is_file():
                         zf.write(file, arcname=str(file.relative_to(store_dir)))
         return path
-
-
 
     def save_npz(self, path: str | Path) -> Path:
         """Save in the views-frames leaf format (values.npy + identifiers.npz)."""
@@ -367,6 +349,11 @@ class ViewsDataset:
         frame = self.to_predictionframe() if self.is_prediction else self.to_featureframe()
         frame.save(path)
         return path
+
+    # ---- xarray access -----------------------------------------------------
+    def to_xarray(self) -> xr.Dataset:
+        """Return the underlying lazy xarray.Dataset (Dask-backed)."""
+        return self._ds
 
     # ---- validation + introspection ----------------------------------------
     def __enter__(self) -> "ViewsDataset":

@@ -67,7 +67,7 @@ def _is_feature_frame(source: Any) -> bool:
 
 def open_zarr_dir(path: str | Path) -> xr.Dataset:
     """Open a Zarr directory as a lazy, Dask-backed Dataset."""
-    return xr.open_zarr(path, chunks="auto", consolidated=False)
+    return xr.open_zarr(path, chunks={}, consolidated=False)
 
 
 def open_zarr_zip(path: str | Path) -> xr.Dataset:
@@ -75,7 +75,7 @@ def open_zarr_zip(path: str | Path) -> xr.Dataset:
     from zarr.storage import ZipStore
 
     store = ZipStore(str(path), mode="r")
-    return xr.open_zarr(store, chunks="auto", consolidated=False)
+    return xr.open_zarr(store, chunks={}, consolidated=False)
 
 
 def pick_time_entity(names: list[str]) -> tuple[str, str]:

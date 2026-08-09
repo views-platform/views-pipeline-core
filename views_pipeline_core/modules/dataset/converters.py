@@ -37,6 +37,7 @@ def build_schema_attrs(
     sample_size: int,
     broadcast_features: bool,
     feature_only: bool = False,
+    extra_attrs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve column roles and return the ``.attrs`` dict for the store."""
     numeric = [n for n, s in specs.items() if s in ("num2", "num3")]
@@ -47,9 +48,18 @@ def build_schema_attrs(
         resolved_targets = list(targets) if targets else pred_vars
         features: list[str] = []
     elif feature_only:
-        # A pure feature store (FeatureFrame): every numeric column is a feature.
-        resolved_targets = []
-        features = list(numeric)
+        # FeatureFrame source: user-specified targets are separated from features.
+        # If targets is provided, those columns are targets; the rest are features.
+        # If targets is not provided, every column is a feature (backward compat).
+        if targets:
+            missing = set(targets) - set(numeric)
+            if missing:
+                raise ValueError(f"Targets not found among columns: {missing}")
+            resolved_targets = list(targets)
+            features = [n for n in numeric if n not in resolved_targets]
+        else:
+            resolved_targets = []
+            features = list(numeric)
     else:
         if not targets:
             raise ValueError(
@@ -62,7 +72,7 @@ def build_schema_attrs(
         resolved_targets = list(targets)
         features = [n for n in numeric if n not in resolved_targets]
 
-    return {
+    attrs = {
         "is_prediction": bool(is_prediction),
         "sample_size": int(sample_size),
         "targets": resolved_targets,
@@ -73,6 +83,10 @@ def build_schema_attrs(
         "entity_id": entity_id,
         "broadcast_features": bool(broadcast_features),
     }
+    # Merge user-provided metadata (model name, run_type, etc.)
+    if extra_attrs:
+        attrs.update(extra_attrs)
+    return attrs
 
 
 def assemble_dataset(
@@ -117,6 +131,7 @@ class DataFrameConverter:
         *,
         targets: list[str] | None = None,
         broadcast_features: bool = False,
+        extra_attrs: dict[str, Any] | None = None,
     ) -> Path:
         df, time_id, entity_id = _normalize_dataframe(df)
         times, entities, sample_size, columns, specs = _frame_to_grid(
@@ -131,6 +146,7 @@ class DataFrameConverter:
             entity_id=entity_id,
             sample_size=sample_size,
             broadcast_features=broadcast_features,
+            extra_attrs=extra_attrs,
         )
         ds = assemble_dataset(
             times, entities, sample_size, columns, specs, time_id, entity_id, attrs
@@ -219,13 +235,21 @@ class PredictionFrameConverter:
     """``views_frames.PredictionFrame`` -> Zarr store (prediction mode)."""
 
     @staticmethod
-    def to_zarr(pf: Any, store_path: Path, *, target: str) -> Path:
+    def to_zarr(
+        pf: Any, store_path: Path, *, target: str,
+        extra_attrs: dict[str, Any] | None = None,
+    ) -> Path:
         entity_id = pf.index.level.entity_column
         time = np.asarray(pf.identifiers["time"])
         unit = np.asarray(pf.identifiers["unit"])
         values = np.asarray(pf.values, dtype=_FLOAT)  # (N, S)
-        # Use _scatter_to_zarr for out-of-core writes (no full grid materialization)
         col_name = target if target.startswith("pred_") else f"pred_{target}"
+        # Read metadata from the PredictionFrame if available
+        frame_meta = {}
+        if hasattr(pf, "metadata") and pf.metadata:
+            frame_meta = pf.metadata.to_dict() if hasattr(pf.metadata, "to_dict") else dict(pf.metadata)
+        if extra_attrs:
+            frame_meta.update(extra_attrs)
         attrs = build_schema_attrs(
             {col_name: "num3"},
             targets=[col_name],
@@ -234,6 +258,7 @@ class PredictionFrameConverter:
             entity_id=entity_id,
             sample_size=values.shape[1],
             broadcast_features=False,
+            extra_attrs=frame_meta,
         )
         return _scatter_to_zarr(
             store_path, time, unit, values[:, None, :], [col_name],
@@ -245,24 +270,35 @@ class FeatureFrameConverter:
     """``views_frames.FeatureFrame`` -> Zarr store (feature mode)."""
 
     @staticmethod
-    def to_zarr(ff: Any, store_path: Path, *, broadcast_features: bool = False) -> Path:
+    def to_zarr(
+        ff: Any, store_path: Path, *,
+        targets: list[str] | None = None,
+        broadcast_features: bool = False,
+        extra_attrs: dict[str, Any] | None = None,
+    ) -> Path:
         entity_id = ff.index.level.entity_column
         time = np.asarray(ff.identifiers["time"])
         unit = np.asarray(ff.identifiers["unit"])
         values = np.asarray(ff.values, dtype=_FLOAT)  # (N, F, S)
         names = list(ff.feature_names)
         specs = {name: "num3" for name in names}
+        # Read metadata from the FeatureFrame if available
+        frame_meta = {}
+        if hasattr(ff, "metadata") and ff.metadata:
+            frame_meta = ff.metadata.to_dict() if hasattr(ff.metadata, "to_dict") else dict(ff.metadata)
+        if extra_attrs:
+            frame_meta.update(extra_attrs)
         attrs = build_schema_attrs(
             specs,
-            targets=[],
+            targets=targets,
             is_prediction=False,
             time_id="month_id",
             entity_id=entity_id,
             sample_size=values.shape[2],
             broadcast_features=broadcast_features,
             feature_only=True,
+            extra_attrs=frame_meta,
         )
-        attrs["features"] = names
         return _scatter_to_zarr(
             store_path, time, unit, values, names,
             "month_id", entity_id, attrs,
@@ -317,7 +353,7 @@ def _scatter_to_zarr(
         shape = (len(times), len(entities), sample_size)
         skeleton_vars[name] = (
             (time_id, entity_id, "sample"),
-            da.full(shape, np.nan, dtype=_FLOAT, chunks="auto"),
+            da.full(shape, np.nan, dtype=_FLOAT, chunks=(min(len(times), 256), min(len(entities), 256), sample_size)),
         )
     coords = {
         time_id: times.astype("int64"),
@@ -368,11 +404,13 @@ class GridWriter:
         for name, spec in specs.items():
             if spec == "num3":
                 shape, dims = (t, e, s), (time_id, entity_id, "sample")
+                chunks = (min(t, 256), min(e, 256), s)
             else:
                 shape, dims = (t, e), (time_id, entity_id)
+                chunks = (min(t, 256), min(e, 256))
             skeleton_vars[name] = (
                 dims,
-                da.full(shape, np.nan, dtype=_FLOAT, chunks="auto"),
+                da.full(shape, np.nan, dtype=_FLOAT, chunks=chunks),
             )
         skeleton = assemble_dataset(
             times, entities, sample_size, {}, {}, time_id, entity_id, attrs
@@ -404,7 +442,12 @@ class GridWriter:
 
 
 class ParquetConverter:
-    """List-in-cell Parquet -> Zarr store, streamed in Arrow batches."""
+    """Parquet -> Zarr store via dask parallel reads.
+
+    Reads the parquet file in parallel using dask.dataframe, which
+    splits by row group and processes chunks concurrently. The data
+    is then scattered into the Zarr skeleton via GridWriter.
+    """
 
     @staticmethod
     def to_zarr(
@@ -413,10 +456,13 @@ class ParquetConverter:
         *,
         targets: list[str] | None = None,
         broadcast_features: bool = False,
+        extra_attrs: dict[str, Any] | None = None,
     ) -> Path:
+        import dask.dataframe as dd
         import pyarrow.parquet as pq
         import pyarrow.types as pat
 
+        # --- Schema scan (metadata only, fast) ---
         pf = pq.ParquetFile(str(parquet_path))
         names = pf.schema_arrow.names
         time_id, raw_entity = readers.pick_time_entity(names)
@@ -431,57 +477,107 @@ class ParquetConverter:
             elif pat.is_floating(arrow_type) or pat.is_integer(arrow_type):
                 specs[name] = "num3" if name.startswith("pred_") else "num2"
             else:
-                continue  # non-numeric columns are skipped in the streaming path
+                continue
 
-        times, entities, sample_size = _scan_parquet_coords(
-            pf, time_id, raw_entity, specs
-        )
+        list_cols = [n for n, s in specs.items() if s == "num3"]
+
+        # --- Coordinate + sample_size discovery (single pass, fast columns only) ---
+        times_set: set[int] = set()
+        entities_set: set[int] = set()
+        sample_size = 1
+        scan_cols = [time_id, raw_entity, *list_cols[:1]]
+        for batch in pf.iter_batches(columns=scan_cols, batch_size=100000):
+            times_set.update(batch.column(time_id).to_numpy(zero_copy_only=False).tolist())
+            entities_set.update(
+                batch.column(raw_entity).to_numpy(zero_copy_only=False).tolist()
+            )
+            if list_cols and batch.num_rows:
+                first = batch.column(list_cols[0])[0]
+                if first.is_valid and hasattr(first, "as_py"):
+                    value = first.as_py()
+                    if isinstance(value, list):
+                        sample_size = max(sample_size, len(value))
+
+        times = np.array(sorted(times_set), dtype="int64")
+        entities = np.array(sorted(entities_set), dtype="int64")
+
         is_prediction = any(n.startswith("pred_") for n in specs)
         attrs = build_schema_attrs(
-            specs,
-            targets=targets,
-            is_prediction=is_prediction,
-            time_id=time_id,
-            entity_id=entity_id,
-            sample_size=sample_size,
-            broadcast_features=broadcast_features,
+            specs, targets=targets, is_prediction=is_prediction,
+            time_id=time_id, entity_id=entity_id,
+            sample_size=sample_size, broadcast_features=broadcast_features,
+            extra_attrs=extra_attrs,
         )
         writer = GridWriter(
             store_path, time_id, entity_id, times, entities, sample_size, specs, attrs
         )
-        columns = [time_id, raw_entity, *specs]
-        for batch in pf.iter_batches(columns=columns):
-            times_b = batch.column(time_id).to_numpy(zero_copy_only=False)
-            entities_b = batch.column(raw_entity).to_numpy(zero_copy_only=False)
-            cols_b = {
-                name: _arrow_column_to_numpy(batch.column(name), specs[name], sample_size)
-                for name in specs
-            }
+
+        # --- Parallel data write via dask ---
+        # dask.dataframe reads row groups in parallel and we write each
+        # partition to the Zarr skeleton. The parquet may have MultiIndex
+        # columns (month_id, priogrid_id) which dask treats as index, not
+        # regular columns. We read ALL columns without filtering so the
+        # index columns are accessible.
+        ddf = dd.read_parquet(str(parquet_path))
+
+        for partition in ddf.partitions:
+            df_part = partition.compute()
+            if df_part.empty:
+                continue
+            # Handle MultiIndex: time_id and raw_entity may be in the index
+            if time_id in df_part.index.names and raw_entity in df_part.index.names:
+                times_b = df_part.index.get_level_values(time_id).to_numpy()
+                entities_b = df_part.index.get_level_values(raw_entity).to_numpy()
+            elif time_id in df_part.columns:
+                times_b = df_part[time_id].to_numpy()
+                entities_b = df_part[raw_entity].to_numpy()
+            else:
+                continue
+            cols_b = {}
+            for name in specs:
+                if name not in df_part.columns:
+                    continue
+                if specs[name] == "num3":
+                    col = df_part[name]
+                    vals = col.iloc[0]
+                    if isinstance(vals, (list, np.ndarray)):
+                        cols_b[name] = np.stack([
+                            np.asarray(v, dtype=_FLOAT) if isinstance(v, (list, np.ndarray))
+                            else np.full(sample_size, np.nan, dtype=_FLOAT)
+                            for v in col.to_numpy()
+                        ])
+                    else:
+                        cols_b[name] = col.to_numpy(dtype=_FLOAT).reshape(-1, 1)
+                else:
+                    cols_b[name] = df_part[name].to_numpy(dtype=_FLOAT)
             writer.write_batch(times_b, entities_b, cols_b)
+
         return store_path
 
 
-def _scan_parquet_coords(
-    pf: Any, time_id: str, entity_id: str, specs: dict[str, str]
-) -> tuple[np.ndarray, np.ndarray, int]:
-    """First pass: unique sorted times/entities and the sample size."""
-    times = np.empty(0, dtype="int64")
-    entities = np.empty(0, dtype="int64")
+
+def _scan_parquet_coords_fast(
+    pf: Any, time_id: str, entity_id: str, list_cols: list[str]
+) -> tuple[set, set, int]:
+    """Fast fallback: scan only time/entity columns + first list col for sample_size.
+
+    Reads only 2-3 columns (not all data columns) so it's much faster
+    than reading the full file.
+    """
+    times_set: set[int] = set()
+    entities_set: set[int] = set()
     sample_size = 1
-    list_cols = [n for n, s in specs.items() if s == "num3"]
     scan_cols = [time_id, entity_id, *list_cols[:1]]
     for batch in pf.iter_batches(columns=scan_cols):
-        times = np.union1d(times, batch.column(time_id).to_numpy(zero_copy_only=False))
-        entities = np.union1d(
-            entities, batch.column(entity_id).to_numpy(zero_copy_only=False)
-        )
+        times_set.update(batch.column(time_id).to_numpy(zero_copy_only=False).tolist())
+        entities_set.update(batch.column(entity_id).to_numpy(zero_copy_only=False).tolist())
         if list_cols and batch.num_rows:
             first = batch.column(list_cols[0])[0]
             if first.is_valid and hasattr(first, "as_py"):
                 value = first.as_py()
                 if isinstance(value, list):
                     sample_size = max(sample_size, len(value))
-    return times, entities, sample_size
+    return times_set, entities_set, sample_size
 
 
 def _arrow_column_to_numpy(column: Any, spec: str, sample_size: int) -> np.ndarray:
