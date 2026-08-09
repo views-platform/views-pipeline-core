@@ -252,7 +252,15 @@ def test_the_bug_itself_changing_the_queryset_now_refuses(loader):
 
 
 def test_an_unchanged_queryset_still_serves_from_cache(loader):
-    """The negative control. A check that refused everything would pass the test above."""
+    """The negative control. A check that refused everything would pass the test above.
+
+    This is also the stated boundary in action: the digest covers the local
+    specification, not the data. An unchanged queryset serves its cache even if the
+    upstream source has been revised since — inherent to caching, and documented on
+    `cache_matches_current_context`. #155 is configuration drift; data drift under an
+    unchanged spec is a different problem needing a mechanism the source would have to
+    provide.
+    """
     _run(loader, use_saved=False)
     fetch = _run(loader, use_saved=True)
     assert fetch.call_count == 0, "an unchanged run refetched — the cache is now useless"
@@ -276,3 +284,58 @@ def test_use_saved_false_is_unaffected_by_a_mismatch(loader):
     loader._model_path.get_queryset.return_value.model_dump.return_value = {"features": ["z"]}
     fetch = _run(loader, use_saved=False)
     assert fetch.call_count == 1
+
+
+# ── the other two outcomes, end to end through the loader ─────────────────────
+
+
+def test_an_unreadable_record_stops_the_run_through_get_data(loader):
+    """Unit-tested above; asserted here through the real loader.
+
+    Review found the "differs" outcome had an end-to-end test and the other two did not.
+    Nothing in `get_data` swallows `ProvenanceRecordInvalid`, but "nothing should" and
+    "nothing does" are different claims and only one of them was checked.
+    """
+    _run(loader, use_saved=False)
+    file_sidecar_path(loader.cached_data_path).write_text("{ truncated")
+
+    with pytest.raises(ProvenanceRecordInvalid):
+        _run(loader, use_saved=True)
+
+
+def test_an_absent_record_refetches_through_get_data(loader):
+    """The self-healing path, end to end: refetch, and leave a record behind."""
+    _run(loader, use_saved=False)
+    file_sidecar_path(loader.cached_data_path).unlink()
+
+    fetch = _run(loader, use_saved=True)
+    assert fetch.call_count == 1, "an unverifiable cache was served"
+    assert file_sidecar_path(loader.cached_data_path).exists(), (
+        "the refetch left no record, so the cache stays unverifiable on every future run"
+    )
+
+
+def test_a_version_mismatch_refetches_through_get_data(loader):
+    """The last of the four outcomes to get an end-to-end test.
+
+    Loop 2 noted this one was still unit-level only. It matters more than it looks: #414
+    bumps the version, so this is the exact path every existing cache takes on the first
+    run after that story lands. If it refused instead of refetching, #414 would stop every
+    run in the platform.
+    """
+    _run(loader, use_saved=False)
+    sidecar = file_sidecar_path(loader.cached_data_path)
+    sidecar.write_text(
+        json.dumps(
+            {**read_provenance(sidecar).to_dict(), "provenance_version": PROVENANCE_VERSION + 1}
+        )
+    )
+
+    fetch = _run(loader, use_saved=True)
+    assert fetch.call_count == 1, (
+        "a cache from another provenance version was served rather than refetched"
+    )
+    assert read_provenance(sidecar).provenance_version == PROVENANCE_VERSION, (
+        "the refetch did not rewrite the record at the current version, so every "
+        "subsequent run would refetch too"
+    )

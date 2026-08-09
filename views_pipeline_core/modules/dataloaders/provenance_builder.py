@@ -106,6 +106,20 @@ def cache_matches_current_context(
 
     The mismatched artifact is deliberately left on disk. Deleting it would destroy the
     thing an operator needs to look at.
+
+    ## What this does NOT detect, stated so it is a boundary rather than a surprise
+
+    The digest is over the **local specification** — what `config_queryset.py` says — never
+    over the data that came back. So a cache stays "valid" when the spec is unchanged but
+    the data behind it is not: an upstream revision (a new GED or ACLED release), or a
+    server-side named queryset redefined under the same name.
+
+    That is inherent, not an oversight. Detecting it would mean refetching in order to
+    compare, which is the thing a cache exists to avoid. #155 is about configuration drift
+    — a developer editing their queryset and being served the old data — and that is what
+    is closed here. Data drift under an unchanged specification is a different problem
+    needing a different mechanism (an upstream content hash the source would have to
+    publish), and it is not solved by this record.
     """
     try:
         found = read_provenance(sidecar_path)
