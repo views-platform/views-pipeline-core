@@ -20,6 +20,7 @@ from views_pipeline_core.modules.dataloaders.feature_frame_path import (
 from views_pipeline_core.modules.dataloaders.frame_cache import save_frame_cache
 from views_pipeline_core.data.model_path import ModelPathManager
 
+
 DESCRIPTOR = {
     "name": "test_model",
     "source": "views-datafactory",
@@ -144,10 +145,10 @@ def test_use_saved_false_always_refetches(loader, mock_datafactory):
     assert mock_datafactory.load_dataset.call_count == 2
 
 
-def test_cached_frame_is_audited_on_hit(loader, mock_datafactory, make_frame):
+def test_cached_frame_is_audited_on_hit(loader, mock_datafactory, make_frame, make_provenance):
     """A cache hit is not a validation bypass: plant a wrong-bounds cache."""
     loader.get_feature_frame("forecasting", use_saved=False, level="pgm")
-    save_frame_cache(make_frame([600, 601]), loader.cached_frame_path)
+    save_frame_cache(make_frame([600, 601]), loader.cached_frame_path, provenance=make_provenance())
     with pytest.raises(ValueError, match="Expected complete coverage"):
         loader.get_feature_frame("forecasting", use_saved=True, level="pgm")
 

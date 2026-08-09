@@ -34,6 +34,7 @@ from views_pipeline_core.modules.dataloaders.datafactory_contract import (
     require_descriptor_keys,
 )
 from views_pipeline_core.modules.dataloaders.fetch_context import FetchContext
+from views_pipeline_core.modules.dataloaders.provenance_builder import provenance_for
 from views_pipeline_core.modules.dataloaders.frame_cache import (
     load_frame_cache,
     save_frame_cache,
@@ -190,7 +191,7 @@ def fetch_feature_frame(
     # Audit BEFORE caching: a frame that fails audit must never be persisted
     # (with validate=False the caller explicitly accepts an unaudited cache).
     _sniff(frame)
-    save_frame_cache(frame, cache_dir)
+    save_frame_cache(frame, cache_dir, provenance=provenance_for(ctx, level))
     if on_fetch is not None:
         on_fetch()
     return frame

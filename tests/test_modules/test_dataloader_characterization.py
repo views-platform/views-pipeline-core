@@ -45,6 +45,13 @@ def sample_df():
 def mock_queryset(sample_df):
     """Mock viewser Queryset with publish chain."""
     mock_qs = MagicMock(spec=Queryset)
+    # A real payload, not the auto-created MagicMock. `spec=Queryset` constrains WHICH
+    # attributes exist but not what they return, so `model_dump()` handed back a mock
+    # until #412 became the first thing to ask the queryset to identify itself.
+    mock_qs.model_dump.return_value = {
+        "loa": "priogrid_month",
+        "name": "characterization_test",
+    }
     mock_publish = MagicMock()
     mock_publish.fetch_with_drift_detection.return_value = (sample_df, [])
     mock_publish.fetch.return_value = sample_df

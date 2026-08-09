@@ -39,7 +39,7 @@ import dataclasses
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Optional
 
 #: Bumped whenever the record's field set changes. A sidecar written at a different
 #: version is a recognisable mismatch rather than a parse error, so the read path (#413)
@@ -172,7 +172,8 @@ class CacheProvenance:
     - ``source`` — viewser and datafactory produce different data for the same queryset
     - ``partition`` — belt and braces with the filename, which also encodes it
     - ``month_first`` / ``month_last`` — a widened range must not read as a hit
-    - ``level`` — ``cm`` and ``pgm`` are different rows entirely
+    - ``level`` — ``cm`` and ``pgm`` are different rows entirely; Optional because
+      ``get_data`` accepts None and the record states what was actually used
     - ``provenance_version`` — so a field set change is a mismatch, not a crash
 
     ``drift_detection_ran`` is **not** here. It is #414's, held back deliberately so that
@@ -184,7 +185,7 @@ class CacheProvenance:
     partition: str
     month_first: int
     month_last: int
-    level: str
+    level: Optional[str]
     provenance_version: int = PROVENANCE_VERSION
 
     def to_dict(self) -> Dict[str, Any]:
