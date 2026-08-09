@@ -41,7 +41,8 @@ COMBINED_CONFIGS = {
     "aggregation": "mean",
     "regression_targets": ["ged_sb"],
     "classification_targets": [],
-    "targets": ["ged_sb"],
+    # No synthesised `targets` key — retired in #380; `_build_context` derives
+    # the full target list via `combined_targets`, which refuses a stale key.
     "level": "pgm",
     "reconciliation": None,
     "reconcile_with": None,
@@ -140,7 +141,6 @@ def df_manager(mock_ensemble_path, mock_wandb_module, mock_config_manager):
             "aggregation": "mean",
             "regression_targets": ["ged_sb"],
             "classification_targets": [],
-            "targets": ["ged_sb"],
             "level": "pgm",
         },
         {"models": ["purple_alien", "blue_cat"]},
