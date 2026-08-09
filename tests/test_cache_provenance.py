@@ -35,6 +35,8 @@ import pytest
 from views_pipeline_core.data.cache_provenance import (
     PROVENANCE_VERSION,
     CacheProvenance,
+    ProvenanceRecordInvalid,
+    ProvenanceVersionMismatch,
     queryset_digest,
 )
 
@@ -102,7 +104,10 @@ def test_key_order_does_not_change_the_digest():
     spurious mismatch — and a check that cries wolf gets switched off.
     """
     reordered = dict(reversed(list(DESCRIPTOR.items())))
-    assert reordered != DESCRIPTOR or list(reordered) != list(DESCRIPTOR)
+    # Dicts with equal items compare equal regardless of order, so the fixture's own
+    # reordering has to be asserted on the KEY SEQUENCE — otherwise this test would pass
+    # just as happily if `reordered` were the same object.
+    assert list(reordered) != list(DESCRIPTOR), "the fixture was not actually reordered"
     assert queryset_digest(reordered) == queryset_digest(DESCRIPTOR)
 
 
@@ -189,6 +194,50 @@ def test_a_pydantic_style_model_is_accepted_via_model_dump():
     )
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")],
+                         ids=["nan", "inf", "-inf"])
+def test_values_json_cannot_represent_are_refused(value):
+    """`json.dumps` emits bare `NaN`/`Infinity` by default, which is not JSON — no other
+    parser is obliged to read it. Digesting it anyway would mean deriving an identity from
+    a string nothing else can parse, which is the quiet degradation this digest exists to
+    prevent. Found by review, not by the original tests.
+
+    Raised as TypeError, not ValueError: `queryset_digest` has one "cannot digest"
+    contract and callers catch one thing. json's own ValueError is normalised by
+    `_canonical`."""
+    with pytest.raises(TypeError, match="canonically serialised"):
+        queryset_digest({"a": value})
+
+
+def test_a_structure_too_deep_to_serialise_is_named_rather_than_crashing(monkeypatch):
+    """A bare RecursionError would surface far from the queryset that caused it, and
+    `_canonical`'s contract is that it names what it could not serialise. Found by
+    probing: `json.dumps` raises RecursionError, which the original catch did not cover.
+
+    The trigger is injected rather than built from a genuinely deep structure. A real
+    2000-deep dict raises or does not depending on how much stack the caller has already
+    consumed — it passed alone and failed inside the full suite, which is a test that
+    reports on the environment rather than on the code. What matters here is that the
+    handler exists and names the problem, and that is deterministic.
+    """
+    from views_pipeline_core.data import cache_provenance
+
+    def _explode(*args, **kwargs):
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(cache_provenance.json, "dumps", _explode)
+    with pytest.raises(TypeError, match="nested too deeply"):
+        queryset_digest({"a": 1})
+
+
+def test_differences_from_reports_self_first():
+    """#413 renders this into an operator-facing message; reversed, it would tell them
+    their new queryset was the stale one."""
+    expected = _provenance(source="datafactory")
+    found = _provenance(source="viewser")
+    assert expected.differences_from(found)["source"] == ("datafactory", "viewser")
+
+
 def test_a_model_dump_that_returns_something_unserialisable_still_refuses():
     """The refusal must survive the pydantic branch, not only the else branch."""
 
@@ -233,11 +282,97 @@ def test_the_record_is_json_serialisable():
     assert CacheProvenance.from_dict(json.loads(payload)) == _provenance()
 
 
-def test_an_unknown_field_is_refused():
-    """A sidecar from a future version records something this one cannot compare."""
+def test_an_unknown_field_at_the_SAME_version_is_malformed():
+    """Same version but different fields is corruption, not age."""
     payload = {**_provenance().to_dict(), "drift_detection_ran": True}
-    with pytest.raises(ValueError, match="unknown field"):
+    with pytest.raises(ProvenanceRecordInvalid, match="unknown field"):
         CacheProvenance.from_dict(payload)
+
+
+# ── version handling: the distinction #413 depends on ─────────────────────────
+
+
+def test_a_different_version_raises_a_version_mismatch_not_a_malformed_record():
+    """The finding that made this branch worth reviewing.
+
+    #414 adds `drift_detection_ran` and bumps the version, so a record from another
+    version differs in its field set BY DEFINITION. If field validation ran first, such a
+    record would be reported as malformed — and #413 could not tell "this cache predates
+    the current code" (refetch, routine) from "this cache is corrupt" (stop and look).
+    Those need opposite responses.
+    """
+    payload = {**_provenance().to_dict(), "provenance_version": PROVENANCE_VERSION + 1}
+    with pytest.raises(ProvenanceVersionMismatch) as excinfo:
+        CacheProvenance.from_dict(payload)
+    assert excinfo.value.found == PROVENANCE_VERSION + 1
+    assert excinfo.value.expected == PROVENANCE_VERSION
+
+
+def test_a_future_version_with_extra_fields_is_a_version_mismatch_not_malformed():
+    """Exactly the record #414 will write, read by code that predates it."""
+    payload = {
+        **_provenance().to_dict(),
+        "provenance_version": PROVENANCE_VERSION + 1,
+        "drift_detection_ran": False,
+    }
+    with pytest.raises(ProvenanceVersionMismatch):
+        CacheProvenance.from_dict(payload)
+
+
+def test_a_record_with_no_version_is_a_version_mismatch_not_a_missing_field():
+    """Every record this code writes carries a version, so its absence means the writer
+    predates the field — which is age, not corruption."""
+    payload = {k: v for k, v in _provenance().to_dict().items() if k != "provenance_version"}
+    with pytest.raises(ProvenanceVersionMismatch) as excinfo:
+        CacheProvenance.from_dict(payload)
+    assert excinfo.value.found is None
+
+
+@pytest.mark.parametrize(
+    "bogus_version",
+    [1.0, True, "1", None, [1]],
+    ids=["float", "bool", "str", "none", "list"],
+)
+def test_a_version_of_the_wrong_TYPE_is_a_mismatch_not_a_match(bogus_version):
+    """`1.0 == 1` and `True == 1` are both true in Python, and `bool` subclasses `int`.
+
+    A plain `!=` comparison would accept a float or boolean version and store it as-is —
+    a corrupt record accepted as verified, which is the class of defect the version check
+    exists to catch. Found by the second review loop, on the fix for the first.
+    """
+    payload = {**_provenance().to_dict(), "provenance_version": bogus_version}
+    with pytest.raises(ProvenanceVersionMismatch):
+        CacheProvenance.from_dict(payload)
+
+
+def test_the_mismatch_reports_the_LIVE_expected_version(monkeypatch):
+    """A default argument is bound at class-definition time.
+
+    Defaulted, an exception raised after PROVENANCE_VERSION changed would report the
+    import-time value — the comparison reading one number while the message reports
+    another. #414 bumps the version, so a test simulating that upgrade is coming.
+    """
+    from views_pipeline_core.data import cache_provenance
+
+    monkeypatch.setattr(cache_provenance, "PROVENANCE_VERSION", 2)
+    with pytest.raises(cache_provenance.ProvenanceVersionMismatch) as excinfo:
+        cache_provenance.CacheProvenance.from_dict(_provenance().to_dict())
+
+    assert excinfo.value.found == 1
+    assert excinfo.value.expected == 2, (
+        "the exception reports a stale expected version — it was bound at import time "
+        "rather than read when raised"
+    )
+    assert "version 2" in str(excinfo.value)
+
+
+def test_both_error_types_remain_ValueError():
+    """#413 and #412 may catch ValueError broadly; narrowing the hierarchy must not
+    silently stop that working."""
+    assert issubclass(ProvenanceVersionMismatch, ValueError)
+    assert issubclass(ProvenanceRecordInvalid, ValueError)
+    assert not issubclass(ProvenanceVersionMismatch, ProvenanceRecordInvalid)
+    assert not issubclass(ProvenanceRecordInvalid, ProvenanceVersionMismatch)
 
 
 @pytest.mark.parametrize(
@@ -251,7 +386,7 @@ def test_an_unknown_field_is_refused():
 def test_a_missing_required_field_is_refused(dropped):
     """Partial reconstruction would compare equal on whatever fields survived."""
     payload = {k: v for k, v in _provenance().to_dict().items() if k != dropped}
-    with pytest.raises(ValueError, match="missing required field"):
+    with pytest.raises(ProvenanceRecordInvalid, match="missing required field"):
         CacheProvenance.from_dict(payload)
 
 

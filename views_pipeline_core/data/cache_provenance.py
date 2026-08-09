@@ -46,17 +46,66 @@ from typing import Any, Dict, Mapping
 #: can treat it as "cannot be verified" instead of crashing on an unexpected key.
 PROVENANCE_VERSION = 1
 
-#: Canonical JSON: sorted keys, no incidental whitespace, non-ASCII escaped. Two
-#: descriptors differing only in key order must digest identically — key order is not a
-#: property of the specification, and treating it as one would report spurious mismatches
-#: until people stopped believing the check.
-_CANONICAL_JSON = {"sort_keys": True, "separators": (",", ":"), "ensure_ascii": True}
+#: Canonical JSON: sorted keys (recursively — verified, not assumed), no incidental
+#: whitespace, non-ASCII escaped. Two descriptors differing only in key order must digest
+#: identically — key order is not a property of the specification, and treating it as one
+#: would report spurious mismatches until people stopped believing the check.
+#:
+#: ``allow_nan=False`` matters more than it looks. Python's ``json`` emits bare ``NaN`` and
+#: ``Infinity`` by default, which is **not JSON** — no other parser is obliged to read it.
+#: Left on, a queryset carrying a NaN would digest happily to a value derived from a
+#: string nothing else can parse. This module refuses what it cannot faithfully represent
+#: everywhere else; accepting it here purely because CPython is lenient would be the same
+#: quiet degradation the digest exists to prevent.
+_CANONICAL_JSON = {
+    "sort_keys": True,
+    "separators": (",", ":"),
+    "ensure_ascii": True,
+    "allow_nan": False,
+}
+
+
+class ProvenanceRecordInvalid(ValueError):
+    """The record is malformed — missing required fields, or otherwise unreadable.
+
+    Distinct from `ProvenanceVersionMismatch` because the two demand different responses
+    and #413 has to tell them apart: a malformed record means something is wrong and the
+    operator should look at it, while an older record is an ordinary consequence of
+    upgrading. Collapsing both into a bare ``ValueError`` would force the read path to
+    guess from the message text.
+    """
+
+
+class ProvenanceVersionMismatch(ValueError):
+    """The record was written at a different `PROVENANCE_VERSION`.
+
+    Not an error in the artifact — an artifact from before (or after) this code. It cannot
+    be compared field-for-field, because the two versions do not agree on what the fields
+    are, so the honest outcome is "cannot be verified" and the safe response is to refetch.
+    """
+
+    def __init__(self, found: Any, expected: int) -> None:
+        self.found = found
+        self.expected = expected
+        super().__init__(
+            f"Provenance record is version {found!r}; this code writes and compares "
+            f"version {expected}. The record cannot be verified field-for-field across "
+            f"versions — refetch rather than trusting or rejecting it."
+        )
 
 
 def _canonical(payload: Any) -> str:
     """Serialise to canonical JSON, or raise naming what could not be serialised."""
     try:
         return json.dumps(payload, **_CANONICAL_JSON)
+    except RecursionError as exc:
+        # A structure too deep for the encoder. Caught explicitly because a bare
+        # RecursionError escaping here would surface far from the queryset that caused
+        # it, and this function's contract is that it names what it could not serialise.
+        raise TypeError(
+            "Queryset is nested too deeply to serialise for a provenance digest. It is "
+            "either far larger than any real queryset or self-referential."
+        ) from exc
     except (TypeError, ValueError) as exc:
         raise TypeError(
             f"Queryset could not be canonically serialised for a provenance digest: "
@@ -154,20 +203,45 @@ class CacheProvenance:
     def from_dict(cls, payload: Mapping[str, Any]) -> "CacheProvenance":
         """Reconstruct from a sidecar, refusing anything that does not round-trip.
 
-        Both directions are checked explicitly. An unknown key means the sidecar was
-        written by a version that knows something this one does not; a missing key means
-        the reverse. Either way the honest answer is that this record cannot be trusted to
-        describe that artifact — not that it can be partially reconstructed and compared.
+        **The version is checked first, and that ordering is load-bearing.** A record from
+        another version differs in its field set *by definition* — #414 adds
+        `drift_detection_ran` — so field-level validation would report it as malformed and
+        the read path could not distinguish "this cache predates the current code" from
+        "this cache is corrupt". Those need opposite responses: refetch versus stop and
+        look. Checking the version first makes the distinction available instead of
+        leaving #413 to parse an error message.
+
+        After that, both directions are checked explicitly. An unknown key means the record
+        knows something this code does not; a missing key means the reverse. Either way it
+        cannot be trusted to describe the artifact — not partially reconstructed and
+        compared.
         """
-        expected = {field.name for field in dataclasses.fields(cls)}
         supplied = set(payload)
 
+        found_version = payload.get("provenance_version")
+        # `type(...) is not int`, not `!=` and not `isinstance`. Python's numeric equality
+        # makes `1.0 == 1` and `True == 1` both true, so a float or boolean version would
+        # sail through a plain comparison and be stored as-is — a corrupt record accepted
+        # as verified, which is the exact class of defect this check exists to catch.
+        # `isinstance` would not help either: `bool` is a subclass of `int`.
+        if type(found_version) is not int or found_version != PROVENANCE_VERSION:
+            # A record with no version at all is also a version mismatch, not a missing
+            # field: every record this code has ever written carries one, so its absence
+            # means the writer predates the field.
+            #
+            # `expected` is passed explicitly rather than defaulted. A default argument is
+            # bound at class-definition time, so an exception raised after
+            # PROVENANCE_VERSION changed would report the value from import time — the
+            # comparison above reading one number while the message reports another.
+            raise ProvenanceVersionMismatch(found_version, PROVENANCE_VERSION)
+
+        expected = {field.name for field in dataclasses.fields(cls)}
         unknown = supplied - expected
         if unknown:
-            raise ValueError(
-                f"Provenance record carries unknown field(s) {sorted(unknown)}. It was "
-                f"written by a version that records something this one does not "
-                f"understand, so it cannot be compared field-for-field."
+            raise ProvenanceRecordInvalid(
+                f"Provenance record declares version {PROVENANCE_VERSION} but carries "
+                f"unknown field(s) {sorted(unknown)}. Same version, different fields — "
+                f"that is a malformed record rather than an older one."
             )
 
         required = {
@@ -177,7 +251,7 @@ class CacheProvenance:
         }
         missing = required - supplied
         if missing:
-            raise ValueError(
+            raise ProvenanceRecordInvalid(
                 f"Provenance record is missing required field(s) {sorted(missing)}. A "
                 f"partially reconstructed record would compare equal on the fields it "
                 f"happens to have, which is worse than refusing."
@@ -186,11 +260,17 @@ class CacheProvenance:
         return cls(**{name: payload[name] for name in supplied})
 
     def differences_from(self, other: "CacheProvenance") -> Dict[str, tuple]:
-        """Field-by-field differences, as ``{field: (mine, theirs)}``.
+        """Field-by-field differences, as ``{field: (self_value, other_value)}``.
 
-        Returned rather than reduced to a bool so the read path (#413) can name what
-        changed. A refusal that says only "cache mismatch" sends the reader to this source
-        file to find out what it means, which is not a remediation.
+        Order stated explicitly rather than left to the parameter names, because #413
+        renders it into an operator-facing message. Call it as
+        ``expected.differences_from(found)`` and each tuple reads ``(expected, found)``;
+        reversed, the refusal would tell the operator their new queryset was the stale
+        one, which is worse than saying nothing.
+
+        Returned rather than reduced to a bool so the read path can name what changed. A
+        refusal that says only "cache mismatch" sends the reader to this source file to
+        find out what it means, which is not a remediation.
 
         Fields are enumerated from the dataclass, so a field added without a comparison is
         impossible rather than merely unlikely.
