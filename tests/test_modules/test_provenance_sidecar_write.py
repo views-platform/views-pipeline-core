@@ -175,19 +175,20 @@ def test_the_record_describes_the_run_that_wrote_it(loader):
     assert record.month_first < record.month_last
 
 
-def test_the_read_path_is_untouched_by_this_story(loader):
-    """#412 must be behaviour-neutral on read; #413 is what changes it.
+def test_a_cache_whose_record_was_deleted_is_refetched(loader):
+    """This test asserted the OPPOSITE until #413, and the change is the point.
 
-    A cached artifact is still served without its record being consulted — asserted by
-    deleting the record and confirming the cache is still used (no second fetch).
+    Under #412 the record was written but never consulted, so deleting it changed nothing.
+    #413 makes an absent record a cache miss — refetch rather than serve data whose origin
+    is unknown. Rewritten rather than deleted so the inversion is visible in history.
     """
     _run(loader, use_saved=False)
     file_sidecar_path(loader.cached_data_path).unlink()
 
     _, fetch = _run(loader, use_saved=True)
-    assert fetch.call_count == 0, (
-        "the cache was refetched despite existing — #412 must not change read behaviour; "
-        "that is #413's story."
+    assert fetch.call_count == 1, (
+        "a cache with no provenance record was served. Since #413 it must be refetched — "
+        "an unverifiable cache is not a verified one."
     )
 
 

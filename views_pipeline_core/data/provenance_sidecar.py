@@ -1,9 +1,8 @@
 """Where a provenance record lives on disk, and how it gets there. Issue #412, epic #410.
 
 `cache_provenance` is pure by contract — it defines the record and refuses to touch a
-filesystem, and its tests assert that. This module is the other half: the paths and the
-write. Reading is #413's, and is deliberately absent here so that story adds it rather
-than inheriting it untested.
+filesystem, and its tests assert that. This module is the other half: the paths, the write
+(#412) and the read (#413).
 
 ## Two shapes, because there are two artifacts
 
@@ -22,9 +21,13 @@ found, and #413 treats "not found" as a cache miss.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
-from views_pipeline_core.data.cache_provenance import CacheProvenance
+from views_pipeline_core.data.cache_provenance import (
+    CacheProvenance,
+    ProvenanceRecordInvalid,
+)
 from views_pipeline_core.data.constants import (
     FRAME_PROVENANCE_FILENAME,
     PROVENANCE_SIDECAR_SUFFIX,
@@ -79,3 +82,43 @@ def write_provenance(provenance: CacheProvenance, sidecar_path: Path) -> None:
         json.dumps(provenance.to_dict(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+logger = logging.getLogger(__name__)
+
+
+def read_provenance(sidecar_path: Path) -> CacheProvenance:
+    """Load the record beside a cached artifact. Issue #413.
+
+    Raises:
+        FileNotFoundError: No record at all. Under #413's rules this is a cache **miss**
+            — the artifact predates provenance, or was written by something that does not
+            write one. Safe to refetch; not safe to serve.
+        ProvenanceRecordInvalid: A record exists and cannot be read. Distinct from absent
+            on purpose: "there is no record" and "there is a record I cannot parse" call
+            for different responses — refetch quietly versus stop and look. Collapsing
+            them would mean a corrupted cache silently refetching forever with nobody ever
+            told the file is damaged.
+        ProvenanceVersionMismatch: Raised through from `CacheProvenance.from_dict`. The
+            caller maps this to refetch, not refuse — see `cache_matches_current_context`.
+    """
+    sidecar_path = Path(sidecar_path)
+    if not sidecar_path.exists():
+        raise FileNotFoundError(f"No provenance record at {sidecar_path}.")
+
+    try:
+        payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ProvenanceRecordInvalid(
+            f"Provenance record at {sidecar_path} could not be read: {exc}. It exists but "
+            f"is unreadable, which is not the same as absent — the cache beside it is not "
+            f"being refetched silently. Delete both if the cache is disposable."
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ProvenanceRecordInvalid(
+            f"Provenance record at {sidecar_path} is a {type(payload).__name__}, not an "
+            f"object."
+        )
+
+    return CacheProvenance.from_dict(payload)

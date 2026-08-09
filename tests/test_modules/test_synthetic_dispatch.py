@@ -161,9 +161,11 @@ class TestGetDataSyntheticDispatch:
         assert "synthetic" in cached_path.name
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.read_dataframe")
-    def test_cache_read_on_use_saved(self, mock_read, loader, sample_df, tmp_path):
+    def test_cache_read_on_use_saved(self, mock_read, loader, sample_df, tmp_path, plant_cache_record):
         cache_file = tmp_path / "calibration_synthetic_df.parquet"
         cache_file.touch()
+        # Precondition, not the thing under test — see #413.
+        plant_cache_record(loader, cache_file, "calibration")
         loader._path_raw = tmp_path
         mock_read.return_value = sample_df
 

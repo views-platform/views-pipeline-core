@@ -34,7 +34,11 @@ from views_pipeline_core.modules.dataloaders.datafactory_contract import (
     require_descriptor_keys,
 )
 from views_pipeline_core.modules.dataloaders.fetch_context import FetchContext
-from views_pipeline_core.modules.dataloaders.provenance_builder import provenance_for
+from views_pipeline_core.data.provenance_sidecar import directory_sidecar_path
+from views_pipeline_core.modules.dataloaders.provenance_builder import (
+    cache_matches_current_context,
+    provenance_for,
+)
 from views_pipeline_core.modules.dataloaders.frame_cache import (
     load_frame_cache,
     save_frame_cache,
@@ -176,7 +180,18 @@ def fetch_feature_frame(
             ).sniff_loaded_frame(frame)
 
     if use_saved:
+        # #413: verified before the frame is loaded — the record is a small JSON read and
+        # the frame is not, so there is no reason to deserialise something we are about to
+        # reject. A refused cache raises out of here; an unverifiable one returns False and
+        # falls through to the fetch below, exactly as a miss does.
+        verified = cache_dir.exists() and cache_matches_current_context(
+            provenance_for(ctx, level),
+            directory_sidecar_path(cache_dir),
+            cache_dir,
+        )
         try:
+            if not verified:
+                raise FileNotFoundError(cache_dir)
             cached = load_frame_cache(cache_dir)
         except FileNotFoundError:
             logger.info(
