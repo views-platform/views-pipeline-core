@@ -10,10 +10,32 @@ from views_frames import FeatureFrame
 
 from views_pipeline_core.data.constants import FRAME_CACHE_DIRNAME_TEMPLATE
 from views_pipeline_core.modules.dataloaders.frame_cache import (
+
     frame_cache_path,
     load_frame_cache,
     save_frame_cache,
 )
+
+
+def _provenance(**overrides):
+    """A provenance record for cache-write tests.
+
+    `save_frame_cache` requires one (#412): a cache without a record is the state #413
+    refetches, so an optional argument would make "every cache carries its provenance" an
+    aspiration rather than something the signature enforces.
+    """
+    from views_pipeline_core.data.cache_provenance import CacheProvenance
+
+    base = dict(
+        queryset_digest="a" * 64,
+        source="datafactory",
+        partition="forecasting",
+        month_first=121,
+        month_last=550,
+        level="pgm",
+    )
+    base.update(overrides)
+    return CacheProvenance(**base)
 
 
 @pytest.fixture(scope="module")
@@ -47,7 +69,7 @@ def test_cache_path_golden(tmp_path):
 
 def test_round_trip_preserves_fixture_content(tmp_path, canon_frame, contract_canon):
     cache = frame_cache_path(tmp_path, "calibration", "datafactory")
-    save_frame_cache(canon_frame, cache)
+    save_frame_cache(canon_frame, cache, provenance=_provenance())
     loaded = load_frame_cache(cache)
     _assert_frames_equal(loaded, canon_frame)
     # pinned against the shared canon, not just self-consistency
@@ -65,8 +87,8 @@ def test_load_reads_the_vendored_fixture_directly(contract_frame_dir):
 
 def test_save_overwrites_previous_cache(tmp_path, canon_frame, make_frame):
     cache = tmp_path / "c_ff"
-    save_frame_cache(canon_frame, cache)
-    save_frame_cache(make_frame([600]), cache)
+    save_frame_cache(canon_frame, cache, provenance=_provenance())
+    save_frame_cache(make_frame([600]), cache, provenance=_provenance())
     loaded = load_frame_cache(cache)
     assert loaded.values.shape == (3, 1, 1)
     assert list(loaded.feature_names) == ["x0"]
@@ -78,7 +100,7 @@ def test_save_cleans_up_orphans_even_non_directory_ones(tmp_path, canon_frame):
     cache = tmp_path / "c_ff"
     (tmp_path / "c_ff.staging").write_text("orphan FILE from a torn earlier save")
     (tmp_path / "c_ff.retired").mkdir()
-    save_frame_cache(canon_frame, cache)
+    save_frame_cache(canon_frame, cache, provenance=_provenance())
     assert sorted(p.name for p in tmp_path.iterdir()) == ["c_ff"]
     _assert_frames_equal(load_frame_cache(cache), canon_frame)
 
@@ -86,7 +108,7 @@ def test_save_cleans_up_orphans_even_non_directory_ones(tmp_path, canon_frame):
 def test_save_replaces_a_stray_file_at_the_cache_path(tmp_path, canon_frame):
     cache = tmp_path / "c_ff"
     cache.write_text("a file squatting where the cache dir belongs")
-    save_frame_cache(canon_frame, cache)
+    save_frame_cache(canon_frame, cache, provenance=_provenance())
     _assert_frames_equal(load_frame_cache(cache), canon_frame)
 
 
@@ -107,7 +129,7 @@ def test_file_at_cache_path_is_not_a_miss(tmp_path):
 
 def test_missing_layout_file_fails_loud(tmp_path, canon_frame):
     cache = tmp_path / "c_ff"
-    save_frame_cache(canon_frame, cache)
+    save_frame_cache(canon_frame, cache, provenance=_provenance())
     victim = sorted(p for p in cache.iterdir() if p.is_file())[-1]
     victim.unlink()
     with pytest.raises(ValueError, match="unreadable"):
@@ -117,7 +139,7 @@ def test_missing_layout_file_fails_loud(tmp_path, canon_frame):
 def test_truncated_layout_file_fails_loud(tmp_path, canon_frame):
     """The real torn-write case: files present, one garbled."""
     cache = tmp_path / "c_ff"
-    save_frame_cache(canon_frame, cache)
+    save_frame_cache(canon_frame, cache, provenance=_provenance())
     for payload in cache.iterdir():
         payload.write_bytes(payload.read_bytes()[:3])  # truncate every file
     with pytest.raises(ValueError, match="unreadable"):
@@ -127,7 +149,7 @@ def test_truncated_layout_file_fails_loud(tmp_path, canon_frame):
 def test_torn_npz_alone_fails_loud(tmp_path, canon_frame):
     """A half-flushed identifiers.npz (zip magic intact → BadZipFile) must not escape."""
     cache = tmp_path / "c_ff"
-    save_frame_cache(canon_frame, cache)
+    save_frame_cache(canon_frame, cache, provenance=_provenance())
     npz = cache / "identifiers.npz"
     payload = npz.read_bytes()
     npz.write_bytes(payload[: len(payload) // 2])
@@ -147,7 +169,7 @@ def test_empty_dir_is_corrupt_not_miss(tmp_path):
 
 def test_save_refuses_empty_frame(tmp_path, empty_frame):
     with pytest.raises(ValueError, match="Empty FeatureFrame"):
-        save_frame_cache(empty_frame, tmp_path / "c_ff")
+        save_frame_cache(empty_frame, tmp_path / "c_ff", provenance=_provenance())
     assert not (tmp_path / "c_ff").exists()
 
 

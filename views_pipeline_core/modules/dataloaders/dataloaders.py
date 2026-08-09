@@ -17,6 +17,11 @@ from views_pipeline_core.data.constants import (
 )
 from views_pipeline_core.data.model_path import ModelPathManager
 from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
+from views_pipeline_core.modules.dataloaders.provenance_builder import provenance_for
+from views_pipeline_core.data.provenance_sidecar import (
+    file_sidecar_path,
+    write_provenance,
+)
 from views_pipeline_core.modules.dataloaders.fetch_context import (
     FetchContext,
     resolve_default_partition_dict,
@@ -47,6 +52,40 @@ _DATAFACTORY_REQUIRED_KEYS = DATAFACTORY_REQUIRED_KEYS  # canonical home: datafa
 _SYNTHETIC_REQUIRED_KEYS = {"pattern", "level", "features"}
 # A FLAT (already-resolved) partition dict is recognized by these keys (C-210).
 _PARTITION_KEYS = {PARTITION_TRAIN, PARTITION_TEST}
+
+
+def _save_df_cache_with_provenance(
+    df, path_cached_df: Path, ctx, level: Optional[str]
+) -> None:
+    """Write the pandas cache and its provenance record, or neither (#412).
+
+    The record is written after the parquet — the parquet is the expensive part and there
+    is no point recording a fetch that failed to persist. But a parquet **without** a
+    record is exactly the state #413 must treat as unverifiable and refetch, so leaving
+    one behind would silently discard the fetch's value on the next run while looking
+    like a successful cache.
+
+    So a failed record write removes the artifact and raises. Nothing is left that a later
+    run could mistake for a complete cache, and the failure is loud at the point it
+    happened rather than surfacing as an unexplained refetch days later.
+    """
+    save_dataframe(df, path_cached_df)
+    try:
+        write_provenance(
+            provenance_for(ctx, level), file_sidecar_path(path_cached_df)
+        )
+    except Exception:
+        # Best-effort cleanup: if the artifact cannot be removed either, the original
+        # failure is still the one worth reporting, so the removal never masks it.
+        try:
+            path_cached_df.unlink(missing_ok=True)
+        except OSError:
+            logger.error(
+                "Could not remove %s after its provenance record failed to write. "
+                "It has no record, so it will be refetched rather than trusted.",
+                path_cached_df,
+            )
+        raise
 
 
 def detect_data_source(queryset: Any, model_name: str) -> str:
@@ -1596,7 +1635,7 @@ class ViewsDataLoader:
                     self._path_raw, self.partition, self._model_name, data_fetch_timestamp
                 )
                 logger.info(f"Saving data to {path_cached_df}")
-                save_dataframe(df, path_cached_df)
+                _save_df_cache_with_provenance(df, path_cached_df, ctx, level)
         else:
             logger.info(f"Fetching data from {source}...")
             df, alerts = self._fetch_data(self_test, source)
@@ -1605,8 +1644,8 @@ class ViewsDataLoader:
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
             logger.info(f"Saving data to {path_cached_df}")
-            save_dataframe(df, path_cached_df)
-            
+            _save_df_cache_with_provenance(df, path_cached_df, ctx, level)
+
         if validate:
             CoreDataSniffer(
                 partition_dict=self.partition_dict,

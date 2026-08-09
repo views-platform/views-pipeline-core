@@ -32,8 +32,13 @@ from pathlib import Path
 
 from views_frames import FeatureFrame
 
+from views_pipeline_core.data.cache_provenance import CacheProvenance
 from views_pipeline_core.data.constants import FRAME_CACHE_DIRNAME_TEMPLATE
 from views_pipeline_core.data.frame_invariants import assert_frame_nonempty
+from views_pipeline_core.data.provenance_sidecar import (
+    directory_sidecar_path,
+    write_provenance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +65,25 @@ def _remove(path: Path) -> None:
         shutil.rmtree(path)
 
 
-def save_frame_cache(frame: FeatureFrame, cache_dir: Path) -> None:
+def save_frame_cache(
+    frame: FeatureFrame, cache_dir: Path, *, provenance: CacheProvenance
+) -> None:
     """Write ``frame`` to ``cache_dir`` via the leaf's ``save()``, stage → retire-swap.
 
     The frame lands in a staging sibling first; the previous cache (if any) is
     renamed aside — not deleted — before the swap, so at no point is a completed
     cache destroyed while its replacement is uncommitted. Refuses empty frames.
+
+    ``provenance`` is **required**, not optional (#412). A cache without a record is
+    exactly the state #413 has to refetch, so a signature that permitted one would make
+    "every cache carries its provenance" an aspiration rather than a fact — and the one
+    caller that forgot would produce caches indistinguishable from those written before
+    this epic. The type checker enforcing it costs nothing; a warning would not.
+
+    The record is written **into staging, before the swap**, so it is committed by the
+    same ``os.replace`` that commits the frame. Written afterwards, there would be an
+    instant where the cache exists and its record does not — brief, but precisely the
+    window a crash finds.
     """
     assert_frame_nonempty(frame, "refused for caching")
     cache_dir = Path(cache_dir)
@@ -77,6 +95,7 @@ def save_frame_cache(frame: FeatureFrame, cache_dir: Path) -> None:
     _remove(retired)
 
     frame.save(staging)  # staging starts absent: leaf save() merges into dirs
+    write_provenance(provenance, directory_sidecar_path(staging))
 
     if cache_dir.is_dir():
         os.replace(cache_dir, retired)  # keep the old cache whole until the swap lands

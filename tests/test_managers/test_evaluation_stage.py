@@ -16,9 +16,32 @@ import pandas as pd
 import pytest
 
 from views_pipeline_core.managers.evaluation.stage import (
+
     EvaluationContext,
     EvaluationStage,
 )
+
+
+def _provenance(**overrides):
+    """A provenance record for cache-write tests.
+
+    `save_frame_cache` requires one (#412): a cache without a record is the state #413
+    refetches, so an optional argument would make "every cache carries its provenance" an
+    aspiration rather than something the signature enforces.
+    """
+    from views_pipeline_core.data.cache_provenance import CacheProvenance
+
+    base = dict(
+        queryset_digest="a" * 64,
+        source="datafactory",
+        partition="forecasting",
+        month_first=121,
+        month_last=550,
+        level="pgm",
+    )
+    base.update(overrides)
+    return CacheProvenance(**base)
+
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -599,7 +622,7 @@ class TestFrameNativeActuals:
             feature_names=list(features),
         )
         cache = tmp_path / "calibration_datafactory_ff"
-        save_frame_cache(frame, cache)
+        save_frame_cache(frame, cache, provenance=_provenance())
         return cache
 
     @staticmethod

@@ -20,6 +20,7 @@ from views_pipeline_core.modules.dataloaders.feature_frame_path import (
 from views_pipeline_core.modules.dataloaders.frame_cache import save_frame_cache
 from views_pipeline_core.data.model_path import ModelPathManager
 
+
 DESCRIPTOR = {
     "name": "test_model",
     "source": "views-datafactory",
@@ -31,6 +32,27 @@ DESCRIPTOR = {
 
 #: forecasting bounds matching the canon fixture months (541-542)
 PARTITIONS = {"forecasting": {PARTITION_TRAIN: (541, 542), PARTITION_TEST: (543, 545)}}
+
+
+def _provenance(**overrides):
+    """A provenance record for cache-write tests.
+
+    `save_frame_cache` requires one (#412): a cache without a record is the state #413
+    refetches, so an optional argument would make "every cache carries its provenance" an
+    aspiration rather than something the signature enforces.
+    """
+    from views_pipeline_core.data.cache_provenance import CacheProvenance
+
+    base = dict(
+        queryset_digest="a" * 64,
+        source="datafactory",
+        partition="forecasting",
+        month_first=121,
+        month_last=550,
+        level="pgm",
+    )
+    base.update(overrides)
+    return CacheProvenance(**base)
 
 
 @pytest.fixture
@@ -147,7 +169,7 @@ def test_use_saved_false_always_refetches(loader, mock_datafactory):
 def test_cached_frame_is_audited_on_hit(loader, mock_datafactory, make_frame):
     """A cache hit is not a validation bypass: plant a wrong-bounds cache."""
     loader.get_feature_frame("forecasting", use_saved=False, level="pgm")
-    save_frame_cache(make_frame([600, 601]), loader.cached_frame_path)
+    save_frame_cache(make_frame([600, 601]), loader.cached_frame_path, provenance=_provenance())
     with pytest.raises(ValueError, match="Expected complete coverage"):
         loader.get_feature_frame("forecasting", use_saved=True, level="pgm")
 
