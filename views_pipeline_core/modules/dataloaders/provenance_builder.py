@@ -70,6 +70,28 @@ def provenance_for(
     )
 
 
+def drift_detection_ran(alerts) -> bool:
+    """Did the fetch actually run drift detection? Derived, never mapped from the source.
+
+    ``None`` means the fetch returned no alerts *channel* — detection did not run.
+    An empty list means it ran and found nothing. Those are different facts and
+    conflating them would be the same defect this record exists to prevent, in miniature:
+    "checked, all clear" reported identically to "never checked".
+
+    Deliberately not ``source == "viewser"``. A hand-written source mapping is wrong the
+    day a source changes behaviour, and this repo has hit that repeatedly (C-259, C-261,
+    C-264, C-282). Reading what the fetch actually returned cannot go stale.
+
+    It lives here rather than in ``dataloaders``, where it started, because ``dataloaders``
+    imports ``feature_frame_path`` — so the frame path cannot import back from it without
+    a cycle. Both paths already import this module. Today the frame path has no alerts
+    channel and passes ``False`` structurally; when it grows one, the shared rule is
+    reachable rather than something to reinvent. Review flagged that trap before it was
+    one.
+    """
+    return alerts is not None
+
+
 class StaleCacheError(RuntimeError):
     """A cached artifact was produced by a different configuration than this run's.
 

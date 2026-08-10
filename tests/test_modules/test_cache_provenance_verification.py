@@ -365,9 +365,11 @@ def test_the_drift_flag_is_derived_from_what_the_fetch_returned(alerts, expected
     The `[]` case is the one worth having: "checked, all clear" and "never checked" are
     different facts, and collapsing them would be C-52 in miniature.
     """
-    from views_pipeline_core.modules.dataloaders.dataloaders import _drift_detection_ran
+    from views_pipeline_core.modules.dataloaders.provenance_builder import (
+        drift_detection_ran,
+    )
 
-    assert _drift_detection_ran(alerts) is expected, why
+    assert drift_detection_ran(alerts) is expected, why
 
 
 def test_a_viewser_cache_records_that_detection_ran(loader):

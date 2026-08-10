@@ -19,6 +19,7 @@ from views_pipeline_core.data.model_path import ModelPathManager
 from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
 from views_pipeline_core.modules.dataloaders.provenance_builder import (
     cache_matches_current_context,
+    drift_detection_ran,
     provenance_for,
 )
 from views_pipeline_core.data.provenance_sidecar import (
@@ -57,19 +58,6 @@ _SYNTHETIC_REQUIRED_KEYS = {"pattern", "level", "features"}
 _PARTITION_KEYS = {PARTITION_TRAIN, PARTITION_TEST}
 
 
-def _drift_detection_ran(alerts) -> bool:
-    """Did the fetch actually run drift detection? Derived, never mapped from the source.
-
-    ``None`` means the fetch returned no alerts *channel* — detection did not run.
-    An empty list means it ran and found nothing. Those are different facts and
-    conflating them would be the same defect this record exists to prevent, in miniature:
-    "checked, all clear" reported identically to "never checked".
-
-    Deliberately not ``source == "viewser"``. A hand-written source mapping is wrong the
-    day a source changes behaviour, and this repo has hit that repeatedly (C-259, C-261,
-    C-264, C-282). Reading what the fetch actually returned cannot go stale.
-    """
-    return alerts is not None
 
 
 def _save_df_cache_with_provenance(
@@ -92,7 +80,7 @@ def _save_df_cache_with_provenance(
     try:
         write_provenance(
             provenance_for(
-                ctx, level, drift_detection_ran=_drift_detection_ran(alerts)
+                ctx, level, drift_detection_ran=drift_detection_ran(alerts)
             ),
             sidecar_path,
         )
