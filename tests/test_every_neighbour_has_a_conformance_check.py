@@ -37,6 +37,20 @@ implementation cited by the issue, `test_cache_name_has_one_spelling.py`, exclud
 docstrings because it detects the *construction* of a filename and a docstring cannot
 construct anything. This detects a *reference*, and a docstring plainly can refer.
 
+## What "covered" does and does not mean
+
+This test answers *"is there a check?"*, not *"is the check deep enough?"* — and the
+difference is not academic. `appwrite` counts as covered on the strength of
+`test_seam_contract_pin_is_coherent.py`, which verifies that the seam-contract citations
+all point at one tag. That is a real check and it has caught real drift, but it is a
+**documentation-citation** check: it says nothing about payload shape. The `models` and
+`faoapi` exemptions below say exactly that about themselves ("the seam pin is checked, the
+payload shape is not") and are counted as gaps; `appwrite` says the same thing and is
+counted as covered.
+
+Recorded rather than quietly graded, because a reader scanning "6 covered" would otherwise
+draw a stronger conclusion than the data supports. Deepening it is B3's business (#430).
+
 ## Derive generously, allowlist explicitly
 
 The scan pulls in things that are not repositories at all — the `views-platform`
@@ -230,7 +244,28 @@ def _conformance_files() -> list[Path]:
         for p in sorted(TESTS.rglob("*.py"))
         if any(marker in p.name for marker in _CONFORMANCE_MARKERS)
         and p.resolve() != Path(__file__).resolve()
+        and _defines_a_test(p)
     ]
+
+
+def _defines_a_test(path: Path) -> bool:
+    """Does this file actually assert anything, or does it just share constants?
+
+    `tests/test_modules/contract_canon.py` matches the "canon" marker and is a
+    shared-constants module with no test functions at all. It named `viewser`, and so
+    conferred "coverage" on the upstream data source — a file that cannot fail was
+    standing in for a check. Requiring a `test_*` function is the cheapest honest filter:
+    a check that cannot fail is not a check.
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return False
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+        for node in ast.walk(tree)
+    )
 
 
 def _require_probe_texts() -> list[tuple[str, str]]:
@@ -255,14 +290,80 @@ def _require_probe_texts() -> list[tuple[str, str]]:
     return probes
 
 
+def _spellings(neighbour: str) -> re.Pattern:
+    """Every way this neighbour's name is actually written, as one pattern.
+
+    Three cases, and getting this wrong is how a guard reads green while proving nothing:
+
+    - `frames` -> `views-frames` or `views_frames`
+    - `frames-reconcile` -> `views-frames-reconcile` or `views_frames_reconcile`, and any
+      mix (`views-frames_reconcile`) because both spellings occur in the wild
+    - `viewser` -> just `viewser`. It carries no `views-` prefix, so demanding one made it
+      impossible to ever detect coverage for the upstream data source.
+
+    **Built by splitting on the hyphen and escaping each part**, not by escaping the whole
+    name and substituting afterwards. `re.escape` escapes `-` to `\-` (Python 3.7+), so
+    `re.escape(n).replace('-', '[-_]')` produced `\[-_]` — a pattern matching the literal
+    five characters `[-_]`. The first version of this function did exactly that, and every
+    hyphenated neighbour was permanently undetectable. `test_the_matcher_matches_real_
+    spellings` exists so that cannot recur silently.
+    """
+    separator = "[-_]"
+    body = separator.join(re.escape(part) for part in neighbour.split("-"))
+    if neighbour.startswith("views"):
+        # e.g. `viewser` — already the whole package name, takes no prefix.
+        return re.compile(rf"\b{body}\b")
+    return re.compile(rf"views{separator}{body}\b")
+
+
 def _names(text: str, neighbour: str) -> bool:
-    pattern = re.compile(rf"views[-_]{re.escape(neighbour).replace('-', '[-_]')}\b")
-    return bool(pattern.search(text))
+    return bool(_spellings(neighbour).search(text))
+
+
+def _non_docstring_source(path: Path) -> str:
+    """A file's source with its docstrings blanked out.
+
+    Used only on the *detection* side, and the asymmetry with `declared_neighbours` is
+    deliberate rather than an oversight:
+
+    - deriving a neighbour, a docstring **is** a claim — "this package works with
+      views-hydranet" is something the next reader will believe;
+    - detecting a *check*, a docstring is **not** a test. It cannot assert anything.
+
+    Without this, `tests/test_data/test_views_frames_conformance.py` conferred coverage on
+    views-reporting because its docstring says *"We do NOT import views-reporting"* — a
+    scope disclaimer counted as a check of the very boundary it disclaims.
+    """
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+    except SyntaxError:
+        return ""
+    lines = source.splitlines(keepends=True)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = getattr(node, "body", None)
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            for i in range(body[0].lineno - 1, body[0].end_lineno):
+                lines[i] = "\n"
+    return "".join(lines)
 
 
 def checks_for(neighbour: str) -> list[str]:
-    """Every conformance file or runtime probe that names this neighbour."""
-    hits = [p.name for p in _conformance_files() if _names(p.read_text(encoding="utf-8"), neighbour)]
+    """Every conformance file or runtime probe that names this neighbour, in code.
+
+    Docstrings are excluded — see `_non_docstring_source`. A file that only mentions a
+    neighbour in prose is not checking it.
+    """
+    hits = [
+        p.name for p in _conformance_files() if _names(_non_docstring_source(p), neighbour)
+    ]
     hits += [name for name, text in _require_probe_texts() if _names(text, neighbour)]
     return hits
 
@@ -295,8 +396,44 @@ def test_the_scan_finds_conformance_files_at_all():
 
 
 def test_the_scan_finds_require_probes_at_all():
+    """Floor set just under the real count, and named spot-checks alongside it.
+
+    A floor of 3 against an actual 4 tolerated losing a quarter of the probes without
+    complaint — review's point, and a fair one. Names matter more than the count: a
+    partial regression that still returned enough probes would slip a bare threshold.
+    """
     probes = _require_probe_texts()
-    assert len(probes) >= 3, f"only {len(probes)} `_require_*` probes found: {probes}"
+    assert len(probes) >= 4, f"only {len(probes)} `_require_*` probes found: {probes}"
+    found = {name.split("::")[-1] for name, _ in probes}
+    for expected in ("_require_dense_report_consumer", "_require_evaluation_source_consumer"):
+        assert expected in found, f"{expected} vanished from the probe scan; found {sorted(found)}"
+
+
+def test_the_matcher_matches_real_spellings():
+    """The matcher's own unit test, and the reason it exists.
+
+    The first version built its pattern as `re.escape(n).replace('-', '[-_]')`. Because
+    `re.escape` escapes `-` to `\\-`, that produced `\\[-_]` — a pattern matching the
+    literal characters `[-_]`. Every hyphenated neighbour became permanently undetectable,
+    and `viewser` was unmatchable besides, since the pattern demanded a `views-` prefix it
+    does not carry.
+
+    Nothing failed. `checks_for('frames-reconcile')` simply returned `[]` forever, and the
+    exemption-staleness assertion built on it was inert for three of eleven entries. That
+    is this guard's own failure mode — silent success — reproduced inside the guard.
+    """
+    assert _names("from views_frames_reconcile import R", "frames-reconcile")
+    assert _names("views-frames-reconcile", "frames-reconcile")
+    assert _names("views-frames_reconcile", "frames-reconcile")
+    assert _names("import views_transformation_library", "transformation-library")
+    assert _names("from viewser import Queryset", "viewser")
+    assert _names("views-frames", "frames") and _names("views_frames", "frames")
+    # and it must not over-match:
+    assert not _names("views-framesomething", "frames")
+    assert not _names("views_frames_reconcile", "frames"), (
+        "`frames` must not match the longer `frames-reconcile` spelling"
+    )
+    assert not _names("nothing to see", "frames")
 
 
 def test_this_repo_is_not_its_own_neighbour():
