@@ -68,6 +68,7 @@ RECORD = CacheProvenance(
     month_first=121,
     month_last=396,
     level="pgm",
+    drift_detection_ran=True,
 )
 
 
@@ -180,16 +181,14 @@ def test_each_recorded_field_is_checked_independently(tmp_path, field, other):
 def test_the_field_cases_cover_every_recorded_field():
     """Derived, so a field added to the record without a case here fails rather than
     slipping through unverified."""
-    import dataclasses
-
     covered = {
         "queryset_digest", "source", "partition", "month_first", "month_last", "level",
     }
-    declared = {f.name for f in dataclasses.fields(CacheProvenance)}
-    assert declared - covered == {"provenance_version"}, (
-        f"CacheProvenance declares {sorted(declared)}; this file checks {sorted(covered)} "
-        f"plus provenance_version (handled by the version test above). Unverified: "
-        f"{sorted(declared - covered - {'provenance_version'})}"
+    identifying = set(CacheProvenance.identifying_fields())
+    assert identifying - covered == {"provenance_version"}, (
+        f"CacheProvenance identifies by {sorted(identifying)}; this file checks "
+        f"{sorted(covered)} plus provenance_version (the version test above). "
+        f"Unverified: {sorted(identifying - covered - {'provenance_version'})}"
     )
 
 
@@ -274,7 +273,11 @@ def test_a_refetch_after_a_change_writes_the_new_record(loader):
     _run(loader, use_saved=False)  # the remediation the message recommends
 
     record = read_provenance(file_sidecar_path(loader.cached_data_path))
-    expected = provenance_for(loader._resolve_fetch_context("calibration", None), "pgm")
+    expected = provenance_for(
+        loader._resolve_fetch_context("calibration", None),
+        "pgm",
+        drift_detection_ran=False,  # not identifying; only the digest is asserted
+    )
     assert record.queryset_digest == expected.queryset_digest
 
 
@@ -339,3 +342,94 @@ def test_a_version_mismatch_refetches_through_get_data(loader):
         "the refetch did not rewrite the record at the current version, so every "
         "subsequent run would refetch too"
     )
+
+
+# ── #414: whether drift detection ran is recorded, not inferred ───────────────
+
+
+@pytest.mark.parametrize(
+    "alerts, expected, why",
+    [
+        (None, False, "no alerts channel at all — detection did not run"),
+        ([], True, "ran and found nothing — NOT the same as never running"),
+        (["an offender"], True, "ran and found something"),
+    ],
+)
+def test_the_drift_flag_is_derived_from_what_the_fetch_returned(alerts, expected, why):
+    """Derived from the fetch's actual return, never mapped from the source name.
+
+    A `source == "viewser"` mapping is a hand-written list, and it is wrong the day a
+    source changes behaviour — the failure this repo has hit repeatedly (C-259, C-261,
+    C-264, C-282). Reading what came back cannot go stale.
+
+    The `[]` case is the one worth having: "checked, all clear" and "never checked" are
+    different facts, and collapsing them would be C-52 in miniature.
+    """
+    from views_pipeline_core.modules.dataloaders.provenance_builder import (
+        drift_detection_ran,
+    )
+
+    assert drift_detection_ran(alerts) is expected, why
+
+
+def test_a_viewser_cache_records_that_detection_ran(loader):
+    """The viewser path returns alerts, so the record says so."""
+    with patch.object(
+        ViewsDataLoader, "_fetch_data", return_value=(_frame(), [])
+    ):
+        loader.get_data(
+            self_test=False, partition="calibration",
+            use_saved=False, validate=False, level="pgm",
+        )
+    record = read_provenance(file_sidecar_path(loader.cached_data_path))
+    assert record.drift_detection_ran is True
+
+
+def test_a_datafactory_cache_records_that_detection_did_not_run(loader):
+    """C-52 made visible in the artifact instead of a log line the run throws away.
+
+    A datafactory fetch has no drift detection. Before this, a datafactory cache and a
+    viewser cache were indistinguishable on disk — the missing safety net left no trace.
+    """
+    _run(loader, use_saved=False)  # _fetch_data stubbed to return (df, None)
+    record = read_provenance(file_sidecar_path(loader.cached_data_path))
+    assert record.drift_detection_ran is False
+
+
+def test_the_drift_flag_never_causes_a_refusal(loader):
+    """It records; it does not block.
+
+    Blocking on `False` would stop every datafactory model in the platform, which is most
+    of the migration target. And the read path CANNOT know the cached value — it has not
+    fetched — so comparing it would refuse every viewser cache on first read.
+    """
+    with patch.object(ViewsDataLoader, "_fetch_data", return_value=(_frame(), ["x"])):
+        loader.get_data(
+            self_test=False, partition="calibration",
+            use_saved=False, validate=False, level="pgm",
+        )
+    assert read_provenance(file_sidecar_path(loader.cached_data_path)).drift_detection_ran
+
+    # Same cache, read back by a run that has no alerts to derive anything from.
+    fetch = _run(loader, use_saved=True)
+    assert fetch.call_count == 0, (
+        "a cache was refused over a field the reader cannot possibly know the value of"
+    )
+
+
+def test_every_v1_record_is_refetched_once_after_the_bump(loader):
+    """The upgrade path, which is the risky part of this story.
+
+    Every cache on disk carries version 1. If the bump made them refuse rather than
+    refetch, this story would stop every run in the platform on its first execution.
+    """
+    _run(loader, use_saved=False)
+    sidecar = file_sidecar_path(loader.cached_data_path)
+    v1 = {k: v for k, v in read_provenance(sidecar).to_dict().items()
+          if k != "drift_detection_ran"}
+    v1["provenance_version"] = 1
+    sidecar.write_text(json.dumps(v1))
+
+    fetch = _run(loader, use_saved=True)
+    assert fetch.call_count == 1, "a v1 record refused instead of refetching"
+    assert read_provenance(sidecar).provenance_version == PROVENANCE_VERSION

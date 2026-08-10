@@ -19,6 +19,7 @@ from views_pipeline_core.data.model_path import ModelPathManager
 from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
 from views_pipeline_core.modules.dataloaders.provenance_builder import (
     cache_matches_current_context,
+    drift_detection_ran,
     provenance_for,
 )
 from views_pipeline_core.data.provenance_sidecar import (
@@ -57,8 +58,10 @@ _SYNTHETIC_REQUIRED_KEYS = {"pattern", "level", "features"}
 _PARTITION_KEYS = {PARTITION_TRAIN, PARTITION_TEST}
 
 
+
+
 def _save_df_cache_with_provenance(
-    df, path_cached_df: Path, ctx, level: Optional[str]
+    df, path_cached_df: Path, ctx, level: Optional[str], alerts
 ) -> None:
     """Write the pandas cache and its provenance record, or neither (#412).
 
@@ -75,7 +78,12 @@ def _save_df_cache_with_provenance(
     save_dataframe(df, path_cached_df)
     sidecar_path = file_sidecar_path(path_cached_df)
     try:
-        write_provenance(provenance_for(ctx, level), sidecar_path)
+        write_provenance(
+            provenance_for(
+                ctx, level, drift_detection_ran=drift_detection_ran(alerts)
+            ),
+            sidecar_path,
+        )
     except Exception:
         # Best-effort cleanup of BOTH artifacts. A partially-flushed sidecar (disk full
         # mid-write) would otherwise survive as unparseable JSON — and #413 reads a
@@ -1630,7 +1638,11 @@ class ViewsDataLoader:
             # version). The `exists()` check stays first — no record is expected when
             # there is no artifact either.
             serve_cache = path_cached_df.exists() and cache_matches_current_context(
-                provenance_for(ctx, level),
+                # `drift_detection_ran` is not an identifying field and is not compared
+                # (see CacheProvenance.identifying_fields) — a run about to READ a cache
+                # has not fetched, so it cannot know whether detection ran for the fetch
+                # that wrote it. False is a placeholder here, never a claim.
+                provenance_for(ctx, level, drift_detection_ran=False),
                 file_sidecar_path(path_cached_df),
                 path_cached_df,
             )
@@ -1653,7 +1665,7 @@ class ViewsDataLoader:
                     self._path_raw, self.partition, self._model_name, data_fetch_timestamp
                 )
                 logger.info(f"Saving data to {path_cached_df}")
-                _save_df_cache_with_provenance(df, path_cached_df, ctx, level)
+                _save_df_cache_with_provenance(df, path_cached_df, ctx, level, alerts)
         else:
             logger.info(f"Fetching data from {source}...")
             df, alerts = self._fetch_data(self_test, source)
@@ -1662,7 +1674,7 @@ class ViewsDataLoader:
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
             logger.info(f"Saving data to {path_cached_df}")
-            _save_df_cache_with_provenance(df, path_cached_df, ctx, level)
+            _save_df_cache_with_provenance(df, path_cached_df, ctx, level, alerts)
 
         if validate:
             CoreDataSniffer(

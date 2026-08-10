@@ -37,6 +37,7 @@ def make_provenance():
             month_first=121,
             month_last=550,
             level="pgm",
+            drift_detection_ran=False,
         )
         base.update(overrides)
 
@@ -65,8 +66,14 @@ def expected_cache_record():
     """
     from views_pipeline_core.modules.dataloaders.provenance_builder import provenance_for
 
-    def _expected(loader, partition, level=None):
-        return provenance_for(loader._resolve_fetch_context(partition, None), level)
+    def _expected(loader, partition, level=None, drift_detection_ran=False):
+        # Not an identifying field, so its value never affects whether a cache verifies —
+        # but it is required, so it must be stated rather than defaulted in the record.
+        return provenance_for(
+            loader._resolve_fetch_context(partition, None),
+            level,
+            drift_detection_ran=drift_detection_ran,
+        )
 
     return _expected
 
@@ -97,7 +104,7 @@ def plant_cache_record():
         # would plant a record that disagrees with a `get_data(...)` call that omitted
         # level — a manufactured mismatch, in a fixture whose job is the opposite.
         ctx = loader._resolve_fetch_context(partition, None)
-        record = provenance_for(ctx, level)
+        record = provenance_for(ctx, level, drift_detection_ran=False)
         if overrides:
             record = type(record)(**{**record.to_dict(), **overrides})
         sidecar = (

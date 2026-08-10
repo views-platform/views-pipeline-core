@@ -38,13 +38,17 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional
 
 #: Bumped whenever the record's field set changes. A sidecar written at a different
 #: version is a recognisable mismatch rather than a parse error, so the read path (#413)
-#: can treat it as "cannot be verified" instead of crashing on an unexpected key.
-PROVENANCE_VERSION = 1
+#: treats it as "cannot be verified" and refetches instead of crashing on an unexpected key.
+#:
+#: 1 -> 2 (#414): gained ``drift_detection_ran``. Every v1 record on disk becomes a version
+#: mismatch and is refetched once — which is the whole reason the read path distinguishes
+#: a version difference from a corrupt record.
+PROVENANCE_VERSION = 2
 
 #: Canonical JSON: sorted keys (recursively — verified, not assumed), no incidental
 #: whitespace, non-ASCII escaped. Two descriptors differing only in key order must digest
@@ -174,10 +178,8 @@ class CacheProvenance:
     - ``month_first`` / ``month_last`` — a widened range must not read as a hit
     - ``level`` — ``cm`` and ``pgm`` are different rows entirely; Optional because
       ``get_data`` accepts None and the record states what was actually used
+    - ``drift_detection_ran`` — whether the safety net actually ran (#414)
     - ``provenance_version`` — so a field set change is a mismatch, not a crash
-
-    ``drift_detection_ran`` is **not** here. It is #414's, held back deliberately so that
-    story can demonstrate a field appearing and the version bump being honoured.
     """
 
     queryset_digest: str
@@ -186,7 +188,34 @@ class CacheProvenance:
     month_first: int
     month_last: int
     level: Optional[str]
+    #: Did the fetch that produced this cache actually run drift detection? (#414)
+    #:
+    #: Deliberately **required**, with no default. A default would have to assert
+    #: something about a cache nobody checked: ``True`` claims a safety net that may never
+    #: have run, and ``False`` is equally an assertion. Requiring it means every
+    #: construction site states what it knows, and `tests/conftest.py`'s fixture guard
+    #: catches any that does not.
+    #:
+    #: **Not identifying.** It records something about how the cache was produced, not
+    #: about *what* it contains, and the reader cannot know it in advance — a run reading
+    #: a cache has not fetched, so it has no alerts to derive it from. Comparing it would
+    #: refuse every viewser cache on the first read. See `IDENTIFYING` below.
+    drift_detection_ran: bool = field(metadata={"identifying": False})
     provenance_version: int = PROVENANCE_VERSION
+
+    @classmethod
+    def identifying_fields(cls) -> tuple:
+        """The fields that determine whether two caches are the same data.
+
+        Derived from each field's metadata rather than listed, so a field added without
+        deciding which kind it is defaults to *identifying* — the safe direction. A new
+        identifying field wrongly treated as informational would silently stop being
+        checked; the reverse merely refuses a cache that could have been served, which is
+        loud and fixable.
+        """
+        return tuple(
+            f.name for f in dataclasses.fields(cls) if f.metadata.get("identifying", True)
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialise for the sidecar.
@@ -273,11 +302,16 @@ class CacheProvenance:
         refusal that says only "cache mismatch" sends the reader to this source file to
         find out what it means, which is not a remediation.
 
+        Only **identifying** fields are compared. `drift_detection_ran` records how a
+        cache was produced, not what it contains, and a run that is about to read a cache
+        has not fetched anything and so cannot know its value — comparing it would refuse
+        every viewser cache on first read.
+
         Fields are enumerated from the dataclass, so a field added without a comparison is
         impossible rather than merely unlikely.
         """
         return {
-            field.name: (getattr(self, field.name), getattr(other, field.name))
-            for field in dataclasses.fields(self)
-            if getattr(self, field.name) != getattr(other, field.name)
+            name: (getattr(self, name), getattr(other, name))
+            for name in self.identifying_fields()
+            if getattr(self, name) != getattr(other, name)
         }

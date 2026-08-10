@@ -39,7 +39,9 @@ from views_pipeline_core.modules.dataloaders.fetch_context import FetchContext
 logger = logging.getLogger(__name__)
 
 
-def provenance_for(ctx: FetchContext, level: Optional[str]) -> CacheProvenance:
+def provenance_for(
+    ctx: FetchContext, level: Optional[str], *, drift_detection_ran: bool
+) -> CacheProvenance:
     """The record describing a cache written from ``ctx``.
 
     ``level`` is not on `FetchContext` — it arrives as a caller argument on both paths —
@@ -51,6 +53,11 @@ def provenance_for(ctx: FetchContext, level: Optional[str]) -> CacheProvenance:
     detection used (#289). Re-reading ``get_queryset()`` here would let the record describe
     a different queryset than the fetch used — the exact confusion the single-read contract
     was introduced to remove.
+
+    ``drift_detection_ran`` is required and keyword-only (#414). The caller knows whether
+    detection ran; this function cannot work it out, and guessing from ``ctx.source`` would
+    be a hand-written mapping that goes wrong the day a source changes behaviour — the
+    failure this repo has hit repeatedly (C-259, C-261, C-264, C-282).
     """
     return CacheProvenance(
         queryset_digest=queryset_digest(ctx.queryset),
@@ -59,7 +66,30 @@ def provenance_for(ctx: FetchContext, level: Optional[str]) -> CacheProvenance:
         month_first=ctx.month_first,
         month_last=ctx.month_last,
         level=level,
+        drift_detection_ran=drift_detection_ran,
     )
+
+
+def drift_detection_ran(alerts) -> bool:
+    """Did the fetch actually run drift detection? Derived, never mapped from the source.
+
+    ``None`` means the fetch returned no alerts *channel* — detection did not run.
+    An empty list means it ran and found nothing. Those are different facts and
+    conflating them would be the same defect this record exists to prevent, in miniature:
+    "checked, all clear" reported identically to "never checked".
+
+    Deliberately not ``source == "viewser"``. A hand-written source mapping is wrong the
+    day a source changes behaviour, and this repo has hit that repeatedly (C-259, C-261,
+    C-264, C-282). Reading what the fetch actually returned cannot go stale.
+
+    It lives here rather than in ``dataloaders``, where it started, because ``dataloaders``
+    imports ``feature_frame_path`` — so the frame path cannot import back from it without
+    a cycle. Both paths already import this module. Today the frame path has no alerts
+    channel and passes ``False`` structurally; when it grows one, the shared rule is
+    reachable rather than something to reinvent. Review flagged that trap before it was
+    one.
+    """
+    return alerts is not None
 
 
 class StaleCacheError(RuntimeError):
