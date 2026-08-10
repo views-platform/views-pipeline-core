@@ -22,7 +22,7 @@ from views_pipeline_core.managers.ensemble import (
     DataFrameEnsembleManager,
     EnsemblePathManager,
 )
-from views_pipeline_core.managers.ensemble.dataframe_ensemble import EnsembleContext
+from views_pipeline_core.managers.ensemble.context import EnsembleContext
 from views_pipeline_core.managers.model import (
     ForecastingModelManager,
     ModelManager,
