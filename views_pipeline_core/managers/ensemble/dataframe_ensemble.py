@@ -16,9 +16,8 @@ import subprocess
 import sys
 import time
 import traceback
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import pandas as pd
 import tqdm
@@ -26,7 +25,6 @@ import wandb
 
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.configs.pipeline import PipelineConfig
-from views_pipeline_core.managers.configuration.configuration import combined_targets
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset, _ViewsDataset
 from views_pipeline_core.domain.reconciliation_port import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
@@ -39,42 +37,14 @@ from views_pipeline_core.modules.aggregation.aggregator import (
 )
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
-from views_pipeline_core.types import BaseStageContext
 
+from .context import EnsembleContext
 from .ensemble import EnsemblePathManager
 
 logger = logging.getLogger(__name__)
 
 # ADR-034: priogrid_gid → priogrid_id rename for AggregationModule compatibility
 _ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
-
-
-# ---------------------------------------------------------------------------
-# Frozen context — single source of truth during a run
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class EnsembleContext(BaseStageContext):
-    """Immutable execution context for DataFrameEnsembleManager.
-
-    Built once in execute_single_run() after config validation, then
-    threaded to every method. Prevents mutable self-state drift.
-    """
-    project: str
-    eval_type: str
-    args: ForecastingModelArgs
-    models: List[str]
-    aggregation: str
-    targets: List[str]
-    reconciliation: Optional[str]
-    reconcile_with: Optional[str]
-    use_weights: bool
-    weights: Dict[str, float]
-    timestamp: str
-    deployment_status: str
-    prediction_format: str
-    partition_dict: Dict[str, Any]
-    expected_samples_per_model: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -309,28 +279,15 @@ class DataFrameEnsembleManager:
 
     def _build_context(self, args: ForecastingModelArgs) -> EnsembleContext:
         c = self.configs
-        return EnsembleContext(
-            configs=c,
+        return EnsembleContext.from_config(
+            c,
             model_path=self._ensemble_path,
-            run_type=args.run_type,
-            project=f"{c['name']}_{args.run_type}",
-            eval_type=args.eval_type,
             args=args,
-            models=c["models"],
-            aggregation=c["aggregation"],
-            # Derive the full target list (regression + classification) via
-            # `combined_targets` (#380) so the pool never silently drops the
-            # occurrence/gate channel — see C-132 and the sibling
-            # PredictionFrameEnsembleManager._build_context.
-            targets=combined_targets(c),
-            reconciliation=c.get("reconciliation"),
-            reconcile_with=c.get("reconcile_with"),
-            use_weights=c.get("use_weights", False),
-            weights=c.get("weights", {}),
-            timestamp=c.get("timestamp", ""),
-            deployment_status=c.get("deployment_status", "shadow"),
+            partition_dict=self._partition_dict,
+            # This manager can emit either format, so the config decides.
             prediction_format=c.get("prediction_format", "dataframe"),
-            partition_dict=self._partition_dict or {},
+            # `expected_samples_per_model` is deliberately not passed: the DataFrame path
+            # has no per-sample expectation to state. See #432.
         )
 
     # ------------------------------------------------------------------

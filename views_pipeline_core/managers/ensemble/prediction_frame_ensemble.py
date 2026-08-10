@@ -28,7 +28,6 @@ from views_pipeline_core.domain.reconciliation_port import (
     Reconciler,
 )
 from views_pipeline_core.exceptions import PipelineException
-from views_pipeline_core.managers.configuration.configuration import combined_targets
 from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.files.utils import handle_ensemble_log_creation
 from views_pipeline_core.modules.reconciliation.reconcile_frames import reconcile_frames
@@ -36,7 +35,7 @@ from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfi
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
 
 from .cm_forecast_loader import load_cm_frame
-from .dataframe_ensemble import EnsembleContext
+from .context import EnsembleContext
 from .ensemble import EnsemblePathManager
 
 logger = logging.getLogger(__name__)
@@ -362,29 +361,13 @@ class PredictionFrameEnsembleManager:
         # injected `Reconciler` port (#236, epic #233). A configured reconciliation with no
         # injected reconciler fails loud at apply time (RECONCILER_NOT_INJECTED_MSG) — no
         # silent-off.
-        return EnsembleContext(
-            configs=c,
+        return EnsembleContext.from_config(
+            c,
             model_path=self._ensemble_path,
-            run_type=args.run_type,
-            project=f"{c['name']}_{args.run_type}",
-            eval_type=args.eval_type,
             args=args,
-            models=c["models"],
-            aggregation=c["aggregation"],
-            # Pool EVERY target the members predict — regression AND classification.
-            # Deriving via `combined_targets` (#380) instead of defaulting to
-            # `regression_targets` alone is what keeps the occurrence/gate channel
-            # (`by_*`) in the pool: gated HydraNet members emit a per-sample gate PF,
-            # and omitting it silently understated ensemble occurrence/AP (C-132).
-            targets=combined_targets(c),
-            reconciliation=c.get("reconciliation"),
-            reconcile_with=c.get("reconcile_with"),
-            use_weights=c.get("use_weights", False),
-            weights=c.get("weights", {}),
-            timestamp=c.get("timestamp", ""),
-            deployment_status=c.get("deployment_status", "shadow"),
+            partition_dict=self._partition_dict,
+            # A literal, not a config read: this manager only ever emits PredictionFrames.
             prediction_format="prediction_frame",
-            partition_dict=self._partition_dict or {},
             expected_samples_per_model=c.get("expected_samples_per_model"),
         )
 

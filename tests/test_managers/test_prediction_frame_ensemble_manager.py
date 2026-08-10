@@ -18,7 +18,7 @@ from views_frames import PredictionFrame, SpatialLevel, SpatioTemporalIndex
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.exceptions import PipelineException
 from views_pipeline_core.managers.ensemble import EnsemblePathManager
-from views_pipeline_core.managers.ensemble.dataframe_ensemble import EnsembleContext
+from views_pipeline_core.managers.ensemble.context import EnsembleContext
 import views_pipeline_core.managers.ensemble.prediction_frame_ensemble as _pfe_mod
 from views_pipeline_core.managers.ensemble.prediction_frame_ensemble import (
     SUPPORTED_PF_AGGREGATION_METHODS,

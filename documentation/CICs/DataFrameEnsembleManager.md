@@ -43,9 +43,12 @@ collaborators vs. inheritance chain.
 - Guarantees that `CoreConfigSniffer.sniff_all()` runs before WandB login or any
   model execution (C-55 fix). This is the primary behavioral difference from
   `EnsembleManager`.
-- Guarantees that an immutable `EnsembleContext` (frozen dataclass) is built once
-  in `execute_single_run()` and threaded to every method. No method reads mutable
-  `self` state for config, args, or run-type during execution.
+- Guarantees that an immutable `EnsembleContext` (frozen dataclass,
+  `managers/ensemble/context.py`) is built once in `execute_single_run()` and threaded
+  to every method, via the shared `EnsembleContext.from_config()` (#432). No method
+  reads mutable `self` state for config, args, or run-type during execution.
+  `prediction_format` is read from config with a `"dataframe"` fallback;
+  `expected_samples_per_model` is not passed on this path.
 - Guarantees that `EvaluationStage`, `PredictionIOManager`, and `ReportingStage`
   are used via composition (injected at construction), not via inheritance.
 - Guarantees that all sub-models in `configs["models"]` are trained, evaluated,

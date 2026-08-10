@@ -56,9 +56,10 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   `PredictionFrame.save()/load()`.
 - Guarantees that `CoreConfigSniffer.sniff_all()` runs before WandB login or any
   model execution.
-- Guarantees that an immutable `EnsembleContext` (frozen dataclass, imported from
-  `dataframe_ensemble.py`) is built once in `execute_single_run()` and threaded to
-  every method. Context always has `prediction_format="prediction_frame"`;
+- Guarantees that an immutable `EnsembleContext` (frozen dataclass, `managers/ensemble/
+  context.py`) is built once in `execute_single_run()` and threaded to every method,
+  via the shared `EnsembleContext.from_config()` (#432). Context always has
+  `prediction_format="prediction_frame"` — passed as a literal, not read from config;
   `reconciliation`/`reconcile_with` are read from config (default `None`).
 - Guarantees that `EvaluationStage` and `ReportingStage` are used via composition
   (injected at construction), not via inheritance.
@@ -179,7 +180,8 @@ PredictionFrameEnsembleManager (composition, no inheritance)
 
 - **Depends on:** `ForecastingModelManager._resolve_evaluation_sequence_number()`
   (static method) for determining evaluation sequence count.
-- **Depends on:** `EnsembleContext` (frozen dataclass from `dataframe_ensemble.py`).
+- **Depends on:** `EnsembleContext` and its `from_config()` factory
+  (`managers/ensemble/context.py`).
 - **Depends on (reconciliation, #236):** the `Reconciler` port
   (`domain.reconciliation_port`), `modules.reconciliation.reconcile_frames`, and
   `cm_forecast_loader.load_cm_frame` — all frames-native.
@@ -309,9 +311,15 @@ manager._evaluate_ensemble(ctx)
 - **`handle_ensemble_log_creation` called in both eval and forecast
   `_execute_*` methods:** This matches the DataFrameEnsembleManager pattern.
   Log creation is an orchestration-level side effect, not a business-logic concern.
-- **`EnsembleContext` imported from `dataframe_ensemble.py`:** Shared frozen
-  dataclass. If the two managers diverge in context needs, a separate context
-  class should be created.
+- **`EnsembleContext` lives in `managers/ensemble/context.py`, owned by neither
+  manager (#432).** It previously lived in `dataframe_ensemble.py` and was imported
+  from there — a shared type homed inside one of its two consumers. Its
+  `from_config()` factory is the single `_build_context` body: the two managers'
+  copies were byte-identical in 16 of 18 arguments, which is why the C-132 gate
+  defect had to be patched twice. The two genuinely divergent values,
+  `prediction_format` and `expected_samples_per_model`, are parameters rather than
+  branches. If the managers diverge further, add a parameter or a separate context
+  class — do not reintroduce a second copy.
 
 ---
 
