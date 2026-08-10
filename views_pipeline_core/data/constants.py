@@ -9,6 +9,18 @@ CACHE_SOURCES = frozenset({"viewser", "datafactory", "synthetic"})
 
 CACHE_FILENAME_TEMPLATE = "{partition}_{source}_df{ext}"
 
+
+def cache_filename_prefix(partition: str, source: str) -> str:
+    """The cache filename without its extension — the stem readers match on.
+
+    Derived from `CACHE_FILENAME_TEMPLATE` rather than respelled, because respelling it is
+    how the convention acquires a second definition. `ModelPathManager` built
+    ``f"{run_type}_{src}_df"`` by hand until #416; it happened to agree, and a change to
+    the template would silently have left it behind — the C-59 failure, inside the repo
+    that had supposedly fixed it.
+    """
+    return CACHE_FILENAME_TEMPLATE.format(partition=partition, source=source, ext="")
+
 #: FeatureFrame cache artifact: a DIRECTORY (views-frames owns the byte layout via
 #: FeatureFrame.save/load — see tests/fixtures/feature_frame_contract/), sibling of
 #: the single-file pandas cache above. Engines must consume the loader's exposed

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.data.constants import CACHE_SOURCES
+from views_pipeline_core.data.constants import cache_filename_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -621,7 +622,7 @@ class ModelPathManager:
         Returns:
             Sorted list of raw data file paths (newest first)
         """
-        prefixes = tuple(f"{run_type}_{src}_df" for src in CACHE_SOURCES)
+        prefixes = tuple(cache_filename_prefix(run_type, src) for src in CACHE_SOURCES)
         paths = [
             f
             for f in self.data_raw.iterdir()
