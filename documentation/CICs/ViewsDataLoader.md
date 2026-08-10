@@ -3,8 +3,8 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-04-22
-**Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern)
+**Last reviewed:** 2026-08-10
+**Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern), ADR-059 (Cache Provenance)
 
 ---
 
@@ -34,6 +34,14 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
 
 ## 3. Responsibilities and Guarantees
 
+**A cache is served only if its provenance record matches this run** (ADR-059). Changing
+the queryset, level, source, partition or month range and re-running with `use_saved=True`
+raises rather than serving the previous specification's data. A cache with no record, or
+one written at a different `PROVENANCE_VERSION`, is refetched rather than served. This does
+**not** detect upstream data revisions under an unchanged queryset — the digest covers the
+specification, not the data (register C-285, open).
+
+
 - Guarantees that data returned from `get_data()` has been fetched from the
   detected source (viewser or views-datafactory) or loaded from a valid cache,
   and covers the month range implied by the requested partition.
@@ -43,19 +51,24 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
 - Guarantees that cache filenames encode the source:
   `{partition}_viewser_df{ext}` or `{partition}_datafactory_df{ext}`.
   A source switch cannot silently read stale data from the other source.
-- Guarantees that fetched DataFrames are saved to `data_raw/` for provenance and
-  reuse, with a timestamped fetch log.
+- Guarantees that fetched DataFrames are saved to `data_raw/` for reuse, with a
+  timestamped fetch log (which records WHEN — the freshness check in
+  `validation/ensemble/check.py` reads it) and a provenance sidecar (which records
+  WHAT produced it). Two records of two different facts, not a duplication; see ADR-059.
 - Guarantees that all numeric columns are cast to `float64` via `ensure_float64()`
   before returning.
 - Guarantees that when `validate=True` (the default), `CoreDataSniffer.sniff_loaded_data()`
   is called before returning, enforcing MultiIndex layout and month range.
 - Guarantees that `_fetch_data_from_datafactory()` selects the datafactory
-  `output_format` from the descriptor's `loa` field via `_LOA_TO_OUTPUT_FORMAT`,
+  `output_format` from the descriptor's `loa` field via `LOA_TO_OUTPUT_FORMAT`
+  (`data/constants.py`, verified against the installed views-datafactory — #415),
   ensuring the returned DataFrame matches the model's declared level of analysis
   (`priogrid_month` → pgm index, `country_month` → cm index).
 - Guarantees that drift detection is attempted on every fresh viewser fetch; on
   `KeyError` the fetch falls back to non-drift-detected mode with a logged error.
-  Drift detection is not available for datafactory sources (C-52 accepted).
+  Drift detection is not available for datafactory sources — the gap is now RECORDED
+  in each cache's provenance as `drift_detection_ran` rather than left as an absence
+  (#414). C-52 remains open: the upstream capability still does not exist.
 - Guarantees that `month_first` and `month_last` are computed from the partition
   dict before any fetch occurs.
 - Guarantees that `cached_data_path` (read-only property) returns the `Path` to
@@ -104,6 +117,12 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
   - Sets instance state: `self.partition`, `self.partition_dict`, `self.month_first`,
     `self.month_last`, `self.drift_config_dict`, `self.override_month`,
     `self._cached_data_path` (exposed as `cached_data_path` property).
+  - Writes a **provenance sidecar** beside every cache it writes (ADR-059, epic #410):
+    `{artifact}.provenance.json` beside the pandas parquet, `provenance.json` inside the
+    FeatureFrame cache directory. Records the queryset digest, source, partition, month
+    range, level, and whether drift detection ran. A failed sidecar write removes the
+    artifact — a cache without a record is refetched, so leaving one behind would discard
+    the fetch on the next run while looking successful.
 
 ---
 
@@ -121,6 +140,12 @@ source-aware filenames, and delegates structural validation to `CoreDataSniffer`
 - `CoreDataSniffer` raises on MultiIndex or month-range violations when `validate=True`.
 - Drift detection `KeyError` is caught and logged; the fetch retries without drift
   detection. This is the only fallback path (viewser only).
+- `StaleCacheError` if `use_saved=True` and the cache's provenance record disagrees with
+  the current run. The message names every field that differs, with both values, and points
+  at `config_queryset.py`. The cache is left on disk for inspection (ADR-059).
+- `ProvenanceRecordInvalid` if a record exists but cannot be parsed. Distinct from an
+  absent record, which is a cache miss and refetches silently: damaged is not missing, and
+  refetching quietly would leave the damage unremarked.
 
 ---
 
