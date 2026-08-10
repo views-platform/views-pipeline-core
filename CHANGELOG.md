@@ -23,6 +23,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.0.1] — unreleased
+
+A patch release. **Nothing here breaks a 3.0.0 consumer**, and the one behaviour change
+refuses loudly rather than degrading quietly — see the note on the version choice below.
+
+### Fixed
+
+- **Gated ensembles silently dropped their occurrence channel, understating AP.** Both
+  ensemble managers derived their pooled target list as
+  `c.get("targets", c.get("regression_targets", []))`, so an ensemble declaring
+  `classification_targets` had its `by_*` gate channel dropped from the pool. The result
+  was a wrong number with no error anywhere. Measured recovery in views-hydranet EXP-03 at
+  h1: sb 0.316→0.456, ns 0.177→0.355, os 0.135→0.225, by re-pooling cached cubes. #380
+  converted `ensemble.py` to `combined_targets` and missed these two sites. (#422, C-286)
+
+  **What this means for you:** if an ensemble config declares `classification_targets`,
+  the pooled context now carries them. If a config still sets the `targets` key retired in
+  #380, `combined_targets` **raises** naming the key and its replacement, where the old
+  code silently preferred it. No live config in views-models or views-hydranet carries it.
+
+### Changed
+
+- **`EnsembleContext` moved** from `managers/ensemble/dataframe_ensemble.py` to
+  `managers/ensemble/context.py` and gained a `from_config()` factory holding the single
+  shared `_build_context` body — previously written twice, differing in 2 of 18 arguments.
+  Not a public symbol; `managers/ensemble/__init__.py` is unchanged. (#432)
+- **`UpdateViewser` moved** from `modules/dataloaders/dataloaders.py` to
+  `modules/dataloaders/update_viewser.py`. **The import path is unchanged** —
+  `from views_pipeline_core.modules.dataloaders import UpdateViewser` still resolves; the
+  package's lazy-export mapping was repointed, not the name. (#431)
+- **`ModelManager.__load_config` is now `_load_config`**, delegating to
+  `managers/configuration/script_config.load_config_from_script()`. Only relevant if you
+  were reaching it through name mangling as `_ModelManager__load_config` — which
+  `EnsembleManager` was, and no longer needs to. (#433)
+
+### Added
+
+- Conformance tests at the views-evaluation and views-models boundaries, and a meta-test
+  that derives the neighbour list from source and fails when a boundary has neither a
+  check nor a written reason it lacks one. (#429, #430)
+- A guard rejecting name-mangled private access anywhere in the package. (#433)
+
+### Note on the version number
+
+This was argued as a **major**: `combined_targets` raises where the old code silently
+preferred a retired key, and views-baseline, views-reporting, views-postprocessing and 13
+views-models ensembles all pin an open `>=3.0.0,<4.0.0` range that absorbs a patch without
+review — the shape of the #188 incident that `tests/test_public_surface_requires_a_major_bump.py`
+exists to prevent.
+
+It was checked rather than assumed. No live config in any downstream repo carries the
+retired key (the only occurrence anywhere is a toy fixture in views-hydranet's tests,
+unconnected to this code path), and if one did, the failure is a `ValueError` naming the
+offending key, its replacement, and the issue. The #188 disaster was a *silent* break;
+this one hands you the remedy in the traceback. Nothing in the 52-name public surface
+snapshot changes.
+
+Forcing 4.0.0 would have required pin bumps in 11 ensemble `requirements.txt` files and
+three sibling repos to guard against a failure that cannot be silent. Recorded here rather
+than in a closed issue, because a future contributor could reasonably reach the opposite
+conclusion from the diff alone.
+
+---
+
 ## [3.0.0] — 2026-08-03
 
 A major release. Every item under *Removed* and *Changed — breaking* will break a 2.x
