@@ -441,7 +441,7 @@ class ViewsDataset:
 
         Replaces the legacy ``df.forecasts.to_store(name=name, ...)`` pandas
         extension call. The parquet bytes are produced by the same
-        :meth:`save_parquet` path (pyarrow, no pandas), then uploaded by
+        :meth:`save_parquet` path, then uploaded by
         :class:`PredstoreModule` under the legacy blob key
         ``pr_{run}_{name}.parquet``. When a metadata database URL is
         configured, a ``forecasts_metadata.forecasts`` row is also written
