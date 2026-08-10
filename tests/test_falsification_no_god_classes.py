@@ -136,7 +136,7 @@ KNOWN_GOD_CLASSES = {
     "views_pipeline_core/managers/model/model.py::ForecastingModelManager",  # 1630 loc
     "views_pipeline_core/modules/aggregation/aggregator.py::AggregationModule",  # 867 loc
     "views_pipeline_core/modules/appwrite/file.py::AppWriteFileModule",  # 1534 loc
-    "views_pipeline_core/modules/dataloaders/dataloaders.py::UpdateViewser",  # 556 loc
+    "views_pipeline_core/modules/dataloaders/update_viewser.py::UpdateViewser",  # 556 loc, split out by #431
     "views_pipeline_core/modules/dataloaders/dataloaders.py::ViewsDataLoader",  # 913 loc
     "views_pipeline_core/modules/datastore/datastore.py::DatastoreModule",  # 560 loc
     "views_pipeline_core/modules/validation/adapter.py::EvaluationAdapter",  # 517 loc
