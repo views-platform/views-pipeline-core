@@ -103,7 +103,13 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   `ModelPathManager`.
 - `configs["aggregation"]` -- must be in `SUPPORTED_PF_AGGREGATION_METHODS`:
   `{"concat", "arithmetic_mean"}`.
-- `configs["targets"]` or `configs["regression_targets"]` -- list of target names.
+- `configs["regression_targets"]` and/or `configs["classification_targets"]` -- lists of
+  target names. The pooled target list is **derived** from both by `combined_targets`
+  (`managers/configuration/configuration.py`), regression first, then classification.
+  Declaring `classification_targets` is what puts the occurrence/gate channel (`by_*`) in
+  the pool; omitting it silently understated ensemble AP (C-132, #422).
+- `configs["targets"]` -- **retired** in #380. `combined_targets` raises `ValueError` on a
+  config still carrying it, rather than letting a stale key outrank the split ones.
 - Assumes sub-model `main.py` scripts accept `ForecastingModelArgs.to_shell_command()`
   arguments and produce PredictionFrame outputs at:
   - Evaluation: `data_generated/predictions_{run_type}_{ts}/origin_{i}/{target}/y_pred.npy`
