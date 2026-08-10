@@ -185,7 +185,9 @@ def fetch_feature_frame(
         # reject. A refused cache raises out of here; an unverifiable one returns False and
         # falls through to the fetch below, exactly as a miss does.
         verified = cache_dir.exists() and cache_matches_current_context(
-            provenance_for(ctx, level),
+            # Not compared — see the pandas path's note and
+            # CacheProvenance.identifying_fields.
+            provenance_for(ctx, level, drift_detection_ran=False),
             directory_sidecar_path(cache_dir),
             cache_dir,
         )
@@ -206,7 +208,15 @@ def fetch_feature_frame(
     # Audit BEFORE caching: a frame that fails audit must never be persisted
     # (with validate=False the caller explicitly accepts an unaudited cache).
     _sniff(frame)
-    save_frame_cache(frame, cache_dir, provenance=provenance_for(ctx, level))
+    save_frame_cache(
+        frame,
+        cache_dir,
+        # The frame path has no drift-detection channel at all: `_fetch_from_datafactory`
+        # returns a bare frame, not `(frame, alerts)`. So this is the measured truth for
+        # this path rather than an assumption about the source (C-52 — the gap is now
+        # recorded in the artifact instead of only in a log line the run throws away).
+        provenance=provenance_for(ctx, level, drift_detection_ran=False),
+    )
     if on_fetch is not None:
         on_fetch()
     return frame

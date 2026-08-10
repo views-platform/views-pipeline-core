@@ -307,3 +307,25 @@ def test_an_unchanged_frame_cache_is_still_served(loader, mock_datafactory):
         loader, "_fetch_data", side_effect=AssertionError("refetched a valid cache")
     ):
         loader.get_feature_frame("forecasting", use_saved=True, level="pgm")
+
+
+def test_a_frame_cache_records_that_drift_detection_did_not_run(loader, mock_datafactory):
+    """C-52, recorded in the artifact rather than left as an absence. #414.
+
+    The frame path has no drift-detection channel at all — `_fetch_from_datafactory`
+    returns a bare frame, not `(frame, alerts)`. So `False` here is measured, not assumed
+    about the source. Asserted because a mutation flipping it to `True` was otherwise
+    undetected: nothing else in the suite looks at this field on this path.
+    """
+    from views_pipeline_core.data.provenance_sidecar import (
+        directory_sidecar_path,
+        read_provenance,
+    )
+
+    loader.get_feature_frame("forecasting", use_saved=False, level="pgm")
+    record = read_provenance(directory_sidecar_path(loader.cached_frame_path))
+
+    assert record.drift_detection_ran is False, (
+        "the frame cache claims drift detection ran. It cannot have: the datafactory "
+        "frame fetch returns no alerts channel."
+    )

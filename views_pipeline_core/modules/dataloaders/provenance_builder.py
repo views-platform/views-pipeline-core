@@ -39,7 +39,9 @@ from views_pipeline_core.modules.dataloaders.fetch_context import FetchContext
 logger = logging.getLogger(__name__)
 
 
-def provenance_for(ctx: FetchContext, level: Optional[str]) -> CacheProvenance:
+def provenance_for(
+    ctx: FetchContext, level: Optional[str], *, drift_detection_ran: bool
+) -> CacheProvenance:
     """The record describing a cache written from ``ctx``.
 
     ``level`` is not on `FetchContext` — it arrives as a caller argument on both paths —
@@ -51,6 +53,11 @@ def provenance_for(ctx: FetchContext, level: Optional[str]) -> CacheProvenance:
     detection used (#289). Re-reading ``get_queryset()`` here would let the record describe
     a different queryset than the fetch used — the exact confusion the single-read contract
     was introduced to remove.
+
+    ``drift_detection_ran`` is required and keyword-only (#414). The caller knows whether
+    detection ran; this function cannot work it out, and guessing from ``ctx.source`` would
+    be a hand-written mapping that goes wrong the day a source changes behaviour — the
+    failure this repo has hit repeatedly (C-259, C-261, C-264, C-282).
     """
     return CacheProvenance(
         queryset_digest=queryset_digest(ctx.queryset),
@@ -59,6 +66,7 @@ def provenance_for(ctx: FetchContext, level: Optional[str]) -> CacheProvenance:
         month_first=ctx.month_first,
         month_last=ctx.month_last,
         level=level,
+        drift_detection_ran=drift_detection_ran,
     )
 
 

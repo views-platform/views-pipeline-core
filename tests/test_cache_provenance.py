@@ -59,6 +59,7 @@ def _provenance(**overrides) -> CacheProvenance:
         "month_first": 121,
         "month_last": 550,
         "level": "pgm",
+        "drift_detection_ran": False,
     }
     base.update(overrides)
     return CacheProvenance(**base)
@@ -284,7 +285,7 @@ def test_the_record_is_json_serialisable():
 
 def test_an_unknown_field_at_the_SAME_version_is_malformed():
     """Same version but different fields is corruption, not age."""
-    payload = {**_provenance().to_dict(), "drift_detection_ran": True}
+    payload = {**_provenance().to_dict(), "a_field_from_the_future": True}
     with pytest.raises(ProvenanceRecordInvalid, match="unknown field"):
         CacheProvenance.from_dict(payload)
 
@@ -354,16 +355,16 @@ def test_the_mismatch_reports_the_LIVE_expected_version(monkeypatch):
     """
     from views_pipeline_core.data import cache_provenance
 
-    monkeypatch.setattr(cache_provenance, "PROVENANCE_VERSION", 2)
+    monkeypatch.setattr(cache_provenance, "PROVENANCE_VERSION", PROVENANCE_VERSION + 1)
     with pytest.raises(cache_provenance.ProvenanceVersionMismatch) as excinfo:
         cache_provenance.CacheProvenance.from_dict(_provenance().to_dict())
 
-    assert excinfo.value.found == 1
-    assert excinfo.value.expected == 2, (
+    assert excinfo.value.found == PROVENANCE_VERSION
+    assert excinfo.value.expected == PROVENANCE_VERSION + 1, (
         "the exception reports a stale expected version — it was bound at import time "
         "rather than read when raised"
     )
-    assert "version 2" in str(excinfo.value)
+    assert f"version {PROVENANCE_VERSION + 1}" in str(excinfo.value)
 
 
 def test_both_error_types_remain_ValueError():
@@ -395,12 +396,19 @@ def test_the_version_defaults_and_is_recorded():
     assert "provenance_version" in _provenance().to_dict()
 
 
-def test_drift_detection_ran_is_not_in_this_version():
-    """#414 adds it. Pinned so that story demonstrably changes the record rather than
-    silently finding the field already present."""
-    assert "drift_detection_ran" not in {
-        field.name for field in dataclasses.fields(CacheProvenance)
-    }
+def test_drift_detection_ran_is_recorded_but_not_identifying():
+    """#414 added it. It records how the cache was produced, not what it contains.
+
+    This test asserted its ABSENCE until #414 — the inversion is the point: S1 held the
+    field back precisely so this story would have to change something visible rather than
+    quietly find it already there.
+    """
+    names = {field.name for field in dataclasses.fields(CacheProvenance)}
+    assert "drift_detection_ran" in names
+    assert "drift_detection_ran" not in CacheProvenance.identifying_fields(), (
+        "a run about to READ a cache has not fetched, so it cannot know whether detection "
+        "ran for the fetch that wrote it. Comparing this would refuse every viewser cache."
+    )
 
 
 # ── differences ───────────────────────────────────────────────────────────────
@@ -433,8 +441,14 @@ def test_each_field_is_compared_independently(field_name, other_value):
     ), "the difference does not carry both values, so a message cannot report them"
 
 
-def test_the_difference_check_covers_every_declared_field():
-    """Derived, so a field added without a comparison is impossible rather than unlikely."""
+def test_the_difference_check_covers_every_identifying_field():
+    """Derived, so a field added without a comparison is impossible rather than unlikely.
+
+    Stated in terms of IDENTIFYING fields since #414: `drift_detection_ran` records how a
+    cache was produced, not what it contains, and is deliberately not compared. A field
+    added without deciding which kind it is defaults to identifying — the safe direction,
+    because the failure is a refused cache rather than an unnoticed one.
+    """
     covered = {
         "queryset_digest",
         "source",
@@ -444,11 +458,24 @@ def test_the_difference_check_covers_every_declared_field():
         "level",
         "provenance_version",
     }
-    declared = {field.name for field in dataclasses.fields(CacheProvenance)}
-    assert declared == covered, (
-        f"CacheProvenance declares {sorted(declared)} but the per-field comparison test "
-        f"covers {sorted(covered)}. Unverified: {sorted(declared - covered)}."
+    identifying = set(CacheProvenance.identifying_fields())
+    assert identifying == covered, (
+        f"CacheProvenance identifies by {sorted(identifying)} but the per-field "
+        f"comparison test covers {sorted(covered)}. Unverified: "
+        f"{sorted(identifying - covered)}."
     )
+
+
+def test_a_non_identifying_field_does_not_cause_a_mismatch():
+    """The reason the distinction exists at all.
+
+    Two caches identical in every identifying respect must compare equal even if one was
+    fetched with drift detection and the other was not — otherwise the read path, which
+    cannot know the cached value, would refuse every viewser cache.
+    """
+    with_drift = _provenance(drift_detection_ran=True)
+    without = _provenance(drift_detection_ran=False)
+    assert with_drift.differences_from(without) == {}
 
 
 # ── purity ────────────────────────────────────────────────────────────────────
