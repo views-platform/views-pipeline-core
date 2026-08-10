@@ -6,10 +6,8 @@
 # Tripwire: tests/test_import_purity.py.
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING, Callable, Union, Optional, List, Dict
 import logging
-import importlib
 from abc import abstractmethod
 from datetime import datetime
 import traceback
@@ -46,6 +44,10 @@ from views_pipeline_core.modules.validation.core_config_sniffer import (
 )
 
 from views_pipeline_core.managers.configuration.configuration import combined_targets
+from views_pipeline_core.managers.configuration.script_config import (
+    load_config_from_script,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -206,14 +208,14 @@ class ModelManager:
 
         self._script_paths = self._model_path.get_scripts()
         self._config_deployment = self.__load_maturity_config()
-        self._config_hyperparameters = self.__load_config(
+        self._config_hyperparameters = self._load_config(
             "config_hyperparameters.py", "get_hp_config"
         )
-        self._config_meta = self.__load_config("config_meta.py", "get_meta_config")
-        self._partition_dict = self.__load_config("config_partitions.py", "generate")
+        self._config_meta = self._load_config("config_meta.py", "get_meta_config")
+        self._partition_dict = self._load_config("config_partitions.py", "generate")
 
         if self._model_path.target == "model":
-            self._config_sweep = self.__load_config(
+            self._config_sweep = self._load_config(
                 "config_sweep.py", "get_sweep_config"
             )
         else:
@@ -292,42 +294,24 @@ class ModelManager:
             )
 
         if has_new:
-            return self.__load_config(MATURITY_CONFIG_FILENAME, "get_maturity_config")
-        return self.__load_config(
+            return self._load_config(MATURITY_CONFIG_FILENAME, "get_maturity_config")
+        return self._load_config(
             LEGACY_MATURITY_CONFIG_FILENAME, "get_deployment_config"
         )
 
-    def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
+    def _load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
+        """Load a config dict from one of this model's `config_*.py` scripts.
+
+        Delegates to `load_config_from_script` (#433), the single implementation shared
+        with both composition-based ensemble managers.
+
+        Protected rather than name-mangled. `EnsembleManager` needs this and used to reach
+        it through Python's name mangling — a string-shaped dependency no tool could
+        follow, and one that would have broken silently on a rename. The implementation
+        now lives outside the hierarchy, so nothing has to inherit from `ModelManager` in
+        order to load a config.
         """
-        Loads and executes a configuration method from a specified script.
-
-        Args:
-            script_name (str): The name of the script to load.
-            config_method (str): The name of the configuration method to execute.
-
-        Returns:
-            dict: The result of the configuration method if the script and method are found, otherwise None.
-
-        Raises:
-            AttributeError: If the specified configuration method does not exist in the script.
-            ImportError: If there is an error importing the script.
-        """
-        script_path = self._script_paths.get(script_name)
-        if script_path:
-            try:
-                spec = importlib.util.spec_from_file_location(script_name, script_path)
-                config_module = importlib.util.module_from_spec(spec)
-                sys.modules[script_name] = config_module
-                spec.loader.exec_module(config_module)
-                if hasattr(config_module, config_method):
-                    return getattr(config_module, config_method)()
-            except (AttributeError, ImportError) as e:
-                logger.error(
-                    f"Error loading config from {script_name}: {e}", exc_info=True
-                )
-                raise
-
-        return None
+        return load_config_from_script(self._script_paths, script_name, config_method)
 
     def __get_pred_store_name(self) -> str:
         """

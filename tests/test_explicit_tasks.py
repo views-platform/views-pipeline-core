@@ -30,7 +30,7 @@ from views_pipeline_core.managers.model.model import ForecastingModelManager  # 
 # EVALUATION LOOP & SCALAR GATE TESTS
 # ============================================================
 
-@patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={})
+@patch('views_pipeline_core.managers.model.model.ForecastingModelManager._load_config', return_value={})
 @patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', return_value=MagicMock())
 @patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock())
 @patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash')
@@ -86,7 +86,7 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
         # evaluate called once per target via EvaluationFrame
         assert mock_eval_cls.return_value.evaluate.call_count == 1
 
-@patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={})
+@patch('views_pipeline_core.managers.model.model.ForecastingModelManager._load_config', return_value={})
 @patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', return_value=MagicMock())
 @patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock())
 @patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash')
@@ -135,7 +135,7 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
         manager._evaluate_prediction_dataframe(df_pred, eval_type="standard")
 
 
-@patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={})
+@patch('views_pipeline_core.managers.model.model.ForecastingModelManager._load_config', return_value={})
 @patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', return_value=MagicMock())
 @patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock())
 @patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash')
