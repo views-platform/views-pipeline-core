@@ -71,7 +71,17 @@ PARTITION_DICT = {
     "calibration": {"train": (121, 444), "test": (445, 492)},
 }
 
-ARGS = ForecastingModelArgs(run_type="calibration", train=True, eval_type="standard")
+def _args() -> ForecastingModelArgs:
+    """A fresh instance per call.
+
+    `ForecastingModelArgs` is a plain (non-frozen) dataclass, so a module-level constant
+    shared across parametrized tests is mutable state one in-place edit away from
+    poisoning test order silently. Nothing mutates it today; building it per call means
+    nothing can.
+    """
+    return ForecastingModelArgs(run_type="calibration", train=True, eval_type="standard")
+
+
 
 
 def _model_path() -> MagicMock:
@@ -94,7 +104,7 @@ def _build(manager_cls, config: dict):
     manager._config_manager.get_combined_config.return_value = config
     manager._ensemble_path = _model_path()
     manager._partition_dict = PARTITION_DICT
-    return manager._build_context(ARGS)
+    return manager._build_context(_args())
 
 
 #: Fields both managers must produce identically, with their expected values.
@@ -104,7 +114,7 @@ SHARED_EXPECTATIONS = {
     "run_type": "calibration",
     "project": "test_ensemble_calibration",
     "eval_type": "standard",
-    "args": ARGS,
+    "args": _args(),  # compared by dataclass equality, not identity
     "models": ["purple_alien", "blue_cat"],
     "aggregation": "mean",
     # regression first, then classification — `combined_targets`, #380/#422
@@ -183,16 +193,25 @@ def test_divergent_fields_keep_their_per_manager_values(manager_cls):
 
 
 @pytest.mark.parametrize("manager_cls", MANAGERS)
-def test_model_path_is_passed_through_unchanged(manager_cls):
-    """Compared by identity: `_build_context` must pass the path object, not rebuild it."""
+def test_pass_through_fields_keep_their_identity(manager_cls):
+    """`model_path` and `configs` are passed through, not rebuilt or copied.
+
+    Identity, not equality. The value comparisons above would still pass if `from_config`
+    started copying `configs` — and a copy would silently break every consumer that reads
+    `ctx.configs` expecting the same object the config manager returned.
+    """
     manager = object.__new__(manager_cls)
+    config = dict(SHARED_CONFIG)
     manager._config_manager = MagicMock()
-    manager._config_manager.get_combined_config.return_value = dict(SHARED_CONFIG)
+    manager._config_manager.get_combined_config.return_value = config
     path = _model_path()
     manager._ensemble_path = path
     manager._partition_dict = PARTITION_DICT
 
-    assert manager._build_context(ARGS).model_path is path
+    ctx = manager._build_context(_args())
+
+    assert ctx.model_path is path
+    assert ctx.configs is config
 
 
 @pytest.mark.parametrize("manager_cls", MANAGERS)
@@ -218,7 +237,7 @@ def test_optional_keys_fall_back_to_their_documented_defaults(manager_cls):
     manager._config_manager.get_combined_config.return_value = minimal
     manager._ensemble_path = _model_path()
     manager._partition_dict = None  # the `or {}` branch
-    ctx = manager._build_context(ARGS)
+    ctx = manager._build_context(_args())
 
     assert ctx.reconciliation is None
     assert ctx.reconcile_with is None

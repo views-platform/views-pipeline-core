@@ -211,8 +211,8 @@ manager._execute_model_training(ctx)
 
 ## 10. Test Alignment
 
-- `tests/test_managers/test_dataframe_ensemble_manager.py` -- 45 characterization
-  tests across 13 test classes:
+- `tests/test_managers/test_dataframe_ensemble_manager.py` -- 48 characterization
+  tests across 14 test classes:
   - `TestNoInheritance` -- verifies no inheritance from ForecastingModelManager
     or ModelManager, and that composed stages exist as attributes.
   - `TestEnsembleContext` -- verifies immutability, field population, and
@@ -239,6 +239,16 @@ manager._execute_model_training(ctx)
   - `TestConfigModelsetMerge` -- verifies config_modelset → effective_meta
     merge precedence, collision warning, copy semantics (original
     config_meta unchanged), and no-op when config_modelset is absent.
+  - `TestBuildContextPoolsGateChannel` -- verifies a declared
+    `classification_targets` reaches `ctx.targets` (C-132, #422), that a
+    regression-only config is unchanged, and that a retired `targets` key
+    fails loud. Mirrors the same-named class in the PredictionFrame tests:
+    the fix was one line in two duplicated bodies and only one was covered.
+- `tests/test_managers/test_ensemble_context_characterization.py` -- 10 tests
+  pinning the full `EnsembleContext` both managers produce, field by field,
+  with a completeness guard derived from `dataclasses.fields`. Written before
+  the #432 unification and unchanged after; it is what makes "behaviour-neutral"
+  a measured claim rather than an asserted one.
 
 ---
 
