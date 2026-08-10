@@ -210,3 +210,43 @@ def test_this_guard_does_not_claim_to_cover_other_repositories():
     """
     assert PACKAGE.name == "views_pipeline_core"
     assert PACKAGE.is_dir()
+
+
+def test_a_provenance_sidecar_is_never_returned_as_raw_data(tmp_path):
+    """The coupling review found, pinned so a later change cannot quietly break it.
+
+    Since #412 a cache has a sidecar beside it: `forecasting_viewser_df.parquet` and
+    `forecasting_viewser_df.parquet.provenance.json`. The sidecar's **stem** is
+    `forecasting_viewser_df.parquet.provenance`, which *starts with the cache prefix* — so
+    `_get_raw_data_file_paths`'s `f.stem.startswith(prefixes)` matches it.
+
+    It is excluded only by the separate `f.suffix == PipelineConfig.dataframe_format`
+    filter, which predates the sidecar and knows nothing about it. Nothing asserted that
+    until now: review verified it by hand, and a hand-verified invariant with no test is
+    one refactor from being wrong. A sidecar returned as raw data would be handed to
+    `read_dataframe` as if it were a parquet.
+    """
+    from views_pipeline_core.configs import PipelineConfig
+    from views_pipeline_core.data.model_path import ModelPathManager
+    from views_pipeline_core.data.provenance_sidecar import file_sidecar_path
+
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    cache = raw / f"forecasting_viewser_df{PipelineConfig.dataframe_format}"
+    cache.touch()
+    sidecar = file_sidecar_path(cache)
+    sidecar.write_text("{}")
+    assert sidecar.stem.startswith(cache_filename_prefix("forecasting", "viewser")), (
+        "this test's premise is stale — the sidecar name no longer collides with the "
+        "cache prefix, so it is no longer proving anything"
+    )
+
+    manager = object.__new__(ModelPathManager)
+    manager.data_raw = raw
+    found = manager._get_raw_data_file_paths("forecasting")
+
+    assert found == [cache], (
+        f"_get_raw_data_file_paths returned {[p.name for p in found]}. A provenance "
+        f"sidecar must never be handed back as raw data — it would go to read_dataframe "
+        f"as if it were a parquet."
+    )
