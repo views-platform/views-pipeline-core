@@ -1,11 +1,16 @@
 # VIEWS Pipeline Core: Data Loading & Viewser Update Module
 
-File: `views_pipeline_core/modules/dataloaders/dataloaders.py`  
-Core Classes:  
-- `UpdateViewser` (incremental GED / ACLED refresh + transformation replay)  
-- `ViewsDataLoader` (partition-aware end‑to‑end data fetch, caching, drift monitoring, optional updating)
+Core Classes — **one per file since #431** (they were both in `dataloaders.py` until then):
 
-Ancillary Assets:
+| class | file |
+|---|---|
+| `ViewsDataLoader` (partition-aware end‑to‑end data fetch, caching, drift monitoring, optional updating) | `views_pipeline_core/modules/dataloaders/dataloaders.py` |
+| `UpdateViewser` (incremental GED / ACLED refresh + transformation replay) | `views_pipeline_core/modules/dataloaders/update_viewser.py` |
+
+Both are still imported from the package, unchanged:
+`from views_pipeline_core.modules.dataloaders import ViewsDataLoader, UpdateViewser`.
+
+Ancillary Assets — all in `update_viewser.py`, where their only consumer lives:
 - `transformation_mapping` (name → callable registry)
 - `TRANSFORMATIONS_EXPECTING_DF` (transformations needing DataFrame input)
 - Lazy Ingester / transformation imports (avoid CI breakages without certificates)
@@ -82,6 +87,8 @@ Special handling: `TRANSFORMATIONS_EXPECTING_DF = {"spatial.lag", "spatial.sptim
 ---
 
 ## Class: UpdateViewser
+
+*(`views_pipeline_core/modules/dataloaders/update_viewser.py` since #431.)*
 
 ### Overview
 
