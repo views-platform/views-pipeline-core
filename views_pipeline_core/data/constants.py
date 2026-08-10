@@ -39,3 +39,24 @@ RUN_TYPE_CALIBRATION = "calibration"
 RUN_TYPE_VALIDATION = "validation"
 RUN_TYPE_FORECASTING = "forecasting"
 TRAINING_RUN_TYPES = frozenset({RUN_TYPE_CALIBRATION, RUN_TYPE_VALIDATION})
+
+
+#: Level of analysis -> the ``output_format`` views-datafactory is asked for (#415, C-62).
+#:
+#: These strings are views-datafactory's vocabulary, not ours. They lived as a private
+#: dict inside the loader, independent of the set the factory validates against, so a
+#: rename on either side broke the other at runtime and only when a datafactory model
+#: actually ran.
+#:
+#: They are here because this file is "the single source of truth for conventions shared
+#: across pipeline-core and engine repos" and because the format is part of what a cache's
+#: provenance is written in (epic #410) — an identity keyed on a vocabulary that can drift
+#: silently between two repos is a poor thing to trust.
+#:
+#: The values are NOT copied from a list of theirs. `tests/test_datafactory_format_contract.py`
+#: verifies them against the installed package, so a rename there fails here rather than in
+#: production.
+LOA_TO_OUTPUT_FORMAT = {
+    "priogrid_month": "dataframe",
+    "country_month": "country_month",
+}

@@ -12,6 +12,7 @@ from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.constants import (
     CACHE_FILENAME_TEMPLATE,
+    LOA_TO_OUTPUT_FORMAT,
     PARTITION_TEST,
     PARTITION_TRAIN,
 )
@@ -148,10 +149,9 @@ def detect_data_source(queryset: Any, model_name: str) -> str:
 #: CI against the vendored contract fixture (tests/fixtures/feature_frame_contract/,
 #: tests/test_modules/test_datafactory_contract_conformance.py). Extend only with
 #: strings the upstream vocabulary defines (e.g. ``feature_frame`` for #161).
-_LOA_TO_OUTPUT_FORMAT = {
-    "priogrid_month": "dataframe",
-    "country_month": "country_month",
-}
+#: Re-exported under its historical private name; the mapping itself now lives in
+#: `data/constants.py` (#415). Kept so existing imports of the private name keep working.
+_LOA_TO_OUTPUT_FORMAT = LOA_TO_OUTPUT_FORMAT
 
 #: Grid-entity index-name consolidation (views-frames ADR-015). viewser and old
 #: on-disk caches still carry the legacy ``priogrid_gid`` (datafactory retired it in
