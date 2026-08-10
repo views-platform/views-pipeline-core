@@ -60,8 +60,20 @@ def _their_valid_formats(dataset) -> set:
     """
     for attribute, extract in _VOCABULARY_SOURCES:
         candidate = getattr(dataset, attribute, None)
-        if candidate is not None:
-            return extract(candidate)
+        if candidate is None:
+            continue
+        found = extract(candidate)
+        if found:
+            return found
+        # Present but EMPTY. `is not None` alone would return an empty set here, and the
+        # contract test would then fail with "we ask for X, they accept []" — technically
+        # red, but describing the wrong problem. An empty vocabulary means the probe found
+        # a husk, which is the same situation as not finding it at all.
+        raise AssertionError(
+            f"views-datafactory's {attribute} is present but empty. The probe located a "
+            f"husk, not a vocabulary — treat this as 'cannot verify', not as 'they accept "
+            f"nothing'."
+        )
 
     raise AssertionError(
         f"views-datafactory is installed but none of "
@@ -123,14 +135,18 @@ def test_an_installed_package_with_no_locatable_vocabulary_fails_rather_than_ski
 def test_we_do_not_keep_our_own_copy_of_their_vocabulary():
     """The point of the story: verify against theirs, never duplicate it.
 
-    Looks for a literal COLLECTION of their formats — a set, list or tuple containing all
-    of them. Copying their vocabulary back in would reintroduce C-62 while leaving the
-    contract test above passing, because the copy would agree with itself.
+    Looks for a literal COLLECTION of their formats — a set, list, tuple, or the keys or
+    values of a dict. Copying their vocabulary back in would reintroduce C-62 while
+    leaving the contract test above passing, because the copy would agree with itself.
 
-    The first version of this check just looked for the three strings anywhere in a file,
-    and flagged `constants.py` and `dataloaders.py` — both of which mention the names in
-    prose and in our own two-entry mapping. A guard that fires on documentation gets
-    switched off, so it parses the source instead of grepping it.
+    Dicts are included because ours **is** a dict. Review pointed out that if a future
+    story adds `feature_frame` support — and `constants.py` already anticipates one — a
+    mapping written as dict values would have carried their whole vocabulary straight past
+    a guard that only watched sets and lists. That is a near-miss, not a hypothetical.
+
+    The first version just looked for the three strings anywhere in a file, and flagged
+    `constants.py` and `dataloaders.py` for mentioning them in prose. A guard that fires on
+    documentation gets switched off, so it parses the source instead of grepping it.
     """
     import ast
     import pathlib
@@ -144,15 +160,21 @@ def test_we_do_not_keep_our_own_copy_of_their_vocabulary():
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:  # pragma: no cover - a template, not importable Python
             continue
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.Set, ast.List, ast.Tuple)):
-                continue
-            literals = {
-                element.value
-                for element in node.elts
-                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        def _strings(elements):
+            return {
+                e.value
+                for e in elements
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)
             }
-            if their_vocabulary <= literals:
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Set, ast.List, ast.Tuple)):
+                groups = [_strings(node.elts)]
+            elif isinstance(node, ast.Dict):
+                groups = [_strings(k for k in node.keys if k), _strings(node.values)]
+            else:
+                continue
+            if any(their_vocabulary <= group for group in groups):
                 offenders.append(f"{path.relative_to(package.parent)}:{node.lineno}")
 
     assert not offenders, (
@@ -169,3 +191,23 @@ def test_our_mapping_covers_the_levels_of_analysis_we_support():
     `country_month` and `priogrid_month`.
     """
     assert set(LOA_TO_OUTPUT_FORMAT) == {"priogrid_month", "country_month"}
+
+
+def test_an_empty_vocabulary_is_reported_as_unlocatable_not_as_an_empty_set():
+    """Present-but-empty is a husk, not an answer.
+
+    `getattr(..., None)` guards absence but not emptiness, so an empty enum would have
+    returned `set()` — and the contract test would then have failed with "we ask for X,
+    they accept nothing", which is red but describes the wrong problem. Found by review.
+    """
+
+    class _EmptyEnum:
+        def __iter__(self):
+            return iter([])
+
+    class _Husk:
+        __name__ = "datafactory_query.dataset"
+        OutputFormat = _EmptyEnum()
+
+    with pytest.raises(AssertionError, match="present but empty"):
+        _their_valid_formats(_Husk())
