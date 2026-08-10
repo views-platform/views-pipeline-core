@@ -28,6 +28,7 @@ from views_pipeline_core.domain.reconciliation_port import (
     Reconciler,
 )
 from views_pipeline_core.exceptions import PipelineException
+from views_pipeline_core.managers.configuration.configuration import combined_targets
 from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.files.utils import handle_ensemble_log_creation
 from views_pipeline_core.modules.reconciliation.reconcile_frames import reconcile_frames
@@ -370,7 +371,12 @@ class PredictionFrameEnsembleManager:
             args=args,
             models=c["models"],
             aggregation=c["aggregation"],
-            targets=c.get("targets", c.get("regression_targets", [])),
+            # Pool EVERY target the members predict — regression AND classification.
+            # Deriving via `combined_targets` (#380) instead of defaulting to
+            # `regression_targets` alone is what keeps the occurrence/gate channel
+            # (`by_*`) in the pool: gated HydraNet members emit a per-sample gate PF,
+            # and omitting it silently understated ensemble occurrence/AP (C-132).
+            targets=combined_targets(c),
             reconciliation=c.get("reconciliation"),
             reconcile_with=c.get("reconcile_with"),
             use_weights=c.get("use_weights", False),

@@ -26,6 +26,7 @@ import wandb
 
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.configs.pipeline import PipelineConfig
+from views_pipeline_core.managers.configuration.configuration import combined_targets
 from views_pipeline_core.data.handlers import _CDataset, _PGDataset, _ViewsDataset
 from views_pipeline_core.domain.reconciliation_port import Reconciler, RECONCILER_NOT_INJECTED_MSG
 from views_pipeline_core.exceptions import PipelineException
@@ -317,7 +318,11 @@ class DataFrameEnsembleManager:
             args=args,
             models=c["models"],
             aggregation=c["aggregation"],
-            targets=c.get("targets", c.get("regression_targets", [])),
+            # Derive the full target list (regression + classification) via
+            # `combined_targets` (#380) so the pool never silently drops the
+            # occurrence/gate channel — see C-132 and the sibling
+            # PredictionFrameEnsembleManager._build_context.
+            targets=combined_targets(c),
             reconciliation=c.get("reconciliation"),
             reconcile_with=c.get("reconcile_with"),
             use_weights=c.get("use_weights", False),

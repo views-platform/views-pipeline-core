@@ -85,6 +85,11 @@ collaborators vs. inheritance chain.
   `ModelPathManager`.
 - `configs["aggregation"]` -- aggregation method (e.g., `"mean"`, `"median"`,
   `"concat"`, `"vincentization"`).
+- `configs["regression_targets"]` and/or `configs["classification_targets"]` -- lists of
+  target names. The pooled target list is **derived** from both by `combined_targets`
+  (`managers/configuration/configuration.py`), regression first, then classification —
+  identical to `PredictionFrameEnsembleManager`. A legacy `configs["targets"]` key is
+  **retired** (#380) and `combined_targets` raises `ValueError` on it (C-132, #422).
 - `configs["reconciliation"]` -- optional. `"pgm_cm_point"` enables hierarchical
   reconciliation during forecasting.
 - `configs["reconcile_with"]` -- optional. CM model name for reconciliation target.

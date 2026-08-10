@@ -66,7 +66,9 @@ COMBINED_CONFIGS = {
     "aggregation": "concat",
     "regression_targets": ["ged_sb"],
     "classification_targets": [],
-    "targets": ["ged_sb"],
+    # NB: no synthesised `targets` key — retired in #380; the combined config
+    # must not carry it (test_targets_key_retired), and `_build_context` now
+    # derives the full list via `combined_targets`, which refuses a stale key.
     "level": "pgm",
     "reconciliation": None,
     "reconcile_with": None,
@@ -193,7 +195,6 @@ def pf_manager(mock_ensemble_path, mock_wandb_module, mock_config_manager):
             "aggregation": "concat",
             "regression_targets": ["ged_sb"],
             "classification_targets": [],
-            "targets": ["ged_sb"],
             "level": "pgm",
         },
         {"models": ["hydra_alpha", "hydra_beta"]},
@@ -1066,3 +1067,102 @@ class TestPredictionFrameReconciliationEndToEnd:
 
         assert called["load"] is False  # reconciliation skipped
         np.testing.assert_array_equal(forecasts["ged_sb"].values, pgm.values)  # untouched
+
+
+# ============================================================================
+# C-132: the pool must carry the occurrence/gate channel
+# ============================================================================
+
+
+class TestBuildContextPoolsGateChannel:
+    """`_build_context` must derive its target list from BOTH task-split keys.
+
+    C-132: gated HydraNet members emit a per-sample occurrence/gate PredictionFrame
+    (a `by_*` classification target) alongside the magnitude `lr_*` regressions. The
+    pool loops over `ctx.targets`, so a target list that carries only
+    `regression_targets` silently drops the gate — the pooled ensemble then has no
+    calibrated occurrence channel and its AP is understated with no error. The fix
+    routes `_build_context` through `combined_targets` (regression + classification,
+    #380), so the gate is pooled by default.
+    """
+
+    def test_targets_include_classification_channel(self, pf_manager, sample_args):
+        cfg = COMBINED_CONFIGS.copy()
+        cfg["regression_targets"] = ["lr_sb_best", "lr_ns_best", "lr_os_best"]
+        cfg["classification_targets"] = ["by_sb_best", "by_ns_best", "by_os_best"]
+        pf_manager._config_manager.get_combined_config.return_value = cfg
+
+        ctx = pf_manager._build_context(sample_args)
+
+        # regression first, then classification — the gate channels must be present
+        assert ctx.targets == [
+            "lr_sb_best", "lr_ns_best", "lr_os_best",
+            "by_sb_best", "by_ns_best", "by_os_best",
+        ]
+        for gate in ("by_sb_best", "by_ns_best", "by_os_best"):
+            assert gate in ctx.targets
+
+    def test_regression_only_config_unchanged(self, pf_manager, sample_args):
+        """A model with no classification targets pools exactly its regressions."""
+        cfg = COMBINED_CONFIGS.copy()
+        cfg["regression_targets"] = ["lr_sb_best"]
+        cfg["classification_targets"] = []
+        pf_manager._config_manager.get_combined_config.return_value = cfg
+
+        ctx = pf_manager._build_context(sample_args)
+
+        assert ctx.targets == ["lr_sb_best"]
+
+    def test_stale_targets_key_fails_loud(self, pf_manager, sample_args):
+        """A resurrected `targets` key is refused, not silently preferred (#380)."""
+        cfg = COMBINED_CONFIGS.copy()
+        cfg["regression_targets"] = ["lr_sb_best"]
+        cfg["classification_targets"] = ["by_sb_best"]
+        cfg["targets"] = ["stale"]
+        pf_manager._config_manager.get_combined_config.return_value = cfg
+
+        with pytest.raises(ValueError, match="targets"):
+            pf_manager._build_context(sample_args)
+
+
+class TestPoolEmitsGateChannelEndToEnd:
+    """C-132, end-to-end: the pooled OUTPUT must carry the `by_*` gate channel —
+    not merely `ctx.targets`. This drives the real `_build_context` →
+    `_forecast_ensemble` chain (the fix + the emit), closing the gap where a test
+    asserting only `ctx.targets` would pass even if the pool never wrote the gate.
+    """
+
+    def test_forecast_ensemble_emits_pooled_gate_channel(self, pf_manager, monkeypatch):
+        cfg = COMBINED_CONFIGS.copy()
+        cfg["regression_targets"] = ["lr_sb_best"]
+        cfg["classification_targets"] = ["by_sb_best"]
+        pf_manager._config_manager.get_combined_config.return_value = cfg
+
+        args = ForecastingModelArgs(
+            run_type="forecasting", train=False, evaluate=False,
+            forecast=True, saved=True, eval_type="standard",
+        )
+        ctx = pf_manager._build_context(args)
+        assert "by_sb_best" in ctx.targets  # the fix put the gate in the plan...
+
+        # ...and each constituent emits BOTH the magnitude and the gate channel.
+        def _artifact(model_name, ctx):
+            return {
+                "lr_sb_best": _make_pf(n_rows=5, n_samples=8, seed=1),
+                "by_sb_best": _make_pf(n_rows=5, n_samples=8, seed=2),
+            }
+
+        monkeypatch.setattr(pf_manager, "_forecast_model_artifact", _artifact)
+        monkeypatch.setattr(_pfe_mod, "save_pf", lambda frame, d: None)
+
+        forecasts = pf_manager._forecast_ensemble(ctx)
+
+        # The EMIT, not just the plan: a pooled gate frame must exist, concat-summed
+        # across constituents (2 members × 8 = 16).
+        assert "by_sb_best" in forecasts, (
+            "the pooled forecast dropped the occurrence/gate channel (C-132) — "
+            "ctx.targets carried it but the emit did not"
+        )
+        assert forecasts["by_sb_best"].sample_count == 8 * len(ctx.models)
+        # magnitude channel still pooled too
+        assert forecasts["lr_sb_best"].sample_count == 8 * len(ctx.models)

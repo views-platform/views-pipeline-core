@@ -41,7 +41,8 @@ COMBINED_CONFIGS = {
     "aggregation": "mean",
     "regression_targets": ["ged_sb"],
     "classification_targets": [],
-    "targets": ["ged_sb"],
+    # No synthesised `targets` key — retired in #380; `_build_context` derives
+    # the full target list via `combined_targets`, which refuses a stale key.
     "level": "pgm",
     "reconciliation": None,
     "reconcile_with": None,
@@ -140,7 +141,6 @@ def df_manager(mock_ensemble_path, mock_wandb_module, mock_config_manager):
             "aggregation": "mean",
             "regression_targets": ["ged_sb"],
             "classification_targets": [],
-            "targets": ["ged_sb"],
             "level": "pgm",
         },
         {"models": ["purple_alien", "blue_cat"]},
@@ -1027,3 +1027,61 @@ class TestConfigModelsetMerge:
             "models": ["old"],
             "description": "Test",
         }
+
+
+# ============================================================================
+# C-132: the pool must carry the occurrence/gate channel
+# ============================================================================
+
+
+class TestBuildContextPoolsGateChannel:
+    """`_build_context` must derive its target list from BOTH task-split keys.
+
+    The sibling `PredictionFrameEnsembleManager` has had this coverage since #422.
+    `DataFrameEnsembleManager` received the identical one-line fix in the same PR and
+    had none — the two `_build_context` bodies are duplicated (#432 unifies them), and
+    a duplicated fix that is verified on only one copy is how the defect returns to the
+    other. That is the whole reason this class exists rather than trusting the sibling.
+
+    C-132: a target list carrying only `regression_targets` silently drops a declared
+    occurrence/gate channel, and the pooled ensemble's AP is understated with no error.
+    """
+
+    def test_targets_include_classification_channel(self, df_manager):
+        cfg = COMBINED_CONFIGS.copy()
+        cfg["regression_targets"] = ["lr_sb_best", "lr_ns_best"]
+        cfg["classification_targets"] = ["by_sb_best", "by_ns_best"]
+        df_manager._config_manager.get_combined_config.return_value = cfg
+
+        ctx = df_manager._build_context(ForecastingModelArgs(run_type="calibration", train=True))
+
+        # regression first, then classification — the gate channels must be present
+        assert ctx.targets == [
+            "lr_sb_best", "lr_ns_best", "by_sb_best", "by_ns_best",
+        ]
+
+    def test_regression_only_config_unchanged(self, df_manager):
+        """The 13 ensembles that declare no gate channel must be untouched by the fix."""
+        cfg = COMBINED_CONFIGS.copy()
+        cfg["regression_targets"] = ["ged_sb"]
+        cfg["classification_targets"] = []
+        df_manager._config_manager.get_combined_config.return_value = cfg
+
+        ctx = df_manager._build_context(ForecastingModelArgs(run_type="calibration", train=True))
+
+        assert ctx.targets == ["ged_sb"]
+
+    def test_stale_targets_key_fails_loud(self, df_manager):
+        """A resurrected `targets` key is refused, not silently preferred (#380).
+
+        The old fallback read `targets` first, which is how the EXP-03 workaround got the
+        gate into the pool — and how a stale key could outrank the split ones.
+        """
+        cfg = COMBINED_CONFIGS.copy()
+        cfg["regression_targets"] = ["lr_sb_best"]
+        cfg["classification_targets"] = ["by_sb_best"]
+        cfg["targets"] = ["stale"]
+        df_manager._config_manager.get_combined_config.return_value = cfg
+
+        with pytest.raises(ValueError, match="retired"):
+            df_manager._build_context(ForecastingModelArgs(run_type="calibration", train=True))
