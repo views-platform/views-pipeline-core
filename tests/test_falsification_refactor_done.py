@@ -26,7 +26,7 @@ sys.modules["views_evaluation.evaluation.evaluation_frame"] = MagicMock()
 sys.modules["art"] = MagicMock()
 
 
-@patch("views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config", return_value={})
+@patch("views_pipeline_core.managers.model.model.ModelManager._load_config", return_value={})
 @patch("views_pipeline_core.modules.logging.LoggingModule.get_logger", return_value=MagicMock())
 @patch("views_pipeline_core.managers.ConfigurationManager", return_value=MagicMock())
 @patch("views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash")

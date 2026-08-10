@@ -8,10 +8,8 @@ All ensemble-specific business logic is copied from DataFrameEnsembleManager
 (WET-before-DRY). The architectural difference is the data format:
 PredictionFrame (N, S) numpy arrays instead of pd.DataFrame.
 """
-import importlib
 import logging
 import subprocess
-import sys
 import time
 import traceback
 from pathlib import Path
@@ -37,6 +35,10 @@ from views_pipeline_core.modules.validation.ensemble import validate_ensemble_mo
 from .cm_forecast_loader import load_cm_frame
 from .context import EnsembleContext
 from .ensemble import EnsemblePathManager
+
+from views_pipeline_core.managers.configuration.script_config import (
+    load_config_from_script,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -293,24 +295,10 @@ class PredictionFrameEnsembleManager:
     def _load_config(
         self, script_name: str, config_method: str
     ) -> Union[Dict, None]:
-        script_path = self._script_paths.get(script_name)
-        if script_path:
-            try:
-                spec = importlib.util.spec_from_file_location(
-                    script_name, script_path
-                )
-                config_module = importlib.util.module_from_spec(spec)
-                sys.modules[script_name] = config_module
-                spec.loader.exec_module(config_module)
-                if hasattr(config_module, config_method):
-                    return getattr(config_module, config_method)()
-            except (AttributeError, ImportError) as e:
-                logger.error(
-                    f"Error loading config from {script_name}: {e}",
-                    exc_info=True,
-                )
-                raise
-        return None
+        """Delegates to the one shared implementation (#433)."""
+        return load_config_from_script(
+            self._script_paths, script_name, config_method
+        )
 
     # ------------------------------------------------------------------
     # Public entry point

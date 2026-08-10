@@ -67,7 +67,7 @@ def _make_manager():
 
     with patch(
         "views_pipeline_core.managers.model.model.ForecastingModelManager"
-        "._ModelManager__load_config",
+        "._load_config",
         return_value={},
     ), patch(
         "views_pipeline_core.modules.logging.LoggingModule.get_logger",
