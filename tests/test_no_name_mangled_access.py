@@ -34,6 +34,16 @@ Note this deliberately does **not** ban double-underscore *definitions*. `ModelM
 still has `__ascii_splash`, `__get_pred_store_name` and `__load_maturity_config`, and
 those are fine: a private method nobody reaches into from outside is doing its job. What
 is banned is the reaching.
+
+## What this does not catch
+
+It matches `ast.Attribute` nodes, so it sees `obj._A__secret` and misses
+`getattr(obj, "_A__secret")`. Closing that would mean flagging string literals, which is
+what makes a guard fire on its own documentation and get switched off — this file's
+docstring quotes the offending line, and the fix would flag it. The dynamic form is a
+deliberate act that reads as one in review, where the attribute form was a one-line
+convenience with an apologetic comment. Stated so the coverage is not mistaken for total;
+if a `getattr`-shaped evasion ever appears, that is the trigger to widen this.
 """
 
 from __future__ import annotations
@@ -110,9 +120,14 @@ def test_the_scan_can_see_a_planted_offender(tmp_path):
 def test_a_docstring_naming_the_pattern_is_not_an_offender(tmp_path):
     """The control for the false-positive direction.
 
-    This file's own docstring quotes `self._ModelManager__load_config`, and nine test
-    files pass the old spelling to `patch()`. A guard that flagged those would be
-    disabled within a week.
+    This file's own docstring quotes `self._ModelManager__load_config`, and so does
+    `script_config.py`'s, explaining the defect they exist to prevent. A guard that
+    flagged its own rationale would be disabled within a week — one in this repo already
+    was, for firing on documentation (#415, C-59).
+
+    (Nine test files also passed the old spelling to `patch()` until this change renamed
+    them. They were never in scope — the scan reads `views_pipeline_core/`, not `tests/`
+    — but they are why the distinction was worth building in rather than discovering.)
     """
     benign = tmp_path / "benign.py"
     benign.write_text('"""Do not write self._A__secret()."""\nX = "self._A__secret"\n')
