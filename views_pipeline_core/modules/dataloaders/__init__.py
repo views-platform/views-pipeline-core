@@ -16,14 +16,21 @@ from typing import TYPE_CHECKING
 from views_pipeline_core._lazy import lazy_attach
 
 if TYPE_CHECKING:  # pragma: no cover — static-analysis convenience only
-    from .dataloaders import UpdateViewser, ViewsDataLoader  # noqa: F401
+    from .dataloaders import ViewsDataLoader  # noqa: F401
+    from .update_viewser import UpdateViewser  # noqa: F401
 
 #: name → defining submodule. Single source of truth for __all__/__getattr__/__dir__.
 _LAZY_EXPORTS = {
     "ViewsDataLoader": "dataloaders",
-    "UpdateViewser": "dataloaders",
+    "UpdateViewser": "update_viewser",
 }
-_LAZY_SUBMODULES = {"dataloaders", "fetch_context", "feature_frame_path", "frame_cache"}
+_LAZY_SUBMODULES = {
+    "dataloaders",
+    "fetch_context",
+    "feature_frame_path",
+    "frame_cache",
+    "update_viewser",
+}
 
 __all__ = sorted(_LAZY_EXPORTS)
 
