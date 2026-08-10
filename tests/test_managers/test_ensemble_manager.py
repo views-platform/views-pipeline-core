@@ -141,7 +141,7 @@ def sample_dataframes_list(sample_dataframe):
 @pytest.fixture
 def manager(mock_ensemble_path, mock_configs, mock_wandb_module):
     """Create EnsembleManager instance with mocked dependencies."""
-    with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config') as mock_load:
+    with patch('views_pipeline_core.managers.model.model.ModelManager._load_config') as mock_load:
         mock_load.side_effect = lambda script, method: mock_configs.get(
             script.replace("config_", "").replace(".py", "")
         )
@@ -181,7 +181,7 @@ class TestEnsembleManagerInit:
     
     def test_initialization(self, mock_ensemble_path, mock_configs, mock_wandb_module):
         """Test basic EnsembleManager initialization."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config') as mock_load:
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config') as mock_load:
             mock_load.side_effect = lambda script, method: mock_configs.get(
                 script.replace("config_", "").replace(".py", "")
             )
@@ -1101,7 +1101,7 @@ class TestConfigModelsetMerge:
 
             with patch(
                 "views_pipeline_core.managers.model.model"
-                ".ModelManager._ModelManager__load_config",
+                ".ModelManager._load_config",
             ) as mock_load, patch(
                 "views_pipeline_core.modules.wandb.WandBModule",
                 return_value=mock_wandb_module,

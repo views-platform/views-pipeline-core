@@ -30,6 +30,74 @@ SUPPORTED_LEVELS     = frozenset(lv.value for lv in _SpatialLevel)
 DEPRECATED_STATUS             = "deprecated"    # must be defined before SUPPORTED_DEPLOYMENT_STATUSES
 SUPPORTED_DEPLOYMENT_STATUSES = {"shadow", "deployed", "baseline", DEPRECATED_STATUS}
 
+# ── ADR-057: the maturity vocabulary, accepted alongside the old one ──────────
+#
+# views-models ADR-017 replaced `deployment_status` with `maturity`. The old field
+# answered three unrelated questions with one word — operational mode (shadow/deployed),
+# lifecycle (deprecated) and role (baseline) — and nothing in the platform branched on it.
+
+RETIRED_MATURITY = "retired"  # must precede SUPPORTED_MATURITIES
+SUPPORTED_MATURITIES = {"candidate", "graduate", RETIRED_MATURITY}
+
+#: Old value -> new value, for the values where the mapping is unambiguous.
+#: `deployed` is deliberately absent; see LEGACY_STATUSES_WITHOUT_A_SAFE_MAPPING.
+LEGACY_STATUS_TO_MATURITY = {
+    "shadow": "candidate",
+    "baseline": "candidate",  # `baseline` is a role, not a maturity; it leaves this file
+    DEPRECATED_STATUS: RETIRED_MATURITY,
+}
+
+#: `deployed` has no automatic equivalent, and translating it would be actively wrong.
+#: ADR-017 makes `deployed -> graduate` conditional on its own rule R2 ("a graduate
+#: ensemble's members must all be graduate"). Measured in views-models on 2026-08-08: the
+#: sole `deployed` source is the ensemble `white_mustang`, whose three members
+#: (`average_cmbaseline`, `zero_cmbaseline`, `locf_cmbaseline`) are all `shadow`. Mapping
+#: it to `graduate` would manufacture a violation of ADR-017's own rule on day one — so
+#: this sniffer refuses to guess and asks for the value to be set deliberately.
+LEGACY_STATUSES_WITHOUT_A_SAFE_MAPPING = {"deployed"}
+
+# Derived, not asserted by hand: every legacy status must be either mapped or explicitly
+# excluded, and every mapping target must be a real maturity. Fails at import rather than
+# leaving a translation table with a silent hole.
+assert (
+    set(LEGACY_STATUS_TO_MATURITY) | LEGACY_STATUSES_WITHOUT_A_SAFE_MAPPING
+) == SUPPORTED_DEPLOYMENT_STATUSES, (
+    "the legacy vocabulary is not fully accounted for: "
+    f"{sorted(SUPPORTED_DEPLOYMENT_STATUSES - set(LEGACY_STATUS_TO_MATURITY) - LEGACY_STATUSES_WITHOUT_A_SAFE_MAPPING)} "
+    "is neither mapped to a maturity nor listed as needing a deliberate decision."
+)
+assert set(LEGACY_STATUS_TO_MATURITY.values()) <= SUPPORTED_MATURITIES, (
+    "the legacy mapping targets "
+    f"{sorted(set(LEGACY_STATUS_TO_MATURITY.values()) - SUPPORTED_MATURITIES)}, "
+    "which is not a supported maturity."
+)
+
+def normalise_maturity(value: str | None) -> str | None:
+    """Read a maturity or legacy status as a maturity, or `None` if it cannot be told.
+
+    `None` means **indeterminate**, not absent, and callers must not treat it as benign:
+
+    - `deployed` has no safe equivalent (see LEGACY_STATUSES_WITHOUT_A_SAFE_MAPPING), so
+      what it means in the new vocabulary is genuinely unknown until someone says.
+    - an unrecognised value is also unknown; `CoreConfigSniffer` rejects those at config
+      load, but the ensemble rules read member status out of a **run log**, which is
+      written by whatever version of the pipeline produced it.
+
+    Reporting either case as a maturity would be inventing a fact. Reporting them as
+    "fine" would be worse — that is the Cluster J shape this codebase keeps finding.
+    """
+    if value is None:
+        return None
+    if value in SUPPORTED_MATURITIES:
+        return value
+    return LEGACY_STATUS_TO_MATURITY.get(value)
+
+
+#: The file that carries the field, old name and new. `model_path` and the config loader
+#: accept both during the transition window; the new name wins when both are present.
+LEGACY_MATURITY_CONFIG_FILENAME = "config_deployment.py"
+MATURITY_CONFIG_FILENAME = "config_maturity.py"
+
 # MAX_SHIFT_COUNT is the number of times the rolling origin is shifted forward by
 # rolling_origin_stride. The total number of evaluation sequences equals
 # MAX_SHIFT_COUNT + 1 (e.g. 12 shifts → 13 sequences). This is because Sequence 0
@@ -41,6 +109,26 @@ MAX_SHIFT_COUNT      = 12
 
 # Supported prediction output formats — extend here when new formats are supported
 SUPPORTED_PREDICTION_FORMATS = frozenset({"dataframe", "prediction_frame"})
+
+#: Formats still accepted everywhere, but deprecated **for report-enabled runs** (#211,
+#: register C-191 / D-36). `dataframe` reports densify list-in-cell values inside
+#: views-reporting, which is the #181 OOM; `prediction_frame` is bounded. Choosing a
+#: format therefore chooses a memory-safety posture, which is what C-191 objects to.
+#:
+#: Warning now, rejection later — D-36 already settled the direction, and #211 makes the
+#: reject conditional on report-bearing models having somewhere to go, which is a
+#: views-models audit that has not happened. Keeping the two sets separate is what lets
+#: the reject land by moving one name, rather than by editing a condition.
+DEPRECATED_REPORT_PREDICTION_FORMATS = frozenset({"dataframe"})
+
+# Derived, not asserted by hand: a format cannot be deprecated for reports without being
+# a format at all. If someone renames one and not the other, this fails at import rather
+# than leaving a set that silently matches nothing.
+assert DEPRECATED_REPORT_PREDICTION_FORMATS <= SUPPORTED_PREDICTION_FORMATS, (
+    "DEPRECATED_REPORT_PREDICTION_FORMATS names "
+    f"{sorted(DEPRECATED_REPORT_PREDICTION_FORMATS - SUPPORTED_PREDICTION_FORMATS)}, "
+    "which is not a supported prediction format. The deprecation would match nothing."
+)
 
 # Evaluation mode — optional config key; controls whether samples are kept or collapsed
 SUPPORTED_EVALUATION_MODES  = frozenset({"stochastic", "point"})
@@ -231,18 +319,99 @@ class CoreConfigSniffer:
             )
 
     def _check_deployment_status(self) -> None:
+        """Accept `maturity` and the legacy `deployment_status`, for one window (ADR-057).
+
+        Both vocabularies are valid here so the two repos need not land in the same
+        minute. New values pass silently; old values pass with a warning naming the file
+        to edit; anything else fails loud listing what is valid.
+
+        The old error messages sent the reader to `config_meta.py`. The field has never
+        lived there — it is in `config_deployment.py` (soon `config_maturity.py`). A
+        remediation pointing at the wrong file is worse than none, because it is followed.
+        """
+        maturity = self._c.get("maturity")
         status = self._c.get("deployment_status")
+
+        if maturity is not None and status is not None:
+            logger.warning(
+                "Model '%s' declares BOTH maturity='%s' and the legacy "
+                "deployment_status='%s'. Using maturity and ignoring deployment_status. "
+                "Delete the legacy key from %s.",
+                self._c.get("name"),
+                maturity,
+                status,
+                MATURITY_CONFIG_FILENAME,
+            )
+
+        if maturity is not None:
+            self._check_maturity_value(maturity)
+            return
+
+        if status is None:
+            raise KeyError(
+                f"CoreConfigSniffer: neither 'maturity' nor the legacy "
+                f"'deployment_status' is set for model '{self._c.get('name')}'. Add "
+                f"'maturity' (one of {sorted(SUPPORTED_MATURITIES)}) to "
+                f"{MATURITY_CONFIG_FILENAME}."
+            )
+
         if status not in SUPPORTED_DEPLOYMENT_STATUSES:
             raise ValueError(
                 f"CoreConfigSniffer: deployment_status='{status}' is not valid. "
-                f"Supported: {SUPPORTED_DEPLOYMENT_STATUSES}. "
-                f"Fix in config_meta.py."
+                f"Supported: {sorted(SUPPORTED_DEPLOYMENT_STATUSES)} (legacy) or set "
+                f"'maturity' to one of {sorted(SUPPORTED_MATURITIES)}. "
+                f"Fix in {LEGACY_MATURITY_CONFIG_FILENAME}."
             )
-        if status == DEPRECATED_STATUS:
+
+        if status in LEGACY_STATUSES_WITHOUT_A_SAFE_MAPPING:
+            logger.warning(
+                "Model '%s' uses the legacy deployment_status='%s', which has no "
+                "automatic equivalent in the maturity vocabulary. It is NOT being read "
+                "as 'graduate': ADR-017 makes that conditional on every member of a "
+                "graduate ensemble also being graduate, so translating it here could "
+                "manufacture a violation. Set 'maturity' explicitly in %s.",
+                self._c.get("name"),
+                status,
+                MATURITY_CONFIG_FILENAME,
+            )
+            return
+
+        equivalent = LEGACY_STATUS_TO_MATURITY[status]
+        logger.warning(
+            "Model '%s' uses the legacy deployment_status='%s'. This is accepted during "
+            "the ADR-057 transition window and reads as maturity='%s'. Rename %s to %s "
+            "and replace the key. The window closes when views-models reports no configs "
+            "on the legacy vocabulary; after that this becomes an error.",
+            self._c.get("name"),
+            status,
+            equivalent,
+            LEGACY_MATURITY_CONFIG_FILENAME,
+            MATURITY_CONFIG_FILENAME,
+        )
+        self._check_maturity_value(equivalent, legacy_source=status)
+
+    def _check_maturity_value(self, maturity: str, legacy_source: str | None = None) -> None:
+        """Validate a maturity value and refuse to run a retired model."""
+        if maturity not in SUPPORTED_MATURITIES:
             raise ValueError(
-                f"CoreConfigSniffer: Model '{self._c.get('name')}' has "
-                f"deployment_status='deprecated' and cannot be run. "
-                f"Update deployment_status in config_meta.py to proceed."
+                f"CoreConfigSniffer: maturity='{maturity}' is not valid. "
+                f"Supported: {sorted(SUPPORTED_MATURITIES)}. "
+                f"Fix in {MATURITY_CONFIG_FILENAME}."
+            )
+        if maturity == RETIRED_MATURITY:
+            declared = (
+                f"deployment_status='{legacy_source}'"
+                if legacy_source
+                else f"maturity='{RETIRED_MATURITY}'"
+            )
+            filename = (
+                LEGACY_MATURITY_CONFIG_FILENAME
+                if legacy_source
+                else MATURITY_CONFIG_FILENAME
+            )
+            raise ValueError(
+                f"CoreConfigSniffer: Model '{self._c.get('name')}' has {declared} and "
+                f"cannot be run. Change it in {filename} to proceed."
             )
 
     def _check_prediction_format(self) -> None:

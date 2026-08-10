@@ -6,10 +6,8 @@
 # Tripwire: tests/test_import_purity.py.
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING, Callable, Union, Optional, List, Dict
 import logging
-import importlib
 from abc import abstractmethod
 from datetime import datetime
 import traceback
@@ -38,9 +36,18 @@ from views_pipeline_core.modules.dataloaders.datafactory_contract import (
 )
 
 from views_pipeline_core.configs import PipelineConfig
-from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer, MAX_SHIFT_COUNT
+from views_pipeline_core.modules.validation.core_config_sniffer import (
+    CoreConfigSniffer,
+    LEGACY_MATURITY_CONFIG_FILENAME,
+    MATURITY_CONFIG_FILENAME,
+    MAX_SHIFT_COUNT,
+)
 
 from views_pipeline_core.managers.configuration.configuration import combined_targets
+from views_pipeline_core.managers.configuration.script_config import (
+    load_config_from_script,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -200,17 +207,15 @@ class ModelManager:
         )
 
         self._script_paths = self._model_path.get_scripts()
-        self._config_deployment = self.__load_config(
-            "config_deployment.py", "get_deployment_config"
-        )
-        self._config_hyperparameters = self.__load_config(
+        self._config_deployment = self.__load_maturity_config()
+        self._config_hyperparameters = self._load_config(
             "config_hyperparameters.py", "get_hp_config"
         )
-        self._config_meta = self.__load_config("config_meta.py", "get_meta_config")
-        self._partition_dict = self.__load_config("config_partitions.py", "generate")
+        self._config_meta = self._load_config("config_meta.py", "get_meta_config")
+        self._partition_dict = self._load_config("config_partitions.py", "generate")
 
         if self._model_path.target == "model":
-            self._config_sweep = self.__load_config(
+            self._config_sweep = self._load_config(
                 "config_sweep.py", "get_sweep_config"
             )
         else:
@@ -262,37 +267,51 @@ class ModelManager:
         )
         print(colored_text)
 
-    def __load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
+    def __load_maturity_config(self) -> Union[Dict, None]:
+        """Load the maturity config under either name, preferring the new one (ADR-057).
+
+        views-models ADR-017 renames `config_deployment.py` to `config_maturity.py`. For
+        one transition window both are accepted, so the rename does not have to land in
+        two repositories simultaneously.
+
+        Preference is for the new name. Finding both is not an error — a half-finished
+        rename is a normal intermediate state — but it warns, because a file that is
+        being silently ignored is how the wrong config gets edited for a week.
         """
-        Loads and executes a configuration method from a specified script.
+        scripts = self._script_paths
+        has_new = scripts.get(MATURITY_CONFIG_FILENAME) is not None
+        has_legacy = scripts.get(LEGACY_MATURITY_CONFIG_FILENAME) is not None
 
-        Args:
-            script_name (str): The name of the script to load.
-            config_method (str): The name of the configuration method to execute.
+        if has_new and has_legacy:
+            logger.warning(
+                "Both %s and %s exist for '%s'. Reading %s and IGNORING %s — delete the "
+                "legacy file once the rename is confirmed (ADR-057).",
+                MATURITY_CONFIG_FILENAME,
+                LEGACY_MATURITY_CONFIG_FILENAME,
+                self._model_path.model_name,
+                MATURITY_CONFIG_FILENAME,
+                LEGACY_MATURITY_CONFIG_FILENAME,
+            )
 
-        Returns:
-            dict: The result of the configuration method if the script and method are found, otherwise None.
+        if has_new:
+            return self._load_config(MATURITY_CONFIG_FILENAME, "get_maturity_config")
+        return self._load_config(
+            LEGACY_MATURITY_CONFIG_FILENAME, "get_deployment_config"
+        )
 
-        Raises:
-            AttributeError: If the specified configuration method does not exist in the script.
-            ImportError: If there is an error importing the script.
+    def _load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:
+        """Load a config dict from one of this model's `config_*.py` scripts.
+
+        Delegates to `load_config_from_script` (#433), the single implementation shared
+        with both composition-based ensemble managers.
+
+        Protected rather than name-mangled. `EnsembleManager` needs this and used to reach
+        it through Python's name mangling — a string-shaped dependency no tool could
+        follow, and one that would have broken silently on a rename. The implementation
+        now lives outside the hierarchy, so nothing has to inherit from `ModelManager` in
+        order to load a config.
         """
-        script_path = self._script_paths.get(script_name)
-        if script_path:
-            try:
-                spec = importlib.util.spec_from_file_location(script_name, script_path)
-                config_module = importlib.util.module_from_spec(spec)
-                sys.modules[script_name] = config_module
-                spec.loader.exec_module(config_module)
-                if hasattr(config_module, config_method):
-                    return getattr(config_module, config_method)()
-            except (AttributeError, ImportError) as e:
-                logger.error(
-                    f"Error loading config from {script_name}: {e}", exc_info=True
-                )
-                raise
-
-        return None
+        return load_config_from_script(self._script_paths, script_name, config_method)
 
     def __get_pred_store_name(self) -> str:
         """
@@ -968,11 +987,33 @@ class ForecastingModelManager(ModelManager):
                 partition_dict=self._partition_dict,
             )
         except Exception:
+            # Log WITH the traceback, then RE-RAISE. Until #367 this swallowed the
+            # exception, logged "No Queryset detected for ViewsDataLoader. Skipping..."
+            # with `exc_info=False`, and set `self._data_loader = None`.
+            #
+            # Every part of that was wrong. `ViewsDataLoader.__init__` is assignment-only
+            # — it cannot detect a queryset, so it cannot fail for the reason claimed.
+            # What it CAN raise is an ImportError from the import above (inside this same
+            # try, so any dependency bump that breaks the module lands here), a KeyError
+            # from `configs["steps"]`, or a TypeError from a signature change. All three
+            # were reported as a missing queryset, without a traceback.
+            #
+            # And nothing handles the None: `_execute_model_tasks` calls
+            # `self._data_loader.get_feature_frame(...)` unguarded, so the failure did not
+            # go away — it relocated. views-postprocessing's FAO delivery hit
+            # `AttributeError: 'NoneType' object has no attribute 'get_feature_frame'`
+            # three repos from the cause. There is no survivable "no queryset" state here;
+            # both callers proceed straight to a run that needs data.
+            #
+            # Cluster J, "failed read reported as absence": a construction that did not
+            # happen, recorded as a loader that is legitimately absent. Register C-170.
             logger.error(
-                "No Queryset detected for ViewsDataLoader. Skipping...",
-                exc_info=False,
+                "ViewsDataLoader construction failed for %s. This is not recoverable — "
+                "the run needs a data loader. The traceback below names the real cause.",
+                getattr(self._model_path, "model_name", "<unknown model>"),
+                exc_info=True,
             )
-            self._data_loader = None
+            raise
 
     def _get_cached_data_path(self):
         """Return the path to the cached raw DataFrame for the current partition.

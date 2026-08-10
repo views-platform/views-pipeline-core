@@ -20,10 +20,10 @@ import importlib
 import hashlib
 from pathlib import Path
 
-import dotenv
 
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.data.constants import CACHE_SOURCES
+from views_pipeline_core.data.constants import cache_filename_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -367,8 +367,21 @@ class ModelPathManager:
         self._instance_hash = self.generate_hash(
             self.model_name, self._validate, self.target
         )
+        # The PATH is recorded; the file is NOT loaded here. Until #377 this line was
+        # followed by `dotenv.load_dotenv(dotenv_path=self.dotenv)`, so constructing a
+        # *path object* mutated `os.environ` process-wide — and this class is constructed
+        # by validation code (`modules/validation/ensemble/check.py`) and by file
+        # utilities, neither of which wants credentials loaded on its behalf.
+        #
+        # It survived the #346 sweep (register C-177) that established the rule, because
+        # the guard there looks for `load_dotenv()` with no path — a search from the
+        # working directory — and this call passed one. Right about the search hazard,
+        # blind to the side effect. `test_no_constructor_loads_a_dotenv` now covers it.
+        #
+        # Callers that need the environment populated must do it in their entry point.
+        # `PredictionStoreConfig.from_environment` already fails loud with the list of
+        # missing variables, so nothing here can fail silently.
         self.dotenv = self.root / ".env"
-        dotenv.load_dotenv(dotenv_path=self.dotenv)
         self._initialize_directories()
         self._initialize_scripts()
         logger.debug(
@@ -467,8 +480,17 @@ class ModelPathManager:
         Internal Use:
             Called by __init__ during initialization.
         """
+        # ADR-057 transition window: the maturity config exists under either name.
+        # Exactly one of them is REQUIRED — that requirement is what stops a model with
+        # neither from loading — but neither individually, because requiring both would
+        # make the rename a flag day and requiring only the old one would reject a model
+        # that has finished renaming. `_build_absolute_directory` raises when a path is
+        # missing under validation, so the present name is resolved and the absent one
+        # is not asked for at all.
+        maturity_config = self._resolve_maturity_config_path()
+
         self.scripts = [
-            self._build_absolute_directory(Path("configs/config_deployment.py")),
+            maturity_config,
             self._build_absolute_directory(Path("configs/config_hyperparameters.py")),
             self._build_absolute_directory(Path("configs/config_meta.py")),
             self._build_absolute_directory(Path("configs/config_partitions.py")),
@@ -600,7 +622,7 @@ class ModelPathManager:
         Returns:
             Sorted list of raw data file paths (newest first)
         """
-        prefixes = tuple(f"{run_type}_{src}_df" for src in CACHE_SOURCES)
+        prefixes = tuple(cache_filename_prefix(run_type, src) for src in CACHE_SOURCES)
         paths = [
             f
             for f in self.data_raw.iterdir()
@@ -811,6 +833,38 @@ class ModelPathManager:
             True if directory exists, False otherwise
         """
         return directory.exists()
+
+    def _resolve_maturity_config_path(self) -> Path:
+        """Return the maturity config's path under whichever name it has (ADR-057).
+
+        views-models ADR-017 renames `config_deployment.py` to `config_maturity.py`.
+        During the transition window either satisfies the requirement, and the new name
+        wins when both are present — the same precedence the config loader applies, so
+        the file this reports is the file that gets read.
+
+        When neither exists the failure names **both** acceptable filenames. Reporting
+        only one would send a model that had already renamed to go and re-create the file
+        it just deleted.
+        """
+        new_name = self.model_dir / "configs" / "config_maturity.py"
+        legacy_name = self.model_dir / "configs" / "config_deployment.py"
+
+        if not self._validate:
+            # Nothing is checked in this mode, so report the name that will win if both
+            # turn up later — matching the loader rather than guessing differently.
+            return new_name if self._check_if_dir_exists(new_name) else legacy_name
+
+        for candidate in (new_name, legacy_name):
+            if self._check_if_dir_exists(directory=candidate):
+                return candidate
+
+        raise FileNotFoundError(
+            f"Expected a maturity config for '{self.model_dir.name}': neither "
+            f"{new_name} nor {legacy_name} exists. Create one (e.g. via "
+            f"`make_new_model.py`), or construct ModelPathManager with `validate=False`. "
+            f"Both names are accepted during the ADR-057 transition window; "
+            f"config_maturity.py is the one to create now."
+        )
 
     def _build_absolute_directory(self, directory: Path) -> Path:
         """

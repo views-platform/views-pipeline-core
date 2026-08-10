@@ -10,15 +10,12 @@ subprocess delegation) is copied from EnsembleManager (WET-before-DRY).
 The architectural difference is HOW infrastructure is accessed:
 composition of explicit collaborators vs inheritance chain.
 """
-import importlib
 import logging
 import subprocess
-import sys
 import time
 import traceback
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import pandas as pd
 import tqdm
@@ -38,42 +35,18 @@ from views_pipeline_core.modules.aggregation.aggregator import (
 )
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
-from views_pipeline_core.types import BaseStageContext
 
+from .context import EnsembleContext
 from .ensemble import EnsemblePathManager
+
+from views_pipeline_core.managers.configuration.script_config import (
+    load_config_from_script,
+)
 
 logger = logging.getLogger(__name__)
 
 # ADR-034: priogrid_gid → priogrid_id rename for AggregationModule compatibility
 _ENTITY_RENAME = {"priogrid_gid": "priogrid_id"}
-
-
-# ---------------------------------------------------------------------------
-# Frozen context — single source of truth during a run
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class EnsembleContext(BaseStageContext):
-    """Immutable execution context for DataFrameEnsembleManager.
-
-    Built once in execute_single_run() after config validation, then
-    threaded to every method. Prevents mutable self-state drift.
-    """
-    project: str
-    eval_type: str
-    args: ForecastingModelArgs
-    models: List[str]
-    aggregation: str
-    targets: List[str]
-    reconciliation: Optional[str]
-    reconcile_with: Optional[str]
-    use_weights: bool
-    weights: Dict[str, float]
-    timestamp: str
-    deployment_status: str
-    prediction_format: str
-    partition_dict: Dict[str, Any]
-    expected_samples_per_model: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -209,24 +182,10 @@ class DataFrameEnsembleManager:
     def _load_config(
         self, script_name: str, config_method: str
     ) -> Union[Dict, None]:
-        script_path = self._script_paths.get(script_name)
-        if script_path:
-            try:
-                spec = importlib.util.spec_from_file_location(
-                    script_name, script_path
-                )
-                config_module = importlib.util.module_from_spec(spec)
-                sys.modules[script_name] = config_module
-                spec.loader.exec_module(config_module)
-                if hasattr(config_module, config_method):
-                    return getattr(config_module, config_method)()
-            except (AttributeError, ImportError) as e:
-                logger.error(
-                    f"Error loading config from {script_name}: {e}",
-                    exc_info=True,
-                )
-                raise
-        return None
+        """Delegates to the one shared implementation (#433)."""
+        return load_config_from_script(
+            self._script_paths, script_name, config_method
+        )
 
     def _get_pred_store_name(self) -> str:
         from datetime import datetime
@@ -308,24 +267,15 @@ class DataFrameEnsembleManager:
 
     def _build_context(self, args: ForecastingModelArgs) -> EnsembleContext:
         c = self.configs
-        return EnsembleContext(
-            configs=c,
+        return EnsembleContext.from_config(
+            c,
             model_path=self._ensemble_path,
-            run_type=args.run_type,
-            project=f"{c['name']}_{args.run_type}",
-            eval_type=args.eval_type,
             args=args,
-            models=c["models"],
-            aggregation=c["aggregation"],
-            targets=c.get("targets", c.get("regression_targets", [])),
-            reconciliation=c.get("reconciliation"),
-            reconcile_with=c.get("reconcile_with"),
-            use_weights=c.get("use_weights", False),
-            weights=c.get("weights", {}),
-            timestamp=c.get("timestamp", ""),
-            deployment_status=c.get("deployment_status", "shadow"),
+            partition_dict=self._partition_dict,
+            # This manager can emit either format, so the config decides.
             prediction_format=c.get("prediction_format", "dataframe"),
-            partition_dict=self._partition_dict or {},
+            # `expected_samples_per_model` is deliberately not passed: the DataFrame path
+            # has no per-sample expectation to state. See #432.
         )
 
     # ------------------------------------------------------------------

@@ -8,10 +8,8 @@ All ensemble-specific business logic is copied from DataFrameEnsembleManager
 (WET-before-DRY). The architectural difference is the data format:
 PredictionFrame (N, S) numpy arrays instead of pd.DataFrame.
 """
-import importlib
 import logging
 import subprocess
-import sys
 import time
 import traceback
 from pathlib import Path
@@ -35,8 +33,12 @@ from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfi
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
 
 from .cm_forecast_loader import load_cm_frame
-from .dataframe_ensemble import EnsembleContext
+from .context import EnsembleContext
 from .ensemble import EnsemblePathManager
+
+from views_pipeline_core.managers.configuration.script_config import (
+    load_config_from_script,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -293,24 +295,10 @@ class PredictionFrameEnsembleManager:
     def _load_config(
         self, script_name: str, config_method: str
     ) -> Union[Dict, None]:
-        script_path = self._script_paths.get(script_name)
-        if script_path:
-            try:
-                spec = importlib.util.spec_from_file_location(
-                    script_name, script_path
-                )
-                config_module = importlib.util.module_from_spec(spec)
-                sys.modules[script_name] = config_module
-                spec.loader.exec_module(config_module)
-                if hasattr(config_module, config_method):
-                    return getattr(config_module, config_method)()
-            except (AttributeError, ImportError) as e:
-                logger.error(
-                    f"Error loading config from {script_name}: {e}",
-                    exc_info=True,
-                )
-                raise
-        return None
+        """Delegates to the one shared implementation (#433)."""
+        return load_config_from_script(
+            self._script_paths, script_name, config_method
+        )
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -361,24 +349,13 @@ class PredictionFrameEnsembleManager:
         # injected `Reconciler` port (#236, epic #233). A configured reconciliation with no
         # injected reconciler fails loud at apply time (RECONCILER_NOT_INJECTED_MSG) — no
         # silent-off.
-        return EnsembleContext(
-            configs=c,
+        return EnsembleContext.from_config(
+            c,
             model_path=self._ensemble_path,
-            run_type=args.run_type,
-            project=f"{c['name']}_{args.run_type}",
-            eval_type=args.eval_type,
             args=args,
-            models=c["models"],
-            aggregation=c["aggregation"],
-            targets=c.get("targets", c.get("regression_targets", [])),
-            reconciliation=c.get("reconciliation"),
-            reconcile_with=c.get("reconcile_with"),
-            use_weights=c.get("use_weights", False),
-            weights=c.get("weights", {}),
-            timestamp=c.get("timestamp", ""),
-            deployment_status=c.get("deployment_status", "shadow"),
+            partition_dict=self._partition_dict,
+            # A literal, not a config read: this manager only ever emits PredictionFrames.
             prediction_format="prediction_frame",
-            partition_dict=self._partition_dict or {},
             expected_samples_per_model=c.get("expected_samples_per_model"),
         )
 

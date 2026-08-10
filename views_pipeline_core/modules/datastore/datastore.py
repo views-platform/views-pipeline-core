@@ -7,11 +7,12 @@ management, file versioning and caching. It does NOT create buckets or collectio
 GOVERNING CONTRACT — the VIEWS Appwrite seam's identity, credential and coordinate rules
 are platform surface:
 
-    PLATFORM-001 (views-appwrite), pinned at tag platform-001-v1.2.0:
-    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/PLATFORM-001_identity_secrets_configuration_contract.md
+    The Appwrite Seam Contract (views-appwrite), formerly `PLATFORM-001`,
+    pinned at tag appwrite-seam-v1.4.1:
+    https://github.com/views-platform/views-appwrite/blob/appwrite-seam-v1.4.1/docs/ADRs/platform/appwrite_seam_contract.md
 
     Coordinate registry (THE canonical source for ids — never copied into code):
-    https://github.com/views-platform/views-appwrite/blob/platform-001-v1.2.0/docs/ADRs/platform/coordinate_registry.toml
+    https://github.com/views-platform/views-appwrite/blob/appwrite-seam-v1.4.1/docs/ADRs/platform/coordinate_registry.toml
 
 **Callers: `upload_data()` reports failure by RETURN VALUE, not by exception.** The SDK's
 `AppwriteException` is converted to `OperationResult(success=False)` inside the storage

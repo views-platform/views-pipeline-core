@@ -19,8 +19,12 @@ dict with a defined priority ordering. Provides a dict-like interface
 
 ## 2. Non-Goals (Explicit Exclusions)
 
-- Does **not** load configuration files from disk. File loading is
-  `ModelManager.__load_config()`'s responsibility via `importlib`.
+- Does **not** load configuration files from disk. File loading belongs to
+  `managers/configuration/script_config.load_config_from_script()`, which executes the
+  named method out of a `config_*.py` script via `importlib` (#433). `ModelManager` and
+  both ensemble managers expose it as a thin protected `_load_config()`; the
+  implementation deliberately sits outside the manager hierarchy, so loading a config
+  requires inheriting nothing.
 - Does **not** own the configuration file format or schema. Each config file
   (`config_deployment.py`, `config_hyperparameters.py`, etc.) defines its own
   structure.

@@ -120,3 +120,80 @@ class DataFetchStrategy(Protocol):
             source does not support drift detection.
         """
         ...
+
+
+# ---------------------------------------------------------------------------
+# IDataSource — the data handoff contract between this framework and engines
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class IDataSource(Protocol):
+    """What pipeline-core promises to hand an engine, and in what shape. Issue #144.
+
+    ## The problem this names
+
+    Nothing declared what data pipeline-core provides or how it arrives, so every engine
+    discovered it independently by importing framework internals — `PipelineConfig` for the
+    file format, `read_dataframe` for the read, `ViewsDataLoader` for everything else. The
+    dual-loader duplication (#143), the format singleton (#137) and the FeatureFrame gap
+    (#136) are all symptoms of this boundary never having been drawn.
+
+    An engine that programs against this Protocol does not import any of them. Format
+    negotiation, caching, partition alignment and auditing happen behind it.
+
+    ## This describes what exists, not a redesign
+
+    #144 sketched `load_features(partition)` and `load_raw_df(partition)`. Those are not the
+    methods this repo has, and inventing them would mean either adapter methods nobody calls
+    or a Protocol that `ViewsDataLoader` does not satisfy — a contract that describes an
+    intention rather than a fact.
+
+    So the members below are `ViewsDataLoader`'s real signatures, and
+    `tests/test_data_source_protocol.py` asserts they stay identical **parameter by
+    parameter**. `runtime_checkable` only checks that method *names* exist; it would happily
+    certify an implementation whose arguments had drifted, which is the failure mode this
+    Protocol exists to prevent.
+
+    ## Two methods because there are two eras
+
+    `get_feature_frame` is the frame-native path (datafactory-only, no pandas). `get_data` is
+    the legacy pandas path. Both are live; the migration between them is epic #285's, not
+    this Protocol's, and pretending there is only one would misdescribe the seam.
+    """
+
+    def get_feature_frame(
+        self,
+        partition: str,
+        use_saved: bool,
+        level: str,
+        validate: bool = True,
+        override_month: Optional[int] = None,
+    ) -> Any:
+        """A validated `views_frames.FeatureFrame`. Returned bare — alerts are a viewser
+        concept and are always None for datafactory (C-52). `level` is required."""
+        ...
+
+    def get_data(
+        self,
+        self_test: bool,
+        partition: str,
+        use_saved: bool,
+        validate: bool = True,
+        override_month: int = None,
+        level: Optional[str] = None,
+    ) -> Any:
+        """The legacy pandas path: `(DataFrame, alerts)`. Annotated `Any` rather than
+        `tuple[pd.DataFrame, list]` because this module is held pandas-free at import
+        (`tests/test_import_purity.py`) and a Protocol is not worth breaking that for."""
+        ...
+
+    @property
+    def cached_frame_path(self) -> Optional[Path]:
+        """Where the last `get_feature_frame` cached, or None. Read by callers that
+        persist provenance; part of the contract because they already depend on it."""
+        ...
+
+    @property
+    def cached_data_path(self) -> Optional[Path]:
+        """The `get_data` counterpart."""
+        ...

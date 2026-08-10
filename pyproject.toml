@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "views_pipeline_core"
-version = "3.0.0"
+version = "3.0.1"
 description = "Core orchestration, data and model-management library for the VIEWS conflict forecasting platform."
 authors = [
     "Borbála Farkas <borbala.farkas@pcr.uu.se>",
@@ -79,7 +79,11 @@ appwrite = ["appwrite"]
 pytest = "^9.0.3"
 
 [tool.pytest.ini_options]
-filterwarnings = ["ignore::DeprecationWarning", "ignore::RuntimeWarning", "ignore::UserWarning"]
+# `ignore::UserWarning` was removed for #366. views-datafactory signals a zero-filled
+# coverage gap with a `UserWarning` (their ADR-047), and that is the only thing telling a
+# consumer a zero was manufactured rather than observed. Suppressing the category here
+# meant no test in this repo could ever assert on it.
+filterwarnings = ["ignore::DeprecationWarning", "ignore::RuntimeWarning"]
 testpaths = ["tests"]
 
 [build-system]

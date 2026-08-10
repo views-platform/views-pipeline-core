@@ -43,9 +43,12 @@ collaborators vs. inheritance chain.
 - Guarantees that `CoreConfigSniffer.sniff_all()` runs before WandB login or any
   model execution (C-55 fix). This is the primary behavioral difference from
   `EnsembleManager`.
-- Guarantees that an immutable `EnsembleContext` (frozen dataclass) is built once
-  in `execute_single_run()` and threaded to every method. No method reads mutable
-  `self` state for config, args, or run-type during execution.
+- Guarantees that an immutable `EnsembleContext` (frozen dataclass,
+  `managers/ensemble/context.py`) is built once in `execute_single_run()` and threaded
+  to every method, via the shared `EnsembleContext.from_config()` (#432). No method
+  reads mutable `self` state for config, args, or run-type during execution.
+  `prediction_format` is read from config with a `"dataframe"` fallback;
+  `expected_samples_per_model` is not passed on this path.
 - Guarantees that `EvaluationStage`, `PredictionIOManager`, and `ReportingStage`
   are used via composition (injected at construction), not via inheritance.
 - Guarantees that all sub-models in `configs["models"]` are trained, evaluated,
@@ -85,6 +88,11 @@ collaborators vs. inheritance chain.
   `ModelPathManager`.
 - `configs["aggregation"]` -- aggregation method (e.g., `"mean"`, `"median"`,
   `"concat"`, `"vincentization"`).
+- `configs["regression_targets"]` and/or `configs["classification_targets"]` -- lists of
+  target names. The pooled target list is **derived** from both by `combined_targets`
+  (`managers/configuration/configuration.py`), regression first, then classification —
+  identical to `PredictionFrameEnsembleManager`. A legacy `configs["targets"]` key is
+  **retired** (#380) and `combined_targets` raises `ValueError` on it (C-132, #422).
 - `configs["reconciliation"]` -- optional. `"pgm_cm_point"` enables hierarchical
   reconciliation during forecasting.
 - `configs["reconcile_with"]` -- optional. CM model name for reconciliation target.
@@ -203,8 +211,8 @@ manager._execute_model_training(ctx)
 
 ## 10. Test Alignment
 
-- `tests/test_managers/test_dataframe_ensemble_manager.py` -- 45 characterization
-  tests across 13 test classes:
+- `tests/test_managers/test_dataframe_ensemble_manager.py` -- 48 characterization
+  tests across 14 test classes:
   - `TestNoInheritance` -- verifies no inheritance from ForecastingModelManager
     or ModelManager, and that composed stages exist as attributes.
   - `TestEnsembleContext` -- verifies immutability, field population, and
@@ -231,6 +239,16 @@ manager._execute_model_training(ctx)
   - `TestConfigModelsetMerge` -- verifies config_modelset → effective_meta
     merge precedence, collision warning, copy semantics (original
     config_meta unchanged), and no-op when config_modelset is absent.
+  - `TestBuildContextPoolsGateChannel` -- verifies a declared
+    `classification_targets` reaches `ctx.targets` (C-132, #422), that a
+    regression-only config is unchanged, and that a retired `targets` key
+    fails loud. Mirrors the same-named class in the PredictionFrame tests:
+    the fix was one line in two duplicated bodies and only one was covered.
+- `tests/test_managers/test_ensemble_context_characterization.py` -- 10 tests
+  pinning the full `EnsembleContext` both managers produce, field by field,
+  with a completeness guard derived from `dataclasses.fields`. Written before
+  the #432 unification and unchanged after; it is what makes "behaviour-neutral"
+  a measured claim rather than an asserted one.
 
 ---
 

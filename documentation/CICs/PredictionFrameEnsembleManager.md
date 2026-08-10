@@ -56,9 +56,10 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   `PredictionFrame.save()/load()`.
 - Guarantees that `CoreConfigSniffer.sniff_all()` runs before WandB login or any
   model execution.
-- Guarantees that an immutable `EnsembleContext` (frozen dataclass, imported from
-  `dataframe_ensemble.py`) is built once in `execute_single_run()` and threaded to
-  every method. Context always has `prediction_format="prediction_frame"`;
+- Guarantees that an immutable `EnsembleContext` (frozen dataclass, `managers/ensemble/
+  context.py`) is built once in `execute_single_run()` and threaded to every method,
+  via the shared `EnsembleContext.from_config()` (#432). Context always has
+  `prediction_format="prediction_frame"` — passed as a literal, not read from config;
   `reconciliation`/`reconcile_with` are read from config (default `None`).
 - Guarantees that `EvaluationStage` and `ReportingStage` are used via composition
   (injected at construction), not via inheritance.
@@ -103,7 +104,13 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   `ModelPathManager`.
 - `configs["aggregation"]` -- must be in `SUPPORTED_PF_AGGREGATION_METHODS`:
   `{"concat", "arithmetic_mean"}`.
-- `configs["targets"]` or `configs["regression_targets"]` -- list of target names.
+- `configs["regression_targets"]` and/or `configs["classification_targets"]` -- lists of
+  target names. The pooled target list is **derived** from both by `combined_targets`
+  (`managers/configuration/configuration.py`), regression first, then classification.
+  Declaring `classification_targets` is what puts the occurrence/gate channel (`by_*`) in
+  the pool; omitting it silently understated ensemble AP (C-132, #422).
+- `configs["targets"]` -- **retired** in #380. `combined_targets` raises `ValueError` on a
+  config still carrying it, rather than letting a stale key outrank the split ones.
 - Assumes sub-model `main.py` scripts accept `ForecastingModelArgs.to_shell_command()`
   arguments and produce PredictionFrame outputs at:
   - Evaluation: `data_generated/predictions_{run_type}_{ts}/origin_{i}/{target}/y_pred.npy`
@@ -173,7 +180,8 @@ PredictionFrameEnsembleManager (composition, no inheritance)
 
 - **Depends on:** `ForecastingModelManager._resolve_evaluation_sequence_number()`
   (static method) for determining evaluation sequence count.
-- **Depends on:** `EnsembleContext` (frozen dataclass from `dataframe_ensemble.py`).
+- **Depends on:** `EnsembleContext` and its `from_config()` factory
+  (`managers/ensemble/context.py`).
 - **Depends on (reconciliation, #236):** the `Reconciler` port
   (`domain.reconciliation_port`), `modules.reconciliation.reconcile_frames`, and
   `cm_forecast_loader.load_cm_frame` — all frames-native.
@@ -303,9 +311,15 @@ manager._evaluate_ensemble(ctx)
 - **`handle_ensemble_log_creation` called in both eval and forecast
   `_execute_*` methods:** This matches the DataFrameEnsembleManager pattern.
   Log creation is an orchestration-level side effect, not a business-logic concern.
-- **`EnsembleContext` imported from `dataframe_ensemble.py`:** Shared frozen
-  dataclass. If the two managers diverge in context needs, a separate context
-  class should be created.
+- **`EnsembleContext` lives in `managers/ensemble/context.py`, owned by neither
+  manager (#432).** It previously lived in `dataframe_ensemble.py` and was imported
+  from there — a shared type homed inside one of its two consumers. Its
+  `from_config()` factory is the single `_build_context` body: the two managers'
+  copies were byte-identical in 16 of 18 arguments, which is why the C-132 gate
+  defect had to be patched twice. The two genuinely divergent values,
+  `prediction_format` and `expected_samples_per_model`, are parameters rather than
+  branches. If the managers diverge further, add a parameter or a separate context
+  class — do not reintroduce a second copy.
 
 ---
 

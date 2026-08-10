@@ -131,9 +131,12 @@ class TestP3SavedSemanticGap:
         import inspect
         from views_pipeline_core.modules.dataloaders.dataloaders import ViewsDataLoader
         source = inspect.getsource(ViewsDataLoader.get_data)
-        assert "Saved data not found" in source, (
+        assert "no usable cache" in source, (
             "Expected fallback message in get_data — the 'saved' flag does not "
-            "guarantee cached data is used"
+            "guarantee cached data is used. #413 reworded this from 'Saved data not "
+            "found' because the fallback now covers more than absence: a cache can also "
+            "be unusable because its provenance record is missing or from another "
+            "version."
         )
         assert "_fetch_data" in source, (
             "Expected _fetch_data call in use_saved=True path — saved falls back "

@@ -314,3 +314,65 @@ def test_no_module_forces_a_log_level_at_import():
         "these modules set a log level at import, overriding whatever the application "
         f"configured: {offenders}"
     )
+
+
+# ---------------------------------------------------------------------------
+# #377 / C-177 residual — a constructor must not mutate the process environment
+# ---------------------------------------------------------------------------
+
+
+def test_no_constructor_loads_a_dotenv():
+    """`load_dotenv` inside `__init__` is a hidden global side effect.
+
+    The guard above catches `load_dotenv()` with **no path** — a library searching
+    upward from the caller's working directory. It deliberately exempts
+    `dotenv_path=` forms, on the reasoning that a declared path is not a search.
+
+    That reasoning is right about the search hazard and blind to the other one.
+    `ModelPathManager.__init__` called `dotenv.load_dotenv(dotenv_path=self.dotenv)`,
+    which is not a search — and still mutated `os.environ` **process-wide** as a side
+    effect of constructing a *path object*. It is constructed by validation code
+    (`modules/validation/ensemble/check.py`) and by file utilities, neither of which
+    wants credentials loaded on their behalf.
+
+    So it survived the #346 sweep that established the policy, and left the repo
+    asserting something untrue: `PredictionStoreConfig.from_environment` raises with
+    *"pipeline-core no longer auto-loads a .env from the working directory"* while one
+    constructor still did.
+
+    Loading is fine where it is honest — `dataloaders.py`'s
+    `_get_viewser_update_config` loads a declared path inside the function that needs
+    the credentials, and fails loud twice if it cannot. That is the shape to copy, and
+    this check does not object to it.
+    """
+    import ast
+    import pathlib
+
+    repo = pathlib.Path(__file__).resolve().parent.parent.parent
+    offenders = []
+
+    for path in sorted((repo / "views_pipeline_core").rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.FunctionDef) and node.name == "__init__"):
+                continue
+            for inner in ast.walk(node):
+                if not isinstance(inner, ast.Call):
+                    continue
+                name = getattr(inner.func, "attr", getattr(inner.func, "id", ""))
+                if name in {"load_dotenv", "find_dotenv"}:
+                    offenders.append(
+                        f"{path.relative_to(repo)}:{inner.lineno} {name}() in __init__"
+                    )
+
+    assert not offenders, (
+        "a constructor loads a .env, mutating os.environ process-wide as a side effect "
+        "of building an object: "
+        f"{offenders}. Load credentials in the operation that needs them and fail loud "
+        "if they are absent — see `dataloaders._get_viewser_update_config`. Callers that "
+        "need the environment populated should do it in their entry point; "
+        "`PredictionStoreConfig.from_environment` already fails with an actionable list "
+        "of the missing variables."
+    )

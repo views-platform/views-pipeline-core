@@ -50,6 +50,8 @@ only confirm the string we just wrote.
 
 from __future__ import annotations
 
+import ast
+import builtins
 import importlib
 import inspect
 import subprocess
@@ -77,7 +79,7 @@ def _generate(template_path: Path, destination: Path) -> str:
     """
     family = template_path.parent.name
     module = importlib.import_module(
-        f"views_pipeline_core.templates.{family}.template_run_sh"
+        f"views_pipeline_core.templates.{family}.{template_path.stem}"
     )
 
     parameters = list(inspect.signature(module.generate).parameters)
@@ -91,7 +93,16 @@ def _generate(template_path: Path, destination: Path) -> str:
         f"skipped silently. Teach the test the new parameter."
     )
 
-    module.generate(destination, **kwargs)
+    wrote = module.generate(destination, **kwargs)
+    # `save_python_script` writes the file BEFORE it py-compiles it, and returns False if
+    # the compile fails — so the file existing does not mean generation succeeded. Checking
+    # only `exists()` would hand syntactically broken content to `ast.parse` below and
+    # report a SyntaxError instead of the assertion the caller wrote.
+    assert wrote is not False, (
+        f"{template_path.relative_to(REPO_ROOT)}::generate returned False. The file may "
+        f"exist anyway — it is written before it is compiled — so its content cannot be "
+        f"trusted and nothing below is meaningful."
+    )
     assert destination.exists(), (
         f"{template_path.relative_to(REPO_ROOT)}::generate returned without writing "
         f"{destination}. Nothing below can be checked."
@@ -208,4 +219,208 @@ def test_the_guard_found_every_run_script_generator() -> None:
         f"found {sorted(families) or 'none'} under {TEMPLATES_ROOT}. Either a template "
         f"was moved or the discovery glob is wrong — in both cases this file is now "
         f"checking less than it appears to."
+    )
+
+
+# ---------------------------------------------------------------------------
+# #366 — a generated main must not silence the only signal upstream provides
+# ---------------------------------------------------------------------------
+
+MAIN_TEMPLATES = sorted(TEMPLATES_ROOT.glob("*/template_main.py"))
+
+# `warnings.filterwarnings(action, message, category, module, lineno, append)` and
+# `warnings.simplefilter(action, category, lineno, append)`. Positional slots matter: the
+# second positional of `filterwarnings` is a *message regex*, not a category.
+_FILTERWARNINGS_SLOTS = {1: "message", 2: "category", 3: "module"}
+_SIMPLEFILTER_SLOTS = {1: "category"}
+
+# A regex that matches every message narrows nothing. `re.match` anchors at the start, so
+# an empty pattern and `.*` are both universal.
+_MATCH_EVERY_MESSAGE = {"", ".*", ".*?", "^", "^.*$", ".*$"}
+
+# `category=` is written as a bare name, so it cannot be `literal_eval`'d — only its
+# identifier is recoverable. Derived, not hand-listed: every warning class Python itself
+# defines, minus the base class, which narrows nothing. An identifier outside this set
+# might be an alias for `Warning`, and this guard says so rather than assuming it is not.
+_NARROWING_CATEGORIES = frozenset(
+    name
+    for name in dir(builtins)
+    if isinstance(getattr(builtins, name), type)
+    and issubclass(getattr(builtins, name), Warning)
+    and name != "Warning"
+)
+
+
+ABSENT = "absent"  # the argument was not supplied
+LITERAL = "literal"  # supplied and its value is known
+IDENTIFIER = "identifier"  # supplied as a bare name; only the identifier is known
+OPAQUE = "opaque"  # supplied as something this guard cannot read at all
+
+
+def _argument(node: ast.Call, name: str, slots: dict[int, str]) -> tuple[str, object]:
+    """Return `(kind, value)` for one argument, whether keyword or positional.
+
+    `kind` distinguishes four states that a two-valued answer would collapse. In
+    particular a literal `"ignore"` and a variable *named* `ignore` are different facts,
+    and so are "not supplied" and "supplied, unreadable". Every caller below branches on
+    all four, because reporting "I could not tell" as "fine" is the exact defect #366
+    was raised about — see ADR-056.
+    """
+    supplied = None
+    for keyword in node.keywords:
+        if keyword.arg == name:
+            supplied = keyword.value
+            break
+    if supplied is None:
+        for index, slot in slots.items():
+            if slot == name and len(node.args) > index:
+                supplied = node.args[index]
+                break
+    if supplied is None:
+        return ABSENT, None
+
+    try:
+        return LITERAL, ast.literal_eval(supplied)
+    except (ValueError, SyntaxError):
+        pass
+    if isinstance(supplied, ast.Name):
+        return IDENTIFIER, supplied.id
+    if isinstance(supplied, ast.Attribute):
+        return IDENTIFIER, supplied.attr
+    return OPAQUE, None
+
+
+def _blanket_reason(node: ast.Call) -> str | None:
+    """Why this call silences everything, or None if it genuinely narrows.
+
+    This asks what the call *does*, not what shape it has. The first version of this guard
+    asked the second question — it accepted any call carrying a `category=` keyword or a
+    second positional argument — and so would have passed `filterwarnings("ignore",
+    category=Warning)`, which silences every warning that exists, and would have missed
+    `simplefilter("ignore")` entirely because it only ever looked at one function name.
+    """
+    # Matches both `warnings.filterwarnings(...)` and a bare `filterwarnings(...)` from
+    # `from warnings import filterwarnings`. Looking only at `.attr`, as the first version
+    # did, would miss the imported form entirely.
+    function = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+    if function not in ("filterwarnings", "simplefilter"):
+        return None
+    slots = _FILTERWARNINGS_SLOTS if function == "filterwarnings" else _SIMPLEFILTER_SLOTS
+
+    action_kind, action = _argument(node, "action", {0: "action"})
+    if action_kind is ABSENT:
+        return f"`{function}` is called with no action, which this guard cannot read"
+    if action_kind is not LITERAL:
+        return (
+            f"`{function}`'s action is not a literal, so this guard cannot tell whether "
+            f"it suppresses anything"
+        )
+    if action != "ignore":
+        return None  # "error", "default", "always" — not a suppression at all
+
+    category_kind, category = _argument(node, "category", slots)
+    if category_kind is OPAQUE:
+        return (
+            f"`category` is neither a literal nor a name, so this guard cannot tell "
+            f"what {function} silences"
+        )
+    if category_kind is not ABSENT:
+        if category in _NARROWING_CATEGORIES:
+            return None  # a named, non-universal category — the permitted form
+        if category != "Warning":
+            return (
+                f"`category={category}` is not a warning class Python defines, so this "
+                f"guard cannot tell whether it narrows anything — it may be an alias for "
+                f"`Warning`. Name a builtin warning category, or extend "
+                f"`_NARROWING_CATEGORIES` with a justification"
+            )
+    # Absent, or `Warning` itself: both functions default `category` to `Warning`, the
+    # base class of every warning that exists.
+
+    if function == "simplefilter":
+        return "`simplefilter` takes no message filter, and its category is `Warning`"
+
+    for argument in ("message", "module"):
+        kind, value = _argument(node, argument, slots)
+        if kind is ABSENT:
+            continue
+        if kind is not LITERAL:
+            return (
+                f"`{argument}` is not a literal, so this guard cannot tell what it "
+                f"matches — a regex it cannot read may match everything"
+            )
+        if value not in _MATCH_EVERY_MESSAGE:
+            return None  # a real regex that excludes something
+
+    return "`category` is `Warning` (the base class of every warning) and no message or module narrows it"
+
+
+def test_the_guard_found_every_main_generator() -> None:
+    """The sibling of `test_the_guard_found_every_run_script_generator`, same reason."""
+    families = {p.parent.name for p in MAIN_TEMPLATES}
+    assert {"model", "ensemble"} <= families, (
+        f"Expected main templates for at least the model and ensemble families; found "
+        f"{sorted(families) or 'none'} under {TEMPLATES_ROOT}. A parametrized test over "
+        f"an empty list reports as passing."
+    )
+
+
+@pytest.mark.parametrize(
+    "template_path", MAIN_TEMPLATES, ids=[p.parent.name for p in MAIN_TEMPLATES]
+)
+def test_generated_main_does_not_blanket_suppress_warnings(
+    template_path: Path, tmp_path: Path
+) -> None:
+    """`warnings.filterwarnings("ignore")` in a generated main eats upstream's only signal.
+
+    views-datafactory zero-fills coverage gaps by design — **their** ADR-047 (this repo
+    has an unrelated ADR-047 of its own; registers and ADR numbers are per-repo and
+    collide, as C-39 already records) states that a filled month is *"structurally
+    indistinguishable from months where the source observed zero events"*. The mitigation
+    they shipped is a `UserWarning` from `load_dataset()`, plus `first_valid_*_month_id` /
+    `last_valid_*_month_id` provenance.
+
+    A bare `filterwarnings("ignore")` at the top of every generated model main discards
+    that warning in exactly the process that needed it. So the platform's answer to
+    "how do I know these zeros are real?" was suppressed by the scaffolding, not by a
+    decision.
+
+    Measured rather than assumed, because the first version of this docstring asserted a
+    blast radius it had not counted. views-models' scaffolder calls this generator
+    directly (`tools/scaffold/build_model_scaffold.py:201`), so every model scaffolded
+    from here on would carry it — but of the 128 mains in views-models today (115 models,
+    13 ensembles) exactly **one** contains the blanket call, `models/fake_model/main.py`;
+    the other 127 have no `warnings` import at all. So this guard prevents a recurrence
+    rather than repairing a fleet, which is the opposite of #384 above, where 24 models
+    had already regressed before anyone looked.
+
+    A targeted suppression is fine and this check permits it: silence the categories you
+    have decided are noise, **by name**. What it refuses is any form that silences
+    categories nobody has considered — including ones that do not exist yet. See
+    `_blanket_reason` for what "by name" is taken to mean and why the obvious syntactic
+    test for it is wrong.
+
+    The template module holds the generated code as a *string literal*, so parsing the
+    template file finds no calls at all — a guard written that way passes unconditionally.
+    This one generates the file first and parses the output, which is what ships.
+    """
+    source = _generate(template_path, tmp_path / "main.py")
+    tree = ast.parse(source)
+
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        reason = _blanket_reason(node)
+        if reason is not None:
+            offenders.append(
+                f"{template_path.relative_to(REPO_ROOT)} -> generated main.py:"
+                f"{node.lineno} — {reason}"
+            )
+
+    assert not offenders, (
+        f"generated mains blanket-suppress every warning: {offenders}. This discards "
+        f"views-datafactory's coverage `UserWarning` (their ADR-047), which is the only "
+        f"signal distinguishing a real zero from a filled gap — in the process that "
+        f"consumes the data. Narrow it: name the categories you have decided are noise."
     )

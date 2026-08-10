@@ -1,6 +1,23 @@
 # LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
+"""`ViewsDataLoader` — fetch, cache and deliver model-ready input data.
+
+One class, one concept. Until #431 this file also held `UpdateViewser`, which replays
+GED/ACLED updates through a queryset's transformation chain — a different job, sharing no
+state and no reason to change with this one. The register called the result a dumping
+ground (C-164); at 1,746 lines, every change to the cache path scrolled past 560 lines of
+transformation-replay logic. `UpdateViewser` now lives in `update_viewser.py`, and this
+file is 1,147 lines of one thing.
+
+`ViewsDataLoader` still constructs an `UpdateViewser` on the `_overwrite_viewser()` path,
+so the dependency runs this way and not the other.
+
+The neighbours carry the rest of the input side: `fetch_context` (run-scoped fetch
+parameters), `frame_cache` and `feature_frame_path` (the frames successor path, #289),
+`provenance_builder` and `data/provenance_sidecar` (cache identity, ADR-059),
+`datafactory_contract` (the datafactory descriptor seam), `synthetic`.
+"""
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 import pandas as pd
 import logging
 from pathlib import Path
@@ -12,17 +29,28 @@ from views_pipeline_core.files.utils import read_dataframe, save_dataframe
 from views_pipeline_core.configs.pipeline import PipelineConfig
 from views_pipeline_core.data.constants import (
     CACHE_FILENAME_TEMPLATE,
+    LOA_TO_OUTPUT_FORMAT,
     PARTITION_TEST,
     PARTITION_TRAIN,
 )
 from views_pipeline_core.data.model_path import ModelPathManager
 from views_pipeline_core.modules.validation.core_data_sniffer import CoreDataSniffer
+from views_pipeline_core.modules.dataloaders.provenance_builder import (
+    cache_matches_current_context,
+    drift_detection_ran,
+    provenance_for,
+)
+from views_pipeline_core.data.provenance_sidecar import (
+    file_sidecar_path,
+    write_provenance,
+)
 from views_pipeline_core.modules.dataloaders.fetch_context import (
     FetchContext,
     resolve_default_partition_dict,
     resolve_month_range,
 )
 from views_pipeline_core.modules.dataloaders.frame_cache import frame_cache_path
+from views_pipeline_core.modules.dataloaders.update_viewser import UpdateViewser
 from views_pipeline_core.modules.dataloaders.feature_frame_path import (
     fetch_feature_frame,
 )
@@ -32,8 +60,6 @@ from views_pipeline_core.modules.dataloaders.datafactory_contract import (
     require_descriptor_keys,
 )
 
-import views_transformation_library.views_2 as views2
-import views_transformation_library.missing as missing
 from viewser import Queryset
 import traceback
 from dotenv import load_dotenv
@@ -47,6 +73,52 @@ _DATAFACTORY_REQUIRED_KEYS = DATAFACTORY_REQUIRED_KEYS  # canonical home: datafa
 _SYNTHETIC_REQUIRED_KEYS = {"pattern", "level", "features"}
 # A FLAT (already-resolved) partition dict is recognized by these keys (C-210).
 _PARTITION_KEYS = {PARTITION_TRAIN, PARTITION_TEST}
+
+
+
+
+def _save_df_cache_with_provenance(
+    df, path_cached_df: Path, ctx, level: Optional[str], alerts
+) -> None:
+    """Write the pandas cache and its provenance record, or neither (#412).
+
+    The record is written after the parquet — the parquet is the expensive part and there
+    is no point recording a fetch that failed to persist. But a parquet **without** a
+    record is exactly the state #413 must treat as unverifiable and refetch, so leaving
+    one behind would silently discard the fetch's value on the next run while looking
+    like a successful cache.
+
+    So a failed record write removes the artifact and raises. Nothing is left that a later
+    run could mistake for a complete cache, and the failure is loud at the point it
+    happened rather than surfacing as an unexplained refetch days later.
+    """
+    save_dataframe(df, path_cached_df)
+    sidecar_path = file_sidecar_path(path_cached_df)
+    try:
+        write_provenance(
+            provenance_for(
+                ctx, level, drift_detection_ran=drift_detection_ran(alerts)
+            ),
+            sidecar_path,
+        )
+    except Exception:
+        # Best-effort cleanup of BOTH artifacts. A partially-flushed sidecar (disk full
+        # mid-write) would otherwise survive as unparseable JSON — and #413 reads a
+        # present-but-unparseable record as CORRUPT, which stops the run, where the
+        # honest state here is simply "this cache was never written".
+        #
+        # If either removal fails the original failure is still the one worth reporting,
+        # so neither ever masks it.
+        try:
+            path_cached_df.unlink(missing_ok=True)
+            sidecar_path.unlink(missing_ok=True)
+        except OSError:
+            logger.error(
+                "Could not remove %s after its provenance record failed to write. "
+                "It has no record, so it will be refetched rather than trusted.",
+                path_cached_df,
+            )
+        raise
 
 
 def detect_data_source(queryset: Any, model_name: str) -> str:
@@ -93,10 +165,9 @@ def detect_data_source(queryset: Any, model_name: str) -> str:
 #: CI against the vendored contract fixture (tests/fixtures/feature_frame_contract/,
 #: tests/test_modules/test_datafactory_contract_conformance.py). Extend only with
 #: strings the upstream vocabulary defines (e.g. ``feature_frame`` for #161).
-_LOA_TO_OUTPUT_FORMAT = {
-    "priogrid_month": "dataframe",
-    "country_month": "country_month",
-}
+#: Re-exported under its historical private name; the mapping itself now lives in
+#: `data/constants.py` (#415). Kept so existing imports of the private name keep working.
+_LOA_TO_OUTPUT_FORMAT = LOA_TO_OUTPUT_FORMAT
 
 #: Grid-entity index-name consolidation (views-frames ADR-015). viewser and old
 #: on-disk caches still carry the legacy ``priogrid_gid`` (datafactory retired it in
@@ -130,606 +201,6 @@ def _normalize_grid_index(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
             [_CANONICAL_GRID_ID if n == _LEGACY_GRID_ID else n for n in names]
         )
     return df
-
-# Ingester dependent imports. Breaks tests on github because no certs
-def _get_splag_country(*args, **kwargs):
-    import views_transformation_library.splag_country as splag_country
-    return splag_country.get_splag_country(*args, **kwargs)
-
-def _get_splag4d(*args, **kwargs):
-    import views_transformation_library.splag4d as splag4d
-    return splag4d.get_splag4d(*args, **kwargs)
-
-def _get_spatial_tree(*args, **kwargs):
-    import views_transformation_library.spatial_tree as spatial_tree
-    return spatial_tree.get_tree_lag(*args, **kwargs)
-
-def _get_spacetime_distance(*args, **kwargs):
-    import views_transformation_library.spacetime_distance as spacetime_distance
-    return spacetime_distance.get_spacetime_distances(*args, **kwargs)
-
-transformation_mapping = {
-    "ops.ln": views2.ln,
-    "missing.fill": missing.fill,
-    "bool.gte": views2.greater_or_equal,
-    "temporal.time_since": views2.time_since,
-    "temporal.decay": views2.decay,
-    "missing.replace_na": missing.replace_na,
-    "spatial.countrylag": _get_splag_country,
-    "temporal.tlag": views2.tlag,
-    "spatial.lag": _get_splag4d,
-    "spatial.treelag": _get_spatial_tree,
-    "spatial.sptime_dist": _get_spacetime_distance,
-    "temporal.moving_sum": views2.moving_sum,
-    "temporal.moving_average": views2.moving_sum,
-}
-
-# The TRANSFORMATIONS_EXPECTING_DF set lists transformation names that require a DataFrame as input,
-# rather than a Series. This is important for handling transformations that operate on multiple columns
-# or require access to the full DataFrame structure. When applying these transformations, the code
-# ensures that the input is converted to a DataFrame before calling the transformation function.
-TRANSFORMATIONS_EXPECTING_DF = {"spatial.lag", "spatial.sptime_dist"}
-
-
-class UpdateViewser:
-    """
-    Update VIEWSER dataframes with latest GED and ACLED data.
-
-    Applies queryset transformations to update existing VIEWSER data with
-    new values from external sources. Handles raw variable updates and
-    recomputes all downstream transformations to maintain consistency.
-
-    The workflow:
-    1. Parses queryset to extract base variables, transformations, and output names
-    2. Loads and preprocesses external update data
-    3. Updates raw columns in VIEWSER dataframe
-    4. Reapplies all transformations in correct sequence
-    5. Returns updated dataframe ready for model consumption
-
-    Supports:
-    - Temporal transformations (lags, moving averages, decay)
-    - Spatial transformations (country lags, grid lags, spatial trees)
-    - Missing value handling and imputation
-    - Mathematical operations (log transforms, boolean operations)
-
-    Attributes:
-        queryset (Queryset): Model queryset defining transformations
-        viewser_df (pd.DataFrame): VIEWSER data to update
-        data_path (Path): Path to external update data
-        months_to_update (List[int]): Month IDs to update
-        base_variables (List[str]): Raw input variable names
-        var_names (List[str]): Final output variable names
-        transformation_list (List[List[Dict]]): Transformation sequences
-        df_external (pd.DataFrame): External update data
-        result (Optional[pd.DataFrame]): Cached update result
-
-    Example:
-        >>> from viewser import Queryset
-        >>> queryset = Queryset.from_file('config_queryset.py')
-        >>> viewser_df = pd.read_parquet('viewser_data.parquet')
-        >>> updater = UpdateViewser(
-        ...     queryset=queryset,
-        ...     viewser_df=viewser_df,
-        ...     data_path='updates/ged_acled_latest.parquet',
-        ...     months_to_update=[528, 529, 530]
-        ... )
-        >>> updated_df = updater.run()
-        >>> print(f"Updated {len(updated_df)} rows")
-
-    Note:
-        - Requires at least one raw_ variable in queryset
-        - External data must cover specified months_to_update
-        - Updates applied in-place to viewser_df
-        - Safe to call run() multiple times (result cached)
-    """
-
-
-    def __init__(
-        self,
-        queryset: Queryset,
-        viewser_df: pd.DataFrame,
-        data_path: str | Path,
-        months_to_update: List[int],
-    ):
-        """
-        Initialize UpdateViewser with queryset, data, and update configuration.
-
-        Sets up update infrastructure by parsing queryset, loading external data,
-        and validating temporal alignment between VIEWSER and update data.
-
-        Args:
-            queryset: Model queryset defining variables and transformations.
-                Must contain at least one variable starting with 'raw_'
-            viewser_df: VIEWSER DataFrame to update. Should have MultiIndex
-                with 'month_id' and entity ID (country_id or priogrid_id)
-            data_path: Path to external update file (parquet format).
-                Must contain columns matching queryset base variables
-            months_to_update: Month IDs to update (e.g., [528, 529, 530]).
-                Must be present in both viewser_df and external data
-
-        Raises:
-            ValueError: If queryset doesn't contain any raw_ variables
-            ValueError: If max month_id in viewser_df exceeds external data
-                (indicates outdated update file)
-            FileNotFoundError: If data_path doesn't exist
-
-        Example:
-            >>> queryset = Queryset.from_file('configs/config_queryset.py')
-            >>> viewser_df = pd.read_parquet('data/viewser.parquet')
-            >>> updater = UpdateViewser(
-            ...     queryset=queryset,
-            ...     viewser_df=viewser_df,
-            ...     data_path='data/ged_acled_updates.parquet',
-            ...     months_to_update=[528, 529]
-            ... )
-            INFO: Max month_id: viewser_df=527
-            INFO: Max month_id: update_df=529
-
-        Note:
-            - External data should be newer than VIEWSER data
-            - Result is None until run() is called
-            - Parses queryset immediately to validate structure
-        """
-
-        self.queryset = queryset
-        self.viewser_df = viewser_df
-        self.data_path = Path(data_path)
-        self.months_to_update = list(months_to_update)
-
-        (self.base_variables, self.var_names, self.transformation_list) = (
-            self._extract_from_queryset()
-        )
-
-        if not any(var.startswith("raw_") for var in self.var_names):
-            raise ValueError(
-                "Queryset does not contain any variable staring with raw_. "
-                "At least one raw_ variable is required to update the viewser df."
-            )
-
-        # self.df_external = self._load_update_df()
-        self.df_external = read_dataframe(self.data_path)
-
-        max_month_id_viewser = self.viewser_df.index.get_level_values("month_id").max()
-        max_month_id_external = self.df_external.index.get_level_values(
-            "month_id"
-        ).max()
-        logger.info(f"Max month_id: viewser_df={max_month_id_viewser}")
-        logger.info(f"Max month_id: update_df={max_month_id_external}")
-
-        if max_month_id_viewser > max_month_id_external:
-            raise ValueError(
-                f"Max month_id mismatch: viewser_df={max_month_id_viewser}, "
-                f"update dataframe={max_month_id_external}, "
-                f"Make sure to get the latest update dataframe! "
-            )
-
-        self.result: pd.DataFrame | None = None  # filled by .run()
-
-    def run(self) -> pd.DataFrame:
-        """
-        Execute complete update workflow to refresh VIEWSER data.
-
-        Applies external updates to raw variables and recomputes all
-        downstream transformations. Safe to call multiple times as
-        result is cached after first execution.
-
-        Execution Flow:
-            1. Check if already run (return cached result)
-            2. Preprocess external data to match queryset structure
-            3. Update raw variables in VIEWSER dataframe
-            4. Reapply all queryset transformations in sequence
-            5. Drop temporary raw_ columns
-            6. Cache and return updated dataframe
-
-        Returns:
-            Updated VIEWSER DataFrame with:
-                - Raw variables updated for specified months
-                - All transformations recomputed
-                - Original structure preserved
-                - Raw columns removed (only transformed remain)
-
-        Example:
-            >>> updater = UpdateViewser(queryset, viewser_df, data_path, [528, 529])
-            >>> # First call executes update
-            >>> df1 = updater.run()
-            INFO: Fetched and updated from viewser
-            INFO: All transformations done
-            >>> # Second call returns cached result
-            >>> df2 = updater.run()
-            DEBUG: Use saved dataframe
-            >>> assert df1 is df2  # Same object
-
-        Performance:
-            - First run: Depends on data size and transformation count
-                Typical: 10-60 seconds for full dataset
-            - Subsequent runs: <1ms (cached result)
-
-        Note:
-            - Updates applied in-place to self.viewser_df
-            - Result cached in self.result
-            - Raw columns dropped from final output
-            - Transformations applied in queryset order
-        """
-        if self.result is not None:
-            logger.debug("Use saved dataframe")  # already done
-            return self.result
-
-        # 1) Adapt update df to queryset and month_ids to update
-        df_update = self._preprocess_update_df()
-
-        # 2) Update df from viewser
-        # df = self.queryset.publish().fetch()
-        self.viewser_df.update(df_update)
-
-        logger.info("Fetched and updated from viewser")
-
-        # 3) Apply transformations
-        df_final = self._apply_all_transformations(df_old=self.viewser_df)
-        logger.info("All transformations done")
-
-        cols_to_drop = df_final.columns[df_final.columns.str.startswith("raw")]
-        df_final = df_final.drop(columns=cols_to_drop)
-
-        # 4)return
-        return df_final
-
-    # 1. -------------  PARSE THE QUERYSET  -------------------------------- #
-    def _extract_from_queryset(
-        self,
-    ) -> Tuple[List[str], List[str], List[List[Dict[str, Any]]]]:
-        """
-        Parse queryset to extract variables and transformations.
-
-        Analyzes queryset operations to build three parallel lists that
-        define the complete transformation pipeline for each variable.
-
-        Internal Use:
-            Called by __init__() to parse queryset structure.
-
-        Returns:
-            Tuple of three lists (same length):
-                - base_variables: Source column names from 'base' namespace
-                    Example: ['country_month.ged_sb_best_sum_nokgi']
-                - var_names: Output column names after rename
-                    Example: ['raw_ged_sb', 'ln_ged_sb_tlag_1']
-                - transformation_list: List of transformation sequences
-                    Example: [[{'name': 'ops.ln', 'arguments': []}]]
-
-        Parsing Rules:
-            - 'base' operations → base_variables
-            - 'trf.util.rename' → var_names
-            - Other 'trf' operations → transformation_list
-            - Operations processed in reverse queryset order
-
-        Example:
-            >>> base_vars, names, transforms = self._extract_from_queryset()
-            >>> print(base_vars[0])
-            'country_month.ged_sb_best_sum_nokgi'
-            >>> print(names[0])
-            'raw_ged_sb'
-            >>> print(transforms[0])
-            [{'name': 'ops.ln', 'arguments': []}]
-
-        Note:
-            - Each queryset line produces one entry in each list
-            - Transformations stored in application order
-            - 'util.base' operations skipped (metadata only)
-        """
-        ops = self.queryset.model_dump()["operations"]
-
-        base_variables: list[str] = []
-        var_names: list[str] = []
-        transformation_list: list[list[dict[str, Any]]] = []
-
-        for cand in ops:
-            transformations: list[dict[str, Any]] = []
-
-            for step in cand:
-                match (step["namespace"], step["name"]):
-                    # record variable renames
-                    case ("trf", "util.rename"):
-                        var_names.append(step["arguments"][0])
-
-                    # record other trf-namespace transformations
-                    case ("trf", other) if other != "util.base":
-                        transformations.append(
-                            {
-                                "name": step["name"],
-                                "arguments": step["arguments"],
-                            }
-                        )
-
-                    # record "base variables"
-                    case ("base", _):
-                        base_variables.append(step["name"])
-
-            transformations.reverse()
-            transformation_list.append(transformations)
-
-        return base_variables, var_names, transformation_list
-    
-    # 2. ------------  PREPROCESS THE UPDATE DF  ---------- #
-    def _preprocess_update_df(
-        self, *, overwrite_external: bool = False
-    ) -> pd.DataFrame:
-        """
-        Prepare external update data to match VIEWSER structure.
-
-        Filters external data to relevant columns and months, then renames
-        columns to match VIEWSER's raw_ variable naming convention.
-
-        Internal Use:
-            Called by run() to preprocess external updates before merging.
-
-        Args:
-            overwrite_external: If True, replaces self.df_external with result.
-                Use with caution - mainly for testing. Default: False
-
-        Returns:
-            Preprocessed DataFrame with:
-                - Only overlapping columns from base_variables
-                - Only rows for months_to_update
-                - Columns renamed to match raw_ variable names
-                - Same index structure as viewser_df
-
-        Processing Steps:
-            1. Extract base names from fully-qualified variables
-                'country_month.ged_sb' → 'ged_sb'
-            2. Find overlap between base names and external columns
-            3. Filter to overlapping columns only
-            4. Filter to specified months_to_update
-            5. Build mapping: base_name → raw_variable_name
-            6. Rename columns using mapping
-            7. Optionally overwrite self.df_external
-
-        Example:
-            >>> df_update = self._preprocess_update_df()
-            >>> print(df_update.columns)
-            Index(['raw_ged_sb', 'raw_ged_os', 'raw_acled_count'])
-            >>> print(df_update.index.names)
-            ['month_id', 'country_id']
-
-        Raises:
-            ValueError: If no overlapping columns found between
-                queryset variables and external data
-
-        Note:
-            - Only processes raw_ variables (transformations computed later)
-            - Preserves MultiIndex structure from external data
-            - Column overlap determined by suffix matching
-        """
-
-        df_new = self.df_external
-
-        # 1. For each string in self.base_variables (which are typically fully-qualified variable names like 'country_month.ged_sb_best_sum_nokgi'),
-        #    it splits the string at the last period ('.') and takes the part after the period. If there is no period, it uses the whole string.
-        #    This produces a list of "base" variable names (e.g., 'ged_sb_best_sum_nokgi') that match the column names in the external update dataframe.
-        #
-        # 2. It then computes the intersection between these extracted base variable names and the columns present in df_new (the external update dataframe).
-        #    This ensures that only variables present in both the queryset and the update dataframe are considered for further processing.
-        #
-        # 3. Finally, it creates a new dataframe (combined_subset) containing only the columns from df_new that are present in the overlap set.
-        #    This filters the external dataframe down to just the relevant columns that can be used for updating the viewser dataframe.
-        # This is dangerous!
-        last_parts = [
-            s.rsplit(".", 1)[1] if "." in s else s for s in self.base_variables
-        ]
-        overlap = set(last_parts).intersection(df_new.columns)
-        if not overlap:
-            raise ValueError(
-                "No overlapping columns found between base variables and update dataframe. "
-                "Check if the update dataframe contains the expected columns."
-            )  # D: Check if the update dataframe contains the expected columns.
-
-        combined_subset = df_new[list(overlap)]
-
-        # ------------------------------------- #
-        # 2. keep only the requested months
-        #    (assumes month_id is the index; adapt otherwise)
-        # ------------------------------------- #
-        df_new = combined_subset.loc[self.months_to_update]
-
-        # ------------------------------------- #
-        # 3. build the rename map (raw_* only)
-        # ------------------------------------- #
-        matching: dict[str, str] = {}
-        for last, vname in zip(last_parts, self.var_names):
-            if vname.startswith("raw_"):
-                matching[last] = vname
-            # else: transformed -- ignore for renaming
-
-        self.last_parts = last_parts
-        self.matching = matching
-
-        df_new = df_new.rename(columns=matching)
-
-        # ------------------------------------- #
-        # 4. optionally persist inside the object
-        # ------------------------------------- #
-        if overwrite_external:
-            self.df_external = df_new
-
-        return df_new
-
-    def _smart_cast(self, arg):
-        """
-        Safely convert string arguments to Python literals.
-
-        Attempts to parse string representations of Python objects
-        (numbers, lists, dicts, etc.) into actual Python types.
-
-        Internal Use:
-            Called during transformation argument processing.
-
-        Args:
-            arg: Input to convert, typically transformation argument.
-                Can be any type; strings attempted for conversion.
-
-        Returns:
-            Evaluated Python object if conversion successful,
-            otherwise original input unchanged.
-
-        Example:
-            >>> self._smart_cast("123")
-            123
-            >>> self._smart_cast("[1, 2, 3]")
-            [1, 2, 3]
-            >>> self._smart_cast("{'key': 'value'}")
-            {'key': 'value'}
-            >>> self._smart_cast("not_a_literal")
-            'not_a_literal'
-
-        Note:
-            - Uses ast.literal_eval for safe evaluation
-            - No arbitrary code execution (safe)
-            - Returns original on conversion failure
-        """
-        try:
-            return ast.literal_eval(arg)
-        except Exception:
-            return arg
-
-    # 3. ------------  APPLY THE TRANSFORMATIONS  ------------------------- #
-    def _apply_all_transformations(self, df_old: pd.DataFrame) -> pd.DataFrame:
-        """
-        Apply all queryset transformations to updated data.
-
-        Recomputes all derived variables by applying transformation sequences
-        to updated raw variables. Handles special cases like spatial lags and
-        ensures index alignment throughout.
-
-        Internal Use:
-            Called by run() after raw variable updates.
-
-        Args:
-            df_old: VIEWSER DataFrame with updated raw values.
-                Must have MultiIndex (month_id, entity_id)
-
-        Returns:
-            DataFrame with all transformations applied.
-            Contains both raw and transformed variables.
-
-        Transformation Handling:
-            - Skips non-GED/ACLED variables (untouched)
-            - Skips raw_ variables (already updated)
-            - Applies transformations in queryset order
-            - Special handling for spatial.countrylag (forward fill)
-            - Reindexes after each transformation for alignment
-
-        Example:
-            >>> df_updated = self._apply_all_transformations(viewser_df)
-            INFO: Applying transformation ops.ln to ln_ged_sb
-            INFO: Applying transformation temporal.tlag to ln_ged_sb_tlag_1
-            >>> print(df_updated.columns)
-            Index(['raw_ged_sb', 'ln_ged_sb', 'ln_ged_sb_tlag_1'])
-
-        Raises:
-            RuntimeError: If transformation fails to apply
-            ValueError: If unknown transformation name encountered
-
-        Note:
-            - Operates in-place on df_old
-            - Uses transformation_mapping for function lookup
-            - Handles both Series and DataFrame inputs per transformation
-            - Index alignment crucial for spatial transformations
-        """
-        ix = pd.IndexSlice
-
-        # Detect the group level (e.g., pg_id, country_id)
-        group_level = next(
-            (lvl for lvl in df_old.index.names if lvl != "month_id"), None
-        )
-        if not group_level:
-            raise ValueError("Could not determine group level from MultiIndex")
-
-        for idx, (var_name, transformations) in enumerate(
-            zip(self.var_names, self.transformation_list)
-        ):
-            # Skip non-ged/acled variables
-            if not any(prefix in var_name for prefix in ("ged", "acled")):
-                logger.debug(f"No Acled or GED variable: {var_name}")
-                continue
-
-            # Skip raw variables
-            if var_name.startswith("raw_"):
-                logger.debug(f"Raw Variable: {var_name}")
-                continue
-
-            # Skip if no transformations to apply
-            if not transformations:
-                logger.debug(f"No transformations: {var_name}")
-                continue
-
-            # Correctly fetch base variable
-            base_var_key = self.last_parts[idx]
-            base_var = self.matching.get(base_var_key)
-
-            if not base_var:
-                logger.warning(
-                    f"⚠️ Could not find base_var for {var_name} (from key '{base_var_key}')"
-                )
-                continue
-            if base_var not in df_old.columns:
-                logger.warning(
-                    f"⚠️ base_var '{base_var}' not in df_old.columns for {var_name}"
-                )
-                continue
-
-            current_series = df_old[base_var]
-
-            for transformation in transformations:
-                name = transformation["name"]
-
-                args = [
-                    self._smart_cast(arg) for arg in transformation.get("arguments", [])
-                ]
-                transform_func = transformation_mapping.get(name)
-
-                if not transform_func:
-                    raise ValueError(f"Unknown transformation: {name}")
-
-                logger.info(
-                    f"Applying transformation {name} with args {args} to {var_name}"
-                )
-
-                # Special case: spatial.countrylag
-                if name == "spatial.countrylag":
-                    logger.debug(f"Special transformation: {name}")
-                    ffilled_col = current_series.groupby(level=group_level).ffill()
-                    df_old.loc[ix[self.months_to_update, :], var_name] = (
-                        ffilled_col.loc[ix[self.months_to_update, :]]
-                    )
-                    continue
-
-                # Determine input shape: Series vs DataFrame
-                if name in TRANSFORMATIONS_EXPECTING_DF:
-                    input_data = current_series.to_frame()
-                else:
-                    input_data = current_series
-
-                # Apply transformation
-                try:
-                    current_series = (
-                        transform_func(input_data, *args)
-                        if args
-                        else transform_func(input_data)
-                    )
-                except Exception as e:
-                    raise RuntimeError(f"Error applying {name} to {var_name}: {e}")
-
-                # Optional: ensure index matches to prevent NaNs
-                if not current_series.index.equals(df_old.index):
-                    logger.warning(
-                        f"[WARNING] Index mismatch after {name} → reindexing"
-                    )
-                    current_series = current_series.reindex(df_old.index)
-
-            # Final assignment to df
-            df_old[var_name] = current_series
-
-        return df_old
-
-
 
 class ViewsDataLoader:
     """
@@ -1222,6 +693,36 @@ class ViewsDataLoader:
             if "col" not in df.columns:
                 df["col"] = ((pgids - 1) % _PRIOGRID_NCOL + 1).astype(float)
 
+        # SAY WHAT IS BEING FABRICATED. A zero that means "no conflict was observed" and a
+        # zero that means "nobody looked" are the same float, and this is the seam where
+        # the second silently becomes the first (#366).
+        #
+        # The fill is NOT removed, deliberately. views-datafactory pre-allocates its
+        # compilation grids with `fill_value=0.0` (their ADR-047: coverage gaps are
+        # "structurally indistinguishable from months where the source observed zero
+        # events"), so most gaps are already zero before this loader sees them. Removing
+        # the fill here would change little and would break models that assume float32
+        # without NaN handling. What was missing is the COUNT — and note the asymmetry
+        # this exposes: `_fetch_data_from_viewser` and `_fetch_data_from_synthetic` do NOT
+        # fill, so the same `get_data()` call has two different NaN policies depending on
+        # the source, which is undocumented and is its own finding.
+        #
+        # Whether coverage gaps should be expressible at all is views-datafactory's
+        # decision, not ours — filed there. Until the input schema can distinguish the two
+        # kinds of zero, this repo does not attempt to.
+        _nan_per_column = df.isna().sum()
+        _nan_total = int(_nan_per_column.sum())
+        if _nan_total:
+            _affected = {c: int(n) for c, n in _nan_per_column.items() if n}
+            logger.warning(
+                "Filling %d NaN value(s) with 0.0 for %s across %d column(s): %s. "
+                "These become indistinguishable from an observed zero. If a column is "
+                "mostly filled, check the source's coverage before trusting the run.",
+                _nan_total,
+                self._model_name,
+                len(_affected),
+                _affected,
+            )
         df = df.fillna(0.0)
         df = df.sort_index()
         df = ensure_float64(df)
@@ -1547,7 +1048,21 @@ class ViewsDataLoader:
         alerts = None
 
         if use_saved:
-            if path_cached_df.exists():
+            # #413: a cache is only served if its provenance record matches this run.
+            # `cache_matches_current_context` raises on a genuine mismatch and returns
+            # False for the cases that should refetch (no record, or one from another
+            # version). The `exists()` check stays first — no record is expected when
+            # there is no artifact either.
+            serve_cache = path_cached_df.exists() and cache_matches_current_context(
+                # `drift_detection_ran` is not an identifying field and is not compared
+                # (see CacheProvenance.identifying_fields) — a run about to READ a cache
+                # has not fetched, so it cannot know whether detection ran for the fetch
+                # that wrote it. False is a placeholder here, never a claim.
+                provenance_for(ctx, level, drift_detection_ran=False),
+                file_sidecar_path(path_cached_df),
+                path_cached_df,
+            )
+            if serve_cache:
                 try:
                     df = read_dataframe(path_cached_df)
                     # Upgrade legacy caches written before the consolidation: an on-disk
@@ -1559,14 +1074,14 @@ class ViewsDataLoader:
                         f"Use of saved data was specified but getting {path_cached_df} failed with: {e}"
                     )
             else:
-                logger.info(f"Saved data not found at {path_cached_df}, fetching from {source}...")
+                logger.info(f"Fetching from {source} — no usable cache at {path_cached_df}...")
                 df, alerts = self._fetch_data(self_test, source)
                 data_fetch_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 create_data_fetch_log_file(
                     self._path_raw, self.partition, self._model_name, data_fetch_timestamp
                 )
                 logger.info(f"Saving data to {path_cached_df}")
-                save_dataframe(df, path_cached_df)
+                _save_df_cache_with_provenance(df, path_cached_df, ctx, level, alerts)
         else:
             logger.info(f"Fetching data from {source}...")
             df, alerts = self._fetch_data(self_test, source)
@@ -1575,8 +1090,8 @@ class ViewsDataLoader:
                 self._path_raw, self.partition, self._model_name, data_fetch_timestamp
             )
             logger.info(f"Saving data to {path_cached_df}")
-            save_dataframe(df, path_cached_df)
-            
+            _save_df_cache_with_provenance(df, path_cached_df, ctx, level, alerts)
+
         if validate:
             CoreDataSniffer(
                 partition_dict=self.partition_dict,

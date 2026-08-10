@@ -77,9 +77,9 @@ def _create_model_args_legacy(args, train, evaluate, forecast):
 
 def _create_model_args_dataframe(args, train, evaluate, forecast):
     """Site 3 for DataFrameEnsembleManager (composition-based)."""
+    from views_pipeline_core.managers.ensemble.context import EnsembleContext
     from views_pipeline_core.managers.ensemble.dataframe_ensemble import (
         DataFrameEnsembleManager,
-        EnsembleContext,
     )
 
     ctx = EnsembleContext(
@@ -111,9 +111,7 @@ def _create_model_args_dataframe(args, train, evaluate, forecast):
 
 def _create_model_args_prediction_frame(args, train, evaluate, forecast):
     """Site 3 for PredictionFrameEnsembleManager (composition-based)."""
-    from views_pipeline_core.managers.ensemble.dataframe_ensemble import (
-        EnsembleContext,
-    )
+    from views_pipeline_core.managers.ensemble.context import EnsembleContext
     from views_pipeline_core.managers.ensemble.prediction_frame_ensemble import (
         PredictionFrameEnsembleManager,
     )

@@ -19,7 +19,12 @@ its own. It owns exactly three things:
   ``managers/prediction/prediction_frame_io.load_pf``): a transient empty fetch
   must never become a poison cache served on every subsequent hit.
 
-Import-light by design (falsify P4): views-frames + stdlib + data.constants only.
+Import-light by design (falsify P4): views-frames, stdlib, and ``data`` submodules —
+no managers, no modules siblings, no pandas. Stated as the invariant rather than as a
+list of module names, because the list drifted the first time a sibling was added (#412
+brought in ``data.cache_provenance`` and ``data.provenance_sidecar``) and a comment that
+enumerates its own imports is stale the moment one changes. The layering is enforced by
+``tests/test_boundary_enforcement.py``; this line says what it means.
 Loader-free by design (falsify P1): explicit values, never a ViewsDataLoader.
 """
 from __future__ import annotations
@@ -32,8 +37,13 @@ from pathlib import Path
 
 from views_frames import FeatureFrame
 
+from views_pipeline_core.data.cache_provenance import CacheProvenance
 from views_pipeline_core.data.constants import FRAME_CACHE_DIRNAME_TEMPLATE
 from views_pipeline_core.data.frame_invariants import assert_frame_nonempty
+from views_pipeline_core.data.provenance_sidecar import (
+    directory_sidecar_path,
+    write_provenance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +70,25 @@ def _remove(path: Path) -> None:
         shutil.rmtree(path)
 
 
-def save_frame_cache(frame: FeatureFrame, cache_dir: Path) -> None:
+def save_frame_cache(
+    frame: FeatureFrame, cache_dir: Path, *, provenance: CacheProvenance
+) -> None:
     """Write ``frame`` to ``cache_dir`` via the leaf's ``save()``, stage → retire-swap.
 
     The frame lands in a staging sibling first; the previous cache (if any) is
     renamed aside — not deleted — before the swap, so at no point is a completed
     cache destroyed while its replacement is uncommitted. Refuses empty frames.
+
+    ``provenance`` is **required**, not optional (#412). A cache without a record is
+    exactly the state #413 has to refetch, so a signature that permitted one would make
+    "every cache carries its provenance" an aspiration rather than a fact — and the one
+    caller that forgot would produce caches indistinguishable from those written before
+    this epic. The type checker enforcing it costs nothing; a warning would not.
+
+    The record is written **into staging, before the swap**, so it is committed by the
+    same ``os.replace`` that commits the frame. Written afterwards, there would be an
+    instant where the cache exists and its record does not — brief, but precisely the
+    window a crash finds.
     """
     assert_frame_nonempty(frame, "refused for caching")
     cache_dir = Path(cache_dir)
@@ -77,6 +100,34 @@ def save_frame_cache(frame: FeatureFrame, cache_dir: Path) -> None:
     _remove(retired)
 
     frame.save(staging)  # staging starts absent: leaf save() merges into dirs
+    try:
+        write_provenance(provenance, directory_sidecar_path(staging))
+    except Exception:
+        # The committed cache is untouched either way — both os.replace calls are still
+        # ahead of us — so this is about not leaving a mess. Without it the staged frame
+        # sits on disk until the NEXT save's `_remove(staging)` eats it silently, which
+        # is indistinguishable from the ordinary empty-staging case and destroys the
+        # evidence of what failed. The pandas path cleans up synchronously and says so;
+        # this now matches.
+        logger.error(
+            "Provenance record failed to write for %s; discarding the staged frame. "
+            "The existing cache (if any) is untouched.",
+            cache_dir,
+        )
+        try:
+            _remove(staging)
+        except OSError:
+            # Guarded for the same reason the pandas path guards its unlink: an
+            # unguarded cleanup REPLACES the original exception as the one callers see,
+            # so the disk-full that actually caused this would surface as a permissions
+            # error from rmtree. The docstring claimed parity with the pandas path before
+            # this guard existed, which made the claim false.
+            logger.error(
+                "Could not remove the staged frame at %s either; it will be cleared by "
+                "the next save.",
+                staging,
+            )
+        raise
 
     if cache_dir.is_dir():
         os.replace(cache_dir, retired)  # keep the old cache whole until the swap lands

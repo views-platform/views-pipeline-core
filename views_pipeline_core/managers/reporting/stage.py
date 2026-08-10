@@ -19,7 +19,51 @@ from typing import Optional
 from views_pipeline_core.types import BaseStageContext
 
 from views_pipeline_core.managers.configuration.configuration import combined_targets
+from views_pipeline_core.modules.validation.core_config_sniffer import (
+    DEPRECATED_REPORT_PREDICTION_FORMATS,
+)
 logger = logging.getLogger(__name__)
+
+
+def _warn_if_report_format_is_deprecated(prediction_format: str, model_name: str) -> None:
+    """Announce that a report-enabled `dataframe` run is on a deprecated path (#211).
+
+    Reaching this module at all means the run is report-enabled, which is why the check
+    lives here rather than in `CoreConfigSniffer`: the sniffer reads a config dict and
+    cannot see the `-re` flag, so it cannot tell a `dataframe` model that reports from
+    one that does not. Only the second is deprecated.
+
+    **This is the warn half of D-36, deliberately not the reject half.** The register
+    settled the direction — reject `dataframe` reports loudly rather than silently take
+    the OOM path — but rejecting is only safe once report-bearing models have somewhere
+    to go, and which of views-models' `dataframe` configs are report-enabled has not been
+    audited. Rejecting first would break runs that have no alternative. The set this reads
+    is named so that flip is a one-name change, not a condition edit.
+
+    ## Why `logger.warning` and not `warnings.warn(..., DeprecationWarning)`
+
+    Because ADR-056 makes generated model mains silence `DeprecationWarning` and
+    `FutureWarning` by name, and reports run inside exactly those mains. A
+    `DeprecationWarning` here would be filtered out in the only process that emits it —
+    the same defect #366 fixed one layer up, and it would be self-inflicted this time.
+    `UserWarning` would survive that filter today, but it would be borrowing a category
+    to dodge our own suppression rather than because the category fits. The run log is
+    the channel an operator actually reads, and nothing filters it.
+    """
+    if prediction_format not in DEPRECATED_REPORT_PREDICTION_FORMATS:
+        return
+
+    logger.warning(
+        "DEPRECATED: model '%s' is generating a report with "
+        "prediction_format='%s'. This path hands list-in-cell values to "
+        "views-reporting to densify, which is the #181 out-of-memory failure; "
+        "prediction_format='prediction_frame' is bounded and is the supported path "
+        "for reports. This will become a hard error once report-bearing models have "
+        "migrated (#211, register D-36). Nothing is being redirected for you — the "
+        "run continues on the path you chose.",
+        model_name,
+        prediction_format,
+    )
 
 
 def _require_dense_report_consumer() -> None:
@@ -31,8 +75,12 @@ def _require_dense_report_consumer() -> None:
     faith. Probe a **public** capability — ``views_reporting.statistics.calculate_map_frame``,
     the bounded ``views_frames_summarize``-backed MAP the dense path relies on and
     that the pre-migration (OOM-prone) views-reporting lacks. This is a capability
-    probe, not a version check (views-reporting is not yet meaningfully versioned),
-    and it touches only a public symbol (not private internals — avoids the C-135
+    probe, not a version check — and deliberately stays one now that it could be a
+    version check: views-reporting reached 0.3.3 on PyPI on 2026-08-02, so the old
+    justification here ("not yet meaningfully versioned") is retired. A capability probe
+    remains the better instrument because this repo declares no pin (ADR-054, #375) and
+    consumes whatever is installed, so the question that matters is what the installed
+    build can *do*, not what it is called. It touches only a public symbol (not private internals — avoids the C-135
     coupling). Raises with an actionable remediation rather than letting an
     AttributeError surface deep inside the template.
     """
@@ -126,6 +174,10 @@ class ReportingStage:
             config=context.configs,
             model_path=context.model_path,
             run_type=context.run_type,
+        )
+
+        _warn_if_report_format_is_deprecated(
+            context.prediction_format, context.configs.get("name", "<unnamed>")
         )
 
         if context.prediction_format == "prediction_frame":

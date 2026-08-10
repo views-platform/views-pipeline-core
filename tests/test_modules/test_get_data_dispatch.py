@@ -9,6 +9,8 @@ import logging
 
 import pytest
 from unittest.mock import MagicMock, patch
+
+from viewser import Queryset
 import pandas as pd
 import numpy as np
 
@@ -35,7 +37,11 @@ def viewser_loader(tmp_path):
     mock_path.model_name = "purple_alien"
     mock_path.data_raw = tmp_path
     mock_path.data_processed = tmp_path
-    mock_qs = MagicMock()
+    # `spec=Queryset` + a real `model_dump` payload: viewser's Queryset is a pydantic
+    # model, and a bare MagicMock answers questions the real object would refuse. #412
+    # needs to IDENTIFY the queryset, which is the first thing that ever asked it one.
+    mock_qs = MagicMock(spec=Queryset)
+    mock_qs.model_dump.return_value = {"loa": "priogrid_month", "name": "dispatch_test"}
     mock_qs.publish = MagicMock()
     mock_path.get_queryset.return_value = mock_qs
 
@@ -145,11 +151,13 @@ class TestCacheFilenames:
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.save_dataframe")
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.create_data_fetch_log_file")
     def test_datafactory_cache_read(
-        self, mock_log, mock_save, datafactory_loader, sample_df, tmp_path
-    ):
+        self, mock_log, mock_save, datafactory_loader, sample_df, tmp_path, plant_cache_record):
         """use_saved=True with existing datafactory cache reads from disk."""
         cache_path = tmp_path / "calibration_datafactory_df.parquet"
         sample_df.to_parquet(cache_path)
+        # Precondition, not the thing under test: since #413 a cache with no provenance
+        # record is refetched, so a hand-planted cache needs one to be served at all.
+        plant_cache_record(datafactory_loader, cache_path, "calibration")
 
         with patch.object(datafactory_loader, "_fetch_data_from_datafactory") as mock_fetch:
             df, _ = datafactory_loader.get_data(

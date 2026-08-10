@@ -121,8 +121,7 @@ class EnsembleManager(ForecastingModelManager):
         self._reconciler = reconciler
         self.__activate_reconciliation = True
 
-        # Name-mangled access: ModelManager.__load_config is private (double underscore)
-        config_modelset = self._ModelManager__load_config(
+        config_modelset = self._load_config(
             "config_modelset.py", "get_modelset_config"
         )
         if config_modelset:

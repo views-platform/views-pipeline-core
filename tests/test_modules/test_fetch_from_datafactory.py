@@ -123,8 +123,23 @@ class TestFetchFromDatafactory:
         assert first_row["col"] == (100001 - 1) % _PRIOGRID_NCOL + 1
 
     @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
-    def test_nan_filled(self, mock_f64, datafactory_loader, mock_datafactory_module):
-        """NaN values filled with 0.0."""
+    def test_nan_filled_and_the_fill_is_reported(
+        self, mock_f64, datafactory_loader, mock_datafactory_module, caplog
+    ):
+        """NaN becomes 0.0 — and the substitution is now SAID OUT LOUD.
+
+        This test used to assert only `not df.isna().any().any()`, which pinned the
+        silence: it required the fill to happen and said nothing about whether anyone
+        was told. A zero that means "no conflict observed" and a zero that means "nobody
+        looked" are the same float, and this is the seam where the second becomes the
+        first (#366).
+
+        The fill itself is NOT removed. views-datafactory pre-allocates its grids with
+        `fill_value=0.0` by design (their ADR-047), so most coverage gaps are already
+        zero before this loader sees them — removing the `fillna` here would change
+        little and would break models that assume float32 without NaN handling. What was
+        missing is the count.
+        """
         index = pd.MultiIndex.from_tuples(
             [(121, 1000)], names=["month_id", "priogrid_gid"]
         )
@@ -135,8 +150,47 @@ class TestFetchFromDatafactory:
         }
         mock_datafactory_module.load_dataset = MagicMock(return_value=nan_df)
 
-        df, _ = datafactory_loader._fetch_data_from_datafactory(self_test=False)
+        with caplog.at_level(logging.WARNING):
+            df, _ = datafactory_loader._fetch_data_from_datafactory(self_test=False)
+
         assert not df.isna().any().any()
+
+        filled = [r for r in caplog.records if "fill" in r.getMessage().lower()]
+        assert filled, (
+            "the fill was silent. One NaN was replaced with 0.0 and nothing said so — a "
+            "fabricated 'no conflict' is indistinguishable from an observed one."
+        )
+        message = filled[-1].getMessage()
+        assert "1" in message, f"the count is not in the message: {message!r}"
+        # The RENAMED column, not the source name — the fill happens after
+        # `rename_features`, and `lr_sb_best` is what the model's config declares, so it
+        # is the name an operator can act on.
+        assert "lr_sb_best" in message, (
+            f"the affected column is not named, so an operator cannot tell which feature "
+            f"was fabricated: {message!r}"
+        )
+
+    @patch("views_pipeline_core.modules.dataloaders.dataloaders.ensure_float64", side_effect=lambda df: df)
+    def test_no_nan_means_no_warning(
+        self, mock_f64, datafactory_loader, mock_datafactory_module, caplog
+    ):
+        """Clean data must stay quiet, or the warning becomes noise and gets ignored."""
+        index = pd.MultiIndex.from_tuples(
+            [(121, 1000)], names=["month_id", "priogrid_gid"]
+        )
+        clean = pd.DataFrame({"ged_sb_best": [0.0]}, index=index)
+
+        datafactory_loader._model_path.get_queryset.return_value = {
+            **SAMPLE_DESCRIPTOR, "features": {"ged_sb_best": "lr_sb_best"}
+        }
+        mock_datafactory_module.load_dataset = MagicMock(return_value=clean)
+
+        with caplog.at_level(logging.WARNING):
+            datafactory_loader._fetch_data_from_datafactory(self_test=False)
+
+        assert not [r for r in caplog.records if "fill" in r.getMessage().lower()], (
+            "a fill was reported when nothing was filled"
+        )
 
     def test_ensure_float64_called(
         self, datafactory_loader, sample_factory_df, mock_datafactory_module

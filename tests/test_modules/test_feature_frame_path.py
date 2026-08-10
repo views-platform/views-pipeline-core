@@ -20,6 +20,7 @@ from views_pipeline_core.modules.dataloaders.feature_frame_path import (
 from views_pipeline_core.modules.dataloaders.frame_cache import save_frame_cache
 from views_pipeline_core.data.model_path import ModelPathManager
 
+
 DESCRIPTOR = {
     "name": "test_model",
     "source": "views-datafactory",
@@ -144,10 +145,21 @@ def test_use_saved_false_always_refetches(loader, mock_datafactory):
     assert mock_datafactory.load_dataset.call_count == 2
 
 
-def test_cached_frame_is_audited_on_hit(loader, mock_datafactory, make_frame):
-    """A cache hit is not a validation bypass: plant a wrong-bounds cache."""
+def test_cached_frame_is_audited_on_hit(
+    loader, mock_datafactory, make_frame, expected_cache_record
+):
+    """A cache hit is not a validation bypass: plant a wrong-bounds cache.
+
+    The record must MATCH — otherwise #413 refuses the cache for the wrong reason and the
+    audit this test is about never runs. The frame's bounds are wrong; its provenance is
+    not.
+    """
     loader.get_feature_frame("forecasting", use_saved=False, level="pgm")
-    save_frame_cache(make_frame([600, 601]), loader.cached_frame_path)
+    save_frame_cache(
+        make_frame([600, 601]),
+        loader.cached_frame_path,
+        provenance=expected_cache_record(loader, "forecasting", "pgm"),
+    )
     with pytest.raises(ValueError, match="Expected complete coverage"):
         loader.get_feature_frame("forecasting", use_saved=True, level="pgm")
 
@@ -248,3 +260,72 @@ def test_frame_path_public_surface_is_loader_free():
     for fn in fns:
         params = set(inspect.signature(fn).parameters)
         assert not params & {"self", "loader", "data_loader"}, fn
+
+
+# ── #413: the frame path verifies provenance too ──────────────────────────────
+
+
+def test_a_frame_cache_from_a_different_queryset_is_refused(loader, mock_datafactory):
+    """The FeatureFrame path gets the same guarantee as the pandas one.
+
+    Without this the epic would have closed with one of the two cache paths still serving
+    stale data — and it would have looked finished, because the pandas tests all pass.
+    A mutation removing verification from the frame path went undetected until this test
+    existed.
+    """
+    from views_pipeline_core.modules.dataloaders.provenance_builder import StaleCacheError
+
+    loader.get_feature_frame("forecasting", use_saved=False, level="pgm")
+
+    # A developer edits their descriptor the way #155 describes.
+    loader._model_path.get_queryset.return_value = {
+        **DESCRIPTOR, "features": {**DESCRIPTOR.get("features", {}), "extra": "extra"}
+    }
+
+    with pytest.raises(StaleCacheError, match="queryset_digest"):
+        loader.get_feature_frame("forecasting", use_saved=True, level="pgm")
+
+
+def test_a_frame_cache_with_no_record_is_refetched(loader, mock_datafactory):
+    """Absent record → miss, on this path as on the other."""
+    from views_pipeline_core.data.provenance_sidecar import directory_sidecar_path
+
+    loader.get_feature_frame("forecasting", use_saved=False, level="pgm")
+    directory_sidecar_path(loader.cached_frame_path).unlink()
+
+    # Reaching the fetch at all is the assertion: an unverifiable cache is not served.
+    loader.get_feature_frame("forecasting", use_saved=True, level="pgm")
+    assert directory_sidecar_path(loader.cached_frame_path).exists(), (
+        "the refetch did not rewrite the record, so the cache stays unverifiable forever"
+    )
+
+
+def test_an_unchanged_frame_cache_is_still_served(loader, mock_datafactory):
+    """Negative control — a check that refused everything would pass the two above."""
+    loader.get_feature_frame("forecasting", use_saved=False, level="pgm")
+    with patch.object(
+        loader, "_fetch_data", side_effect=AssertionError("refetched a valid cache")
+    ):
+        loader.get_feature_frame("forecasting", use_saved=True, level="pgm")
+
+
+def test_a_frame_cache_records_that_drift_detection_did_not_run(loader, mock_datafactory):
+    """C-52, recorded in the artifact rather than left as an absence. #414.
+
+    The frame path has no drift-detection channel at all — `_fetch_from_datafactory`
+    returns a bare frame, not `(frame, alerts)`. So `False` here is measured, not assumed
+    about the source. Asserted because a mutation flipping it to `True` was otherwise
+    undetected: nothing else in the suite looks at this field on this path.
+    """
+    from views_pipeline_core.data.provenance_sidecar import (
+        directory_sidecar_path,
+        read_provenance,
+    )
+
+    loader.get_feature_frame("forecasting", use_saved=False, level="pgm")
+    record = read_provenance(directory_sidecar_path(loader.cached_frame_path))
+
+    assert record.drift_detection_ran is False, (
+        "the frame cache claims drift detection ran. It cannot have: the datafactory "
+        "frame fetch returns no alerts channel."
+    )

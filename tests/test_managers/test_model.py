@@ -28,6 +28,12 @@ def mock_model_path():
     mock.configs = Path("/test/root/models/purple_alien/configs")
     mock.data = Path("/test/root/models/purple_alien/data")
     mock.data_raw = Path("/test/root/models/purple_alien/data/raw")
+    # `data_processed` is created at RUNTIME by `_initialize_directories`, so it is not on
+    # the class and `spec=ModelPathManager` does not know it exists. Its absence made
+    # `ViewsDataLoader.__init__` raise AttributeError on every one of these tests — and
+    # `_initialize_data_loader` swallowed it, so they passed while the data loader
+    # silently failed to construct. #367 removed the swallow; this completes the mock.
+    mock.data_processed = Path("/test/root/models/purple_alien/data/processed")
     mock.data_generated = Path("/test/root/models/purple_alien/data/generated")
     mock.reports = Path("/test/root/models/purple_alien/reports")
     mock.dotenv = Path("/test/root/.env")
@@ -129,7 +135,7 @@ def concrete_manager_class():
 class TestModelManagerInit:
     def test_initialization(self, mock_model_path, mock_configs):
         """Test basic initialization."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config') as mock_load:
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config') as mock_load:
             mock_load.side_effect = lambda script, method: mock_configs.get(
                 script.replace("config_", "").replace(".py", "")
             )
@@ -153,7 +159,7 @@ class TestModelManagerInit:
         """Test instance counter increments."""
         initial_count = ModelManager.__instances__
         
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config'):
             with patch('views_pipeline_core.modules.wandb.WandBModule'):
                 with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
                     with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
@@ -198,7 +204,7 @@ class TestModelManagerProperties:
     @pytest.fixture
     def manager(self, mock_model_path, mock_configs):
         """Create manager instance."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config') as mock_load:
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config') as mock_load:
             # Return actual config values
             mock_load.side_effect = lambda script, method: mock_configs.get(
                 script.replace("config_", "").replace(".py", "")
@@ -246,7 +252,7 @@ class TestModelManagerProperties:
 class TestForecastingModelManagerInit:
     def test_initialization(self, mock_model_path):
         """Test ForecastingModelManager initialization."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config'):
             with patch('views_pipeline_core.modules.wandb.WandBModule'):
                 with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
                     with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
@@ -389,7 +395,7 @@ class TestGetEvaluationStepMappings:
     @pytest.fixture
     def manager(self, mock_model_path):
         """Create a minimally configured manager for method-level tests."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config'):
             with patch('views_pipeline_core.modules.wandb.WandBModule'):
                 with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
                     with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
@@ -456,7 +462,7 @@ class TestAssertPartitionConfigAccessible:
     @pytest.fixture
     def manager(self, mock_model_path):
         """Create a minimally configured manager for method-level tests."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config'):
             with patch('views_pipeline_core.modules.wandb.WandBModule'):
                 with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
                     with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
@@ -503,7 +509,7 @@ class TestForecastingModelManagerAbstractMethods:
     @pytest.fixture
     def manager(self, mock_model_path):
         """Create manager instance."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config'):
             with patch('views_pipeline_core.modules.wandb.WandBModule'):
                 with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
                     with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
@@ -540,7 +546,7 @@ class TestExecuteSingleRun:
     @pytest.fixture
     def manager(self, mock_model_path, mock_configs):
         """Create manager with mocked dependencies."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config') as mock_load:
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config') as mock_load:
             mock_load.side_effect = lambda script, method: mock_configs.get(
                 script.replace("config_", "").replace(".py", "")
             )
@@ -628,7 +634,7 @@ class TestExecuteModelTasks:
     @pytest.fixture
     def manager(self, mock_model_path):
         """Create manager instance."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config'):
             with patch('views_pipeline_core.modules.wandb.WandBModule'):
                 with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
                     with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
@@ -693,7 +699,7 @@ class TestExecuteDataFetching:
     @pytest.fixture
     def manager(self, mock_model_path, mock_configs):
         """Create manager with mocked WandB."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config') as mock_load:
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config') as mock_load:
             mock_load.side_effect = lambda script, method: mock_configs.get(
                 script.replace("config_", "").replace(".py", "")
             )
@@ -756,7 +762,7 @@ class TestStringRepresentations:
     @pytest.fixture
     def manager(self, mock_model_path):
         """Create manager instance."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config'):
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config'):
             with patch('views_pipeline_core.modules.wandb.WandBModule'):
                 with patch('views_pipeline_core.managers.configuration.ConfigurationManager'):
                     with patch('views_pipeline_core.modules.dataloaders.dataloaders.ViewsDataLoader'):
@@ -803,7 +809,7 @@ class TestSaveMethods:
     @pytest.fixture
     def manager(self, mock_model_path, mock_configs):
         """Create manager instance."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config') as mock_load:
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config') as mock_load:
             mock_load.side_effect = lambda script, method: mock_configs.get(
                 script.replace("config_", "").replace(".py", "")
             )
@@ -850,7 +856,7 @@ class TestSaveMethods:
 class TestIntegration:
     def test_full_training_workflow(self, mock_model_path, mock_configs):
         """Test complete training workflow."""
-        with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__load_config') as mock_load:
+        with patch('views_pipeline_core.managers.model.model.ModelManager._load_config') as mock_load:
             mock_load.side_effect = lambda script, method: mock_configs.get(
                 script.replace("config_", "").replace(".py", "")
             )

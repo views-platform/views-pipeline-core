@@ -41,7 +41,7 @@ def get_test_manager():
     mock_path_manager._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
     mock_path_manager.root = Path(".")
     
-    with patch('views_pipeline_core.managers.model.model.ForecastingModelManager._ModelManager__load_config', return_value={}):
+    with patch('views_pipeline_core.managers.model.model.ForecastingModelManager._load_config', return_value={}):
         with patch('views_pipeline_core.modules.logging.LoggingModule.get_logger', return_value=MagicMock()):
             with patch('views_pipeline_core.managers.ConfigurationManager', return_value=MagicMock()):
                 with patch('views_pipeline_core.managers.model.model.ModelManager._ModelManager__ascii_splash'):
