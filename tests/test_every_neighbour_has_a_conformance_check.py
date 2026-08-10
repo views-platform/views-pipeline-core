@@ -113,25 +113,15 @@ class Exemption:
 #: is_justified` enforces both — an entry saying only "skip" fails, which is the whole
 #: point: an unexplained absence and a decided one must not look the same.
 EXEMPT: dict[str, Exemption] = {
-    "evaluation": Exemption(
-        "Probe-only: `_require_evaluation_source_consumer` (managers/reporting/stage.py) "
-        "checks the consumer at runtime, but nothing pins the shape of what we hand "
-        "views-evaluation. A conformance test is the work of B3.",
-        "#430",
-    ),
-    "models": Exemption(
-        "Probe-only, and this is the boundary the #422/#427 incident went through. The "
-        "conformance fixture must freeze rusty_bucket's ensemble config, which is "
-        "currently mid-rebase and broken on its own (declares classification_targets "
-        "with no classification metric key — see "
-        "tests/test_falsification_gate_pooling_splash_zone.py). Writing it now would "
-        "freeze either a wrong shape or a moving branch.",
-        "#430, blocked on views-models#367",
-    ),
     "faoapi": Exemption(
-        "Probe-only. views-faoapi consumes what this package publishes through the "
-        "Appwrite seam; the seam pin is checked, the payload shape is not. B3.",
-        "#430",
+        "Blocked on the other repo, not on effort. views-faoapi is a service, not an "
+        "installable package, and it CONSUMES what this repo publishes through the "
+        "Appwrite seam — so the contract is the payload shape, and the only honest "
+        "artifact is a fixture of what faoapi actually reads. Inventing one here would "
+        "be a copy of their vocabulary, which is the defect with an extra step (C-62). "
+        "Requested from that repo; the seam pin is checked meanwhile, the payload shape "
+        "is not.",
+        "views-faoapi#380, #430",
     ),
     "hydranet": Exemption(
         "Consumer, not a dependency: views-hydranet imports this package, not the "
