@@ -267,3 +267,92 @@ def test_an_evaluation_frame_can_be_built_the_way_this_repo_builds_one(case, sam
     )
 
     assert frame is not None, case
+
+
+# ----------------------------------------------------------------------------------
+# The metric vocabulary. Added after views-models#372 caught this repo recommending a
+# config that clears its own gate and fails the neighbour's.
+# ----------------------------------------------------------------------------------
+
+
+def test_the_metric_key_names_this_repo_knows_are_the_ones_the_evaluator_knows():
+    """`CoreConfigSniffer`'s metric-key constants must be views-evaluation's, exactly.
+
+    `REGRESSION_METRIC_KEYS` and `CLASSIFICATION_METRIC_KEYS` are a local copy of the keys
+    `NativeEvaluator._METRIC_LIST_KEYS` maps to `(task, kind)` cells. A copy of a
+    neighbour's vocabulary goes stale silently — C-62, and the reason every other
+    expectation in this file is read off the installed package rather than written down.
+
+    Not deleted in favour of importing theirs: the sniffer runs at config load and this
+    repo does not otherwise require views-evaluation at that point. A checked copy is the
+    compromise, and this is the check.
+    """
+    from views_pipeline_core.modules.validation.core_config_sniffer import (
+        CLASSIFICATION_METRIC_KEYS,
+        REGRESSION_METRIC_KEYS,
+    )
+
+    with _real_package() as package:
+        from importlib import import_module
+
+        evaluator = import_module("views_evaluation.evaluation.native_evaluator")
+        theirs = set(evaluator.NativeEvaluator._METRIC_LIST_KEYS)
+        assert package is not None
+
+    ours = set(REGRESSION_METRIC_KEYS) | set(CLASSIFICATION_METRIC_KEYS)
+    assert ours == theirs, (
+        f"this repo's metric-key constants have drifted from views-evaluation's. "
+        f"Only here: {sorted(ours - theirs)}. Only there: {sorted(theirs - ours)}. "
+        f"`CoreConfigSniffer` would accept a key the evaluator ignores, or reject one it "
+        f"requires."
+    )
+
+
+def test_every_metric_cell_the_evaluator_declares_has_metrics_in_it():
+    """A control: an empty cell would make the membership check below vacuous."""
+    with _real_package():
+        from importlib import import_module
+
+        catalog = import_module("views_evaluation.evaluation.metric_catalog")
+        membership = catalog.METRIC_MEMBERSHIP
+
+    assert membership, "METRIC_MEMBERSHIP is empty"
+    for cell, metrics in membership.items():
+        assert metrics, f"cell {cell} declares no valid metrics"
+
+
+def test_a_metric_is_only_valid_for_the_cell_the_evaluator_puts_it_in():
+    """The specific thing this repo got wrong, pinned so the lesson is executable.
+
+    `AP` is a classification **point** metric. This repo recommended it as a
+    classification **sample** metric in views-models#372 — a config that clears
+    `CoreConfigSniffer` (which checks only that a metric key is present) and is then
+    refused by `NativeEvaluator._validate_config`, moving the failure from config-load to
+    evaluation time rather than removing it. views-models caught it.
+
+    Read off the installed package, so it tracks their vocabulary rather than restating
+    it. If views-evaluation ever does make `AP` valid for samples, this fails and the
+    recommendation can change — which is the correct direction for the dependency.
+    """
+    with _real_package():
+        from importlib import import_module
+
+        catalog = import_module("views_evaluation.evaluation.metric_catalog")
+        membership = catalog.METRIC_MEMBERSHIP
+
+    assert "AP" in membership[("classification", "point")], (
+        "`AP` is no longer a classification point metric; the guidance in "
+        "views-models#372 and the control in "
+        "tests/test_falsification_gate_pooling_splash_zone.py depend on where it lives."
+    )
+    assert "AP" not in membership[("classification", "sample")], (
+        "`AP` is now valid as a classification SAMPLE metric. The correction this repo "
+        "sent to views-models#372 — use `Brier_cls_sample`, not `AP`, in "
+        "`classification_sample_metrics` — is no longer the whole story. Re-check before "
+        "repeating it."
+    )
+    assert "Brier_cls_sample" in membership[("classification", "sample")], (
+        "`Brier_cls_sample` is what views-models' eight constituent models declare and "
+        "what this repo's corrected control uses. If it moved cells, that control is now "
+        "certifying the wrong thing."
+    )
