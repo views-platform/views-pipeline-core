@@ -21,6 +21,15 @@
 > - **C-206 / #274 — still consciously accepted**, unchanged. Verify from a clean venv
 >   after publishing, not from this worktree. The 3.0.0 gate's own clean-room procedure
 >   applies verbatim.
+> - **C-287 — CONSCIOUSLY ACCEPTED.** Found *during* this release cycle, by views-models
+>   reviewing guidance this repo sent them (views-models#372). `CoreConfigSniffer` checks a
+>   metric key is *present* and never that its contents are *valid*, so it certifies configs
+>   `NativeEvaluator._validate_config` refuses. Accepted rather than fixed: teaching the
+>   sniffer to validate names is a **new failure mode at config load**, and adding one to a
+>   patch release that is already on `main` and drafted is how a patch stops being a patch.
+>   The failure it permits is loud and downstream, not silent. Pinned as executable current
+>   behaviour, and the metric-key constants are now conformance-checked against
+>   `NativeEvaluator._METRIC_LIST_KEYS` so the drift that produced it cannot recur silently.
 > - **views-faoapi payload conformance — OPEN by dependency**, not by choice. The only
 >   honest fixture has to come from that repo; requested as views-faoapi#380. The Appwrite
 >   seam pin is checked; the payload shape is not.
