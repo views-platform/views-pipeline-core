@@ -61,6 +61,18 @@ import pytest
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 
 
+def _native_evaluator():
+    """views-evaluation's own config gate, or a skip if it is not installed."""
+    pytest.importorskip(
+        "views_evaluation",
+        reason="the second gate lives in views-evaluation; without it there is only one "
+        "gate to check and this control cannot do its job.",
+    )
+    from views_evaluation.evaluation.native_evaluator import NativeEvaluator
+
+    return NativeEvaluator
+
+
 def _sniffer(config: dict) -> CoreConfigSniffer:
     instance = object.__new__(CoreConfigSniffer)
     instance._c = config
@@ -73,13 +85,23 @@ RUSTY_BUCKET_AFTER_367 = {
     "classification_targets": ["by_sb_best", "by_ns_best", "by_os_best"],
     "regression_sample_metrics": ["CRPS", "QS_sample", "MCR_sample"],
     # NOTE: no classification metric key — this is what #367 actually writes.
+    #
+    # `steps` and `evaluation_profile` are not part of what #367 changes. They are here
+    # because views-evaluation's `_validate_config` requires them, and the controls below
+    # run the config through that gate as well as this repo's — which is the correction
+    # views-models#372 asked for. Without them the second gate fails for an unrelated
+    # reason and the control proves nothing about the metric key.
+    "steps": list(range(1, 37)),
+    "evaluation_profile": "hydranet_ucdp",
 }
 
 
 @pytest.mark.xfail(
-    reason="F1: views-models#367 as written fails this check. The fix belongs in that PR — "
-    "add `classification_sample_metrics` alongside the `classification_targets` it "
-    "introduces. Delete this file when it lands.",
+    reason="F1: the config views-models#367 wrote fails this check. Premise updated after "
+    "views-models#372 — #367 is NOT merging as-is (it also deletes two ensembles and "
+    "edits governance, and is being split), so the metric key now lands with the C-132 "
+    "work, which is gated on a published 3.0.1. This will keep failing until then; that "
+    "is the release pipeline, not inaction.",
     strict=True,
 )
 def test_f1_the_config_views_models_367_writes_is_accepted():
@@ -94,11 +116,27 @@ def test_f1_the_config_views_models_367_writes_is_accepted():
     _sniffer(dict(RUSTY_BUCKET_AFTER_367))._check_targets_and_metrics()
 
 
-def test_f1_control_the_same_config_with_a_metric_is_accepted():
-    """The control. If this also failed, F1 would be about something else — a config the
-    sniffer rejects for an unrelated reason would produce the same xfail above."""
-    config = {**RUSTY_BUCKET_AFTER_367, "classification_sample_metrics": ["AP"]}
+def test_f1_control_the_same_config_with_a_metric_passes_BOTH_gates():
+    """The control — corrected, after views-models#372 showed the first version was wrong.
+
+    It originally used `classification_sample_metrics: ["AP"]` and called only
+    `_check_targets_and_metrics`. That passes. It also **certifies a config
+    views-evaluation rejects**: `AP` lives in `METRIC_MEMBERSHIP[("classification",
+    "point")]`, and `NativeEvaluator._validate_config` refuses a metric that is not valid
+    for the cell its key names. So the "fix" this control blessed would have moved the
+    failure from config-load to evaluation time rather than removing it.
+
+    That is the same defect the sniffer has (see
+    `test_the_sniffer_accepts_metric_names_the_evaluator_rejects`): a gate that checks a
+    key is *present* and never that its contents are *valid*. A control test built on the
+    weaker gate inherits the weakness.
+
+    So the control now runs the config through both gates, and uses a metric that is
+    actually valid for the sample cell.
+    """
+    config = {**RUSTY_BUCKET_AFTER_367, "classification_sample_metrics": ["Brier_cls_sample"]}
     _sniffer(config)._check_targets_and_metrics()
+    _native_evaluator()._validate_config(config)
 
 
 def test_f1_control_todays_config_is_accepted():
@@ -106,3 +144,36 @@ def test_f1_control_todays_config_is_accepted():
     pre-existing. Without this, F1 could be blaming the wrong change."""
     config = {k: v for k, v in RUSTY_BUCKET_AFTER_367.items() if k != "classification_targets"}
     _sniffer(config)._check_targets_and_metrics()
+
+
+# ----------------------------------------------------------------------------------
+# The gap views-models#372 exposed: two gates, and the earlier one is weaker
+# ----------------------------------------------------------------------------------
+
+
+def test_the_sniffer_accepts_metric_names_the_evaluator_rejects():
+    """`CoreConfigSniffer` checks a metric key is PRESENT, never that its contents are VALID.
+
+    `_check_targets_and_metrics` asks only whether one of `CLASSIFICATION_METRIC_KEYS` is
+    non-empty. views-evaluation's `NativeEvaluator._validate_config` additionally requires
+    every named metric to be valid for the `(task, kind)` cell its key declares. So a
+    config can clear this repo's gate and be refused by the next one — and the operator
+    discovers it at evaluation time, after training has run.
+
+    Found by views-models#372 while reviewing a fix *this repo recommended*: the suggested
+    `classification_sample_metrics: ["AP"]` passes here and fails there, because `AP` is a
+    classification **point** metric.
+
+    Pinned as current behaviour, not fixed here — teaching the sniffer to validate names
+    is a new failure mode and belongs in its own change, filed separately. This test fails
+    the day that lands, which is the signal to delete it.
+    """
+    evaluator = _native_evaluator()
+    config = {**RUSTY_BUCKET_AFTER_367, "classification_sample_metrics": ["AP"]}
+
+    # gate one: passes
+    _sniffer(dict(config))._check_targets_and_metrics()
+
+    # gate two: refuses
+    with pytest.raises(ValueError, match="not valid for"):
+        evaluator._validate_config(config)
