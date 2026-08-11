@@ -22,7 +22,8 @@ of a real config**, pinned to the commit it came from:
 `white_mustang` deliberately, not `rusty_bucket`. rusty_bucket is the ensemble the incident
 concerns, and it is mid-rebase on views-models#367 — where it currently declares
 `classification_targets` with **no** classification metric key, which `CoreConfigSniffer`
-refuses outright (pinned in `tests/test_falsification_gate_pooling_splash_zone.py`).
+refused outright. **Resolved 2026-08-11 by views-models#383**, which is why the
+gated shape is now vendored below.
 Freezing it now would capture either a broken shape or a moving branch. `white_mustang` is
 merged and stable.
 
@@ -181,21 +182,86 @@ def test_the_required_keys_are_present_rather_than_defaulted(combined):
         )
 
 
-def test_this_fixture_does_not_cover_the_gated_shape():
-    """The limit, stated as a test rather than left in a docstring.
+# ----------------------------------------------------------------------------------
+# The gated shape — the one the incident was actually about
+# ----------------------------------------------------------------------------------
 
-    `white_mustang` is regression-only. The classification/gate shape that caused the
-    #422 incident is **not** exercised here; it is pinned in
-    `tests/test_falsification_gate_pooling_splash_zone.py` until views-models#367 lands,
-    after which rusty_bucket should be vendored alongside this.
+GATED_FIXTURE = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "views_models" / "rusty_bucket_configs.py"
+)
 
-    Written as an assertion so that when someone does vendor a gated config, this fails
-    and forces the docstring above to be corrected rather than left lying.
+
+@pytest.fixture(scope="module")
+def gated():
+    """`rusty_bucket` as views-models#383 shipped it — the ensemble that declares a gate.
+
+    `white_mustang` is regression-only and cannot exercise this path. Until 2026-08-11 the
+    gated shape did not exist to vendor: rusty_bucket ran on eight `temporary_*` stand-ins
+    that declared no `classification_targets`, and views-models#367's attempt declared them
+    with no classification metric key, which `CoreConfigSniffer` refuses.
+
+    A previous version of this file carried a test asserting the gated shape was NOT
+    covered here, so that vendoring one would fail and force this docstring to be
+    corrected rather than left lying. It did. This is that correction.
     """
-    module = _fixture_module()
-    assert not module.get_meta_config().get("classification_targets"), (
-        "the vendored config now declares classification targets — the gated shape IS "
-        "covered here. Update this module's docstring, and drop the views-models entry "
-        "from EXEMPT in tests/test_every_neighbour_has_a_conformance_check.py if the "
-        "coverage is now complete."
+    if not GATED_FIXTURE.exists():  # pragma: no cover - the fixture is committed
+        pytest.fail(f"the vendored gated config is missing at {GATED_FIXTURE}")
+    spec = importlib.util.spec_from_file_location("_vendored_rusty_bucket", GATED_FIXTURE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    config = dict(module.get_meta_config())
+    config.update(module.get_deployment_config())
+    config.update(module.get_modelset_config())
+    return config
+
+
+def test_the_gated_config_declares_the_channel_the_incident_was_about(gated):
+    """The `by_*` occurrence channel, declared — which is what makes the fix do anything.
+
+    #422 stopped the pool dropping a declared gate. That fix is inert until an ensemble
+    declares one. This asserts the real config now does.
+    """
+    assert gated["classification_targets"] == ["by_sb_best", "by_ns_best", "by_os_best"]
+
+
+def test_the_gated_config_passes_this_repos_gate(gated):
+    """`CoreConfigSniffer` — the check views-models#367's version failed."""
+    sniffer = object.__new__(CoreConfigSniffer)
+    sniffer._c = dict(gated)
+    sniffer._check_targets_and_metrics()
+
+
+def test_the_gated_config_pools_the_gate_channel(gated):
+    """End of the line: the declared gate reaches the pooled target list.
+
+    Regression first, then classification. Before #422 this returned only the three
+    `lr_*` magnitudes and the ensemble's AP was understated with no error anywhere.
+    """
+    ctx = EnsembleContext.from_config(
+        gated,
+        model_path=None,
+        args=ForecastingModelArgs(run_type="calibration", train=True),
+        partition_dict=None,
+        prediction_format="prediction_frame",
+        expected_samples_per_model=16,
     )
+    assert ctx.targets == [
+        "lr_sb_best", "lr_ns_best", "lr_os_best",
+        "by_sb_best", "by_ns_best", "by_os_best",
+    ]
+
+
+def test_the_gated_config_also_satisfies_views_evaluation(gated):
+    """Two gates, not one — the lesson of C-287.
+
+    `CoreConfigSniffer` checks a metric key is *present*; views-evaluation additionally
+    requires each metric to be valid for the cell its key names. This repo recommended
+    `classification_sample_metrics: ["AP"]`, which clears the first and fails the second
+    (`AP` is a classification *point* metric). views-models#372 caught it. Asserting both
+    here is what stops that advice being given again.
+    """
+    pytest.importorskip("views_evaluation", reason="the second gate needs the neighbour")
+    from views_evaluation.evaluation.native_evaluator import NativeEvaluator
+
+    config = {**gated, "steps": list(range(1, 37))}
+    NativeEvaluator._validate_config(config)
