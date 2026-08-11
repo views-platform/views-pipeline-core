@@ -8,7 +8,7 @@ cross-repo contract**; on mismatch, re-vendor from here.
 **The pinned root hash (SHA-256 of `SHA256SUMS`):**
 
 ```
-b1f3878df9ef74b25dce53a070e1711db39dfdf1c6ca3e1f5a716875ceb32f44
+9658a6484cc9d975412e52624d52f328985f14cf58e3fc9fbdf3e64ab5a0564b
 ```
 
 ## Contents (1 run × 1 target × 1 month × 6 cells × S=4)
@@ -29,6 +29,14 @@ injected fixed literals (`run_id="fixture_run_0"`, `generated_at="2026-07-15T00:
 ## Regeneration
 
 `PYTHONPATH=. python3 scripts/build_wire_fixture.py` — byte-reproducible **with the pinned
-tool versions** (numpy per lockfile, `pyarrow 23.0.1`, `views_frames 1.0.0`; parquet bytes
-vary across pyarrow versions). The committed bytes + `SHA256SUMS` are canonical regardless.
-**A change to this fixture is a change to the contract (§10)** — do not regenerate casually.
+tool versions** (numpy per lockfile, `pyarrow 16.1.0`). The committed bytes + `SHA256SUMS`
+are canonical regardless. **A change to this fixture is a change to the contract (§10)** —
+do not regenerate casually.
+
+**`pyarrow` is the version-sensitive one; `views_frames` is not.** Parquet bytes vary
+across pyarrow versions — that is why the pin is `>=16.1.0,<17.0.0` and why a local
+pyarrow 23.x fails byte-parity while CI passes (register **C-72**). `views_frames` sits
+above it: the fixture was generated under `1.0.0`, CI has reproduced it continuously under
+`1.6.0`, and `1.10.2` was verified to regenerate **all five artifacts byte-identically**
+before the pin was raised (2026-08-02). Raising it again does not require regenerating the
+fixture — but it does require proving that, the same way.
