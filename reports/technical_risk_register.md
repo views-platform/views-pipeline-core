@@ -4,7 +4,14 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 287 concerns (178 resolved) + 41 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.0.1 — OPEN, prepared 2026-08-11.**
+> **Release gate — pipeline-core 3.0.1 — ~~OPEN~~ SHIPPED 2026-08-11.**
+> `views-pipeline-core 3.0.1` is on PyPI (tag `3.0.1`, commit `b108d96`). Verified from
+> outside rather than from this worktree — a fresh venv, `pip install
+> views-pipeline-core==3.0.1` from PyPI: all **61** shipped modules import, `pytest` is
+> absent from the consumer install, `UpdateViewser` resolves through the lazy re-export,
+> and `combined_targets` pools the gate channel. That procedure is C-206's standing
+> remedy and this release inherited C-206 as accepted, so it was run, not assumed.
+> Prepared 2026-08-11; the gate below was its disposition.
 > A patch release carrying the gate-pooling fix (**C-286**) and the three named-debt
 > refactors. Disposition, in the gate's own wording (*"closed or consciously accepted"*):
 >
