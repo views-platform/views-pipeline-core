@@ -353,35 +353,32 @@ class ViewsDataset:
         frame.save(path)
         return path
 
-    # ---- cloud delivery ---------------------------------------
-    def _build_predstore_metadata(self, additional_info: dict | None) -> dict:
-        """Build the ``additional_info`` dict the predstore module expects.
+    # ---- cloud delivery (no pandas) ---------------------------------------
+    def _detect_loa(self) -> str:
+        """Return the spatial-temporal LOA code (e.g. ``"pgm"`` / ``"cm"``).
 
-        Mirrors the legacy ``ForecastAccessor`` autodetection: spatial/temporal
-        LOA, time and space extents, prediction columns and steps, target
-        column. Any key the caller already supplied in ``additional_info``
-        wins — the autodetected values are defaults, not overrides.
-
-        Kept on :class:`ViewsDataset` rather than on :class:`PredstoreModule`
-        because the values come from the dataset's own schema attrs
-        (``_time_id``, ``_entity_id``, ``targets``, ``pred_vars``). The
-        module would otherwise have to reach back into the dataset, which
-        couples it to a dataset shape it has no business knowing.
+        Mirrors the legacy ``ForecastAccessor`` LOA codes — ``spatial_loa``
+        (one of ``c``/``pg``/``a``) concatenated with ``temporal_loa`` (one
+        of ``m``/``y``). The managers already carry this as
+        ``self.configs["level"]``; this method lets a dataset self-report
+        so :meth:`save_appwrite` does not need it as an argument.
         """
         from views_pipeline_core.modules.predstore import (
             detect_spatial_loa,
             detect_temporal_loa,
         )
+        return f"{detect_spatial_loa(self._entity_id)}{detect_temporal_loa(self._time_id)}"
 
-        info = dict(additional_info or {})
-        # LOA defaults — autodetect from the dataset's identifier columns,
-        # exactly as the legacy ``ForecastAccessor.__fetch_spatial_loa`` did
-        # against the dataframe columns.
-        info.setdefault("spatial_loa", detect_spatial_loa(self._entity_id))
-        info.setdefault("temporal_loa", detect_temporal_loa(self._time_id))
+    def _predstore_metadata(self, model_name: str | None = None) -> dict:
+        """Build the ``additional_info`` dict the predstore module expects.
 
-        # Extents — the legacy accessor computed these from the dataframe
-        # index; we read them from the dataset's coordinate arrays.
+        Mirrors the legacy ``ForecastAccessor`` autodetection: spatial/temporal
+        LOA, time and space extents, prediction columns and steps, target.
+        """
+        info: dict[str, Any] = {}
+        if model_name:
+            info["description"] = model_name
+
         times = self._ds[self._time_id].values.astype("int64")
         entities = self._ds[self._entity_id].values.astype("int64")
         if times.size:
@@ -391,36 +388,16 @@ class ViewsDataset:
             info.setdefault("space_min", int(entities.min()))
             info.setdefault("space_max", int(entities.max()))
 
-        # Prediction columns and steps — same logic as the legacy
-        # ``__autodetect_pred_columns`` / ``__autodetect_steps``: columns
-        # starting with ``pred_`` are prediction columns; the suffix after
-        # the last ``_`` (when numeric) is a step.
-        pred_cols = [c for c in self._ds.data_vars if str(c).startswith("pred_")]
+        pred_cols = [str(c) for c in self._ds.data_vars if str(c).startswith("pred_")]
         if pred_cols:
             info.setdefault("prediction_columns", sorted(pred_cols))
-            # Target defaults to the first prediction column's variable name
-            # (``pred_ged_sb`` -> ``ged_sb``), matching the legacy accessor
-            # which took the first non-``_id`` non-prediction column. When the
-            # dataset's ``targets`` attr is populated we prefer that.
-            target = info.get("target")
-            if not target:
-                if self.targets:
-                    info.setdefault("target", self.targets[0])
-                else:
-                    info.setdefault("target", pred_cols[0])
-            # Steps: legacy code parsed them from the prediction column names
-            # (``..._pred_s1`` -> ``[1]``). When the dataset exposes a
-            # ``sample`` dim we use its size as the step count — that is what
-            # the savers chain assumes for PredictionFrame-based writes.
-            if "steps" not in info:
-                sample_size = int(self._ds.sizes.get("sample", 1))
-                info.setdefault("steps", list(range(1, sample_size + 1)))
+            if self.targets:
+                info.setdefault("target", self.targets[0])
+            else:
+                info.setdefault("target", pred_cols[0])
+            sample_size = int(self._ds.sizes.get("sample", 1))
+            info.setdefault("steps", list(range(1, sample_size + 1)))
 
-        # ds / osa flags — when the dataset carries ``pred_`` columns it is
-        # at least one of the two; the legacy accessor distinguished on the
-        # column-name regex. We default to ``osa=False, ds=True`` for
-        # prediction datasets (the common case for VIEWS ensemble writes)
-        # and let the caller override.
         if self.is_prediction:
             info.setdefault("ds", True)
             info.setdefault("osa", False)
@@ -430,78 +407,45 @@ class ViewsDataset:
         self,
         name: str,
         run: str | int,
-        additional_info: dict[str, Any] | None = None,
         *,
-        config: Any = None,
         module: Any = None,
-        overwrite: bool = True,
-        check_transfer: bool = False,
     ) -> str:
-        """Upload this dataset as parquet to the views-forecasts Azure store.
+        """Upload this dataset's parquet to the views-forecasts Azure store.
 
-        Replaces the legacy ``df.forecasts.to_store(name=name, ...)`` pandas
-        extension call. The parquet bytes are produced by the same
-        :meth:`save_parquet` path, then uploaded by
-        :class:`PredstoreModule` under the legacy blob key
-        ``pr_{run}_{name}.parquet``. When a metadata database URL is
-        configured, a ``forecasts_metadata.forecasts`` row is also written
-        so existing lookups keep working.
+        Minimal signature: only ``name`` (the prediction name the legacy
+        ``to_store`` received) and ``run`` (the run name, e.g.
+        ``self._pred_store_name``) are required. Everything else the
+        predstore module needs (LOA, extents, prediction columns, steps,
+        target) is autodetected from this dataset's schema.
 
         Args:
-            name: Logical prediction name (the ``name`` the legacy accessor
-                passed to ``to_store``).
-            run: Run name (e.g. ``"v010200"``) or run id (int). Defaults
-                to ``"test"`` to match the legacy ``ForecastsStore`` default.
-            additional_info: Optional dict of metadata fields. Recognised
-                keys: ``description``, ``target``, ``spatial_loa``,
-                ``temporal_loa``, ``ds``, ``osa``, ``time_min``,
-                ``time_max``, ``space_min``, ``space_max``, ``steps``,
-                ``prediction_columns``, ``views_user``. Anything
-                autodetectable (LOA, extents, prediction columns) is
-                filled in from the dataset when omitted — see
-                :meth:`_build_predstore_metadata`.
-            config: Optional :class:`PredstoreConfig`. When ``None``, the
-                config is read from the standard environment variables via
-                ``PredstoreConfig.from_environment()``.
+            name: Logical prediction name. The blob key is
+                ``pr_{run}_{name}.parquet``.
+            run: Run name (str, e.g. ``"v010200_2026_03"``) or run id (int).
             module: Optional pre-built :class:`PredstoreModule` (e.g. an
                 existing instance shared across calls, or a mock in tests).
-                When ``None``, a module is built from ``config`` for this
-                call and closed afterwards.
-            overwrite: When ``True`` (default), an existing blob is
-                replaced — matches the legacy ``ViewsForecastsSaver`` which
-                calls ``to_store(overwrite=True)``.
-            check_transfer: When ``True``, the uploaded blob is re-read and
-                its SHA-256 compared to the local bytes. Off by default.
+                When ``None``, a module is built from the environment and
+                closed afterwards.
 
         Returns:
             The blob key (``pr_{run}_{name}.parquet``).
-
-        Raises:
-            ConfigurationException: If ``config`` is ``None`` and the
-                required environment variables are not set.
-            Exception: Any Azure-side failure propagates — views-forecasts
-                is the PRIMARY external destination under ADR-047 and a
-                failure must be visible, not silent.
         """
-        from views_pipeline_core.modules.predstore import PredstoreModule, PredstoreConfig
+        from views_pipeline_core.modules.predstore import (
+            PredstoreConfig, PredstoreModule,
+        )
 
-        info = self._build_predstore_metadata(additional_info)
-
-        # Module lifetime: when the caller hands us a module, they own it
-        # (and its underlying backend). When we build one for this call,
-        # we close it on the way out so the Azure client does not leak.
+        info = self._predstore_metadata(model_name=None)
         owns_module = module is None
         if module is None:
-            resolved_config = config or PredstoreConfig.from_environment()
-            module = PredstoreModule(resolved_config)
+            module = PredstoreModule(PredstoreConfig.from_environment())
         try:
             return module.save_dataset(
                 self,
                 name=name,
                 run=run,
-                overwrite=overwrite,
+                overwrite=True,
                 additional_info=info,
-                check_transfer=check_transfer,
+                check_transfer=False,
             )
         finally:
             if owns_module:
@@ -509,16 +453,288 @@ class ViewsDataset:
 
     def save_appwrite(
         self,
-        name: str | None = None,
-        additional_info: dict[str, Any] | None = None,
+        filename: str,
+        model_name: str,
+        target: str,
+        loa: str,
         *,
-        config: Any = None,
         datastore: Any = None,
-        overwrite: bool = True,
     ) -> Any:
-        """Upload this dataset as parquet to the Appwrite cloud store.
+        """Upload this dataset's parquet to the Appwrite cloud store.
+
+        Minimal signature matching the legacy ``AppwriteSaver.save`` /
+        ``DatastoreModule.upload_data`` call: filename in the bucket, model
+        name to record in metadata, target variable name. The LOA, targets
+        list and category are derived from this dataset so callers do not
+        repeat them.
+
+        Args:
+            filename: File name in the Appwrite bucket (e.g.
+                ``"predictions_forecasting_20260101.parquet"``).
+            model_name: Model name recorded in the Appwrite metadata
+                document.
+            target: Target variable name. Recorded both as ``type`` in the
+                metadata and in the ``targets`` list, matching the legacy
+                saver chain.
+            datastore: Optional pre-built :class:`DatastoreModule`. When
+                ``None``, a datastore is built from the standard Appwrite
+                environment variables. Pass an existing instance to amortise
+                the authentication round-trip across multiple uploads.
+
+        Returns:
+            The :class:`OperationResult` returned by
+            ``DatastoreModule.upload_data``. Inspect ``result.success``
+            before declaring victory — Appwrite reports failure by RETURN
+            VALUE, not by exception (register C-227).
+
+        Note:
+            Appwrite is the SECONDARY EXTERNAL destination under ADR-047.
+            A failure is logged at ``logger.error`` but does NOT raise —
+            local disk and views-forecasts already hold the authoritative
+            artefacts. This matches :class:`AppwriteSaver`'s
+            graceful-degradation contract.
         """
-        raise NotImplementedError("Appwrite support is not yet implemented")
+        import tempfile
+
+        # loa = self._detect_loa()
+        targets = list(self.targets) if self.targets else [target]
+
+        owns_datastore = datastore is None
+        if datastore is None:
+            from views_pipeline_core.modules.datastore import DatastoreModule
+            from views_pipeline_core.configs.prediction_store import (
+                PredictionStoreConfig,
+            )
+            datastore = DatastoreModule(
+                PredictionStoreConfig.from_environment().to_appwrite_config(
+                    path_manager=None,
+                )
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            parquet_path = Path(tmpdir) / filename
+            self.save_parquet(parquet_path)
+            try:
+                result = datastore.upload_data(
+                    file=parquet_path,
+                    filename=filename,
+                    loa=loa,
+                    name=model_name,
+                    type=target,
+                    targets=targets,
+                    category="forecast",
+                    description="",
+                )
+            except Exception as e:
+                # Programming errors propagate; transport faults have
+                # already been converted to OperationResult by the SDK
+                # glue — same pattern as AppwriteSaver.save().
+                logger.error(
+                    "save_appwrite: upload FAILED for %s — %s",
+                    filename, e, exc_info=True,
+                )
+                return None
+
+        if result is None or getattr(result, "success", False):
+            logger.info(
+                "save_appwrite: uploaded %s (loa=%s, target=%s).",
+                filename, loa, target,
+            )
+        else:
+            logger.error(
+                "save_appwrite: upload FAILED for %s — code=%s error=%s",
+                filename,
+                getattr(result, "code", None),
+                getattr(result, "error", None),
+            )
+        return result
+
+    # ---- cloud retrieval -------------------------------------------------
+    @classmethod
+    def from_predstore_latest(
+        cls,
+        model_path: Any,
+        run: str | int | None = None,
+        target: str | None = None,
+        *,
+        module: Any = None,
+    ) -> "ViewsDataset":
+        """Retrieve the latest prediction for a model from the views-forecasts store.
+
+        Mirrors the lookup the EnsembleManager does inline today:
+
+            run_id = ViewsMetadata().get_run_id_from_name(self._pred_store_name)
+            all_runs = ViewsMetadata().with_name(cm_model).fetch()["name"].to_list()
+            forecasts = [fc for fc in all_runs if cm_model in fc and "forecasting" in fc]
+            forecasts.sort()
+            return _CDataset(source=pd.DataFrame.forecasts.read_store(
+                run=run_id, name=forecasts[-1]))
+
+        The new path reads the parquet bytes back through
+        :class:`PredstoreModule` and constructs the dataset directly — no
+        pandas. ``run`` is resolved from ``model_path`` when not supplied
+        (using the same ``_pred_store_name`` format the manager builds).
+
+        Args:
+            model_path: A :class:`ModelPathManager` (or any object exposing
+                ``model_name`` and, optionally, a ``_pred_store_name``
+                attribute). Used both to resolve ``run`` (when not supplied)
+                and to filter the metadata lookup.
+            run: Run name (str) or id (int). When ``None``, the manager's
+                ``_pred_store_name`` attribute on ``model_path`` is used as
+                a fallback; if that is missing, ``LookupError`` is raised.
+            target: Optional target name. Currently informational — the
+                legacy store keys files by ``(run, name)`` only.
+            module: Optional pre-built :class:`PredstoreModule`.
+
+        Returns:
+            A :class:`ViewsDataset` (or subclass — call
+            ``ViewsDataset.for_loa`` to route to ``PGDataset`` /
+            ``CDataset`` based on the retrieved data) loaded from the
+            latest matching parquet blob.
+
+        Raises:
+            LookupError: If no matching prediction is found in the store.
+        """
+        import tempfile
+
+        from views_pipeline_core.modules.predstore import (
+            PredstoreConfig, PredstoreModule,
+        )
+
+        # Resolve the run name: explicit > manager's _pred_store_name > error.
+        # The ForecastingModelManager / EnsembleManager set this attribute on
+        # themselves, not on model_path — but a caller who built model_path
+        # independently and wants to read against a known run can pass it
+        # directly. Refusing the implicit "test" default matches the legacy
+        # ``ForecastsStore`` "test" default being unsafe (register C-229).
+        if run is None:
+            run = getattr(model_path, "_pred_store_name", None)
+        if run is None:
+            raise LookupError(
+                "from_predstore_latest: 'run' was not supplied and "
+                "model_path has no '_pred_store_name' attribute. Pass run= "
+                "explicitly (e.g. 'v010200_2026_03')."
+            )
+
+        # Default name to the legacy ensemble pattern when no metadata DB
+        # is configured — matches what the EnsembleManager writes via
+        # ``{model_name}_predictions_{run_type}_{ts}``. Callers that need
+        # a different name can pre-build the module with a metadata writer
+        # and let it look up the latest matching name itself.
+        name = f"{model_path.model_name}_predictions_forecasting"
+
+        owns_module = module is None
+        if module is None:
+            module = PredstoreModule(PredstoreConfig.from_environment())
+        try:
+            parquet_bytes = module.read(name=name, run=run)
+        finally:
+            if owns_module:
+                module.close()
+
+        # The dataset's parquet converter takes a path (see readers.detect_source_type).
+        # Write the bytes to a temp file and hand the path over.
+        with tempfile.NamedTemporaryFile(
+            suffix=".parquet", delete=False
+        ) as tmp:
+            tmp.write(parquet_bytes)
+            tmp_path = Path(tmp.name)
+        return cls(tmp_path)
+
+    @classmethod
+    def from_appwrite_latest(
+        cls,
+        model_path: Any,
+        target: str | None = None,
+        *,
+        datastore: Any = None,
+    ) -> "ViewsDataset":
+        """Retrieve the latest prediction for a model from the Appwrite store.
+
+        Mirrors the legacy ``DatastoreModule.download_latest_file`` flow:
+        search the metadata collection by model name (and optionally
+        target), pick the most recent match, download its parquet, and
+        construct a dataset from it.
+
+        Args:
+            model_path: A :class:`ModelPathManager`. ``model_name`` is the
+                primary filter; ``target`` (when set) disambiguates.
+            target: Optional target name to filter on. When ``None``, the
+                most recent file for the model is returned regardless of
+                target.
+            datastore: Optional pre-built :class:`DatastoreModule`.
+
+        Returns:
+            A :class:`ViewsDataset` (or subclass) loaded from the latest
+            matching parquet.
+
+        Raises:
+            LookupError: If no matching file is found.
+        """
+        import tempfile
+
+        owns_datastore = datastore is None
+        if datastore is None:
+            from views_pipeline_core.modules.datastore import DatastoreModule
+            from views_pipeline_core.configs.prediction_store import (
+                PredictionStoreConfig,
+            )
+            datastore = DatastoreModule(
+                PredictionStoreConfig.from_environment().to_appwrite_config(
+                    path_manager=None,
+                )
+            )
+
+        filters = {"name": model_path.model_name, "category": "forecast"}
+        if target:
+            filters["targets"] = target
+
+        file_id = datastore.get_latest_file_id(filters=filters)
+        if file_id is None:
+            raise LookupError(
+                f"from_appwrite_latest: no file found for model "
+                f"{model_path.model_name!r} (target={target!r})."
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / f"{model_path.model_name}.parquet"
+            result = datastore.download_prediction(
+                file_id=file_id,
+                save_path=save_path,
+                use_cache=False,
+            )
+            if not getattr(result, "success", False):
+                raise LookupError(
+                    f"from_appwrite_latest: download failed for file_id={file_id}: "
+                    f"{getattr(result, 'error', 'unknown')}"
+                )
+            return cls(save_path)
+
+    @classmethod
+    def for_loa(cls, loa: str, source: Any, **kwargs: Any) -> "ViewsDataset":
+        """Construct the right dataset subclass for a VIEWS ``loa`` code.
+
+        The managers carry ``self.configs["level"]`` (``"pgm"`` / ``"cm"`` /
+        ``"pgy"`` / ``"cym"``). Routing the source through the matching
+        subclass enforces the index-name invariant (``priogrid_id`` vs.
+        ``country_id`` / ``month_id`` vs. ``year_id``) at construction.
+
+        ``loa`` is the legacy two-letter code (spatial + temporal), case
+        insensitive. Unknown codes fall back to the base
+        :class:`ViewsDataset` — same behaviour as the legacy
+        ``_ViewsDataset(source=...)`` path.
+        """
+        from views_pipeline_core.modules.dataset.subclasses import (
+            CDataset, CMDataset, CYDataset,
+            PGDataset, PGMDataset, PGYDataset,
+        )
+        _LOA_TO_CLASS = {
+            "pgm": PGMDataset, "pgy": PGYDataset, "pg": PGDataset,
+            "cm":  CMDataset,  "cy":  CYDataset,  "c":  CDataset,
+        }
+        klass = _LOA_TO_CLASS.get((loa or "").lower(), ViewsDataset)
+        return klass(source, **kwargs)
 
     # ---- xarray access -----------------------------------------------------
     def to_xarray(self) -> xr.Dataset:

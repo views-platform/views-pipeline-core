@@ -30,7 +30,7 @@ from views_pipeline_core.data.prediction_frame import PredictionFrame
 
 if TYPE_CHECKING:  # annotation-only; never imported at runtime
     import pandas as pd
-from views_pipeline_core.modules.frames.prediction_frame_io import load_pf, save_pf
+from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
 from views_pipeline_core.modules.dataloaders.datafactory_contract import (
     DATA_FORMAT_DATAFRAME,
     DATA_FORMAT_FEATURE_FRAME,
@@ -44,32 +44,32 @@ from views_pipeline_core.managers.configuration.configuration import combined_ta
 logger = logging.getLogger(__name__)
 
 
-# _require_dataframe_runtime lives in managers/model/_runtime.py
+def _require_dataframe_runtime() -> None:
+    """Fail loud at run start if the legacy DataFrame path lacks pandas (C-224).
+
+    pandas is imported lazily since #320 so the frame-native path never loads
+    it; the cost is that a broken/missing pandas would otherwise surface at the
+    first DataFrame touch — potentially deep inside a run. Mirrors the
+    reporting stage's ``_require_*`` capability-preflight idiom: probe once,
+    fail with remediation, before any expensive work.
+    """
+    try:
+        import pandas  # noqa: F401
+    except ImportError as e:
+        raise RuntimeError(
+            "This model declares data_format='dataframe' (the legacy pandas "
+            "path), but pandas is not importable in this environment. Install "
+            "pandas, or migrate the model to data_format='feature_frame'. "
+            f"Underlying import error: {e}"
+        ) from e
 
 
-# ModelPathManager — model-specific path management.
-# Moved from data/model_path.py per the user's directive:
-# "ModelPathManager belongs in managers/model.py"
-# The base PathManager lives in managers/path.py.
-
-from views_pipeline_core.managers.path import PathManager
+# ModelPathManager relocated to data/ layer per ADR-045 E6 (Root Cause #1:
+# inverted dependencies).  Re-exported here for backward compatibility.
+from views_pipeline_core.data.model_path import ModelPathManager  # noqa: F401, E402
 
 
-# ModelPathManager moved to managers/model/path.py
-from views_pipeline_core.managers.model.path import ModelPathManager  # noqa: F401
-
-# Mixin imports (C-1 audit decision: ForecastingModelManager decomposed into
-# focused mixins under managers/model/mixins/).
-from views_pipeline_core.managers.model.mixins import (
-    DataFetchMixin,
-    EvaluationMixin,
-    ExecutionMixin,
-    ForecastingMixin,
-    PreflightMixin,
-    ReportingMixin,
-    SweepMixin,
-    TrainingMixin,
-)
+# ============================================================ Model Manager ============================================================
 
 
 class ModelManager:
@@ -497,57 +497,40 @@ class ModelManager:
         return df
 
 
-
-# ============================================================ Forecasting Model Manager ============================================================
-
-
-class ForecastingModelManager(
-    ModelManager,
-    DataFetchMixin,
-    TrainingMixin,
-    EvaluationMixin,
-    ForecastingMixin,
-    SweepMixin,
-    ReportingMixin,
-    PreflightMixin,
-    ExecutionMixin,
-):
-    """Orchestrate forecasting model pipeline operations.
-
-    This class is a thin facade composed of mixins (C-1 audit decision).
-    Each pipeline concern — data fetch, training, evaluation, forecasting,
-    sweep, reporting, preflight, and execution — lives in its own mixin
-    file under :mod:`views_pipeline_core.managers.model.mixins`. The
-    mixins read/write ``self._*`` attributes that are set on the combined
-    instance by :meth:`ModelManager.__init__` and
-    :meth:`ForecastingModelManager.__init__`.
-
-    This class itself keeps only:
-      * ``__init__`` — wires up the PredictionIOManager and the 4 stages.
-      * The 4 abstract template-method hooks (``_train_model_artifact``,
-        ``_evaluate_model_artifact``, ``_forecast_model_artifact``,
-        ``_evaluate_sweep``) that subclasses (e.g. r2darts2's
-        ``DartsForecastingModelManager``) must implement.
-      * ``_prediction_format`` property.
-      * ``dataset_class`` static method.
-      * ``__repr__`` / ``__str__``.
-
-    Backward compatibility: every public and private attribute/method that
-    existed on the pre-refactor ``ForecastingModelManager`` is preserved
-    verbatim (either on this class or on one of the mixins). r2darts2's
-    ``DartsForecastingModelManager`` continues to work unchanged.
-
-    Vestigial forwarders removed per m-1 audit decision:
-      * ``_save_evaluations`` — was a 4-line delegation to
-        ``self._io.save_evaluations``.
-      * ``_save_predictions`` — was a 4-line delegation to
-        ``self._io.save_predictions``.
-      * ``_generate_evaluation_table`` — was a static delegation to
-        ``PredictionIOManager.generate_evaluation_table``.
-
-    These were called only by ``EnsembleManager`` (legacy), which now
-    calls ``self._io.save_*`` directly. No external consumer (including
-    r2darts2) called them.
+class ForecastingModelManager(ModelManager):
+    """
+    Orchestrate forecasting model pipeline operations.
+    
+    Manages complete lifecycle of forecasting models including data loading,
+    training, evaluation, future forecasting, and reporting. Supports both
+    single runs and hyperparameter sweeps with WandB integration.
+    
+    Pipeline Stages:
+        - data_fetch: Load and validate time-series data
+        - train: Train model with hyperparameters
+        - evaluate: Multi-horizon performance evaluation
+        - forecast: Generate future predictions
+        - report: Create evaluation/forecast reports
+    
+    Attributes:
+        _data_loader (ViewsDataLoader): Data loading utility
+        _eval_type (str): Current evaluation type
+        _sweep (bool): Whether running as sweep
+        _predictions_name (str): Current predictions filename
+    
+    Example:
+        >>> model_path = ModelPathManager("purple_alien")
+        >>> manager = ForecastingModelManager(
+        ...     model_path=model_path,
+        ...     wandb_notifications=True
+        ... )
+        >>> args = ForecastingModelArgs.parse_args()
+        >>> manager.execute_single_run(args)
+    
+    Note:
+        - Inherits core functionality from ModelManager
+        - Requires queryset configuration for data loading
+        - Supports both probabilistic and point forecasts
     """
 
     def __init__(
@@ -746,6 +729,46 @@ class ForecastingModelManager(
             "_evaluate_model_artifact method must be implemented by subclasses."
         )
 
+    def _evaluate_model_artifact_streaming(
+        self,
+        eval_type: str,
+        artifact_name: str,
+        origin_sink: Callable[[int, Dict[str, PredictionFrame]], None],
+    ) -> None:
+        """
+        Call origin_sink(origin_idx, pf_dict) once per rolling origin.
+
+        origin_sink receives a dict mapping each target name to the single
+        PredictionFrame for that origin. The sink is responsible for saving
+        the PF to disk and freeing it before returning.
+
+        Subclasses should override this method to emit one origin at a time
+        without accumulating all origins in memory first. Overriding is the
+        primary way to eliminate the M×T×PF_size memory spike.
+
+        Default behaviour
+        -----------------
+        Wraps the existing batch ``_evaluate_model_artifact()`` for backward
+        compatibility with models that have not yet adopted streaming. The full
+        batch dict is loaded once and then emitted origin by origin — memory
+        footprint is unchanged relative to the old code path, but the sink
+        interface is honoured so callers written for streaming still work.
+        """
+        raw_preds = self._evaluate_model_artifact(eval_type, artifact_name)
+        if not isinstance(raw_preds, dict):
+            err_msg = (
+                f"prediction_format='prediction_frame' declared but "
+                f"_evaluate_model_artifact() returned {type(raw_preds).__name__}, "
+                f"expected Dict[str, List[PredictionFrame]]. "
+                f"Model contract violation."
+            )
+            logger.error(err_msg)
+            raise ModelEvaluationException(err_msg)
+        n_origins = len(next(iter(raw_preds.values())))
+        for i in range(n_origins):
+            pf_dict = {target: pf_list[i] for target, pf_list in raw_preds.items()}
+            origin_sink(i, pf_dict)
+
     @abstractmethod
     def _forecast_model_artifact(self, artifact_name: str) -> Union[pd.DataFrame, Dict[str, PredictionFrame]]:
         """
@@ -836,21 +859,1351 @@ class ForecastingModelManager(
         raise NotImplementedError(
             "_evaluate_sweep method must be implemented by subclasses."
         )
+    
+    @staticmethod
+    def dataset_class(loa: str) -> type:
+        # DataFrame-path only: the dataset classes live in the legacy tier
+        # (frozen handlers.py, pandas + files.utils chain), so importing them
+        # here — not at module scope — keeps the frame path pandas-free (#320).
+        from views_pipeline_core.data.handlers import CMDataset, PGMDataset
 
-    # @staticmethod
-    # def dataset_class(loa: str) -> type:
-    #     # DataFrame-path only: the dataset classes live in the legacy tier
-    #     # (frozen handlers.py, pandas + files.utils chain), so importing them
-    #     # here — not at module scope — keeps the frame path pandas-free (#320).
-    #     from views_pipeline_core.data.handlers import CMDataset, PGMDataset
+        dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
+        dataset_cls = dataset_classes.get(loa)
+        if dataset_cls:
+            return partial(dataset_cls)
+        raise ValueError(
+            f"Unknown level-of-analysis '{loa}'. Expected one of: {list(dataset_classes.keys())}"
+        )
 
-    #     dataset_classes = {"cm": CMDataset, "pgm": PGMDataset}
-    #     dataset_cls = dataset_classes.get(loa)
-    #     if dataset_cls:
-    #         return partial(dataset_cls)
-    #     raise ValueError(
-    #         f"Unknown level-of-analysis '{loa}'. Expected one of: {list(dataset_classes.keys())}"
-    #     )
+    def _has_evaluation_metrics(self) -> bool:
+        """Return True if any metric keys are specified in config."""
+        return any([
+            self.configs.get("metrics"),
+            self.configs.get("regression_metrics"),
+            self.configs.get("classification_metrics"),
+            self.configs.get("regression_point_metrics"),
+            self.configs.get("regression_sample_metrics"),
+            self.configs.get("classification_point_metrics"),
+            self.configs.get("classification_sample_metrics"),
+        ])
+
+    @staticmethod
+    def _resolve_evaluation_sequence_number(eval_type: str) -> int:
+        """
+        Total number of rolling-origin evaluation sequences for a given eval type.
+
+        The count includes the base-origin sequence (sequence 0, no shift) plus
+        one sequence per shift.  For example, ``"standard"`` with
+        ``MAX_SHIFT_COUNT = 12`` yields 13 sequences (0 … 12).
+
+        Args:
+            eval_type: Type of evaluation
+
+        Returns:
+            Number of sequences.
+
+        Raises:
+            NotImplementedError: If eval_type is "long" (retired, #378) or "complete"
+                (not yet implemented). Both request a sequence count the partition
+                geometry enforced by CoreConfigSniffer cannot supply.
+            ValueError: If eval_type is not recognized.
+
+        Example:
+            >>> n = ForecastingModelManager._resolve_evaluation_sequence_number("standard")
+            >>> print(n)
+            13
+        """
+        if eval_type == "standard":
+            return MAX_SHIFT_COUNT + 1       # 13: base origin + 12 shifts
+        elif eval_type == "long":
+            # Retired 2026-08-02 (#378, register C-268). This returned
+            # 3*MAX_SHIFT_COUNT + 1 = 37, but CoreConfigSniffer *enforces*
+            # test_len == time_steps + MAX_SHIFT_COUNT (36 + 12 = 48 months), which
+            # supports exactly 13 sequences. 37 would need a 72-month window that the
+            # sniffer rejects outright.
+            #
+            # The 24 surplus sequences forecast past the actuals horizon, so
+            # EvaluationAdapter's `actual.index.intersection(df.index)` matched
+            # progressively fewer months — down to 12 — and step-wise evaluation
+            # truncated to the shortest sequence, silently reporting 12 of 36 steps.
+            # Verified against every real model config: 256 of 256 (model, run_type)
+            # combinations, without exception.
+            #
+            # Same failure shape as C-70 (Tier 1) on this same resolver: an eval_type
+            # accepted by the CLI and asserted by tests, but unsupported by the
+            # geometry. `complete` crashed loudly and was caught; `long` degraded
+            # quietly and was not.
+            raise NotImplementedError(
+                "eval_type='long' has been retired — it required 37 rolling-origin "
+                "sequences. CoreConfigSniffer enforces a partition window of "
+                f"test_len == time_steps + MAX_SHIFT_COUNT, where MAX_SHIFT_COUNT="
+                f"{MAX_SHIFT_COUNT} — so a standard 36-step model gets a 48-month "
+                f"window, which supports {MAX_SHIFT_COUNT + 1} sequences. Using "
+                "'long' silently truncated "
+                "step-wise evaluation to the shortest sequence, reporting 12 of 36 "
+                "steps. Use 'standard'. See views-pipeline-core#378."
+            )
+        elif eval_type == "complete":
+            raise NotImplementedError(
+                "eval_type='complete' is not yet implemented — the required "
+                "sequence count depends on partition geometry. Use 'standard'."
+            )
+        elif eval_type == "live":
+            return MAX_SHIFT_COUNT + 1       # 13: same as standard
+        else:
+            raise ValueError(f"Invalid evaluation type: {eval_type}")
+
+    def _initialize_data_loader(self):
+        """Construct ViewsDataLoader after config validation guarantees steps exists.
+
+        Called from execute_single_run() and execute_sweep_run() after
+        CoreConfigSniffer.sniff_all() has validated the configuration.
+        """
+        try:
+            from views_pipeline_core.modules.dataloaders import ViewsDataLoader
+
+            self._data_loader = ViewsDataLoader(
+                model_path=self._model_path,
+                steps=len(self.configs["steps"]),
+                partition_dict=self._partition_dict,
+            )
+        except Exception:
+            logger.error(
+                "No Queryset detected for ViewsDataLoader. Skipping...",
+                exc_info=False,
+            )
+            self._data_loader = None
+
+    def _get_cached_data_path(self):
+        """Return the path to the cached raw DataFrame for the current partition.
+
+        Engine subclasses call this instead of hardcoding the filename convention.
+        """
+        path = self._cached_data_path
+        if path is None:
+            raise RuntimeError(
+                "No cached data path available — _execute_data_fetching() "
+                "must run before engines access raw data."
+            )
+        return path
+
+    def _get_cached_frame_path(self):
+        """Return the FeatureFrame cache directory for the current partition.
+
+        Engine subclasses call this instead of hardcoding the directory
+        convention (C-59 lesson). Only set for models declaring
+        data_format: feature_frame (#290).
+        """
+        path = self._cached_frame_path
+        if path is None:
+            raise RuntimeError(
+                "No cached frame path available — the model must declare "
+                "data_format: feature_frame and _execute_data_fetching() must "
+                "run before engines access the frame cache."
+            )
+        return path
+
+    def execute_single_run(self, args: ForecastingModelArgs) -> None:
+        """
+        Execute single pipeline run with given arguments.
+        
+        Main entry point for model pipeline operations. Orchestrates
+        data fetching, training, evaluation, forecasting, and reporting
+        based on command line arguments.
+        
+        Execution Flow:
+            1. Validate and store arguments
+            2. Initialize WandB session
+            3. Update configuration
+            4. Fetch/load data
+            5. Execute requested stages (train/evaluate/forecast/report)
+        
+        Args:
+            args: Validated command line arguments.
+                Must be ForecastingModelArgs instance.
+        
+        Raises:
+            ValueError: If args not ForecastingModelArgs instance
+            PipelineException: If pipeline execution fails
+            ModelTrainingException: If training fails
+            ModelEvaluationException: If evaluation fails
+            ModelForecastingException: If forecasting fails
+        
+        Side Effects:
+            - Sets self._args
+            - Initializes WandB session
+            - Creates artifacts/predictions/reports
+            - Sends WandB notifications
+        
+        Example:
+            >>> manager = ForecastingModelManager(model_path)
+            >>> args = ForecastingModelArgs.parse_args()
+            >>> manager.execute_single_run(args)
+        
+        Note:
+            - Typical runtime: Minutes to hours
+            - GPU recommended for large models
+        """
+        if not isinstance(args, ForecastingModelArgs):
+            raise ValueError(
+                f"args must be an instance of ForecastingModelArgs. Got {type(args)} instead."
+            )
+
+        # Store args FIRST before using them
+        self._args = args
+
+        # Layer 1: structural pre-condition — fail immediately if partition config
+        # is inaccessible, before any side effects (WandB login, data fetching, etc.)
+        self._assert_partition_config_accessible(args.run_type)
+        CoreConfigSniffer(self.configs, self._partition_dict, target=self._model_path.target).sniff_all(args.run_type)
+
+        # Construct ViewsDataLoader now that config is validated
+        self._initialize_data_loader()
+
+        self._wandb_module.login()
+
+        # Now we can use self.args in config_manager
+        self._config_manager.update_for_single_run(
+            self.args,
+            wandb_module=self._wandb_module,
+        )
+
+        self._project = f"{self.configs['name']}_{self.args.run_type}"
+        self._eval_type = self.args.eval_type
+        self._config_manager.add_config({"eval_type": self._eval_type})
+
+        # Fetch data
+        self._execute_data_fetching()
+
+        # Execute model tasks
+        self._execute_model_tasks()
+
+    def execute_sweep_run(self, args: ForecastingModelArgs) -> None:
+        """
+        Execute hyperparameter sweep with WandB.
+        
+        Runs WandB sweep agent for hyperparameter optimization.
+        Trains and evaluates models with different configurations.
+        
+        Args:
+            args: Command line arguments.
+                Must have sweep=True.
+        
+        Raises:
+            ValueError: If args not ForecastingModelArgs instance
+        
+        Side Effects:
+            - Creates WandB sweep
+            - Initializes sweep agent
+            - Runs multiple training iterations
+        
+        Example:
+            >>> args = ForecastingModelArgs(
+            ...     run_type='calibration',
+            ...     sweep=True
+            ... )
+            >>> manager.execute_sweep_run(args)
+        
+        Note:
+            - Fetches data once, reuses for all iterations
+            - Sweep config must be defined in config_sweep.py
+        """
+        if not isinstance(args, ForecastingModelArgs):
+            raise ValueError(
+                f"args must be an instance of ForecastingModelArgs. Got {type(args)} instead."
+            )
+        import wandb
+
+        # Store args FIRST before using them
+        self._args = args
+
+        # Layer 1: structural pre-condition — match execute_single_run() contract
+        self._assert_partition_config_accessible(args.run_type)
+        CoreConfigSniffer(self.configs, self._partition_dict, target=self._model_path.target).sniff_all(args.run_type)
+
+        # Construct ViewsDataLoader now that config is validated
+        self._initialize_data_loader()
+
+        self._wandb_module.login()
+
+        self._project = f"{self._config_manager.config_sweep['name']}_sweep"
+        self._eval_type = self.args.eval_type
+        self._sweep = True
+
+        # Fetch data
+        self._execute_data_fetching()
+
+        # Execute sweep
+        sweep_id = wandb.sweep(
+            self._config_manager.config_sweep,
+            project=self._project,
+            entity=self._entity,
+        )
+        wandb.agent(sweep_id, self._execute_model_tasks, entity=self._entity)
+
+    def _execute_model_tasks(self) -> None:
+        """
+        Execute requested pipeline stages.
+        
+        Orchestrates training, evaluation, forecasting, and reporting
+        based on arguments. Handles both single runs and sweeps.
+        
+        Internal Use:
+            Called by execute_single_run() and execute_sweep_run().
+        
+        Execution Flow:
+            If sweep:
+                - Execute sweep training and evaluation
+            
+            If single run:
+                - Train model (if args.train)
+                - Evaluate model (if args.evaluate)
+                - Generate forecasts (if args.forecast)
+                - Create reports (if args.report)
+        
+        Side Effects:
+            - Executes pipeline stages
+            - Creates artifacts/predictions
+            - Logs to WandB
+            - Sends notifications
+        
+        Note:
+            - Logs total runtime at completion
+            - All exceptions handled by stage methods
+        """
+        import time
+
+        start_t = time.time()
+
+        if self._sweep:
+            self._execute_model_sweeping()
+        else:
+            if self.args.train:
+                self._execute_model_training()
+            if self.args.evaluate:
+                self._execute_model_evaluation()
+            if self.args.forecast:
+                self._execute_model_forecasting()
+            if self.args.report and self.args.forecast:
+                self._execute_forecast_reporting()
+            if self.args.report and self.args.evaluate:
+                self._execute_evaluation_reporting()
+
+        end_t = time.time()
+        minutes = (end_t - start_t) / 60
+        logger.info(f"Done. Runtime: {minutes:.3f} minutes.\n")
+
+    def _execute_data_fetching(self) -> None:
+        """
+        Fetch and validate data from ViEWS viewser.
+        
+        Downloads or loads data, applies queryset filters, validates
+        quality, and saves processed data. Creates WandB artifact.
+        
+        Pipeline Stage:
+            data_fetch
+        
+        Side Effects:
+            - Creates WandB run (job_type="fetch_data")
+            - Downloads/loads data from viewser
+            - Saves to self._model_path.data_raw
+            - Creates WandB artifact
+            - Sends completion notification
+        
+        Raises:
+            DataFetchException: If fetching or validation fails
+        
+        Example:
+            >>> # Internal usage
+            >>> self._execute_data_fetching()
+            INFO: Fetching data for calibration...
+            INFO: Data saved to data/raw/calibration_viewser_df.parquet
+        
+        Note:
+            - Uses args.saved to skip download if data exists
+            - Respects args.override_timestep for custom ranges
+            - Updates viewser if args.update_viewser=True
+        """
+
+        # Explicit df-vs-ff dispatch (#290, epic #285): the model's queryset
+        # descriptor declares its input shape; absent → dataframe, byte-identical
+        # legacy behavior. Resolved BEFORE the wandb run/try block so a config
+        # typo fails as a crisp ValueError with no spurious fetch-failure alert.
+        # This is a second get_queryset() read (the loader takes its own #289
+        # snapshot for the fetch): deliberate — if a regenerated queryset were
+        # to diverge between the reads, the loader's fail-loud gates (dict
+        # check, frame-capable source check) catch the contradiction loudly.
+        data_format = declared_data_format(self._model_path.get_queryset())
+        # Remembered for the evaluation stage (#302): actuals sourcing and
+        # legacy-egress gating dispatch on the same declaration.
+        self._data_format = data_format
+        if data_format == DATA_FORMAT_DATAFRAME:
+            _require_dataframe_runtime()  # C-224 preflight — see its docstring
+
+        with self._wandb_module.initialize_run(
+            project=self._project,
+            config={},
+            job_type="fetch_data",
+        ):
+            try:
+                if data_format == DATA_FORMAT_FEATURE_FRAME:
+                    self._data_loader.get_feature_frame(
+                        partition=self.args.run_type,
+                        use_saved=self.args.saved,
+                        level=self.configs["level"],
+                        validate=True,
+                        override_month=self.args.override_timestep,
+                    )
+                    self._cached_frame_path = self._data_loader.cached_frame_path
+                else:
+                    self._data_loader.get_data(
+                        use_saved=self.args.saved,
+                        validate=True,
+                        self_test=self.args.drift_self_test,
+                        partition=self.args.run_type,
+                        override_month=self.args.override_timestep,
+                        level=self.configs["level"],
+                    )
+                    self._cached_data_path = self._data_loader.cached_data_path
+
+                self._wandb_module.send_alert(
+                    title=f"Queryset Fetch Complete ({str(self.args.run_type)})",
+                    text=f"Queryset for {self._model_path.target} {self._model_path.model_name} downloaded successfully.",
+                    notifications_enabled=self._wandb_notifications,
+                )
+
+            except Exception as e:
+                logger.error(f"Data fetching failed: {e}", exc_info=True)
+                raise DataFetchException(
+                    f"Data fetching failed: {e}",
+                    wandb_module=self._wandb_module,
+                )
+            finally:
+                self._wandb_module.finish_run()
+
+    def _execute_model_training(self) -> None:
+        """
+        Train model and save artifact.
+
+        Calls the abstract _train_model_artifact() (subclass-specific),
+        then delegates post-training bookkeeping to TrainingStage (ADR-045 E5).
+        WandB lifecycle stays in this facade method.
+
+        Side Effects:
+            - Creates WandB run (job_type="train")
+            - Creates artifact via abstract method
+            - Creates training log and sends alert via TrainingStage
+        """
+        import traceback
+        from views_pipeline_core.managers.training.stage import TrainingContext
+
+        with self._wandb_module.initialize_run(
+            project=self._project,
+            config=self.configs,
+            job_type="train",
+        ):
+            try:
+                logger.info(
+                    f"Training {self._model_path.target} {self.configs['name']}..."
+                )
+                self._train_model_artifact()
+
+                context = TrainingContext(
+                    configs=self.configs,
+                    model_path=self._model_path,
+                    run_type=self.args.run_type,
+                    sweep=self._sweep,
+                )
+                self._training_stage.finalize_training(context)
+
+            except Exception as e:
+                logger.error(
+                    f"{self._model_path.target.title()} training model: {e}",
+                    exc_info=True,
+                )
+                raise ModelTrainingException(
+                    f"Training failed: {traceback.format_exc()}",
+                    wandb_module=self._wandb_module,
+                )
+            finally:
+                self._wandb_module.finish_run()
+
+    def _execute_model_evaluation(self) -> None:
+        """
+        Evaluate model on test data.
+        
+        Generates predictions, validates structure, calculates metrics,
+        and saves evaluation results. Supports multi-sequence evaluation.
+        
+        Pipeline Stage:
+            evaluate
+        
+        Side Effects:
+            - Creates WandB run (job_type="evaluate")
+            - Generates predictions for each sequence
+            - Validates prediction DataFrames
+            - Calculates and saves metrics
+            - Logs to WandB
+            - Sends completion notification
+        
+        Raises:
+            ModelEvaluationException: If evaluation fails
+        
+        Example:
+            >>> # Internal usage
+            >>> self._execute_model_evaluation()
+            INFO: Evaluating purple_alien...
+            INFO: Validating 12 prediction sequences...
+            INFO: Evaluation completed.
+        
+        Note:
+            - Uses threadpool for parallel validation
+            - Metrics calculated only if specified in config
+        """
+        import traceback
+        from views_pipeline_core.modules.validation.core_prediction_sniffer import CorePredictionSniffer
+        from views_pipeline_core.files.utils import handle_single_log_creation
+
+        with self._wandb_module.initialize_run(
+            project=self._project,
+            config=self.configs,
+            job_type="evaluate",
+        ):
+            try:
+                logger.info(
+                    f"Evaluating {self._model_path.target} {self.configs['name']}..."
+                )
+
+                # Layer 2: log declared temporal window before expensive inference.
+                # This makes the expected outcome visible in the run log so any
+                # mismatch with actual model output can be diagnosed from logs alone.
+                if self.args.run_type != "forecasting":
+                    _steps = self.configs["steps"]
+                    _base_origin = self._partition_dict[self.args.run_type]['test'][0] - 1
+                    logger.info(
+                        f"Declared temporal window: base_origin={_base_origin}, "
+                        f"step 1 → month {_base_origin + 1}, "
+                        f"step {max(_steps)} → month {_base_origin + max(_steps)} "
+                        f"({len(_steps)} steps total). Model inference starting."
+                    )
+
+                import gc
+                import shutil
+                import concurrent.futures
+
+                if self._prediction_format == "prediction_frame":
+                    # ── PF path — streaming evaluation ───────────────────────────────
+                    # Process one origin at a time so at most one origin's PredictionFrames
+                    # are alive simultaneously.  Each origin writes:
+                    #   Track A  staging/_pf_staging/origin_i/target/ — compact .npy,
+                    #            used by the metrics reload below (mmap-safe)
+                    #   Track A+ data_generated/predictions_{run_type}_{ts}/origin_i/target/
+                    #            — permanent numpy for PF ensemble consumption
+                    #   Track B  data_generated/predictions_*.parquet — list-in-cell,
+                    #            controlled by mandatory skip_predictions_delivery key
+                    _skip_delivery = self.configs["skip_predictions_delivery"]
+                    if not _skip_delivery:
+                        from views_pipeline_core.managers.prediction.prediction_frame_converter import (
+                            PredictionFrameConverter,
+                        )
+                        converter = PredictionFrameConverter()
+                    staging_path = self._model_path.data_generated / "_pf_staging"
+                    _run_type = self.args.run_type
+                    _ts = self._model_path.resolve_artifact_path(
+                        self.args.run_type, self.args.artifact_name
+                    ).stem[-15:]
+                    all_targets: List[str] = []
+                    n_sequences = 0
+
+                    def _origin_sink(
+                        origin_idx: int, pf_dict: Dict[str, PredictionFrame]
+                    ) -> None:
+                        nonlocal n_sequences
+                        if not all_targets:
+                            all_targets.extend(pf_dict.keys())
+                        else:
+                            missing = set(all_targets) - set(pf_dict.keys())
+                            if missing:
+                                logger.warning(
+                                    "Origin %d is missing targets %s present "
+                                    "in origin 0. These targets will not be "
+                                    "saved for this origin, and mmap reload "
+                                    "will fail at metric evaluation time.",
+                                    origin_idx, sorted(missing),
+                                )
+                        for target in list(pf_dict.keys()):
+                            pf = pf_dict.pop(target)  # remove from dict → refcount drops
+                            # Track A — compact numpy (metrics mmap reload)
+                            save_pf(pf, staging_path / f"origin_{origin_idx}" / target)
+                            # Track A+ — permanent numpy for ensemble consumption
+                            save_pf(
+                                pf,
+                                self._model_path.data_generated
+                                / f"predictions_{_run_type}_{_ts}"
+                                / f"origin_{origin_idx}"
+                                / target
+                            )
+                            # Track B — list-in-cell parquet (delivery)
+                            # Controlled by mandatory skip_predictions_delivery key.
+                            # PF ensembles consume Track A+ numpy, not Track B.
+                            if not _skip_delivery:
+                                table = converter.to_arrow_table(
+                                    pf, target, level=self.configs["level"]
+                                )
+                                self._save_predictions(
+                                    table, self._model_path.data_generated, origin_idx,
+                                    send_alert=False,
+                                    target_identifier=target,
+                                )
+                                del table
+                            del pf
+                            gc.collect()  # return ~1.6 GB to OS per target
+                        del pf_dict  # now empty — trivial
+                        gc.collect()
+                        n_sequences += 1
+
+                    self._evaluate_model_artifact_streaming(
+                        self._eval_type, self.args.artifact_name, origin_sink=_origin_sink
+                    )
+                else:
+                    # ── DF path (legacy DataFrame format) ────────────────────────────
+                    raw_preds = self._evaluate_model_artifact(
+                        self._eval_type, self.args.artifact_name
+                    )
+                    # Type enforcement guard (ADR-042, fail-loud).
+                    if isinstance(raw_preds, dict):
+                        raise ValueError(
+                            "prediction_format='dataframe' declared but "
+                            "_evaluate_model_artifact() returned a dict, expected "
+                            "List[pd.DataFrame]. Model contract violation."
+                        )
+                    self._assert_predictions_in_step_window(raw_preds)
+                    # Validate (sniff) and save each prediction DataFrame.
+                    n_sequences = len(raw_preds)
+
+                    def validate_and_save(
+                        df, idx, configs, model_path, save_predictions_func
+                    ):
+                        logger.info(
+                            f"Validating evaluation dataframe of sequence {idx+1}/{n_sequences}"
+                        )
+                        CorePredictionSniffer(level=configs["level"]).sniff_predictions(
+                            df, targets=combined_targets(configs)
+                        )
+                        save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
+
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        futures = [
+                            executor.submit(
+                                validate_and_save,
+                                df,
+                                i,
+                                self.configs,
+                                self._model_path,
+                                self._save_predictions,
+                            )
+                            for i, df in enumerate(raw_preds)
+                        ]
+                        concurrent.futures.wait(futures)
+
+                self._wandb_module.send_alert(
+                    title="Evaluation Predictions Saved",
+                    text=f"Validated and saved {n_sequences} prediction sequences at {self._model_path.data_generated.relative_to(self._model_path.root)}.",
+                    notifications_enabled=self._wandb_notifications,
+                )
+
+                handle_single_log_creation(
+                    model_path=self._model_path,
+                    config=self.configs,
+                    train=False,
+                )
+
+                has_metrics = self._has_evaluation_metrics()
+
+                if has_metrics:
+                    if self.configs.get("skip_evaluation_metrics", False):
+                        logger.warning(
+                            "skip_evaluation_metrics=True — skipping metric evaluation "
+                            "to avoid peak y_pred_out allocation at high sample counts."
+                        )
+                    elif self._prediction_format == "prediction_frame":
+                        # Reload PFs from Track A staging files via mmap.
+                        # Only accessed pages enter RAM — peak memory is bounded
+                        # by the EvaluationAdapter's sequential access pattern,
+                        # not by M × T × PF_size simultaneously.
+                        raw_preds_for_metrics = {
+                            target: [
+                                load_pf(
+                                    staging_path / f"origin_{i}" / target,
+                                    self.configs["level"], mmap=True,
+                                )
+                                for i in range(n_sequences)
+                            ]
+                            for target in all_targets
+                        }
+                        self._evaluate_prediction_dataframe(
+                            raw_preds_for_metrics, self._eval_type
+                        )
+                        del raw_preds_for_metrics
+                        gc.collect()
+                    else:
+                        self._evaluate_prediction_dataframe(raw_preds, self._eval_type)
+                else:
+                    logger.warning("No metrics specified in config")
+
+                if self._prediction_format == "prediction_frame":
+                    shutil.rmtree(staging_path, ignore_errors=True)
+
+                self._wandb_module.send_alert(
+                    title=f"Evaluation for {self._model_path.target} {self.configs['name']} completed successfully.",
+                    notifications_enabled=self._wandb_notifications,
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"{self._model_path.target.title()} evaluating model: {e}",
+                    exc_info=True,
+                )
+                raise ModelEvaluationException(
+                    f"Evaluation failed: {traceback.format_exc()}",
+                    wandb_module=self._wandb_module,
+                )
+            finally:
+                self._wandb_module.finish_run()
+
+    def _save_combined_forecast(
+        self,
+        predictions: Dict[str, Any],
+        ts: str,
+    ) -> None:
+        """Save a combined multi-target parquet and upload to the prediction stores.
+
+        Replaces the legacy ``combined_table.to_pandas() → df.forecasts.to_store()``
+        round-trip. The new path:
+
+          1. ``PredictionFrameConverter.to_combined_arrow_table`` builds one
+             Arrow table with ``month_id``, ``{entity_col}`` and a
+             ``pred_{target}`` column for every target — pandas never touched.
+          2. ``pyarrow.parquet.write_table`` writes the parquet to the model's
+             ``data_generated`` directory (same path the legacy code used).
+          3. :meth:`ViewsDataset.save_predstore` uploads the parquet to the
+             views-forecasts Azure store under the legacy blob key
+             ``pr_{run}_{name}.parquet`` — replacing the
+             ``combined_df.forecasts.to_store()`` call.
+          4. :meth:`ViewsDataset.save_appwrite` uploads to the Appwrite cloud
+             store — replacing the direct ``self._datastore.upload_data()`` call.
+
+        Args:
+            predictions: Dict mapping target name → PredictionFrame. Every
+                frame must share the same ``(time, unit)`` index — the
+                ensemble manager guarantees this by construction.
+            ts: Timestamp string (15-char) used in the filename, matching
+                the legacy ``predictions_{run_type}_{ts}.parquet`` pattern.
+
+        Side effects:
+            - Writes ``predictions_{run_type}_{ts}.parquet`` to disk.
+            - Uploads to views-forecasts when ``self._use_prediction_store``
+              is True.
+            - Uploads to Appwrite when ``self._datastore`` is not None.
+              Failures are logged, not raised (ADR-047 graceful degradation
+              for the Appwrite path).
+
+        Note:
+            The predstore (views-forecasts) is the PRIMARY external
+            destination under ADR-047; failures there propagate. The
+            Appwrite path is SECONDARY and degrades gracefully.
+        """
+        import pyarrow.parquet as pq
+        from views_pipeline_core.configs.pipeline import PipelineConfig
+        from views_pipeline_core.modules.frames.prediction_frame_converter import (
+            PredictionFrameConverter,
+        )
+        from views_pipeline_core.modules.dataset.base import ViewsDataset
+
+        level = self.configs["level"]
+        run_type = self.args.run_type
+        model_name = self._model_path.model_name
+        target = self._model_path.target
+        data_generated = self._model_path.data_generated
+
+        # 1) Build the combined Arrow table (no pandas).
+        combined_table = PredictionFrameConverter().to_combined_arrow_table(
+            predictions, level,
+        )
+
+        # 2) Write the parquet file to the model's data_generated dir.
+        combined_name = f"predictions_{run_type}_{ts}{PipelineConfig.dataframe_format}"
+        combined_path = data_generated / combined_name
+        data_generated.mkdir(parents=True, exist_ok=True)
+        pq.write_table(combined_table, combined_path)
+        logger.info(f"Saved combined forecast: {combined_path}")
+
+        # 3) Build the dataset (routed through the right subclass based on
+        #    the LOA — PGDataset for pgm, CDataset for cm, etc.). The
+        #    dataset is constructed from the parquet file we just wrote,
+        #    so there is no in-memory duplication.
+        dataset = ViewsDataset.for_loa(level, combined_path)
+
+        # 4) Upload to views-forecasts (primary external destination).
+        if self._use_prediction_store:
+            try:
+                store_name = f"{model_name}_predictions_{run_type}_{ts}"
+                dataset.save_predstore(
+                    name=store_name,
+                    run=self._pred_store_name,
+                )
+                logger.info(f"Uploaded to prediction store: {store_name}")
+            except Exception as e:
+                logger.error(
+                    f"Prediction store upload failed: {e}", exc_info=True,
+                )
+                raise  # primary destination — failures propagate
+
+        # 5) Upload to Appwrite (secondary external destination, graceful).
+        if self._datastore is not None:
+            try:
+                dataset.save_appwrite(
+                    filename=combined_name,
+                    model_name=model_name,
+                    target=target,
+                    datastore=self._datastore,
+                    loa=self.configs["level"],
+                )
+                logger.info(f"Uploaded to Appwrite: {combined_name}")
+            except Exception as e:
+                # ADR-047: Appwrite is secondary — log and continue.
+                logger.error(f"Appwrite upload failed: {e}", exc_info=True)
+
+    def _execute_model_forecasting(self) -> None:
+        """
+        Generate future predictions.
+
+        Calls the abstract _forecast_model_artifact() (subclass-specific),
+        then delegates post-processing to ForecastingStage (ADR-045 E4).
+        WandB lifecycle stays in this facade method.
+
+        Side Effects:
+            - Creates WandB run (job_type="forecast")
+            - Generates predictions via abstract method
+            - Validates, converts, and saves via ForecastingStage
+            - Sends completion notification
+        """
+        import traceback
+        from views_pipeline_core.managers.forecasting.stage import ForecastingContext
+
+        with self._wandb_module.initialize_run(
+            project=self._project,
+            config=self.configs,
+            job_type="forecast",
+        ):
+            try:
+                predictions = self._forecast_model_artifact(self.args.artifact_name)
+                if (
+                    self._prediction_format == "prediction_frame"
+                    and isinstance(predictions, dict)
+                ):
+                    _ts = self._model_path.resolve_artifact_path(
+                        self.args.run_type, self.args.artifact_name
+                    ).stem[-15:]
+                    for target, pf in predictions.items():
+                        save_pf(
+                            pf,
+                            self._model_path.data_generated
+                            / f"predictions_{self.args.run_type}_{_ts}"
+                            / target
+                        )
+                context = ForecastingContext(
+                    configs=self.configs,
+                    model_path=self._model_path,
+                    run_type=self.args.run_type,
+                    prediction_format=self._prediction_format,
+                )
+                self._forecasting_stage.process_and_save_forecast(predictions, context)
+
+                # Upload the combined forecast to the prediction stores
+                # (views-forecasts Azure + Appwrite). For the prediction_frame
+                # path this builds one parquet containing every target's
+                # ``pred_{target}`` column — the layout downstream readers
+                # (EnsembleManager, views-faoapi) already expect.
+                if (
+                    self._prediction_format == "prediction_frame"
+                    and isinstance(predictions, dict)
+                    and (self._use_prediction_store or self._datastore is not None)
+                ):
+                    self._save_combined_forecast(predictions, _ts)
+            except Exception as e:
+                logger.error(
+                    f"Error forecasting {self._model_path.target}: {e}", exc_info=True
+                )
+                raise ModelForecastingException(
+                    f"Forecasting failed: {traceback.format_exc()}",
+                    wandb_module=self._wandb_module,
+                )
+            finally:
+                self._wandb_module.finish_run()
+
+    def _execute_model_sweeping(self) -> None:
+        """
+        Execute single sweep iteration.
+        
+        Trains model with current sweep parameters, evaluates performance,
+        and logs metrics to WandB for optimization.
+        
+        Internal Use:
+            Called by WandB sweep agent for each hyperparameter combination.
+        
+        Side Effects:
+            - Creates WandB run (job_type="sweep")
+            - Updates config with sweep parameters
+            - Trains model
+            - Evaluates model
+            - Calculates metrics
+            - Logs to WandB
+        
+        Note:
+            - Uses wandb.config for hyperparameters
+            - Validation always performed during sweeps
+        """
+        import wandb
+
+        with self._wandb_module.initialize_run(
+            project=self._project,
+            config=None,  # Will be set by wandb.config
+            job_type="sweep",
+        ):
+            try:
+                # Update config for sweep run using config_manager
+                self._config_manager.update_for_sweep_run(
+                    wandb.config,
+                    self.args,
+                    wandb_module=self._wandb_module,
+                )
+
+                logger.info(f"Sweeping {self._model_path.target} {self.configs['name']}...")
+                model = self._train_model_artifact()
+
+                self._wandb_module.send_alert(
+                    title=f"Training for {self._model_path.target} {self.configs['name']} completed successfully.",
+                    text=f"```\nModel hyperparameters (Sweep: {self._sweep})\n\n{wandb.config}\n```",
+                    notifications_enabled=self._wandb_notifications,
+                )
+
+                logger.info(
+                    f"Evaluating {self._model_path.target} {self.configs['name']}..."
+                )
+                raw_preds_sweep = self._evaluate_sweep(self._eval_type, model)
+
+                # Step C — Type enforcement guard (ADR-042, fail-loud).
+                if self._prediction_format == "prediction_frame":
+                    if not isinstance(raw_preds_sweep, dict):
+                        raise ValueError(
+                            f"prediction_format='prediction_frame' declared but "
+                            f"_evaluate_sweep() returned {type(raw_preds_sweep).__name__}, "
+                            f"expected Dict[str, List[PredictionFrame]]. Model contract violation."
+                        )
+                else:
+                    if isinstance(raw_preds_sweep, dict):
+                        raise ValueError(
+                            "prediction_format='dataframe' declared but "
+                            "_evaluate_sweep() returned a dict, expected "
+                            "List[pd.DataFrame]. Model contract violation."
+                        )
+
+                # ADR-042: PF path skips CorePredictionSniffer (PF is self-validating
+                # at construction). The DF path validates each sequence as before.
+                if self._prediction_format != "prediction_frame":
+                    for i, df in enumerate(raw_preds_sweep):
+                        logger.info(
+                            f"Validating evaluation dataframe of sequence {i+1}/{len(raw_preds_sweep)}"
+                        )
+                        from views_pipeline_core.modules.validation.core_prediction_sniffer import (
+                            CorePredictionSniffer,
+                        )
+
+                        CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
+                            df, targets=combined_targets(self.configs)
+                        )
+
+                has_metrics = self._has_evaluation_metrics()
+                if has_metrics:
+                    self._evaluate_prediction_dataframe(raw_preds_sweep, self._eval_type)
+                else:
+                    logger.error("No evaluation metrics specified in config_meta.py")
+                    raise PipelineException("No evaluation metrics specified in config_meta.py")
+            finally:
+                self._wandb_module.finish_run()
+
+    def _execute_forecast_reporting(self) -> None:
+        """
+        Generate forecast visualization report.
+
+        Delegates to ReportingStage.generate_forecast_report() (ADR-045 E3).
+        WandB lifecycle stays in this facade method.
+
+        Side Effects:
+            - Creates WandB run (job_type="report")
+            - Generates HTML report via ReportingStage
+            - Sends completion notification
+        """
+        from views_pipeline_core.managers.reporting.stage import ReportingContext
+
+        with self._wandb_module.initialize_run(
+            project=self._project,
+            config=self.configs,
+            job_type="report",
+        ):
+            try:
+                context = ReportingContext(
+                    configs=self.configs,
+                    model_path=self._model_path,
+                    run_type=self.args.run_type,
+                    entity=self._entity,
+                    prediction_format=self._prediction_format,
+                )
+                self._reporting_stage.generate_forecast_report(context)
+            except PipelineException:
+                raise
+            except Exception:
+                logger.error(f"Forecast report generation failed: {traceback.format_exc()}")
+                raise PipelineException(
+                    f"Forecast report generation failed: {traceback.format_exc()}",
+                    wandb_module=self._wandb_module,
+                )
+            finally:
+                self._wandb_module.finish_run()
+
+
+    def _save_evaluations(
+        self,
+        df_step_wise_evaluation: pd.DataFrame,
+        df_time_series_wise_evaluation: pd.DataFrame,
+        df_month_wise_evaluation: pd.DataFrame,
+        path_generated: Union[str, Path],
+        target_identifier: str,
+    ) -> None:
+        """Delegate to PredictionIOManager."""
+        self._io.save_evaluations(
+            df_step_wise_evaluation,
+            df_time_series_wise_evaluation,
+            df_month_wise_evaluation,
+            path_generated,
+            target_identifier,
+            run_type=self.configs["run_type"],
+            timestamp=self.configs["timestamp"],
+        )
+
+    def _save_predictions(
+        self,
+        df_predictions,
+        path_generated: Union[str, Path],
+        sequence_number: Optional[int] = None,
+        send_alert: bool = True,
+        target_identifier: Optional[str] = None,
+    ) -> None:
+        """Delegate to PredictionIOManager. Signature preserved for EnsembleManager compat."""
+        self._io.save_predictions(
+            df_predictions,
+            path_generated,
+            run_type=self.configs["run_type"],
+            timestamp=self.configs["timestamp"],
+            level=self.configs.get("level"),
+            targets=combined_targets(self.configs),
+            sequence_number=sequence_number,
+            target_identifier=target_identifier,
+            send_alert=send_alert,
+        )
+
+    def _evaluate_prediction_dataframe(
+        self, df_predictions, eval_type, ensemble=False
+    ) -> None:
+        """
+        Calculate evaluation metrics from predictions.
+        
+        Computes metrics at multiple aggregation levels (step, time-series,
+        month) and logs to WandB. Saves results to disk.
+        
+        Internal Use:
+            Called by evaluation and sweep methods.
+        
+        Args:
+            df_predictions: List of prediction DataFrames or single DataFrame
+            eval_type: Evaluation type
+            ensemble: Whether predictions from ensemble model
+        
+        Side Effects:
+            - Calculates metrics using NativeEvaluator
+            - Logs metrics to WandB
+            - Saves evaluation files
+            - Sends summary notification
+        
+        Note:
+            - Loads actual values from viewser data
+            - Processes each task type separately (regression/classification)
+            - Groups metrics by conflict type
+            - Enforces scalar predictions for point metrics
+        """
+        from views_pipeline_core.managers.evaluation.stage import EvaluationContext
+
+        context = EvaluationContext(
+            configs=self.configs,
+            model_path=self._model_path,
+            prediction_format=self._prediction_format,
+            partition_dict=self._partition_dict,
+            run_type=self.args.run_type,
+            data_loader=getattr(self, '_data_loader', None),
+            prepare_actuals_df=self.prepare_actuals_df,
+            # #302: frame-fed models evaluate against the frame cache; defaults
+            # keep every dataframe-path and ensemble construction unchanged.
+            data_format=getattr(self, "_data_format", DATA_FORMAT_DATAFRAME),
+            frame_cache_path=getattr(self, "_cached_frame_path", None),
+        )
+        self._evaluation_stage.evaluate(df_predictions, context, ensemble=ensemble)
+
+    def _get_evaluation_step_mappings(self, n_sequences: int) -> List[Dict[int, int]]:
+        """
+        Build one step mapping per evaluation sequence for rolling-origin evaluation.
+
+        Fulfills ADR-031 (Authority over Inference): the orchestrator is the sole
+        authority on lead-times. Each sequence i is anchored at (base_origin + i),
+        shifting the origin by one month per sequence as in standard rolling-origin
+        cross-validation.
+
+        Args:
+            n_sequences: Number of prediction sequences (len of df_predictions list).
+
+        Returns:
+            List of dicts, one per sequence: [{base_origin+i+s: s for s in steps} ...]
+        """
+        run_type = self.args.run_type
+
+        # 1. Resolve Base Origin from Authority (DNA)
+        if run_type == "forecasting":
+            # Forecasting origin is dynamic based on current data state (explicit override)
+            if not (hasattr(self, '_data_loader') and self._data_loader):
+                # Should be impossible if initialization succeeded, but rigorous check
+                raise ValueError("Forecasting run requires an initialized data loader to determine origin.")
+            base_origin = self._data_loader.month_last
+        else:
+            # Calibration/Validation origin is static from partition config
+            # Structure: self._partition_dict[run_type]['train'] -> (start, end)
+            
+            if run_type not in self._partition_dict:
+                raise KeyError(
+                    f"Partition configuration for run_type '{run_type}' not found. "
+                    f"Available keys: {list(self._partition_dict.keys())}"
+                )
+            # base_origin = test[0] - 1 is definitionally correct.
+            # The forecast origin is "the last month of observed data before the
+            # evaluation period begins", which is test[0] - 1 by definition.
+            # Using train[1] was an implicit assumption that the partition is
+            # gap-free (train[1] + 1 == test[0]). If any gap exists between
+            # train end and test start, train[1] != test[0] - 1 and the old
+            # formula would produce a shifted window that excludes the model's
+            # last prediction month. test[0] - 1 is correct in all cases.
+            base_origin = self._partition_dict[run_type]['test'][0] - 1
+
+        steps = self.configs["steps"]
+
+        mappings = [
+            {base_origin + i + s: s for s in steps}
+            for i in range(n_sequences)
+        ]
+
+        logger.debug(
+            f"Step mappings built for {n_sequences} sequences "
+            f"from base_origin {base_origin}: "
+            f"seq[0]={mappings[0] if mappings else {}}"
+        )
+        return mappings
+
+    def _assert_partition_config_accessible(self, run_type: str) -> None:
+        """
+        Layer 1 structural assertion: verify the partition config is accessible
+        for the declared run_type before any computation begins.
+
+        This is a PRE-CONDITION check, not a behavioral check. It asserts that
+        the configuration is structurally valid — keys exist, test[0] is reachable.
+        It does NOT check numeric consistency (step window vs. test period length),
+        which would generate false positives for rolling-origin evaluation.
+
+        Called at the start of execute_single_run so configuration mistakes fail
+        immediately, before any side effects (WandB login, data fetching, inference).
+
+        Args:
+            run_type: The run type declared in args (e.g. 'calibration', 'forecasting').
+
+        Raises:
+            KeyError: if run_type is not in _partition_dict (non-forecasting runs).
+            KeyError: if 'test' key is missing from the run_type partition.
+            IndexError: if the 'test' value has no first element (empty sequence).
+        """
+        if run_type == "forecasting":
+            # Forecasting uses _data_loader.month_last — no partition 'test' needed.
+            return
+        partition_dict = self._partition_dict or {}
+        if run_type not in partition_dict:
+            available = list(partition_dict.keys())
+            raise KeyError(
+                f"Partition config missing for run_type='{run_type}'. "
+                f"Available: {available}."
+            )
+        partition = partition_dict[run_type]
+        if 'test' not in partition:
+            raise KeyError(
+                f"Partition for run_type='{run_type}' has no 'test' key. "
+                f"Keys present: {list(partition.keys())}."
+            )
+        test_val = partition['test']
+        if not hasattr(test_val, '__getitem__') or len(test_val) < 1:
+            raise IndexError(
+                f"Partition['test'] for run_type='{run_type}' must have at least "
+                f"one element (test[0] is the test period start month). "
+                f"Got: {test_val!r}."
+            )
+
+    def _assert_predictions_in_step_window(
+        self, predictions: Union[List[pd.DataFrame], List[PredictionFrame]]
+    ) -> None:
+        """
+        Pre-flight: validate temporal coverage of all prediction sequences against
+        the declared step_mapping window BEFORE the per-target evaluation loop.
+
+        Raises ValueError immediately if any sequence contains months outside the
+        declared window, surfacing the mismatch right after model inference rather
+        than midway through the per-target evaluation loop. This gives a clear,
+        early error instead of a cryptic failure deep in the adapter.
+
+        Args:
+            predictions: List of prediction DataFrames or PredictionFrames returned
+                by _evaluate_model_artifact.
+        """
+        if not predictions:
+            return
+        # Contract enforcement: evaluation must return exactly MAX_SHIFT_COUNT + 1
+        # sequences. More or fewer means the engine is misconfigured at a fundamental
+        # level. This method is only called from _execute_model_evaluation (never the
+        # forecasting path), so no run_type guard is required.
+        _expected = MAX_SHIFT_COUNT + 1
+        _actual = len(predictions)
+        if _actual != _expected:
+            raise ValueError(
+                f"Pre-flight sequence count check FAILED: expected {_expected} "
+                f"prediction sequences (MAX_SHIFT_COUNT={MAX_SHIFT_COUNT} + 1) "
+                f"but got {_actual}. "
+                f"The model engine violated the rolling-origin evaluation contract. "
+                f"Root cause is in _evaluate_model_artifact (the engine), not "
+                f"views-pipeline-core."
+            )
+        step_mappings = self._get_evaluation_step_mappings(n_sequences=len(predictions))
+        for i, (df, mapping) in enumerate(zip(predictions, step_mappings)):
+            if isinstance(df, PredictionFrame):
+                pred_months = set(df.identifiers["time"].tolist())
+            else:
+                pred_months = set(df.index.get_level_values(0).unique())
+            pred_min = min(pred_months)
+            pred_max = max(pred_months)
+            pred_count = len(pred_months)
+            # Layer 3 diagnostic: always log ranges so the run log captures what the
+            # model produced even when the check passes (visible without re-running).
+            logger.debug(
+                f"Pre-flight Seq {i}: {pred_count} month(s) {pred_min}..{pred_max}"
+                f" | window {min(mapping)}..{max(mapping)}"
+            )
+            rogue = pred_months - set(mapping.keys())
+            if rogue:
+                base_origin = min(mapping) - 1
+                declared_steps = self.configs["steps"]
+                declared_max_step = max(declared_steps)
+                rogue_steps = sorted(m - base_origin for m in rogue)
+                # Detect origin shift: if the first declared step month is absent from
+                # predictions, the model forecasted from a later origin than expected.
+                first_step_month = min(mapping)  # = base_origin + 1
+                origin_shifted = first_step_month not in pred_months
+                if origin_shifted:
+                    cause_hint = (
+                        f"Origin appears SHIFTED: month {first_step_month} (step 1) is "
+                        f"absent from predictions — model forecasted from origin "
+                        f"{pred_min - 1} instead of {base_origin}.\n"
+                        f"Root cause: data loaded beyond test[1] causes "
+                        f"get_rolling_origin_indices to place the last origin one month "
+                        f"too late. Fix: truncate data to test[1] before building "
+                        f"VolumeHandler, or pin the last origin via fixed_last_origin."
+                    )
+                else:
+                    cause_hint = (
+                        f"Origin is correct (month {first_step_month} present) but model "
+                        f"generated {pred_count} month(s) instead of "
+                        f"{len(declared_steps)}.\n"
+                        f"Root cause: ConfigInitializer or the prediction loop generates "
+                        f"an extra step. Check ConfigInitializer.get_config() for "
+                        f"inflation of 'time_steps'."
+                    )
+                raise ValueError(
+                    f"Pre-flight check failed — Sequence {i}: prediction has "
+                    f"{pred_count} month(s) covering {pred_min}..{pred_max}, with "
+                    f"{len(rogue)} rogue month(s) {sorted(rogue)} outside the declared "
+                    f"step_mapping window [{min(mapping)}-{max(mapping)}] "
+                    f"(base_origin={base_origin}, configs['steps'] declares "
+                    f"{len(declared_steps)} steps, max={declared_max_step}).\n"
+                    f"{cause_hint}\n"
+                    f"Rogue month(s) {sorted(rogue)} correspond to step(s) "
+                    f"{rogue_steps} relative to base_origin={base_origin}.\n"
+                    f"To fix, choose one of:\n"
+                    f"  (a) [Origin shifted] Pin the rolling origin or truncate data "
+                    f"to test[1] in _evaluate_model_artifact (views-models).\n"
+                    f"  (b) [Extra step] Fix ConfigInitializer not to inflate "
+                    f"'time_steps', or fix the prediction loop to stop at step "
+                    f"{declared_max_step} (month {base_origin + declared_max_step}).\n"
+                    f"Note: configs['steps'] is the sole source of truth in "
+                    f"views-pipeline-core. If it shows {len(declared_steps)} steps "
+                    f"and the model generates more, the bug is in "
+                    f"_evaluate_model_artifact (views-models)."
+                )
+
+    @staticmethod
+    def _generate_evaluation_table(metric_dict: Dict) -> str:
+        """Delegate to PredictionIOManager."""
+        from views_pipeline_core.managers.prediction.io import PredictionIOManager
+        return PredictionIOManager.generate_evaluation_table(metric_dict)
+
+    def _execute_evaluation_reporting(self) -> None:
+        """
+        Generate evaluation visualization report.
+
+        Delegates to ReportingStage.generate_evaluation_report() (ADR-045 E3).
+        WandB lifecycle stays in this facade method.
+
+        Side Effects:
+            - Creates WandB run (job_type="report")
+            - Generates HTML report via ReportingStage
+            - Sends completion notification
+        """
+        from views_pipeline_core.managers.reporting.stage import ReportingContext
+
+        with self._wandb_module.initialize_run(
+            project=self._project,
+            config=self.configs,
+            job_type="report",
+        ):
+            try:
+                context = ReportingContext(
+                    configs=self.configs,
+                    model_path=self._model_path,
+                    run_type=self.args.run_type,
+                    entity=self._entity,
+                    prediction_format=self._prediction_format,
+                )
+                self._reporting_stage.generate_evaluation_report(context)
+            except PipelineException:
+                raise
+            except Exception:
+                logger.error(f"Evaluation report generation failed: {traceback.format_exc()}")
+                raise PipelineException(
+                    f"Evaluation report generation failed: {traceback.format_exc()}",
+                    wandb_module=self._wandb_module,
+                )
+            finally:
+                self._wandb_module.finish_run()
 
     def __repr__(self) -> str:
         """
@@ -918,67 +2271,3 @@ class ForecastingModelManager(
             base_str += f" ({self._args.run_type})"
 
         return base_str
-
-    # ------------------------------------------------------------------
-    # Vestigial forwarders (retained for backward compat).
-    #
-    # The m-1 audit decision was to delete these, but the mixins
-    # (EvaluationMixin._execute_model_evaluation) and the test suite
-    # still call ``self._save_predictions`` / ``self._save_evaluations``
-    # and ``ForecastingModelManager._generate_evaluation_table``. They
-    # are kept as delegations to ``self._io`` until the call sites are
-    # migrated to use ``self._io`` directly (separate PR).
-    # ------------------------------------------------------------------
-
-    def _save_evaluations(
-        self,
-        metric_dict: Dict,
-        path_generated: Union[str, Path],
-        run_type: str,
-        timestamp: str,
-        level: Optional[str] = None,
-        targets: Optional[list] = None,
-        sequence_number: Optional[int] = None,
-        send_alert: bool = True,
-    ) -> None:
-        """Delegate to :class:`PredictionIOManager.save_evaluations`."""
-        self._io.save_evaluations(
-            metric_dict,
-            path_generated,
-            run_type,
-            timestamp,
-            level=level,
-            targets=targets,
-            sequence_number=sequence_number,
-            send_alert=send_alert,
-        )
-
-    def _save_predictions(
-        self,
-        df_predictions,
-        path_generated: Union[str, Path],
-        sequence_number: Optional[int] = None,
-        send_alert: bool = True,
-        target_identifier: Optional[str] = None,
-    ) -> None:
-        """Delegate to :class:`PredictionIOManager.save_predictions`.
-
-        Signature preserved for EnsembleManager compat.
-        """
-        self._io.save_predictions(
-            df_predictions,
-            path_generated,
-            run_type=self.configs["run_type"],
-            timestamp=self.configs["timestamp"],
-            level=self.configs.get("level"),
-            targets=combined_targets(self.configs),
-            sequence_number=sequence_number,
-            target_identifier=target_identifier,
-            send_alert=send_alert,
-        )
-
-    @staticmethod
-    def _generate_evaluation_table(metric_dict: Dict) -> str:
-        """Delegate to :meth:`PredictionIOManager.generate_evaluation_table`."""
-        from views_pipeline_core.managers.prediction.io import PredictionIOManager
-        return PredictionIOManager.generate_evaluation_table(metric_dict)

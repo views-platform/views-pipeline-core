@@ -115,50 +115,47 @@ class PredictionIOManager:
         self, df_predictions, path_generated: Path, predictions_name: str,
         level: Optional[str] = None, targets: Optional[list] = None,
     ) -> None:
-        """Upload predictions to views-forecasts store and Appwrite datastore."""
-        if isinstance(df_predictions, pa.Table):
-            raise NotImplementedError(
-                "Prediction store upload via PredictionIOManager is not supported "
-                "for Arrow Tables. The PF forecasting path uses composed savers "
-                "(ViewsForecastsSaver, AppwriteSaver) which handle this directly. "
-                "This guard protects the legacy DF path only."
-            )
+        """Upload predictions via ``ViewsDataset.save_predstore`` / ``save_appwrite``.
+
+        Replaces the legacy ``df_predictions.forecasts.set_run(...).to_store(...)``
+        round-trip with the new pandas-free path: build a ``ViewsDataset``
+        from the parquet file already on disk, then call
+        :meth:`ViewsDataset.save_predstore` and :meth:`ViewsDataset.save_appwrite`.
+
+        The legacy path raised ``NotImplementedError`` for ``pa.Table`` inputs;
+        the new path handles both because the parquet file is constructed
+        upstream in :meth:`save_predictions` (via ``pq.write_table`` for
+        ``pa.Table`` inputs or ``save_dataframe`` for ``pd.DataFrame`` inputs).
+        """
+        from views_pipeline_core.modules.dataset import ViewsDataset
+
+        # Build the dataset from the parquet file already on disk. This
+        # avoids any re-serialization — the bytes the dataset sees are the
+        # bytes the legacy ``pq.write_table`` / ``save_dataframe`` produced.
+        # ``for_loa`` routes to ``PGDataset`` / ``CDataset`` etc. based on
+        # the LOA, matching the legacy ``ForecastAccessor`` validation.
+        loa = level
+        parquet_path = path_generated / predictions_name
+        dataset = ViewsDataset.for_loa(loa, parquet_path)
 
         name = f"{self._model_path.model_name}_{predictions_name.split('.')[0]}"
-        df_predictions.forecasts.set_run(self._pred_store_name)
-        df_predictions.forecasts.to_store(name=name, overwrite=True)
 
+        # Primary external destination (ADR-047) — failures propagate.
+        # The legacy code raised here on Azure failures; we preserve that.
+        dataset.save_predstore(name=name, run=self._pred_store_name)
+        logger.info(f"Uploaded to prediction store: {name}")
+
+        # Secondary external destination (ADR-047) — graceful degradation.
+        # Delegated to ``ViewsDataset.save_appwrite`` which logs at error
+        # and never raises, mirroring ``AppwriteSaver.save``'s contract.
         if self._datastore is not None:
-            # ADR-047: Appwrite is SECONDARY EXTERNAL — log at error, never raise.
-            # But `upload_data` reports failure by RETURN VALUE, so the result must be
-            # inspected or a failed delivery reads as a successful one (C-227, #330).
-            try:
-                result = self._datastore.upload_data(
-                    file=path_generated / predictions_name,
-                    filename=predictions_name,
-                    loa=level,
-                    name=self._model_path.model_name,
-                    targets=targets or [],
-                    category="forecast",
-                    description="",
-                    type=self._model_path.target,
-                )
-            except upload_transport_faults() as e:
-                logger.error(
-                    f"Error uploading predictions to datastore: {e}", exc_info=True
-                )
-                return
-
-            if result is None or getattr(result, "success", False):
-                logger.info("Forecasts uploaded to Appwrite Datastore successfully.")
-            else:
-                logger.error(
-                    "Appwrite upload FAILED for %s — the forecast was NOT delivered. "
-                    "code=%s error=%s",
-                    predictions_name,
-                    getattr(result, "code", None),
-                    getattr(result, "error", None),
-                )
+            dataset.save_appwrite(
+                filename=predictions_name,
+                model_name=self._model_path.model_name,
+                target=self._model_path.target,
+                datastore=self._datastore,
+                loa=self.configs["level"],
+            )
 
     def save_evaluations(
         self,
