@@ -223,27 +223,22 @@ def test_f3_faoapi_pages_in_every_metadata_path():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "F4 (open): #344 deleted SessionAuth; views-appwrite's coordinate_registry.toml "
-        "still cites file.py:359-412 for it. Cross-repo, tracked at views-appwrite#24 — "
-        "XPASSes the moment that registry is updated, which is the point"
-    ),
-)
 def test_f4_deleting_sessionauth_must_not_orphan_the_seam_registry():
-    """The cross-repo half of #344, which this repo cannot close alone.
+    """The cross-repo half of #344 — **closed 2026-08-11**, and the ratchet is why.
 
-    SessionAuth is now gone from the source. views-appwrite's canonical coordinate
-    registry still cites it **by file and line** — `file.py:359-412 (SessionAuth)` — so
-    the platform's authoritative coordinate source points at code that no longer exists.
-    That is C-239's drift class, across a repo boundary.
+    This was `xfail(strict=True)` while views-appwrite's registry still cited a class this
+    repo had deleted. views-appwrite closed it in their `29f3bea`
+    ("close §9 O3 — the carrier was excised, and our citation of it was breaking another
+    repo's build (#24) — v1.5.1"), the xfail XPASSed, `strict=True` turned that into a
+    failure, and the failure is what said so. Nobody had to remember.
 
-    Marked `xfail(strict=True)` rather than left failing: this repo has done its half,
-    and the other half is an issue filed against views-appwrite (#24). When that registry
-    is updated this XPASSes, `strict=True` turns the pass into a failure, and whoever
-    sees it converts the stub into a plain assertion. An xfail that silently starts
-    passing is the problem this suite documents, so it is not allowed to.
+    Now a plain assertion, kept live in both directions: it fails if the registry
+    re-acquires the citation *or* if the class comes back without the registry following.
+
+    The defect it caught: SessionAuth was deleted here while views-appwrite's canonical
+    coordinate registry still cited it **by file and line** — `file.py:359-412` — so the
+    platform's authoritative coordinate source pointed at code that no longer existed.
+    C-239's drift class, across a repo boundary.
 
     **Where this is actually enforced: a developer's machine, not CI.** Verified rather
     than assumed — `pytest.skip()` inside `xfail(strict=True)` reports SKIPPED, because
