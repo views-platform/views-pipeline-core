@@ -95,6 +95,22 @@ RUSTY_BUCKET_AFTER_367 = {
     "evaluation_profile": "hydranet_ucdp",
 }
 
+#: The metric keys views-models decided on, recorded in their
+#: `tests/test_roster_conformance.py` and merged as views-models#376.
+#:
+#: **Both**, not one. `Brier_cls_sample` is what the eight constituent models already
+#: declare, so it restores existing behaviour rather than adding any. `AP` is additional,
+#: and goes under `classification_point_metrics` because `AP` lives in
+#: `METRIC_MEMBERSHIP[("classification", "point")]` — putting it under the sample key is
+#: the mistake this repo made and views-models#372 caught.
+#:
+#: Mirrored here so the control below tests the config that will actually ship, not a
+#: plausible one. A control that certifies a shape nobody deploys certifies nothing.
+DECIDED_METRIC_KEYS = {
+    "classification_point_metrics": ["AP"],
+    "classification_sample_metrics": ["Brier_cls_sample"],
+}
+
 
 @pytest.mark.xfail(
     reason="F1: the config views-models#367 wrote fails this check. Premise updated after "
@@ -134,7 +150,7 @@ def test_f1_control_the_same_config_with_a_metric_passes_BOTH_gates():
     So the control now runs the config through both gates, and uses a metric that is
     actually valid for the sample cell.
     """
-    config = {**RUSTY_BUCKET_AFTER_367, "classification_sample_metrics": ["Brier_cls_sample"]}
+    config = {**RUSTY_BUCKET_AFTER_367, **DECIDED_METRIC_KEYS}
     _sniffer(config)._check_targets_and_metrics()
     _native_evaluator()._validate_config(config)
 
@@ -177,3 +193,69 @@ def test_the_sniffer_accepts_metric_names_the_evaluator_rejects():
     # gate two: refuses
     with pytest.raises(ValueError, match="not valid for"):
         evaluator._validate_config(config)
+
+
+# ----------------------------------------------------------------------------------
+# The inverse direction, raised by views-models#372: declaring a channel the members
+# do not produce
+# ----------------------------------------------------------------------------------
+
+
+def test_declaring_a_target_no_member_produces_fails_loud_not_silent():
+    """views-models' third blocker, answered from this side.
+
+    None of `rusty_bucket`'s eight `temporary_*` stand-ins declares
+    `classification_targets`, so declaring the `by_*` gate on the ensemble before the
+    roster is rewired would claim a channel its constituents do not produce. views-models
+    described the consequence as "a config that passes both gates and pools nothing".
+
+    It is worse-sounding and better-behaved than that: **both managers refuse.** The
+    PredictionFrame path raises naming the model and the target
+    (`prediction_frame_ensemble.py:636`); the DataFrame path raises from
+    `AggregationModule` naming the missing column. Verified by driving both, not by
+    reading them.
+
+    That matters for their sequencing decision. Shipping the declaration early is an
+    error, not a wrong number — the opposite failure mode from C-286, which is the whole
+    point of this epic. It is still a blocker; it is not a silent one.
+
+    Pinned because nothing asserted it, and "pools nothing" is exactly the behaviour a
+    future refactor might introduce while believing it was being tolerant.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from views_pipeline_core.modules.aggregation.aggregator import AggregationModule
+
+    # The DataFrame path: a declared target with no matching column.
+    index = pd.MultiIndex.from_product(
+        [[1, 2], [100, 101]], names=["month_id", "priogrid_id"]
+    )
+    frame = pd.DataFrame({"pred_lr_sb_best": np.zeros(4)}, index=index)
+    aggregator = AggregationModule(
+        index_cols=["month_id", "priogrid_id"],
+        target_cols=["pred_lr_sb_best", "pred_by_sb_best"],
+    )
+    with pytest.raises(ValueError, match="Missing target columns"):
+        aggregator.add_model(data=frame, weight=None, name="temporary_stand_in")
+        aggregator.aggregate(method="mean", use_weights=False)
+
+
+def test_the_prediction_frame_path_also_refuses_rather_than_dropping():
+    """The same invariant on the path `rusty_bucket` actually uses.
+
+    Asserted against the source rather than by constructing a full ensemble run: the
+    guard is a single `if pf is None: raise` inside `_forecast_ensemble`, and standing up
+    the surrounding machinery would test the fixtures. Its absence is what would matter,
+    and its absence is what this detects.
+    """
+    import inspect
+
+    from views_pipeline_core.managers.ensemble import prediction_frame_ensemble
+
+    source = inspect.getsource(prediction_frame_ensemble.PredictionFrameEnsembleManager._forecast_ensemble)
+    assert "did not produce a forecast" in source, (
+        "`_forecast_ensemble` no longer raises when a constituent is missing a declared "
+        "target. A silently skipped target is exactly C-286 in the other direction: the "
+        "pool would quietly contain fewer channels than the config declares."
+    )
