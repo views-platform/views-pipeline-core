@@ -54,6 +54,7 @@ views-transformation-library = "^2.7.2"
 art = "^6.4"
 polars = ">=1.34.0,<2.0.0"
 views-frames = "^1.10.2"
+toolz = "^1.1.0"
 
 # Disk-backed dataset tier (views_pipeline_core/modules/dataset). The Zarr store +
 # lazy xarray/Dask reads replace the pandas-in-RAM _ViewsDataset so datasets larger

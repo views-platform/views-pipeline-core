@@ -30,7 +30,7 @@ from views_pipeline_core.data.prediction_frame import PredictionFrame
 
 if TYPE_CHECKING:  # annotation-only; never imported at runtime
     import pandas as pd
-from views_pipeline_core.managers.prediction.prediction_frame_io import load_pf, save_pf
+from views_pipeline_core.modules.frames.prediction_frame_io import save_pf, load_pf
 from views_pipeline_core.modules.dataloaders.datafactory_contract import (
     DATA_FORMAT_DATAFRAME,
     DATA_FORMAT_FEATURE_FRAME,
@@ -66,7 +66,7 @@ def _require_dataframe_runtime() -> None:
 
 # ModelPathManager relocated to data/ layer per ADR-045 E6 (Root Cause #1:
 # inverted dependencies).  Re-exported here for backward compatibility.
-from views_pipeline_core.data.model_path import ModelPathManager  # noqa: F401, E402
+from views_pipeline_core.managers.model import ModelPathManager  # noqa: F401, E402
 
 
 # ============================================================ Model Manager ============================================================
@@ -1857,7 +1857,6 @@ class ForecastingModelManager(ModelManager):
                     configs=self.configs,
                     model_path=self._model_path,
                     run_type=self.args.run_type,
-                    entity=self._entity,
                     prediction_format=self._prediction_format,
                 )
                 self._reporting_stage.generate_forecast_report(context)
@@ -2190,7 +2189,6 @@ class ForecastingModelManager(ModelManager):
                     configs=self.configs,
                     model_path=self._model_path,
                     run_type=self.args.run_type,
-                    entity=self._entity,
                     prediction_format=self._prediction_format,
                 )
                 self._reporting_stage.generate_evaluation_report(context)
