@@ -343,7 +343,7 @@ def test_a_metric_is_only_valid_for_the_cell_the_evaluator_puts_it_in():
     assert "AP" in membership[("classification", "point")], (
         "`AP` is no longer a classification point metric; the guidance in "
         "views-models#372 and the control in "
-        "tests/test_falsification_gate_pooling_splash_zone.py depend on where it lives."
+        "tests/test_gate_pooling_invariants.py depend on where it lives."
     )
     assert "AP" not in membership[("classification", "sample")], (
         "`AP` is now valid as a classification SAMPLE metric. The correction this repo "

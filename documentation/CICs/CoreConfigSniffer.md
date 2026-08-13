@@ -47,9 +47,14 @@ the execution engine.
   `time_steps` and `steps` are present, they must agree (`time_steps == len(steps)`).
 - Guarantees that at least one of `regression_targets` / `classification_targets` is
   non-empty, and that each non-empty target list has a matching metric key.
-- Guarantees that for non-forecasting runs the partition exists, contains no train/test
-  overlap, and that `test_len` equals the expected value
-  (`time_steps + MAX_SHIFT_COUNT`).
+- Guarantees that for non-forecasting runs the partition exists and contains no
+  train/test overlap — true of every config, whatever its evaluation scheme.
+- Guarantees that the partition satisfies the contract of the scheme the config declares
+  via `evaluation_sequencing` (ADR-060). Absent, it means `rolling_origin`.
+  - `rolling_origin` — `test_len == time_steps + MAX_SHIFT_COUNT`, then sequence accounting.
+  - `horizon_chunks` — `output_chunk_length` present, a positive integer, and no longer
+    than the test window. A partial final chunk is allowed and logged.
+- Guarantees that `evaluation_sequencing`, when present, names a supported scheme.
 - Guarantees that `prediction_format` is present for model configs and is a supported
   value (`"dataframe"` or `"prediction_frame"`). Ensembles may omit
   `prediction_format` (it is a model-only key); when present on an ensemble it is
@@ -225,7 +230,7 @@ if result:   # sniff_all returns None; absence of exception is the success signa
 
 - **Target name format not validated:** The sniffer validates config keys and supported values but does not validate that target names contain conflict type codes (sb/os/ns). This assumption is enforced downstream in `ForecastingModelManager._evaluate_prediction_dataframe()` where it causes a hard crash (Technical Risk R2).
 - **No validation of script existence:** Config references model scripts (train, predict) but the sniffer does not verify these scripts exist on disk.
-- **Evaluation contract check assumes fixed geometry:** `_check_evaluation_contract()` hardcodes `test_len = time_steps + MAX_SHIFT_COUNT = 48`. If these constants change independently, the check may become inconsistent.
+- **~~Evaluation contract check assumes fixed geometry~~ — resolved by ADR-060 (#460).** The check applied one scheme's contract to every config, so a model sequenced differently was refused for being correct. It now dispatches on `evaluation_sequencing`. The `rolling_origin` geometry is still `time_steps + MAX_SHIFT_COUNT` and still coupled to those two constants — that half of the note stands.
 
 ---
 

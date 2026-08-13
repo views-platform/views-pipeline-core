@@ -5,9 +5,59 @@ across pipeline-core and engine repos.  Engine repos should import
 from here rather than hardcoding their own variants.
 """
 
+import re
+
 CACHE_SOURCES = frozenset({"viewser", "datafactory", "synthetic"})
 
 CACHE_FILENAME_TEMPLATE = "{partition}_{source}_df{ext}"
+
+#: Trained model artifact: `{run_type}_model_{timestamp}{ext}`, or with a target
+#: discriminator, `{run_type}_model_{targets}_{timestamp}{ext}`.
+#:
+#: The convention was spelled twice — `files.utils.generate_model_file_name` wrote it and
+#: `ModelPathManager._get_artifact_files` matched it with a hand-built
+#: ``f"{run_type}_model_"``. They happened to agree, which is exactly how C-59 survives:
+#: a change to one silently leaves the other behind, and the symptom is a loader that
+#: cannot find artifacts it just wrote. Adding the discriminator (#459) would have made
+#: that two hand-rolled spellings of a more complicated convention, so it is a template
+#: now, with the writer and the reader derived from it.
+MODEL_ARTIFACT_TEMPLATE = "{run_type}_model{suffix}_{timestamp}{ext}"
+
+#: `YYYYMMDD_HHMMSS`, as written by `generate_model_file_name`.
+MODEL_ARTIFACT_TIMESTAMP_PATTERN = r"\d{8}_\d{6}"
+
+
+def _artifact_suffix(targets_suffix: str) -> str:
+    """`""` -> `""`; `"lr_sb"` -> `"_lr_sb"`. Keeps the no-suffix name byte-identical."""
+    return f"_{targets_suffix}" if targets_suffix else ""
+
+
+def model_artifact_filename(
+    run_type: str, timestamp: str, ext: str, targets_suffix: str = ""
+) -> str:
+    """The artifact filename. With no suffix this is byte-identical to pre-#459 names."""
+    return MODEL_ARTIFACT_TEMPLATE.format(
+        run_type=run_type, suffix=_artifact_suffix(targets_suffix), timestamp=timestamp, ext=ext
+    )
+
+
+def model_artifact_stem_pattern(run_type: str, targets_suffix: str = "") -> "re.Pattern":
+    """A **fully anchored** matcher for artifact stems.
+
+    Anchoring both ends is the point. A left-anchored `startswith` on
+    ``f"{run_type}_model_{suffix}_"`` matches the wrong artifacts: suffix ``sb`` matches a
+    stem written for ``sb_best``, because ``sb_best_...`` starts with ``sb_``. The
+    timestamp on the right is what closes it.
+
+    With no suffix the pattern matches artifacts **with any suffix or none**, preserving
+    the behaviour of callers that do not ask for one.
+    """
+    head = re.escape(run_type)
+    tail = MODEL_ARTIFACT_TIMESTAMP_PATTERN
+    if targets_suffix:
+        return re.compile(rf"^{head}_model_{re.escape(targets_suffix)}_{tail}$")
+    return re.compile(rf"^{head}_model_(?:.+_)?{tail}$")
+
 
 
 def cache_filename_prefix(partition: str, source: str) -> str:

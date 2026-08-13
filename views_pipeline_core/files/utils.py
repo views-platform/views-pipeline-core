@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
 from datetime import datetime
 
+from views_pipeline_core.data.constants import model_artifact_filename
+
 if TYPE_CHECKING:  # annotation-only; never imported at runtime
     import pandas as pd
 
@@ -306,19 +308,31 @@ def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
         raise
 
 
-def generate_model_file_name(run_type: str, file_extension: str) -> str:
+def generate_model_file_name(
+    run_type: str, file_extension: str, targets_suffix: str = ""
+) -> str:
     """
     Generates a model file name based on the run type, and timestamp.
 
     Args:
         run_type (str): The type of run (e.g., calibration, validation).
         file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pt, .pkl, .h5
+        targets_suffix (str): Optional target discriminator, for a model trained several
+            times over different target sets whose artifacts would otherwise collide
+            (views-impact does this; see #459). Empty by default, and the empty case is
+            **byte-identical** to the pre-#459 name, so nothing migrates and no existing
+            artifact stops being found.
 
     Returns:
         str: The generated model file name.
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{run_type}_model_{timestamp}{file_extension}"
+    return model_artifact_filename(
+        run_type=run_type,
+        timestamp=timestamp,
+        ext=file_extension,
+        targets_suffix=targets_suffix,
+    )
 
 
 def generate_output_file_name(
