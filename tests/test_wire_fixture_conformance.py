@@ -155,6 +155,39 @@ _UPSTREAM = (
     / "wire_contract"
 )
 
+#: views-faoapi's vendored copy of the same canon. It is the **consumer** of these bytes;
+#: this repo and views-postprocessing are writers.
+#:
+#: views-faoapi#380 asked them for a payload fixture so this repo could verify the boundary
+#: it publishes across. Their answer was better than the ask: they do not author a schema —
+#: ADR-013 v1.5 is homed in views-postprocessing, and faoapi only encodes the capability
+#: gate (`SERVED_CONTRACT_VERSION = "1.5"`). Their recommendation was to pin the
+#: views-postprocessing canon writer-to-writer as the oracle, and treat their vendored copy
+#: as the consumer-side cross-check.
+#:
+#: So the views-faoapi boundary is verified **here**, by three-way byte agreement, rather
+#: than by a fixture they would have had to invent. That is why they have no separate
+#: conformance file and are no longer carried as an exemption.
+_FAOAPI = (
+    Path(__file__).resolve().parents[2]
+    / "views-faoapi"
+    / "tests"
+    / "forecast"
+    / "golden"
+    / "wire_contract"
+)
+
+#: Byte artifacts all three repos must agree on. `README.md` is excluded deliberately:
+#: each repo annotates its own copy, and faoapi's differs today. Prose is not the contract.
+_BYTE_ARTIFACTS = {
+    "fixture_run_0__manifest.json",
+    "fixture_run_0__lr_ged_sb__manifest.json",
+    "fixture_run_0__lr_ged_sb__m000543.arrow.parquet",
+    "fixture_run_0__lr_ged_sb__m000543.tap.zip",
+    "fixture_run_0__sidecar.parquet",
+    "SHA256SUMS",
+}
+
 
 def test_the_vendored_fixture_is_byte_identical_to_upstream():
     """Three outcomes, and the third is the one that was missing.
@@ -221,4 +254,48 @@ def test_it_is_stated_which_vendored_files_the_producer_is_checked_against():
     assert SHARD_A.name in _WE_PRODUCE and MANIFEST_A.name in _WE_PRODUCE, (
         "the parity tests compare files not listed in _WE_PRODUCE — update the list and "
         "this docstring together."
+    )
+
+
+def test_the_views_faoapi_consumer_copy_agrees_with_the_canon():
+    """The views-faoapi boundary, verified writer-to-writer rather than by their fixture.
+
+    This repo *writes* bytes that views-faoapi *reads*. The obvious check — ask faoapi for
+    a fixture of what they read — was filed as views-faoapi#380 and answered with something
+    better: they do not author the schema. ADR-013 v1.5 is homed in views-postprocessing,
+    and faoapi only encodes the capability gate. Their recommendation was to pin the
+    views-postprocessing canon as the oracle and use their vendored copy as a cross-check.
+
+    Three-way agreement is what makes the boundary verified. Two copies agreeing proves
+    only that two repos re-vendored from the same place at the same time; the third is what
+    catches one of them drifting — which is exactly what happened to *this* repo for eight
+    weeks (#447).
+
+    Scope, from their answer: single run × single target × single month × 6 cells × S=4. It
+    pins format, columns, dtypes, index and null handling — **not** multi-shard assembly,
+    which they cover synthetically. Stated so this is not mistaken for full payload
+    conformance.
+    """
+    if not _FAOAPI.is_dir():  # pragma: no cover - sibling checkout may be absent
+        pytest.skip("views-faoapi not checked out beside this repo")
+
+    missing = [n for n in sorted(_BYTE_ARTIFACTS) if not (_FAOAPI / n).exists()]
+    assert not missing, (
+        f"views-faoapi's vendored copy is missing {missing}. Their conformance test "
+        f"(`tests/forecast/test_wire_golden_fixture.py`) pins these by root hash; if they "
+        f"have moved, this boundary needs re-establishing rather than silently skipping."
+    )
+
+    drifted = [
+        name
+        for name in sorted(_BYTE_ARTIFACTS)
+        if (FIX / name).read_bytes() != (_FAOAPI / name).read_bytes()
+    ]
+    assert not drifted, (
+        f"this repo and views-faoapi disagree on {drifted}. One of the three copies has "
+        f"drifted from the ADR-013 §10 canon. Check views-postprocessing first — it is the "
+        f"authority — then re-vendor whichever repo is behind. Note the bytes are "
+        f"reproducible only under pyarrow 16.1.0; when views-postprocessing lifts its "
+        f"ceiling (views-faoapi#348) the root hash changes and all three must re-vendor "
+        f"together."
     )
