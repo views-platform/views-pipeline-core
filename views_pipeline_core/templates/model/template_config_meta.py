@@ -34,10 +34,14 @@ def generate(script_path: Path, model_name: str, model_algorithm: str) -> bool:
     meta_config = {{
         "name": "{model_name}",
         "algorithm": "{model_algorithm}",
-        # Uncomment and modify the following lines as needed for additional metadata:
+        # Uncomment and fill in. Those marked REQUIRED are enforced by
+        # CoreConfigSniffer and a model will not run without them; the rest are optional.
         # "queryset": "escwa001_cflong",
         # "level": "pgm",
         # "creator": "Your name here",
+        # "prediction_format": "dataframe", # or "prediction_frame" — REQUIRED for models
+        # "rolling_origin_stride": 1, # REQUIRED for models
+        # "evaluation_sequencing": "rolling_origin", # or "horizon_chunks" (ADR-060); omit for the default
         # "output_scale": "log", # "log" for log-scale predictions, "natural" for engines that undo transforms (HydraNet, R2DARTS2, SHURF)
         "regression_point_metrics": ["RMSLE", "MSE", "MSLE", "y_hat_bar"],
         # "metrics" was retired in views-evaluation 0.4.0 and its validator
