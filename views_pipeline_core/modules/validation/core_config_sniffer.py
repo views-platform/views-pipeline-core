@@ -132,6 +132,24 @@ assert DEPRECATED_REPORT_PREDICTION_FORMATS <= SUPPORTED_PREDICTION_FORMATS, (
 
 # Evaluation mode — optional config key; controls whether samples are kept or collapsed
 SUPPORTED_EVALUATION_MODES  = frozenset({"stochastic", "point"})
+
+#: How a config's evaluation is sequenced over its test partition. Each scheme has its own
+#: contract, and `_check_evaluation_contract` applies the one the config declares.
+#:
+#: - ``rolling_origin`` — the platform default. Origins advance by `rolling_origin_stride`
+#:   across a test window of exactly ``time_steps + MAX_SHIFT_COUNT`` months.
+#: - ``horizon_chunks`` — the test window is consumed in blocks of `output_chunk_length`.
+#:   Its length is not a function of `time_steps`, so the rolling-origin length contract
+#:   does not apply and would refuse every such config. views-impact uses this (#460).
+SUPPORTED_EVALUATION_SEQUENCING = frozenset({"rolling_origin", "horizon_chunks"})
+
+#: Applied when a config declares no scheme.
+#:
+#: Deliberately the **strict** one. Every config predating #460 is rolling-origin and must
+#: keep being checked exactly as before; and an unstated scheme should get the tighter
+#: contract, because a wrongly-refused config is loud and fixable while a wrongly-accepted
+#: one is not. Same reasoning as ADR-059's identifying-by-default.
+DEFAULT_EVALUATION_SEQUENCING = "rolling_origin"
 SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
 
 # Reconciliation — optional config key; controls hierarchical prediction reconciliation.
@@ -209,6 +227,7 @@ class CoreConfigSniffer:
         self._check_prediction_format()
         self._check_skip_predictions_delivery()
         self._check_evaluation_mode()
+        self._check_evaluation_sequencing()
         self._check_reconciliation_config()
         self._check_output_scale()
         if run_type != FORECASTING_RUN_TYPE:
@@ -268,6 +287,72 @@ class CoreConfigSniffer:
                 "CoreConfigSniffer: Classification metric key(s) declared but "
                 "classification_targets is empty. Add targets or remove the metric keys."
             )
+
+    def _check_evaluation_sequencing(self) -> None:
+        """The `evaluation_sequencing` key, if present, must name a scheme we implement.
+
+        Optional. Absent means `rolling_origin` — see DEFAULT_EVALUATION_SEQUENCING for
+        why the default is the strict one.
+        """
+        declared = self._c.get("evaluation_sequencing")
+        if declared is None:
+            return
+        if declared not in SUPPORTED_EVALUATION_SEQUENCING:
+            raise ValueError(
+                f"CoreConfigSniffer: evaluation_sequencing='{declared}' is not supported. "
+                f"Choose one of {sorted(SUPPORTED_EVALUATION_SEQUENCING)}, or omit the key "
+                f"for '{DEFAULT_EVALUATION_SEQUENCING}'."
+            )
+
+    def _check_horizon_chunk_contract(
+        self, test_len: int, test_start: int, test_end: int
+    ) -> None:
+        """The contract for `horizon_chunks`, which is not "no contract".
+
+        A scheme exempted from the rolling-origin length rule must still be checked
+        against its own invariants. A branch that validates nothing is how #328's
+        approach — commenting the check out — fails, only more quietly.
+
+        Two things are true of chunked evaluation and are enforced:
+
+        1. `output_chunk_length` must be present and a positive integer. Without it the
+           scheme has no block size and the config is not sequenceable at all.
+        2. It must fit inside the test window. A horizon longer than the window means the
+           model predicts further than anything can score it, and the consumer's own
+           `test_len // horizon + 1` yields a single partial block — a number that looks
+           like an evaluation and is not.
+
+        A remainder is **allowed** and logged rather than refused: the consumer's `+ 1`
+        deliberately covers a partial final block. Refusing it would be this repo
+        inventing a rule the scheme does not have.
+        """
+        horizon = self._c.get("output_chunk_length")
+        if horizon is None:
+            raise KeyError(
+                "CoreConfigSniffer: evaluation_sequencing='horizon_chunks' requires "
+                "'output_chunk_length' — the block size the test window is consumed in. "
+                "Without it there is no sequencing to verify."
+            )
+        if not isinstance(horizon, int) or isinstance(horizon, bool) or horizon <= 0:
+            raise ValueError(
+                f"CoreConfigSniffer: output_chunk_length={horizon!r} must be a positive "
+                f"integer number of months."
+            )
+        if horizon > test_len:
+            raise ValueError(
+                f"CoreConfigSniffer: output_chunk_length={horizon} exceeds the test window "
+                f"test_len={test_len} ({test_start}..{test_end}). The model would predict "
+                f"further than the partition can score, and the run would report one "
+                f"partial block as though it were an evaluation."
+            )
+
+        whole, remainder = divmod(test_len, horizon)
+        logger.info(
+            "CoreConfigSniffer: Evaluation contract verified — horizon_chunks, "
+            "%d whole chunk(s) of %d month(s) over test_len=%d%s.",
+            whole, horizon, test_len,
+            f", with a final partial chunk of {remainder}" if remainder else "",
+        )
 
     def _resolve_time_steps(self) -> int:
         """Return the effective time_steps value for validation.
@@ -536,15 +621,27 @@ class CoreConfigSniffer:
                 f"test_start={test_start} ≤ train_end={train_end}."
             )
 
-        test_len     = test_end - test_start + 1
+        test_len = test_end - test_start + 1
+
+        # The overlap check above is true of any scheme. What follows is not: the length
+        # contract belongs to rolling-origin evaluation specifically, and applying it to a
+        # config sequenced some other way refuses a correct config (#460).
+        sequencing = self._c.get("evaluation_sequencing", DEFAULT_EVALUATION_SEQUENCING)
+        if sequencing == "horizon_chunks":
+            self._check_horizon_chunk_contract(test_len, test_start, test_end)
+            return
+
         expected_len = time_steps + MAX_SHIFT_COUNT   # currently 36 + 12 = 48
 
         if test_len != expected_len:
             raise NotImplementedError(
                 f"CoreConfigSniffer: test_len={test_len} ({test_start}..{test_end}) but "
                 f"only test_len={expected_len} "
-                f"(time_steps={time_steps} + MAX_SHIFT_COUNT={MAX_SHIFT_COUNT}) is supported. "
-                f"Update MAX_SHIFT_COUNT in core_config_sniffer.py when ready."
+                f"(time_steps={time_steps} + MAX_SHIFT_COUNT={MAX_SHIFT_COUNT}) is supported "
+                f"for evaluation_sequencing='rolling_origin'. "
+                f"Update MAX_SHIFT_COUNT in core_config_sniffer.py when ready, or declare "
+                f"the scheme this config actually uses "
+                f"(evaluation_sequencing, one of {sorted(SUPPORTED_EVALUATION_SEQUENCING)})."
             )
 
         num_sequences = (test_end - base_origin - time_steps) // stride + 1

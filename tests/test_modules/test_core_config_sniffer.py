@@ -641,3 +641,141 @@ class TestOutputScaleValidation:
         configs = {**_valid_configs(), "output_scale": "cubic"}
         with pytest.raises(ValueError, match="output_scale"):
             CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# evaluation_sequencing — the contract applies to the scheme the config declares
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestEvaluationSequencing:
+    """#460. The rolling-origin length rule is one scheme's contract, not everyone's.
+
+    `_check_evaluation_contract` asserted `test_len == time_steps + MAX_SHIFT_COUNT` for
+    every config. views-impact does not sequence that way — it consumes the test window in
+    blocks of `output_chunk_length` — so a correct config was refused, and PR #328
+    responded by **commenting the check out** for the whole platform.
+
+    A config now declares its scheme and gets that scheme's contract. Crucially,
+    `horizon_chunks` is not an escape from checking: it has invariants of its own and they
+    are enforced, because a branch that validates nothing fails the same way #328 did, only
+    more quietly.
+    """
+
+    #: A test window impact's way: 48 months in 12-month blocks.
+    _CHUNKED_PARTITION = {"calibration": {"train": (121, 444), "test": (445, 492)}}
+
+    def _chunked(self, **overrides):
+        configs = _valid_configs()
+        configs["evaluation_sequencing"] = "horizon_chunks"
+        configs["output_chunk_length"] = 12
+        configs.update(overrides)
+        return configs
+
+    # ── the default is unchanged, which matters more than the new scheme ──
+
+    def test_a_config_with_no_scheme_is_checked_exactly_as_before(self):
+        """Every config predating #460 declares nothing. None may change behaviour."""
+        good = {"calibration": {"train": (121, 444), "test": (445, 492)}}
+        CoreConfigSniffer(_valid_configs(), good, target="model").sniff_all("calibration")
+
+        bad = {"calibration": {"train": (121, 444), "test": (445, 491)}}
+        with pytest.raises(NotImplementedError, match="test_len=47"):
+            CoreConfigSniffer(_valid_configs(), bad, target="model").sniff_all("calibration")
+
+    def test_declaring_rolling_origin_explicitly_is_the_same_as_omitting_it(self):
+        bad = {"calibration": {"train": (121, 444), "test": (445, 491)}}
+        configs = _valid_configs()
+        configs["evaluation_sequencing"] = "rolling_origin"
+        with pytest.raises(NotImplementedError, match="test_len=47"):
+            CoreConfigSniffer(configs, bad, target="model").sniff_all("calibration")
+
+    # ── the new scheme ──
+
+    def test_a_horizon_chunked_config_is_accepted(self):
+        """The impact-shaped case #328 could only reach by disabling the check."""
+        CoreConfigSniffer(
+            self._chunked(), self._CHUNKED_PARTITION, target="model"
+        ).sniff_all("calibration")
+
+    def test_a_horizon_chunked_config_escapes_the_rolling_origin_length_rule(self):
+        """A window the rolling-origin rule refuses is fine when chunked.
+
+        This is the whole point: `test_len=47` raises under the default and does not here.
+        """
+        odd = {"calibration": {"train": (121, 444), "test": (445, 491)}}  # 47, not 48
+        CoreConfigSniffer(self._chunked(), odd, target="model").sniff_all("calibration")
+
+    def test_a_partial_final_chunk_is_allowed(self):
+        """47 months in blocks of 12 is three whole chunks and a remainder of 11.
+
+        Allowed, and logged. The consumer's own `test_len // horizon + 1` covers the
+        partial block deliberately; refusing it would be this repo inventing a rule the
+        scheme does not have.
+        """
+        odd = {"calibration": {"train": (121, 444), "test": (445, 491)}}
+        CoreConfigSniffer(self._chunked(), odd, target="model").sniff_all("calibration")
+
+    # ── and it is not an escape from checking ──
+
+    def test_horizon_chunks_without_a_chunk_length_is_refused(self):
+        configs = self._chunked()
+        del configs["output_chunk_length"]
+        with pytest.raises(KeyError, match="output_chunk_length"):
+            CoreConfigSniffer(
+                configs, self._CHUNKED_PARTITION, target="model"
+            ).sniff_all("calibration")
+
+    @pytest.mark.parametrize("bad", [0, -12, 12.0, "12", True])
+    def test_a_chunk_length_that_is_not_a_positive_integer_is_refused(self, bad):
+        """`True` is in here on purpose — `bool` subclasses `int`, and `True > 0`."""
+        with pytest.raises(ValueError, match="output_chunk_length"):
+            CoreConfigSniffer(
+                self._chunked(output_chunk_length=bad),
+                self._CHUNKED_PARTITION,
+                target="model",
+            ).sniff_all("calibration")
+
+    def test_a_chunk_longer_than_the_test_window_is_refused(self):
+        """The model would predict further than the partition can score.
+
+        The consumer's `test_len // horizon + 1` yields a single partial block — a number
+        that looks like an evaluation and is not.
+        """
+        with pytest.raises(ValueError, match="exceeds the test window"):
+            CoreConfigSniffer(
+                self._chunked(output_chunk_length=60),
+                self._CHUNKED_PARTITION,
+                target="model",
+            ).sniff_all("calibration")
+
+    def test_partition_overlap_is_still_refused_under_any_scheme(self):
+        """The overlap check belongs to no scheme. Declaring one must not evade it."""
+        overlapping = {"calibration": {"train": (121, 450), "test": (445, 492)}}
+        with pytest.raises(ValueError, match="Partition overlap"):
+            CoreConfigSniffer(
+                self._chunked(), overlapping, target="model"
+            ).sniff_all("calibration")
+
+    # ── the vocabulary ──
+
+    def test_an_unrecognised_scheme_is_refused_and_names_the_supported_set(self):
+        configs = _valid_configs()
+        configs["evaluation_sequencing"] = "expanding_window"
+        good = {"calibration": {"train": (121, 444), "test": (445, 492)}}
+        with pytest.raises(ValueError, match="horizon_chunks"):
+            CoreConfigSniffer(configs, good, target="model").sniff_all("calibration")
+
+    def test_the_supported_set_and_the_default_agree(self):
+        """A default outside the supported set would refuse every config that omits the
+        key — which is every config written before #460."""
+        from views_pipeline_core.modules.validation.core_config_sniffer import (
+            DEFAULT_EVALUATION_SEQUENCING,
+            SUPPORTED_EVALUATION_SEQUENCING,
+        )
+
+        assert DEFAULT_EVALUATION_SEQUENCING in SUPPORTED_EVALUATION_SEQUENCING
+        assert DEFAULT_EVALUATION_SEQUENCING == "rolling_origin", (
+            "the default must stay the strict scheme — an unstated scheme getting the "
+            "looser contract is how a config stops being checked without anyone deciding"
+        )
