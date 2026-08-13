@@ -173,6 +173,34 @@ class WandBModule:
             target_identifier,
         )
 
+    def log_yearly_evaluation(self, evaluation_dict: dict, target: str) -> None:
+        """Log calendar-year evaluation metrics to the run summary.
+
+        views-impact aggregates monthly predictions to complete calendar years and scores
+        them there — leakage-safe, per its own docstring — and had nowhere to put the
+        result (#459).
+
+        Args:
+            evaluation_dict: must carry a ``"year"`` entry whose value exposes the metrics
+                as attributes. Keys are written as ``{target}_yearly_{metric}``.
+            target: the target these metrics belong to.
+
+        Raises:
+            KeyError: if ``"year"`` is absent. Deliberately not a silent no-op — a caller
+                asking to log yearly metrics without them has a bug upstream, and
+                swallowing it produces a run that looks scored and is not. Reporting an
+                undetermined thing as determined is the failure this codebase keeps
+                finding (Cluster J).
+        """
+        if "year" not in evaluation_dict:
+            raise KeyError(
+                f"log_yearly_evaluation: no 'year' entry for target '{target}'. "
+                f"Available: {sorted(evaluation_dict)}. Nothing was logged."
+            )
+        for metric, value in vars(evaluation_dict["year"]).items():
+            if value is not None:
+                wandb.summary[f"{target}_yearly_{metric}"] = value
+
     @staticmethod
     def send_alert(
         title: str,
