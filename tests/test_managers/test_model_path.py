@@ -404,9 +404,9 @@ class TestArtifactMethods:
             f.unlink()
         
         # Create various artifacts
-        (manager.artifacts / "calibration_model_20241105.pt").touch()
-        (manager.artifacts / "calibration_model_20241106.pkl").touch()
-        (manager.artifacts / "validation_model_20241105.pt").touch()
+        (manager.artifacts / "calibration_model_20241105_143022.pt").touch()
+        (manager.artifacts / "calibration_model_20241106_091500.pkl").touch()
+        (manager.artifacts / "validation_model_20241105_143022.pt").touch()
         (manager.artifacts / "other_file.txt").touch()
         
         files = manager._get_artifact_files("calibration")
@@ -603,7 +603,7 @@ class TestIntegration:
             f.unlink()
         
         # Create artifact
-        artifact = manager.artifacts / "calibration_model_20241105.pt"
+        artifact = manager.artifacts / "calibration_model_20241105_143022.pt"
         artifact.touch()
         
         # Get latest artifact

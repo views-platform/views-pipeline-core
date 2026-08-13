@@ -24,6 +24,7 @@ from pathlib import Path
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.data.constants import CACHE_SOURCES
 from views_pipeline_core.data.constants import cache_filename_prefix
+from views_pipeline_core.data.constants import model_artifact_stem_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -564,7 +565,7 @@ class ModelPathManager:
             logger.error(f"Error checking if input is a path: {e}")
             return False
 
-    def _get_artifact_files(self, run_type: str) -> List[Path]:
+    def _get_artifact_files(self, run_type: str, targets_suffix: str = "") -> List[Path]:
         """
         Get artifact files for given run type.
 
@@ -597,11 +598,17 @@ class ModelPathManager:
             ".cbm",
             ".onnx",
         ]
+        # Anchored on both ends, and derived from MODEL_ARTIFACT_TEMPLATE rather than
+        # respelled here. The old `startswith(f"{run_type}_model_")` was a second spelling
+        # of the convention `generate_model_file_name` writes (C-59), and a left-anchored
+        # match cannot separate targets_suffix="sb" from an artifact written for
+        # "sb_best" — `sb_best_...` starts with `sb_`. See #459.
+        pattern = model_artifact_stem_pattern(run_type, targets_suffix)
         artifact_files = [
             f
             for f in self.artifacts.iterdir()
             if f.is_file()
-            and f.stem.startswith(f"{run_type}_model_")
+            and pattern.match(f.stem)
             and f.suffix in common_extensions
             and len(f.suffixes) == 1
         ]
@@ -630,6 +637,43 @@ class ModelPathManager:
             and f.stem.startswith(prefixes)
             and f.suffix == PipelineConfig.dataframe_format
         ]
+        return sorted(paths, reverse=True)
+
+    def get_processed_data_file_paths(
+        self, run_type: str, targets: Optional[List[str]] = None
+    ) -> List[Path]:
+        """Processed dataframes for a run type, newest first.
+
+        The sibling of `_get_raw_data_file_paths`, which had no processed counterpart —
+        so views-impact reached into `data_processed` directly at four sites (#459).
+        **Public**, because the caller is another repository: reaching a private method
+        across a repo boundary is the defect #433 removed.
+
+        Args:
+            run_type: 'calibration', 'validation' or 'forecasting'.
+            targets: optional target discriminator. When given, only files whose name
+                carries the joined targets are returned.
+
+        Returns:
+            Matching paths, newest first.
+
+        Note:
+            The name is built from `cache_filename_prefix`, not respelled. A hand-built
+            ``f"{run_type}_viewser_df"`` is a second spelling of a convention
+            `data/constants.py` owns, and `tests/test_cache_name_has_one_spelling.py`
+            rejects it (C-59).
+        """
+        prefix = cache_filename_prefix(run_type, "viewser")
+        paths = [
+            f
+            for f in self.data_processed.iterdir()
+            if f.is_file()
+            and f.stem.startswith(prefix)
+            and f.suffix == PipelineConfig.dataframe_format
+        ]
+        if targets:
+            joined = "_".join(targets)
+            paths = [f for f in paths if joined in f.stem]
         return sorted(paths, reverse=True)
 
     def _get_generated_predictions_data_file_paths(self, run_type: str) -> List[Path]:
@@ -683,7 +727,7 @@ class ModelPathManager:
         ]
         return sorted(paths, key=lambda p: p.name, reverse=True)
 
-    def get_latest_model_artifact_path(self, run_type: str) -> Path:
+    def get_latest_model_artifact_path(self, run_type: str, targets_suffix: str = "") -> Path:
         """
         Get path to latest model artifact for run type.
 
@@ -708,7 +752,7 @@ class ModelPathManager:
             - Timestamp format: YYYYMMDD_HHMMSS
         """
         # List all model files for the given specific run_type with the expected filename pattern
-        model_files = self._get_artifact_files(run_type=run_type)
+        model_files = self._get_artifact_files(run_type=run_type, targets_suffix=targets_suffix)
 
         if not model_files:
             raise FileNotFoundError(
