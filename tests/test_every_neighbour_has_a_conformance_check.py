@@ -528,10 +528,32 @@ def _sibling_consumers() -> list[str]:
     return found
 
 
+def _has_siblings() -> bool:
+    """Is there a checkout beside this one that is not this one?
+
+    The `is not this one` half is load-bearing and was missed first time. On a CI runner
+    the workspace is `.../views-pipeline-core/views-pipeline-core`, so the parent contains
+    exactly one `views-*` directory: **this repo**. A skip guard that only asked "are
+    there any `views-*` directories" answered yes, declined to skip, and then failed the
+    population control on the zero consumers that remain after excluding self.
+
+    That is the same shape as every other defect this file records — a check comparing a
+    thing to itself and reading the result as evidence about something else.
+    """
+    if not _SIBLINGS.is_dir():
+        return False
+    return any(
+        p.is_dir()
+        and p.name.startswith("views-")
+        and p.resolve() != REPO_ROOT.resolve()
+        for p in _SIBLINGS.iterdir()
+    )
+
+
 def test_the_sibling_scan_finds_consumers_at_all():
     """Control. A scan returning nothing would make the assertion below vacuous."""
-    if not any(p.name.startswith("views-") and p.is_dir() for p in _SIBLINGS.iterdir()):
-        pytest.skip("no sibling checkouts beside this repo")
+    if not _has_siblings():
+        pytest.skip("no sibling checkouts beside this repo (CI has none)")
     consumers = _sibling_consumers()
     assert len(consumers) >= 5, (
         f"only {len(consumers)} sibling consumers found ({consumers}) — the scan has "
@@ -548,8 +570,8 @@ def test_every_consumer_on_disk_is_accounted_for():
     here has thought about, which is how views-impact ended up pinned two majors behind on
     a config key we retired, with nothing to tell it.
     """
-    if not _SIBLINGS.is_dir():  # pragma: no cover
-        pytest.skip("no sibling checkouts")
+    if not _has_siblings():
+        pytest.skip("no sibling checkouts beside this repo (CI has none)")
     consumers = _sibling_consumers()
     if not consumers:
         pytest.skip("no sibling consumers on disk")
