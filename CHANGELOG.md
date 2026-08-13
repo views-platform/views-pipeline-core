@@ -23,6 +23,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.1.0] — unreleased
+
+A minor release. **Nothing here breaks a 3.0.x consumer** — every addition is optional,
+and the one new config key defaults to today's behaviour.
+
+Built for **views-impact**, which subclasses `ForecastingModelManager`, overrides ten of
+its methods, and had been unable to reach the API it needs since its PR (#328) went red in
+July and lost its author. Epic #458.
+
+### Added
+
+- **`generate_model_file_name(..., targets_suffix="")`** and
+  **`ModelPathManager.get_latest_model_artifact_path(..., targets_suffix="")`** — an
+  optional target discriminator, for a model trained several times over different target
+  sets whose artifacts would otherwise collide. **The empty-suffix case is byte-identical
+  to 3.0.x**, so no existing artifact is renamed or stops being found. (#464)
+- **`ModelPathManager.get_processed_data_file_paths(run_type, targets=None)`** — the
+  sibling of `_get_raw_data_file_paths`, which had no processed counterpart. Public,
+  because the caller is another repository. (#464)
+- **`WandBModule.log_yearly_evaluation(evaluation_dict, target)`** — logs calendar-year
+  metrics to the run summary. Raises if the `"year"` entry is absent rather than logging
+  nothing, because a run that looks scored and is not is the failure worth avoiding. (#464)
+- **`evaluation_sequencing`** config key, with `rolling_origin` (the default) and
+  `horizon_chunks`. See *Changed* below and **ADR-060**. (#465)
+- Conformance tests at the **views-impact** and **views-faoapi** boundaries, and a
+  consumer scan that finds repositories depending on this package that it never names.
+  (#454, #456, #457, #466)
+
+### Changed
+
+- **The evaluation contract now applies the scheme a config declares.**
+  `CoreConfigSniffer` asserted `test_len == time_steps + MAX_SHIFT_COUNT` for every
+  config. That is one scheme's contract applied to all, and it refused correct configs
+  that sequence differently — views-impact consumes its test window in blocks of
+  `output_chunk_length`, so its partition is not a function of `time_steps` at all.
+
+  **Nothing changes for existing configs**: an absent `evaluation_sequencing` means
+  `rolling_origin` and is checked exactly as before. `horizon_chunks` is exempt from the
+  *length* rule and nothing else — the block size must be present, a positive integer, and
+  no longer than the test window. (#465, ADR-060)
+- **The model artifact name has one spelling.** `generate_model_file_name` wrote it and
+  `ModelPathManager` matched it with a hand-built prefix; both now derive from
+  `MODEL_ARTIFACT_TEMPLATE`. The artifact match is **anchored on both ends**, so a suffix
+  of `sb` no longer matches an artifact written for `sb_best`. Only relevant if you passed
+  a suffix, which nothing outside views-impact does. (#464)
+- The model scaffold names every mandatory config key, commented and marked REQUIRED,
+  rather than leaving two of them for the author to discover from a `KeyError`. (#467)
+
+### Note on the version number
+
+Minor rather than patch: 3.0.1 fixed a defect and added nothing, while this adds two public
+methods, two optional keywords and a config key. Backwards compatible throughout.
+
+`tests/test_public_surface_requires_a_major_bump.py` passes and does not force a bump —
+correctly, since it tracks constructor signatures of exported classes and none changed.
+That is the guard behaving as designed, not a reason to skip the reasoning.
+
+---
+
 ## [3.0.1] — unreleased
 
 A patch release. **Nothing here breaks a 3.0.0 consumer**, and the one behaviour change
