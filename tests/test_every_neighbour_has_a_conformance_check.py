@@ -113,15 +113,6 @@ class Exemption:
 #: is_justified` enforces both — an entry saying only "skip" fails, which is the whole
 #: point: an unexplained absence and a decided one must not look the same.
 EXEMPT: dict[str, Exemption] = {
-    "impact": Exemption(
-        "Newly a *declared* neighbour, and by accident of the right kind: #459 names it in "
-        "four docstrings explaining why the API it needs exists, so this guard immediately "
-        "demanded it be accounted for. It is a live consumer with no tests of its own, so "
-        "the usual 'the check belongs on their side' does not apply — S4 of epic #458 adds "
-        "a conformance test here, derived from the surface it actually uses. Remove this "
-        "entry when that lands.",
-        "#461, epic #458",
-    ),
     "hydranet": Exemption(
         "Consumer, not a dependency: views-hydranet imports this package, not the "
         "reverse. The conformance check belongs on its side, where the expectation "
@@ -493,13 +484,6 @@ KNOWN_CONSUMERS: dict[str, Exemption] = {
     "views-stepshifter": Exemption(
         "Engine. Imports this package; no reciprocal claim is made here about it.",
         "#428",
-    ),
-    "views-impact": Exemption(
-        "Engine, and the reason this check exists — it subclasses ForecastingModelManager "
-        "and calls four internals while being named nowhere in our source. It is pinned "
-        "<3.0.0 and uses the `targets` key retired in #380, so it cannot adopt 3.x "
-        "unchanged; filed as views-impact#5.",
-        "views-impact#5",
     ),
     "views-crafdapi": Exemption(
         "Consumer of published artifacts, like views-faoapi. Its payload contract is the "
