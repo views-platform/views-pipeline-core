@@ -4,7 +4,15 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 289 concerns (178 resolved) + 41 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.1.0 — OPEN, prepared 2026-08-13.**
+> **Release gate — pipeline-core 3.1.0 — ~~OPEN~~ SHIPPED 2026-08-14.**
+> `views-pipeline-core 3.1.0` is on PyPI (tag `3.1.0`, commit `b9f8fb1`). Verified from
+> outside rather than from this worktree — a fresh venv, `pip install
+> views-pipeline-core==3.1.0` from PyPI: **all 61 shipped modules import**, `pytest` is
+> absent from the consumer install, all four additions views-impact waited for are
+> reachable, both `evaluation_sequencing` schemes are present, and the no-suffix artifact
+> name is unchanged from 3.0.x. That procedure is C-206's standing remedy and this
+> release inherited C-206 as accepted, so it was run rather than assumed.
+> Prepared 2026-08-13; the gate below was its disposition.
 > A **minor** release: epic #458 adds public API rather than fixing a defect. Four new
 > public things — `targets_suffix` on two callables, `ModelPathManager.get_processed_data_file_paths`,
 > `WandBModule.log_yearly_evaluation` — plus the `evaluation_sequencing` config key
