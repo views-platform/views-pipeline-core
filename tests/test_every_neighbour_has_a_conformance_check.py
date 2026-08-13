@@ -444,6 +444,136 @@ def test_documentation_does_not_add_neighbours():
 
 
 # ----------------------------------------------------------------------------------
+# Consumers this repo has never named — the blind spot the derivation cannot cover
+# ----------------------------------------------------------------------------------
+#
+# Added 2026-08-13, after views-impact turned up as a real consumer that subclasses
+# `ForecastingModelManager`, calls four other internals, and appears **nowhere** in this
+# package's source.
+#
+# `declared_neighbours()` derives from what this repo *says*. That is the right basis for
+# a dependency — naming one is a claim about it. It is structurally blind to a *consumer*,
+# because being imported by someone leaves no trace in your own source. views-hydranet and
+# views-baseline are in the derived set only because docstrings happen to mention them;
+# had nobody written those sentences, they would be invisible too.
+#
+# So consumers are found the only way they can be: by looking at the repositories beside
+# this one. That works where checkouts are colocated and skips in CI, the same limit as
+# the wire-fixture drift check and the SessionAuth registry ratchet — and, as there,
+# whoever has the sibling checked out is whoever can act.
+
+_SIBLINGS = REPO_ROOT.parent
+
+#: Consumers that import this package and need no conformance check here, with the reason.
+#: Same discipline as EXEMPT: a reason long enough to disagree with, and somewhere to look.
+KNOWN_CONSUMERS: dict[str, Exemption] = {
+    "views-hydranet": Exemption(
+        "Engine. Imports this package; nothing here imports it. The conformance check "
+        "belongs on its side, where the expectation lives, and is filed there.",
+        "views-hydranet#257",
+    ),
+    "views-baseline": Exemption(
+        "Engine, same reasoning as views-hydranet. Pins a range and imports us.",
+        "#428",
+    ),
+    "views-r2darts2": Exemption(
+        "Engine. Also rebuilds the cache filename itself rather than reading the loader's "
+        "exposed path, which is filed there as views-r2darts2#25 (the C-59 class).",
+        "views-r2darts2#25",
+    ),
+    "views-stepshifter": Exemption(
+        "Engine. Imports this package; no reciprocal claim is made here about it.",
+        "#428",
+    ),
+    "views-impact": Exemption(
+        "Engine, and the reason this check exists — it subclasses ForecastingModelManager "
+        "and calls four internals while being named nowhere in our source. It is pinned "
+        "<3.0.0 and uses the `targets` key retired in #380, so it cannot adopt 3.x "
+        "unchanged; filed as views-impact#5.",
+        "views-impact#5",
+    ),
+    "views-crafdapi": Exemption(
+        "Consumer of published artifacts, like views-faoapi. Its payload contract is the "
+        "ADR-013 wire canon, verified here by the three-way byte agreement in "
+        "test_wire_fixture_conformance.py rather than by a per-repo fixture.",
+        "#454",
+    ),
+}
+
+
+def _sibling_consumers() -> list[str]:
+    """Sibling repositories that import or pin this package.
+
+    Excludes this repo, virtualenvs and site-packages — a vendored copy inside someone's
+    `envs/` is not a consumer, it is an install.
+    """
+    if not _SIBLINGS.is_dir():  # pragma: no cover
+        return []
+    found = []
+    for candidate in sorted(_SIBLINGS.iterdir()):
+        if not candidate.is_dir() or candidate.resolve() == REPO_ROOT.resolve():
+            continue
+        if not candidate.name.startswith("views-"):
+            continue
+        for path in list(candidate.rglob("*.py")) + list(candidate.rglob("pyproject.toml")):
+            parts = set(path.parts)
+            if parts & {"envs", "site-packages", ".git", "node_modules", "wandb"}:
+                continue
+            try:
+                if "views_pipeline_core" in path.read_text(encoding="utf-8", errors="ignore"):
+                    found.append(candidate.name)
+                    break
+            except OSError:  # pragma: no cover
+                continue
+    return found
+
+
+def test_the_sibling_scan_finds_consumers_at_all():
+    """Control. A scan returning nothing would make the assertion below vacuous."""
+    if not any(p.name.startswith("views-") and p.is_dir() for p in _SIBLINGS.iterdir()):
+        pytest.skip("no sibling checkouts beside this repo")
+    consumers = _sibling_consumers()
+    assert len(consumers) >= 5, (
+        f"only {len(consumers)} sibling consumers found ({consumers}) — the scan has "
+        f"stopped seeing most of them."
+    )
+
+
+def test_every_consumer_on_disk_is_accounted_for():
+    """A repository that imports this package must be known to this repo.
+
+    Not "must have a conformance test" — most consumers are correctly checked from their
+    own side. It must be *known*: either this repo names it (so the derivation sees it) or
+    it is listed above with a reason. Anything else is a repo depending on us that nobody
+    here has thought about, which is how views-impact ended up pinned two majors behind on
+    a config key we retired, with nothing to tell it.
+    """
+    if not _SIBLINGS.is_dir():  # pragma: no cover
+        pytest.skip("no sibling checkouts")
+    consumers = _sibling_consumers()
+    if not consumers:
+        pytest.skip("no sibling consumers on disk")
+
+    derived = {f"views-{n}" for n in declared_neighbours()}
+    unaccounted = [c for c in consumers if c not in derived and c not in KNOWN_CONSUMERS]
+
+    assert not unaccounted, (
+        f"these repositories import or pin views_pipeline_core and this repo knows nothing "
+        f"about them: {unaccounted}. Add each to KNOWN_CONSUMERS with a reason and an "
+        f"issue, or give it a conformance check. A consumer leaves no trace in our source, "
+        f"so the derivation cannot find it — this scan is the only thing that can."
+    )
+
+
+@pytest.mark.parametrize("consumer", sorted(KNOWN_CONSUMERS))
+def test_every_known_consumer_is_justified(consumer):
+    """Same bar as EXEMPT — an entry saying "skip" fails."""
+    entry = KNOWN_CONSUMERS[consumer]
+    assert len(entry.reason) >= 40, f"KNOWN_CONSUMERS['{consumer}'] reason is too thin"
+    assert entry.issue, f"KNOWN_CONSUMERS['{consumer}'] has no issue reference"
+
+
+# ----------------------------------------------------------------------------------
 # The assertion itself
 # ----------------------------------------------------------------------------------
 
