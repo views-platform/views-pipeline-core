@@ -113,16 +113,6 @@ class Exemption:
 #: is_justified` enforces both — an entry saying only "skip" fails, which is the whole
 #: point: an unexplained absence and a decided one must not look the same.
 EXEMPT: dict[str, Exemption] = {
-    "faoapi": Exemption(
-        "Blocked on the other repo, not on effort. views-faoapi is a service, not an "
-        "installable package, and it CONSUMES what this repo publishes through the "
-        "Appwrite seam — so the contract is the payload shape, and the only honest "
-        "artifact is a fixture of what faoapi actually reads. Inventing one here would "
-        "be a copy of their vocabulary, which is the defect with an extra step (C-62). "
-        "Requested from that repo; the seam pin is checked meanwhile, the payload shape "
-        "is not.",
-        "views-faoapi#380, #430",
-    ),
     "hydranet": Exemption(
         "Consumer, not a dependency: views-hydranet imports this package, not the "
         "reverse. The conformance check belongs on its side, where the expectation "
