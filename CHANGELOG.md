@@ -23,6 +23,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.1.1] — unreleased
+
+A patch release. It exists because the first CRAF'd delivery could not run.
+
+### Fixed
+
+- **A duplicate lookup that failed was treated as a duplicate lookup that found nothing.**
+  `check_file_exists_by_hash` has three callers; only one checked whether the lookup had
+  succeeded. `upload_file_with_metadata` and `upload_file_from_bytes_with_metadata` tested
+  only for specific *success* codes, so a failed read fell through to an upload with
+  duplicate-checking effectively disabled. C-232's pathology, at the two sites its original
+  fix did not reach. All three callers now refuse to proceed on an undetermined result.
+  (#473, C-290)
+- **A call to a method that had moved.** The same lookup called
+  `self._create_attribute_by_type`, which has lived on `AppwriteProvisioner` since #331 and
+  never on the metadata handler — an Extract Class refactor took the method and left the
+  caller. It raised `AttributeError` on the first delivery to any collection lacking
+  `file_hash`, which is once per partner. Deleted rather than repaired: repairing it would
+  reinstate create-on-read (ADR-046 §5) and would have created the attribute at `size=255`
+  where the declared schema says 64. **The crash was the only thing preventing the silent
+  upload above**, so the callers were fixed first. (#473)
+- **`ensure-collection` reported OK while writing nothing.** On an existing collection it
+  skipped attribute-ensuring entirely and returned `EXISTS` after two reads and zero writes,
+  so a collection missing `file_hash` stayed missing it while the operator was told it was
+  provisioned. It now ensures the declared schema on both paths. (#473, C-291)
+
+### Added
+
+- **`--collection` and `--collection-name` on the provisioning CLI.** It could previously
+  target only `production_forecasts`, whatever the operator meant, because the collection
+  coordinates come from `APPWRITE_PROD_FORECASTS_*`. Supplying half the pair is **refused** —
+  the other half would still resolve from the environment, so a command meaning a partner's
+  shelf could provision production. (#473)
+- Two derived guards: no class may call a `self.X()` that resolves to nothing
+  (`tests/test_no_orphaned_self_calls.py`), and a failed hash lookup may not become an
+  upload (`tests/test_modules/test_hash_lookup_failure_is_not_absence.py`, using a real
+  `AppwriteException` — no double had ever been asked to raise this error).
+
+### Changed
+
+- **A metadata collection is identified by its id, and its name must agree.** The match was
+  `id == wanted_id or name == wanted_name`, so either half of the pair could select a
+  collection alone and whichever appeared first in the listing won. A disagreement is now
+  refused as `COORDINATE_MISMATCH`. Only observable if your id and name disagree, which was
+  never safe. (#473)
+
+---
+
 ## [3.1.0] — unreleased
 
 A minor release. **Nothing here breaks a 3.0.x consumer** — every addition is optional,

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "views_pipeline_core"
-version = "3.1.0"
+version = "3.1.1"
 description = "Core orchestration, data and model-management library for the VIEWS conflict forecasting platform."
 authors = [
     "Borbála Farkas <borbala.farkas@pcr.uu.se>",

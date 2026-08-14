@@ -21,7 +21,9 @@ from views_pipeline_core.modules.appwrite.file import (
 )
 from views_pipeline_core.modules.appwrite.provisioning import (
     AppwriteProvisioner,
+    build_provisioner,
     infer_attribute_type,
+    main,
 )
 
 
@@ -356,3 +358,127 @@ class TestRunnableEntrypoint:
             from views_pipeline_core.modules.appwrite.provisioning import main
 
             assert main(["ensure-bucket"]) == 0
+
+
+class TestTheCliCanReachAPartnerCollection:
+    """#473, C-291. `ensure-collection` could only ever target `production_forecasts`,
+    and on an existing collection it reported OK while writing nothing.
+
+    Both defects blocked the first CRAF'd delivery: `file.py` tells the operator to run
+    this command, and the command could neither reach the collection nor repair it.
+    """
+
+    def test_the_collection_can_be_overridden(self):
+        """`_ENV_MAP` hardcodes `APPWRITE_PROD_FORECASTS_*`, so without this the CLI
+        provisions the production shelf whatever the operator meant."""
+        # `build_provisioner` imports these inside the function, so they are patched at
+        # their source rather than on the provisioning module.
+        with patch(
+            "views_pipeline_core.configs.prediction_store.PredictionStoreConfig"
+        ) as store_cls, patch(
+            "views_pipeline_core.modules.appwrite.file.AppWriteFileModule"
+        ), patch(
+            "views_pipeline_core.modules.appwrite.file.AppwriteConfig"
+        ) as cfg_cls:
+            store_cls.from_environment.return_value = MagicMock(
+                collection_id="production_forecasts", collection_name="production_forecasts"
+            )
+            build_provisioner(None, "crafd", "crafd")
+
+        assert cfg_cls.call_args.kwargs["collection_id"] == "crafd"
+        assert cfg_cls.call_args.kwargs["collection_name"] == "crafd"
+
+    @pytest.mark.parametrize(
+        "collection,name", [("crafd", None), (None, "crafd")], ids=["id-only", "name-only"]
+    )
+    def test_half_a_coordinate_pair_is_refused(self, collection, name):
+        """One variable away from provisioning production_forecasts while meaning a
+        partner's shelf. Same refusal, and same reason, as `audit/targets.py` (C-250)."""
+        from views_pipeline_core.exceptions.exceptions import ConfigurationException
+
+        with pytest.raises(ConfigurationException, match="one pair"):
+            build_provisioner(None, collection, name)
+
+    def test_the_cli_passes_metadata_so_an_existing_collection_is_repaired(self):
+        """The defect that made the workaround useless.
+
+        With the default `metadata=None`, `ensure_collection` skipped `ensure_attributes`
+        on the existing-collection branch and returned `EXISTS` having written nothing —
+        so a collection missing `file_hash` stayed missing it while the operator was told
+        it was provisioned.
+        """
+        with patch(
+            "views_pipeline_core.modules.appwrite.provisioning.build_provisioner"
+        ) as build:
+            provisioner = MagicMock()
+            provisioner.ensure_collection.return_value = OperationResult(
+                success=True, code="EXISTS"
+            )
+            build.return_value = provisioner
+            assert main(["ensure-collection"]) == 0
+
+        kwargs = provisioner.ensure_collection.call_args.kwargs
+        assert kwargs.get("metadata") == {}, (
+            "ensure-collection must pass a metadata dict — with None, the existing-"
+            "collection branch skips ensure_attributes and reports OK over an unrepaired "
+            "schema (C-291)"
+        )
+
+    def test_the_cli_threads_the_collection_flags_through(self):
+        with patch(
+            "views_pipeline_core.modules.appwrite.provisioning.build_provisioner"
+        ) as build:
+            build.return_value = MagicMock()
+            build.return_value.ensure_collection.return_value = OperationResult(success=True)
+            main(["ensure-collection", "--collection", "crafd", "--collection-name", "crafd"])
+
+        assert build.call_args.args == (None, "crafd", "crafd")
+
+
+class TestCollectionIdentityIsTheId:
+    """#473. The match was `$id == coll_id or name == coll_name`, so either half of the
+    pair could select a collection alone — and whichever appeared first in the listing
+    won, with nothing comparing the winner's other field. C-250 and C-271 are the
+    shelf-level form of the same conflation."""
+
+    def _listing(self, provisioner, collections):
+        provisioner.databases.list_collections.return_value = {
+            "total": len(collections),
+            "collections": collections,
+        }
+        provisioner.ensure_database = MagicMock(
+            return_value=OperationResult(success=True, code="EXISTS")
+        )
+
+    def test_a_matching_pair_is_accepted(self, provisioner):
+        self._listing(provisioner, [{"$id": "test_collection", "name": "Test Collection"}])
+        provisioner.ensure_attributes = MagicMock(return_value=OperationResult(success=True))
+
+        result = provisioner.ensure_collection(metadata={})
+
+        assert result.success and result.code == "EXISTS"
+        provisioner.ensure_attributes.assert_called_once()
+
+    def test_a_disagreeing_pair_is_refused_not_resolved(self, provisioner):
+        """The id exists; the name is somebody else's. Refuse rather than guess."""
+        self._listing(provisioner, [{"$id": "test_collection", "name": "production_forecasts"}])
+        provisioner.ensure_attributes = MagicMock(return_value=OperationResult(success=True))
+
+        result = provisioner.ensure_collection(metadata={})
+
+        assert result.success is False
+        assert result.code == "COORDINATE_MISMATCH"
+        provisioner.ensure_attributes.assert_not_called()
+
+    def test_a_name_match_alone_no_longer_selects_a_collection(self, provisioner):
+        """The old disjunct. A collection whose *name* matched while its id did not would
+        be selected and written into; now it is simply not this collection, and the
+        create path is reached instead."""
+        self._listing(provisioner, [{"$id": "somebody_else", "name": "Test Collection"}])
+        provisioner.databases.create_collection.return_value = {"$id": "test_collection"}
+        provisioner.ensure_attributes = MagicMock(return_value=OperationResult(success=True))
+
+        result = provisioner.ensure_collection(metadata={})
+
+        assert result.success
+        provisioner.databases.create_collection.assert_called_once()

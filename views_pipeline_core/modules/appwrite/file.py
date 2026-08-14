@@ -1147,7 +1147,11 @@ class AppwriteMetadataHandler:
             # reasons the platform key needed create scopes (register C-233, þing-02
             # #331). The collection is now provisioned deliberately:
             #   python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection
-            # If it does not exist, the read below fails loud and says so.
+            # If it does not exist, the read below FAILS — but in-band, as
+            # OperationResult(success=False), not by raising. Callers must inspect it.
+            # That sentence used to read "fails loud and says so", which was never true
+            # of this method, and it mattered: two callers ignored the failure and
+            # uploaded anyway (#473).
             # limit(1): this reads `total` for existence and `documents[0]` for the
             # answer, so one row is all it consumes. `total` is reported over the whole
             # match regardless of page size, so bounding the page cannot hide a
@@ -1169,52 +1173,18 @@ class AppwriteMetadataHandler:
             return OperationResult(success=False, code="NOT_FOUND")
 
         except AppwriteException as e:
-            # If the file_hash attribute doesn't exist, create it and try again
-            if "Attribute not found in schema: file_hash" in exception_message(e):
-                logger.info("file_hash attribute not found, creating it...")
-                try:
-                    self._create_attribute_by_type(
-                        db_id, coll_id, "file_hash", "string", False
-                    )
-
-                    # Try the search again
-                    try:
-                        search_result = self.databases.list_documents(
-                            db_id,
-                            coll_id,
-                            queries=[
-                                Query.equal("file_hash", file_hash),
-                                Query.limit(1),
-                            ],
-                        )
-
-                        if search_result["total"] > 0:
-                            return OperationResult(
-                                success=True,
-                                data=search_result["documents"][0],
-                                code="FOUND_BY_HASH"  # <-- CHANGED here too
-                            )
-
-                        return OperationResult(success=False, code="NOT_FOUND")
-                    except AppwriteException as retry_e:
-                        logger.error(
-                            f"Search failed after creating attribute: {retry_e.message}"
-                        )
-                        return OperationResult(
-                            success=False,
-                            error=f"Search failed: {retry_e.message}",
-                            code=retry_e.type,
-                        )
-                except AppwriteException as create_e:
-                    logger.error(
-                        f"Failed to create file_hash attribute: {create_e.message}"
-                    )
-                    return OperationResult(
-                        success=False,
-                        error=f"Attribute creation failed: {create_e.message}",
-                        code=create_e.type,
-                    )
-
+            # The branch that used to live here caught "Attribute not found in schema:
+            # file_hash" and tried to create the attribute before retrying — a write
+            # inside a read, which ADR-046 §5 supersedes and this method's own comment
+            # above says was removed. It called `self._create_attribute_by_type`, which
+            # has lived on `AppwriteProvisioner` since #331 and never on this class, so
+            # it raised AttributeError instead. Deleted in #473 rather than repaired:
+            # repairing it would reinstate create-on-read (C-233), and it would have
+            # created `file_hash` at size=255 where the declared schema says 64
+            # (provisioning.py:95) — a schema that diverges per partner, silently.
+            #
+            # A missing attribute now surfaces below as an ordinary failed read. Callers
+            # must inspect it; the two that did not are guarded as of #473.
             logger.error(f"Search failed: {e.message}")
             return OperationResult(
                 success=False, error=f"Search failed: {e.message}", code=e.type
@@ -1996,6 +1966,23 @@ class AppWriteFileModule:
             file_hash, collection_name, collection_id, self.config.database_id
         )
 
+        # C-232, at the two sites its original fix did not cover. A lookup that FAILED
+        # is not evidence that no duplicate exists, and the branches below only ask
+        # whether it SUCCEEDED with a particular code — so a failure fell through to an
+        # unconditional upload with duplicate-checking effectively off. Until #473 the
+        # only thing preventing that was an AttributeError from a dead branch inside the
+        # lookup; removing that branch without this guard would have turned a loud crash
+        # into a silent second copy.
+        if not existing_metadata.success and existing_metadata.code != "NOT_FOUND":
+            return OperationResult(
+                success=False,
+                error=(
+                    f"Could not determine whether a duplicate exists: "
+                    f"{existing_metadata.error}"
+                ),
+                code=existing_metadata.code,
+            )
+
         # Verify the file exists in BOTH metadata and storage before treating the
         # metadata document as an orphan. See ``_classify_storage_presence``: a read
         # that FAILED is not evidence of absence, and only evidence of absence may
@@ -2258,6 +2245,23 @@ class AppWriteFileModule:
         existing_metadata = self.metadata_manager.check_file_exists_by_hash(
             file_hash, collection_name, collection_id, self.config.database_id
         )
+
+        # C-232, at the two sites its original fix did not cover. A lookup that FAILED
+        # is not evidence that no duplicate exists, and the branches below only ask
+        # whether it SUCCEEDED with a particular code — so a failure fell through to an
+        # unconditional upload with duplicate-checking effectively off. Until #473 the
+        # only thing preventing that was an AttributeError from a dead branch inside the
+        # lookup; removing that branch without this guard would have turned a loud crash
+        # into a silent second copy.
+        if not existing_metadata.success and existing_metadata.code != "NOT_FOUND":
+            return OperationResult(
+                success=False,
+                error=(
+                    f"Could not determine whether a duplicate exists: "
+                    f"{existing_metadata.error}"
+                ),
+                code=existing_metadata.code,
+            )
         
         # Use same logic as upload_file_with_metadata for consistency
         should_update_metadata_only = (existing_metadata.success and 
