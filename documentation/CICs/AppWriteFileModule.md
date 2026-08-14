@@ -3,7 +3,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-04-08
+**Last reviewed:** 2026-08-14 (#473)
 **Related ADRs:** ADR-008 (Observability)
 
 ---
@@ -61,6 +61,18 @@ until usage patterns stabilize.
   storage is a deliberate act, not a side effect of publishing; it moved to
   `views_pipeline_core.modules.appwrite.provisioning`, which the delivery path must not
   import (asserted in a subprocess by `tests/test_import_purity.py`, #332).
+- **Corrected 2026-08-14 (#473):** the clause above was true of the code #331 moved and
+  false of one branch it left behind. `check_file_exists_by_hash` still contained an
+  attribute-creation retry — dead in practice, because it called a method that had gone
+  to `AppwriteProvisioner` — so the guarantee held by accident of an `AttributeError`,
+  not by construction. The branch is deleted. `tests/test_no_orphaned_self_calls.py` now
+  derives, per class, that no `self.X()` resolves to nothing, replacing a hand-listed
+  `not hasattr` check that had omitted the very method involved.
+- Guarantees that a duplicate lookup which **failed** is never treated as a duplicate
+  lookup that **found nothing**. All three callers of `check_file_exists_by_hash` now
+  refuse to proceed on an undetermined result; until #473 only one did, and the other two
+  fell through to an upload with duplicate-checking effectively disabled (C-232's
+  pathology, at the two sites its original fix did not reach).
 
 ---
 
@@ -114,6 +126,13 @@ until usage patterns stabilize.
   fall back to fresh downloads; they do **not** raise.
 - Metadata storage failures after a successful upload are returned as
   `OperationResult(success=False)` but do **not** delete the uploaded file.
+- **A metadata collection missing a declared attribute** (e.g. `file_hash`) surfaces as
+  `OperationResult(success=False)` from `check_file_exists_by_hash`, carrying the
+  substrate's error. It is **not** repaired in-band: this method is a query, and
+  provisioning is a deliberate operator act (ADR-046 §5, C-233). Callers must not proceed;
+  the fix is
+  `python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection
+  --collection <id> --collection-name <name>` (#473).
 
 ---
 
