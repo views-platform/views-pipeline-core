@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.1.1] — unreleased
+## [3.1.1] — 2026-08-14
 
 A patch release. It exists because the first CRAF'd delivery could not run.
 
@@ -71,7 +71,7 @@ A patch release. It exists because the first CRAF'd delivery could not run.
 
 ---
 
-## [3.1.0] — unreleased
+## [3.1.0] — 2026-08-13
 
 A minor release. **Nothing here breaks a 3.0.x consumer** — every addition is optional,
 and the one new config key defaults to today's behaviour.
@@ -130,7 +130,7 @@ That is the guard behaving as designed, not a reason to skip the reasoning.
 
 ---
 
-## [3.0.1] — unreleased
+## [3.0.1] — 2026-08-11
 
 A patch release. **Nothing here breaks a 3.0.0 consumer**, and the one behaviour change
 refuses loudly rather than degrading quietly — see the note on the version choice below.
