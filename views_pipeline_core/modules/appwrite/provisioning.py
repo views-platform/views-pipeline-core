@@ -240,23 +240,47 @@ class AppwriteProvisioner:
                     success=False, error=truncated, code="LISTING_INCOMPLETE"
                 )
 
+            # Identity is the id. The name must agree with it, and a disagreement is
+            # refused rather than resolved.
+            #
+            # This used to be `$id == coll_id or name == coll_name`, which meant either
+            # half of the pair could select a collection on its own: override only
+            # APPWRITE_PROD_FORECASTS_COLLECTION_ID and the name still says
+            # production_forecasts, so the name disjunct matches it and attributes are
+            # written into the wrong shelf. Whichever appeared first in the listing won,
+            # nothing compared the winner's other field, and nothing noticed that two
+            # different collections had each matched one half. C-250 and C-271 are the
+            # shelf-level form of the same conflation.
             for collection in collections:
-                if collection["$id"] == coll_id or collection["name"] == coll_name:
-                    if metadata:
-                        attr_result = self.ensure_attributes(
-                            db_id, collection["$id"], metadata
-                        )
-                        if not attr_result.success:
-                            return attr_result
+                if collection["$id"] != coll_id:
+                    continue
+                if collection["name"] != coll_name:
                     return OperationResult(
-                        success=True,
-                        data={
-                            "collection": collection,
-                            "database_id": db_id,
-                            "collection_id": collection["$id"],
-                        },
-                        code="EXISTS",
+                        success=False,
+                        error=(
+                            f"Collection '{coll_id}' exists but is named "
+                            f"'{collection['name']}', not '{coll_name}'. Refusing rather "
+                            f"than guessing which you meant — a coordinate pair that "
+                            f"disagrees is how one shelf's schema gets written into "
+                            f"another's. Correct the id/name pair and re-run."
+                        ),
+                        code="COORDINATE_MISMATCH",
                     )
+                attr_result = self.ensure_attributes(
+                    db_id, collection["$id"], metadata or {}
+                )
+                if not attr_result.success:
+                    return attr_result
+
+                return OperationResult(
+                    success=True,
+                    data={
+                        "collection": collection,
+                        "database_id": db_id,
+                        "collection_id": collection["$id"],
+                    },
+                    code="EXISTS",
+                )
 
             result = self.databases.create_collection(
                 database_id=db_id,
@@ -485,13 +509,47 @@ class AppwriteProvisioner:
             return OperationResult(success=False, error=e.message, code=e.type)
 
 
-def build_provisioner(bucket_override: Optional[str] = None) -> AppwriteProvisioner:
-    """Construct a provisioner from the validated process environment."""
+def build_provisioner(
+    bucket_override: Optional[str] = None,
+    collection_override: Optional[str] = None,
+    collection_name_override: Optional[str] = None,
+) -> AppwriteProvisioner:
+    """Construct a provisioner from the validated process environment.
+
+    `PredictionStoreConfig._ENV_MAP` names the `production_forecasts` shelf specifically,
+    so without the overrides this can only ever provision that one. That is what stopped
+    the first CRAF'd delivery: `file.py` tells the operator to run `ensure-collection`,
+    and the command could not reach the collection it needed (#473).
+
+    **A collection id and its name are one pair.** Supplying half of it silently targets
+    whichever the environment happens to hold for the other — one variable away from
+    provisioning `production_forecasts` while meaning a partner's shelf. Refused, in the
+    same shape and for the same reason as `audit/targets.py:64-73` (C-250).
+
+    That refusal is duplicated rather than shared: the audit package states it performs no
+    writes and no provisioning, and importing it here would make that false. **Named
+    trigger for extracting it:** a third caller needing pair-coherent coordinate
+    resolution.
+    """
     from views_pipeline_core.configs.prediction_store import PredictionStoreConfig
+    from views_pipeline_core.exceptions.exceptions import ConfigurationException
     from views_pipeline_core.modules.appwrite.file import (
         AppWriteFileModule,
         AppwriteConfig,
     )
+
+    if bool(collection_override) != bool(collection_name_override):
+        supplied, missing = (
+            ("collection", "collection-name")
+            if collection_override
+            else ("collection-name", "collection")
+        )
+        raise ConfigurationException(
+            f"--{supplied} was given without --{missing}. A collection's id and its name "
+            f"are one pair; supplying half of it leaves the other resolved from "
+            f"APPWRITE_PROD_FORECASTS_*, so a command meaning a partner's shelf can "
+            f"provision production_forecasts instead. Supply both, or neither."
+        )
 
     store = PredictionStoreConfig.from_environment()
     config = AppwriteConfig(
@@ -503,8 +561,8 @@ def build_provisioner(bucket_override: Optional[str] = None) -> AppwriteProvisio
         cache_dir=".appwrite_provisioning_cache",
         bucket_id=bucket_override or store.bucket_id,
         bucket_name=store.bucket_name,
-        collection_id=store.collection_id,
-        collection_name=store.collection_name,
+        collection_id=collection_override or store.collection_id,
+        collection_name=collection_name_override or store.collection_name,
         database_id=store.database_id,
         database_name=store.database_name,
     )
@@ -525,11 +583,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="What to create if it does not already exist.",
     )
     parser.add_argument("--bucket", default=None, help="Bucket id. Defaults to the env var.")
+    parser.add_argument(
+        "--collection",
+        default=None,
+        help=(
+            "Metadata collection id. Defaults to the env var. Must be given together "
+            "with --collection-name."
+        ),
+    )
+    parser.add_argument(
+        "--collection-name",
+        default=None,
+        help="Metadata collection name. Must be given together with --collection.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    provisioner = build_provisioner(args.bucket)
+    provisioner = build_provisioner(
+        args.bucket, args.collection, args.collection_name
+    )
     bucket_id = args.bucket or provisioner.config.bucket_id
 
     if args.action == "ensure-bucket":
@@ -539,7 +612,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif args.action == "ensure-database":
         result = provisioner.ensure_database()
     else:
-        result = provisioner.ensure_collection()
+        # `metadata={}` rather than the default None. `ensure_attributes` iterates
+        # FIXED_METADATA_ATTRIBUTES unconditionally, so an empty dict is what makes the
+        # existing-collection path ensure the declared schema — matching the creation
+        # path, which already passes `metadata or {}`. With the default, this command
+        # returned OK(EXISTS) having written nothing, so a collection missing `file_hash`
+        # stayed missing it while the operator was told it was provisioned (#473). Do NOT
+        # pass FIXED_METADATA_ATTRIBUTES here: it is a list of dicts, and the dynamic pass
+        # would infer `string(255)` for each and create junk attributes named after them.
+        result = provisioner.ensure_collection(metadata={})
 
     if result.success:
         logger.info("%s: OK (%s)", args.action, result.code or "CREATED")
