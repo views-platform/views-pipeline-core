@@ -43,9 +43,12 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from appwrite.exception import AppwriteException
-from appwrite.permission import Permission
 from appwrite.query import Query
-from appwrite.role import Role
+
+# `Permission` and `Role` are deliberately NOT imported. This module grants nothing by
+# default (ADR-061), so a caller wanting a wider grant constructs it and passes it in.
+# Keeping the names out of this file's namespace means the guard in
+# `tests/test_no_container_is_provisioned_open.py` has nothing to re-introduce quietly.
 
 from views_pipeline_core.modules.appwrite.file import (
     INITIAL_RETRY_DELAY,
@@ -210,8 +213,33 @@ class AppwriteProvisioner:
         collection_name: str = None,
         collection_id: str = None,
         database_id: str = None,
+        permissions: List[str] = None,
     ) -> OperationResult:
-        """Create the metadata collection (and its database) if they do not exist."""
+        """Create the metadata collection (and its database) if they do not exist.
+
+        **`permissions` defaults to `[]` — least privilege (C-292, ADR-061).** An empty
+        list is not "no access": a server API key bypasses container permissions, and
+        every consumer on this platform authenticates with one. It means *only* the key.
+
+        Until 2026-08-14 this method hardcoded
+        `Permission.{read,create,update,delete}(Role.any())` with `document_security=False`,
+        making every collection it created readable, writable and deletable by anyone
+        holding the project id — which is not a secret. `ensure_bucket`, in this same
+        class, has always defaulted to `permissions=[]`; the two halves of one tool
+        disagreed, and nobody chose it. The grant was carried verbatim through #331
+        under the rule that a relocation must not change behaviour, and predates it.
+
+        It was not merely reachable by CLI. Before #331 this creation path ran from
+        `upload_file_with_metadata`, `upload_file_from_bytes_with_metadata` and
+        `check_file_exists_by_hash` — so an ordinary delivery to a new partner created
+        an open collection automatically.
+
+        **Widening is now something a caller states**, and stating it should come with a
+        reason. This changes nothing already provisioned: Appwrite applies these grants
+        at creation, and the existing-collection branch below does not re-apply them.
+        Inspect live containers with
+        `python -m views_pipeline_core.modules.appwrite.audit --permissions`.
+        """
         db_id = database_id or self.config.database_id
         coll_name = collection_name or self.config.collection_name
         coll_id = collection_id or self.config.collection_id
@@ -286,12 +314,12 @@ class AppwriteProvisioner:
                 database_id=db_id,
                 collection_id=coll_id,
                 name=coll_name,
-                permissions=[
-                    Permission.read(Role.any()),
-                    Permission.create(Role.any()),
-                    Permission.update(Role.any()),
-                    Permission.delete(Role.any()),
-                ],
+                # Least privilege by default — see this method's docstring and ADR-061.
+                # `document_security=False` is retained deliberately: with no
+                # container-level grants there is nothing for per-document permissions
+                # to narrow, and flipping it would change how every existing document
+                # is evaluated for no benefit we can name.
+                permissions=[] if permissions is None else list(permissions),
                 document_security=False,
                 enabled=True,
             )

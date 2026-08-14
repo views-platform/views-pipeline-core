@@ -17,6 +17,8 @@ from views_pipeline_core.modules.appwrite.audit import (
     build_file_manager,
     exit_code,
     audit,
+    permissions_exit_code,
+    read_permissions,
 )
 
 
@@ -57,11 +59,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         help="Print every orphan and dangling document, not just the counts.",
     )
+    parser.add_argument(
+        "--permissions",
+        action="store_true",
+        help=(
+            "Instead of the pairing audit, report what this shelf's collection and "
+            "bucket actually permit, and whether anything is granted to `any` — i.e. "
+            "to anyone holding the project id, which is not a secret (C-292). "
+            "Read-only: this cannot change a permission and has no --fix."
+        ),
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     file_manager = build_file_manager(args.target, args.bucket, args.collection)
+
+    if args.permissions:
+        # A separate verdict and a separate exit code. Folding permissions into the
+        # pairing report would make one number answer two unrelated questions, which
+        # is the conflation C-244 records.
+        permissions = read_permissions(file_manager)
+        print(permissions.render())
+        return permissions_exit_code(permissions)
+
     report = audit(file_manager)
     print(report.render(list_detail=args.list))
     return exit_code(report)

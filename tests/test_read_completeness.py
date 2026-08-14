@@ -215,6 +215,15 @@ _RECORDED_NOT_SWALLOWED: Dict[Tuple[str, str], str] = {
     ): "records the failure in `report.indeterminate` and returns what it has; the audit "
     "must survive any substrate error in order to report that it could not complete",
     (
+        "permissions.py",
+        "_read_container",
+    ): "records the failure in `PermissionsReport.indeterminate` naming the container, "
+    "so a permission that could not be read renders as UNKNOWN rather than as locked "
+    "down. Catching narrowly here would be worse, not better: a key lacking the scope "
+    "raises AppwriteException, but a network fault, a DNS failure or an SDK bug does "
+    "not — and every one of those must reach the operator as 'could not determine' "
+    "rather than as an all-clear on a security question (C-232, C-292)",
+    (
         "file.py",
         "AppWriteFileModule.upload_file",
     ): "returns OperationResult(success=False) carrying the error — converting an "

@@ -23,6 +23,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.1.2] — unreleased
+
+A security-posture release. Provisioning no longer creates containers that anyone can
+read, write and delete.
+
+### Changed
+
+- **`ensure_collection` provisions least-privilege by default** (ADR-061, C-292). It
+  hardcoded `Permission.{read,create,update,delete}(Role.any())` with
+  `document_security=False`, so every metadata collection it created was readable,
+  writable and **deletable** by anyone holding the project id — which is not a secret.
+  `ensure_bucket`, in the same class, has always defaulted to `permissions=[]`; one tool
+  had two postures and nobody chose it. The default is now `[]` and widening is an
+  argument the caller passes. `Permission` and `Role` are no longer imported by the module.
+
+  **This was not a CLI-only hazard.** Before #331 this creation path ran from
+  `upload_file_with_metadata`, `upload_file_from_bytes_with_metadata` and
+  `check_file_exists_by_hash`, so an ordinary delivery to a new partner created an open
+  collection automatically. The grant dates to 2025-10-22.
+
+  **Nothing already provisioned changes** — Appwrite applies grants at creation and the
+  existing-collection path does not re-apply them. Whether live containers are open is a
+  separate question; see below.
+
+  Safe to tighten because every consumer on the platform authenticates with a server API
+  key, which bypasses container permissions. Buckets already run at `permissions=[]` and
+  deliveries to them work.
+
+### Added
+
+- **`--permissions` on the audit CLI.** `python -m views_pipeline_core.modules.appwrite.audit
+  --permissions` reports what a shelf's collection and bucket actually permit and flags
+  anything granted to `any`. Nothing in this repo could read a permission before — the
+  package whose job is auditing this seam never looked at one. Read-only, no `--fix`.
+  Three outcomes: absent / read / **unreadable**, exiting 2 on the last, so a container
+  the key may not read never renders as locked down.
+- **A derived guard** (`tests/test_no_container_is_provisioned_open.py`) AST-walking every
+  `create_*(permissions=...)` call in the package and `tools/`. A grant it cannot resolve
+  statically is reported as unknown rather than passed over.
+
+### Operators
+
+If you provisioned a metadata collection with this tool before 3.1.2, run
+`... audit --permissions --target <shelf>` and check the verdict. Remediation is a console
+action; this release does not and cannot perform it.
+
+---
+
 ## [3.1.1] — 2026-08-14
 
 A patch release. It exists because the first CRAF'd delivery could not run.
