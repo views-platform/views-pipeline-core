@@ -39,7 +39,7 @@ classifiers = [
 python = ">=3.11,<3.15"
 viewser = "^6.6.4"
 ingester3 = "=2.1.1"
-wandb = "^0.18.7"
+wandb = ">=0.28.2"
 pyprojroot="^0.3.0"
 # views-evaluation 1.0.0 is an API-STABILITY declaration, not a rewrite: the diff from
 # v0.5.0 touches zero lines under `views_evaluation/` — only tests, CI, ADR-022 and the
