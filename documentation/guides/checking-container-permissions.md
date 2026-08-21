@@ -4,9 +4,14 @@
 environment variables. No engineering background assumed.
 
 **Why it exists:** until August 2026 our setup code created partner *index-card drawers*
-open to the public while locking the *file folders* beside them. New ones are now locked
-(ADR-061). **Drawers created before that are whatever they were created as, and nobody has
-looked.** This is how you look.
+open to the public while locking the *file folders* beside them. **This was not
+theoretical.** On 14 August 2026 an anonymous request carrying only our project ID — no
+password, no login — returned every row of two production drawers: 111 from the FAO one
+and 461 from the internal one. Both were closed the same day, and a follow-up on the 15th
+found nothing had been altered. New drawers are now locked by default (ADR-061).
+
+So: the known ones have been looked at and are clean. This guide is for the next one, and
+for the next time someone asks.
 
 ---
 

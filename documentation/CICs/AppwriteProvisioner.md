@@ -96,13 +96,22 @@ python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection \
 ```
 
 ```python
-# A deliberately wider grant, stated where the reason is visible.
+# A deliberately wider grant, stated where the reason is visible. Note the role: this
+# grants every AUTHENTICATED user of the project, not the public.
 provisioner.ensure_collection(
     metadata={},
-    # Public read for the open-data mirror, agreed with the partner on <date>.
-    permissions=[Permission.read(Role.any())],
+    # Read access for the internal dashboard, agreed <date>, ticket #NNN.
+    permissions=[Permission.read(Role.users())],
 )
 ```
+
+**This example previously used `Role.any()`.** That was wrong to print in a document
+headed *Examples of Correct Usage*: `Role.any()` is the unauthenticated public, and it is
+the exact grant this class was changed to stop producing. A contributor copying it would
+have shipped an open partner collection — and until 2026-08-22 the guard could not see it,
+because it only inspected raw `create_*` calls and not this API. Both are fixed; the
+example is corrected here because a CIC that demonstrates the defect is worse than one
+that omits the case.
 
 ## 9. Examples of Incorrect Usage
 
