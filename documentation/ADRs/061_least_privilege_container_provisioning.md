@@ -36,6 +36,27 @@ happened silently, as part of normal work, for about nine months.
 And we could not have found out. Nothing we owned could read a permission and tell us
 whether a real drawer was locked or open.
 
+## It was not theoretical — it was measured
+
+On **14 August 2026** someone checked, from the views-models side. A request carrying only
+our project ID — no password, no login, nothing anyone would call a credential — returned:
+
+| card drawer | anonymous request | what it permitted |
+|---|---|---|
+| the FAO one | **all 111 rows came back** | read, alter and delete, by anyone |
+| the internal one | **all 461 rows came back** | read, alter and delete, by anyone |
+| the CRAF'd one | refused | nothing — locked |
+
+Both open drawers were closed that same day. A follow-up the next day found that **no card
+had been altered since it was created**, on either — so there is no evidence anyone used
+it.
+
+The CRAF'd drawer was clean because it was made *after* the code stopped creating drawers
+automatically. That detail matters, because reasoning from the one clean drawer to the
+other two is exactly the mistake this record made a week later: an inspection carried out
+after the fix was read as proof that nothing had ever been wrong. Recorded as C-300 here,
+and as C-83 in views-appwrite, which measured it.
+
 ## What was decided
 
 **Storage we create is locked by default. Opening it up is something the requester has to
