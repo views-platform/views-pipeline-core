@@ -1,4 +1,4 @@
-# ADR-061: Containers are provisioned least-privilege; widening is stated by the caller
+# ADR-061: Lock partner storage by default, and make anyone who opens it say so
 
 **Status:** Implemented
 **Date:** 2026-08-14
@@ -8,32 +8,68 @@
 
 ---
 
-## In plain terms, before the detail
+## What this is about
 
-We send forecast files to partners through a hosted service called Appwrite. Each file
-gets an index card describing it, and those cards live in a *collection* — think of a card
-drawer next to the folder holding the files.
+When we deliver a forecast to a partner — FAO, CRAF'd — two things go across to a
+storage service called Appwrite:
 
-**Our setup code locked the folders and left the card drawers open to the public.** Anyone
-who knew our project's ID could read, change or delete any partner's cards. This changes
-new drawers to be locked, and adds a command that tells you whether an existing one is.
+- **the file itself**, which sits in a *bucket*: a folder
+- **an index card** describing that file, which sits in a *collection*: a card drawer
+  beside the folder
 
-It does **not** change any drawer that already exists. Those have to be looked at.
+Partners find files by reading the index cards.
 
-Terms used below: a *container* is a folder or a card drawer. A *call site* is the place
-in the code where one function asks another to do something. *AST-walking* means a test
-reads the code's structure to find every place a rule could be broken, rather than
-searching for particular words.
+## What was wrong
 
-## Scope of this decision
+**The folders were locked. The card drawers were open to the public.** Anyone who knew our
+project's ID — which is not a password, and sits in plain text in our configuration —
+could read, alter or delete any partner's index cards.
 
-**One question:** what access should a container created by this repo grant by default?
+The same piece of setup code created both. It locked one and left the other open, and
+nobody ever chose that: the open setting was copied forward, years ago, by a change that
+was deliberately trying not to alter any behaviour.
 
-Not in scope: what any *already-provisioned* container should permit (an operator action
-against a partner-facing store, and not a code decision), API key scope narrowing, and
-whether `document_security` should be `True`.
+Worse, it did not need anyone to run a setup command. Until 31 July, the ordinary act of
+sending a file to a new partner **created the card drawer as a side effect** — so it
+happened silently, as part of normal work, for about nine months.
 
-## Context
+And we could not have found out. Nothing we owned could read a permission and tell us
+whether a real drawer was locked or open.
+
+## What was decided
+
+**Storage we create is locked by default. Opening it up is something the requester has to
+ask for explicitly, in the code, where their reason is visible.**
+
+Three things follow:
+
+1. **New card drawers are created locked.** Locked means *only our own system key can
+   reach them* — that key is what our pipeline and the partner-facing service both
+   already use, so nothing about delivery changes.
+2. **There is now a command that tells you what a real drawer permits.** It only looks; it
+   cannot change anything. If it is unable to check, it says so rather than reporting that
+   all is well.
+3. **An automatic test refuses any future change that creates open storage.**
+
+## What was deliberately not decided
+
+**Drawers that already exist are untouched.** The setting is applied when a drawer is
+created, so nothing live moved. Whether any existing drawer is open is still an open
+question, and answering it means someone with access looking — which is why the command
+in point 2 exists.
+
+Also left alone: how narrow our access key itself should be, and a per-card permission
+setting we do not use.
+
+## Context — the same thing again, for whoever maintains this
+
+Everything below is the engineering record. It is written for someone working in this
+code, and it repeats what is above in the vocabulary of the codebase.
+
+**The one question this ADR answers:** what access should a container created by this repo
+grant by default? Not in scope: what an already-provisioned container should permit (an
+operator action against a partner-facing store), API key scope narrowing, and whether
+`document_security` should be `True`.
 
 `AppwriteProvisioner.ensure_collection` created every metadata collection with:
 
