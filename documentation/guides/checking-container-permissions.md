@@ -33,7 +33,7 @@ those two. Both flags or neither — one alone would silently fall back to produ
 
 The command prints each container, what it permits, and a verdict at the end.
 
-### 🟢 What you want
+### GOOD — what you want to see
 
 ```
 collection crafd
@@ -47,7 +47,7 @@ Exit code **0**. `permissions: []` is not "nobody can use it" — our own system
 works, and that key is what the pipeline and the partner-facing service both already use.
 It means *only* the key.
 
-### 🔴 What is a problem
+### BAD — this is a problem
 
 ```
 collection crafd
@@ -64,7 +64,7 @@ Exit code **1**. `any` means anyone at all, including someone who has never logg
 `read` alone is a disclosure. `create`, `update` or `delete` mean someone could alter or
 destroy a partner's records.
 
-### 🟡 What is *not* an all-clear
+### NOT AN ALL-CLEAR — do not read this as fine
 
 ```
 COULD NOT DETERMINE (1):
