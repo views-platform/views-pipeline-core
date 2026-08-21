@@ -8,6 +8,23 @@
 
 ---
 
+## In plain terms, before the detail
+
+We send forecast files to partners through a hosted service called Appwrite. Each file
+gets an index card describing it, and those cards live in a *collection* — think of a card
+drawer next to the folder holding the files.
+
+**Our setup code locked the folders and left the card drawers open to the public.** Anyone
+who knew our project's ID could read, change or delete any partner's cards. This changes
+new drawers to be locked, and adds a command that tells you whether an existing one is.
+
+It does **not** change any drawer that already exists. Those have to be looked at.
+
+Terms used below: a *container* is a folder or a card drawer. A *call site* is the place
+in the code where one function asks another to do something. *AST-walking* means a test
+reads the code's structure to find every place a rule could be broken, rather than
+searching for particular words.
+
 ## Scope of this decision
 
 **One question:** what access should a container created by this repo grant by default?
@@ -30,11 +47,25 @@ permissions=[
 document_security=False,
 ```
 
-`Role.any()` is **anyone**, including unauthenticated callers holding only the project id
-— which is not a secret and appears in client-side configuration by design.
+`Role.any()` is **anyone**, including unauthenticated callers holding only the project id.
 `document_security=False` means those grants govern every document with no per-document
 narrowing. So every collection this tool created was readable, writable and **deletable**
 by anyone who could reach the endpoint.
+
+**Two things that sentence depends on, stated rather than assumed.**
+
+*Who can reach the endpoint.* Our default is `https://cloud.appwrite.io/v1`
+(`modules/appwrite/file.py:41`) — Appwrite's hosted service, on the public internet, with
+no network restriction of ours in front of it. So "anyone who could reach the endpoint"
+means anyone, from anywhere. If the platform ever moves to a self-hosted or
+network-restricted instance, this sentence needs re-checking rather than re-reading.
+
+*Why the project id is not a credential.* Not because it appears in browser code — **there
+is no client-side code anywhere on this platform**; no `package.json` and no JS, TS or HTML
+touching Appwrite in any of the 24 repos. It is not a credential because it is carried as
+an ordinary environment variable across five repos, CI configuration and operator shells,
+and has never been handled as a secret. The API key is the secret; the project id
+identifies which project the key is for.
 
 Three things made this worse than a bad default.
 
@@ -44,8 +75,8 @@ bucket and an open collection. Nobody chose that; the two halves simply never me
 
 **It was not CLI-only.** Before #331 (2026-07-31), `create_metadata_collection_if_not_exists`
 was called from `upload_file_with_metadata`, `upload_file_from_bytes_with_metadata` and
-`check_file_exists_by_hash` — the ordinary delivery path. The grant dates to `f0351d3`
-(2025-10-22). For roughly nine months, **an ordinary delivery to a new partner created an
+`check_file_exists_by_hash` — the ordinary delivery path. The grant dates to commit
+`f0351d3` ("add aw+tests", 2025-10-22), which introduced the Appwrite module. For roughly nine months, **an ordinary delivery to a new partner created an
 open collection automatically.**
 
 **Nothing could see it.** The word `permission` appeared in no test in this repo, and
@@ -57,10 +88,13 @@ The provenance is #331: the grant was relocated verbatim under that PR's stated 
 a relocation must not change behaviour. That rule was right and it is why this survived —
 a faithful move carries a defect faithfully.
 
-**ADR-046 has argued for least privilege throughout**, four times, about API key scopes
-(§ "create scopes, which blocked least privilege", and the §5 supersession note: auto-bucket
-creation "blocked least privilege platform-wide"). The ADR and the code have disagreed
-since #331, in the same seam, about the same principle.
+**ADR-046 has argued for least privilege throughout** — the phrase appears four times in
+it, every one about API key *scopes* and none about container permissions. Two are quoted
+here as representative: "create scopes, which blocked least privilege", and the §5
+supersession note that auto-bucket creation "blocked least privilege platform-wide". The
+count is reproducible with `grep -ci 'least privilege' documentation/ADRs/046*.md`. The
+ADR and the code have disagreed since #331, in the same part of the system, about the same
+principle.
 
 ## Decision
 
@@ -146,8 +180,10 @@ automatically for nine months.
 user of the project, which is not the same as "the pipeline". With key auth there is no
 reason to grant a role at all.
 
-**Tighten live containers in the same change.** Rejected on the CLAUDE.md boundary: altering
-a partner-facing store touches an external party and belongs to the operator, after looking.
+**Tighten live containers in the same change.** Rejected on the boundary this repo's
+`CLAUDE.md` draws between decisions I make and decisions the operator makes: anything
+touching an external party is theirs. Altering a live container changes what a partner can
+reach, so it belongs to the operator — and only after looking at what is actually there.
 
 **Delete the parameter and hardcode `[]`.** Simpler, and it removes the ability to widen
 deliberately — so the next person needing a wider grant edits the library instead of stating
@@ -161,8 +197,10 @@ parameter for this reason.
 - **ADR-046** — the Appwrite storage integration, which argued least privilege for the key
   while the code granted `Role.any()` on the container
 - **ADR-047** — destination authority; local disk is authoritative, Appwrite is secondary
-- **C-232 / C-244 / C-249** — failed read as absence, verdict conflation, a renderer stating
-  a conclusion without consulting the record. All three shape the probe's three outcomes
+- **C-232 / C-244 / C-249** — three past incidents in the risk register, all the same
+  shape: a check that could not tell "there is nothing there" from "I was not able to
+  look", and reported the reassuring one. They are why the probe has three outcomes rather
+  than two
 - **C-218** — the belief-mirroring suite at this seam; why the probe's parser is pinned
   against real SDK output rather than a hand-written string
 - **#331** (the relocation that carried it), **#473** (the CLI flags that made it reachable)
