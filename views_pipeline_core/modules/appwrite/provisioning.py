@@ -46,9 +46,15 @@ from appwrite.exception import AppwriteException
 from appwrite.query import Query
 
 # `Permission` and `Role` are deliberately NOT imported. This module grants nothing by
-# default (ADR-061), so a caller wanting a wider grant constructs it and passes it in.
-# Keeping the names out of this file's namespace means the guard in
-# `tests/test_no_container_is_provisioned_open.py` has nothing to re-introduce quietly.
+# default (ADR-061), so a caller wanting a wider grant constructs it and passes it in,
+# where the reason for it is visible.
+#
+# That is a CONVENTION, not the enforcement. Nothing inspects this import list and the
+# import can be restored in one line. What actually prevents a container being created
+# open is `tests/test_no_container_is_provisioned_open.py`, which AST-walks every
+# `create_*(permissions=...)` call and fails on any grant to `any`. An earlier version of
+# this comment credited the missing import with the protection — a claim the evidence made
+# consistent but did not support (C-273).
 
 from views_pipeline_core.modules.appwrite.file import (
     INITIAL_RETRY_DELAY,

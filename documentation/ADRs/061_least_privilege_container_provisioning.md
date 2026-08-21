@@ -74,6 +74,16 @@ caller passes, and a reason the caller records.**
 `Permission` and `Role` are **not imported** by `provisioning.py`. A caller wanting a wider
 grant constructs it at the call site, where the reason for it is visible.
 
+**That import removal is a convention, not the enforcement — do not mistake one for the
+other.** Nothing inspects the import list, and the import can be restored in a single line.
+What actually prevents recurrence is
+`tests/test_no_container_is_provisioned_open.py`, which AST-walks every
+`create_*(permissions=...)` call in `views_pipeline_core/` and `tools/` and fails on any
+grant to `any`. If you are looking for the thing that will stop you, that is the thing.
+(An earlier revision of this ADR, and of that test's own docstring, credited the missing
+import with the protection — a claim the evidence made consistent but did not support.
+Corrected 2026-08-21; recorded as an instance of C-273.)
+
 ### An empty list is not "no access"
 
 This is the point most likely to be misread later. A **server API key bypasses container
@@ -102,6 +112,16 @@ is ever actually wanted.
   operator.
 - **New partner onboarding is closed by default**, which matters now: #473 shipped the CLI
   flags that make creating a partner collection easy.
+- **How you would know this decision was wrong.** It rests on one belief about the
+  substrate: *a server API key bypasses container permissions*. If that is false,
+  `permissions=[]` removes access that partners depend on. The symptom would be
+  **deliveries failing with authorization errors after 3.1.2** — and if you are reading
+  this because that is happening, this decision is the first thing to check, and reverting
+  is a one-line change to the default plus a re-provision. The belief is argued from our
+  own system rather than from documentation (see above), and every consumer was swept for
+  anonymous access across all repos and languages with zero hits — but it remains a belief
+  about someone else's platform, and it is written down here so the symptom has a path back
+  to the cause.
 - **We can now see.** `python -m views_pipeline_core.modules.appwrite.audit --permissions`
   reports what a shelf's collection and bucket actually permit. It is read-only and has no
   `--fix`, deliberately: a mutating tool pointed at partner-facing production is what
