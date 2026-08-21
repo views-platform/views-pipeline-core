@@ -198,19 +198,104 @@ def test_an_unparseable_permission_string_becomes_an_unknown_not_an_empty():
 
 
 def test_a_missing_permissions_key_is_not_treated_as_locked_down():
-    """Appwrite always returns `$permissions`; if it ever does not, absence of the key
-    is not the same as an empty list — but an empty list IS the correct reading of an
-    empty list. This pins the benign half so the strict half above cannot over-fire."""
+    """It says so in the name, and until 2026-08-22 the body asserted the opposite.
+
+    The test fed a payload with no `$permissions` key and asserted `is_clean` — pinning
+    the exact conflation its own docstring called out. Because it was the only test on
+    that path, an engineer who fixed the code would have seen this go red, read the name,
+    and reverted the fix. A test can be worse than no test.
+
+    Not hypothetical drift: the installed SDK is migrating `get_collection` to a TablesDB
+    API which renames `documentSecurity` to `rowSecurity`, so field names at this seam are
+    actively moving.
+    """
     manager = _manager(
-        collection_result={"documentSecurity": False},
-        bucket_result={"$permissions": [], "fileSecurity": True},
+        collection_result={"$id": "crafd", "documentSecurity": False},
+        bucket_result={"$permissions": [], "fileSecurity": False},
     )
 
     report = read_permissions(manager)
 
-    assert report.containers[0].grants == []
-    assert report.is_clean
+    assert not report.is_clean, "an absent key is not an empty permission list"
+    assert any("$permissions absent" in note for note in report.indeterminate)
+    assert permissions_exit_code(report) == 2
 
+
+def test_an_empty_permission_list_is_still_read_as_empty():
+    """The control. If absence and emptiness were both refused, the probe would report
+    every correctly-locked container as unknown and be useless."""
+    manager = _manager(
+        collection_result={"$permissions": [], "documentSecurity": False},
+        bucket_result={"$permissions": [], "fileSecurity": False},
+    )
+    report = read_permissions(manager)
+    assert report.is_clean and permissions_exit_code(report) == 0
+
+
+def test_guests_is_reported_open_because_it_is_the_unauthenticated_population():
+    """`Role.guests()` is the SDK's "any guest user without a session".
+
+    Until 2026-08-22 only `any` was flagged, so a container granted to `guests` produced
+    no warning, `is_clean == True` and exit 0 — the reassuring answer, for the exact
+    population this module exists to detect.
+    """
+    manager = _manager(
+        collection_result={"$permissions": ['read("guests")', 'delete("guests")'],
+                           "documentSecurity": False},
+        bucket_result={"$permissions": [], "fileSecurity": False},
+    )
+    report = read_permissions(manager)
+    assert not report.is_clean
+    assert report.containers[0].verbs_open_to_anyone == ["read", "delete"]
+    assert permissions_exit_code(report) == 1
+    assert "OPEN TO ANYONE" in report.render()
+
+
+def test_a_non_dict_response_is_recorded_not_raised():
+    """A 200 carrying HTML returns bytes; appwrite >= 14 returns model objects.
+
+    Either made `raw.get` raise *outside* the try, aborting before the second container
+    was read and exiting 1 — the code this module defines as "a container IS open". A
+    transport fault must not render as a finding.
+    """
+    manager = _manager(
+        collection_result=b"<html>maintenance</html>",
+        bucket_result={"$permissions": [], "fileSecurity": False},
+    )
+    report = read_permissions(manager)
+    assert not report.is_clean
+    assert permissions_exit_code(report) == 2
+    assert len(report.containers) == 1, "the bucket must still have been read"
+
+
+def test_no_container_id_is_unknown_not_clean():
+    """A probe with no address checked nothing, and must not say all-clear."""
+    manager = _manager(
+        collection_result={"$permissions": [], "documentSecurity": False},
+        bucket_result={"$permissions": [], "fileSecurity": False},
+    )
+    manager.config.collection_id = ""
+    report = read_permissions(manager)
+    assert not report.is_clean
+    assert any("no collection id" in note for note in report.indeterminate)
+    assert permissions_exit_code(report) == 2
+
+
+def test_an_empty_list_under_item_security_does_not_claim_key_only_access():
+    """`fileSecurity=True` is the EXPECTED production state — `ensure_bucket` defaults it.
+
+    With it on, per-item permissions are additive to the container's, so an individual
+    file can carry `read("any")` while the bucket carries nothing. This probe does not
+    read per-item permissions and must not print "reachable only with an API key" over a
+    question it never asked. All three live buckets are in exactly this state.
+    """
+    manager = _manager(
+        collection_result={"$permissions": [], "documentSecurity": False},
+        bucket_result={"$permissions": [], "fileSecurity": True},
+    )
+    rendered = read_permissions(manager).render()
+    assert "DOES NOT READ PER-ITEM PERMISSIONS" in rendered
+    assert "reachable only with an API key" not in rendered.split("bucket crafd_forecasts")[1]
 
 # ----------------------------------------------------------------------------------
 # The grant parser, and the substrate it models

@@ -73,7 +73,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    file_manager = build_file_manager(args.target, args.bucket, args.collection)
+    # `build_file_manager` raises on a half-loaded environment or half a coordinate pair.
+    # Uncaught, that exits 1 — which the permissions verdict below defines as "a container
+    # IS open", and which the pairing audit defines as "the pairing is broken". Neither is
+    # true of a configuration fault. `tools/wipe_fao_shelf.py` carries this same wrapper
+    # for the same reason (C-271); this file did not have it until 2026-08-22.
+    try:
+        file_manager = build_file_manager(args.target, args.bucket, args.collection)
+    except Exception as e:  # noqa: BLE001 - a config fault must not read as a finding
+        print(f"COULD NOT START: {e}", file=sys.stderr)
+        print(
+            "Nothing was checked. This is a configuration fault, not a finding.",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.permissions:
         # A separate verdict and a separate exit code. Folding permissions into the

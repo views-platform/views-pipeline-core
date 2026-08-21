@@ -2,7 +2,7 @@
 
 Read-only, like the rest of this package. It reads `get_collection` and `get_bucket`,
 reports the `$permissions` array verbatim, and says which verbs — if any — are granted
-to the role `any`.
+to a role reachable without authenticating (`any` or `guests`).
 
 ## Why this exists
 
@@ -47,10 +47,14 @@ from typing import List, Optional
 #: because the string comes back off the wire, not from our own formatting.
 _GRANT = re.compile(r'^\s*(\w+)\s*\(\s*"([^"]*)"\s*\)\s*$')
 
-#: The role that means *anyone at all*, including unauthenticated callers holding only
-#: the project id — which is not a secret. `users` means any signed-in user and is a
-#: different, lesser exposure; it is reported but not treated as the same thing.
-ROLE_ANYONE = "any"
+#: The roles reachable **without authenticating**. `any` is anyone at all; `guests` is,
+#: in the SDK's own words, "any guest user without a session" — the same unauthenticated
+#: population this module exists to detect. Treating only `any` as open let a container
+#: granted to `guests` render as a full all-clear (found 2026-08-22).
+#:
+#: `users` is deliberately absent: it means every signed-in user of the project, a real
+#: but lesser exposure. It is reported and not flagged.
+ROLES_MEANING_UNAUTHENTICATED = frozenset({"any", "guests"})
 
 #: Verbs that let a caller change or destroy partner-facing data. `read` on a partner's
 #: metadata is a disclosure; these are an integrity loss, and the distinction is worth
@@ -91,7 +95,7 @@ class ContainerPermissions:
         found = []
         for raw in self.grants:
             parsed = parse_grant(raw)
-            if parsed and parsed[1] == ROLE_ANYONE:
+            if parsed and parsed[1] in ROLES_MEANING_UNAUTHENTICATED:
                 found.append(parsed[0])
         return found
 
@@ -133,8 +137,32 @@ def _read_container(
     fetch, kind: str, container_id: str, security_key: str, report: PermissionsReport
 ) -> None:
     """Read one container's permissions, recording failure rather than assuming absence."""
+    if not container_id:
+        report.indeterminate.append(
+            f"no {kind} id was configured, so nothing was checked — UNKNOWN, "
+            f"which is not the same as locked down"
+        )
+        return
+
+    # The whole payload handling sits inside the try, not just the fetch. A 200 carrying
+    # HTML from a proxy returns bytes, and appwrite >= 14 returns model objects rather
+    # than dicts — either makes `raw.get` raise, and an uncaught raise here would abort
+    # before the second container is read and exit 1, which this module defines as
+    # "a container IS open". Found 2026-08-22.
     try:
         raw = fetch(container_id)
+        if not isinstance(raw, dict):
+            raise TypeError(
+                f"expected a mapping from get_{kind}, got {type(raw).__name__}"
+            )
+        if "$permissions" not in raw:
+            raise KeyError(
+                "$permissions absent from the response — an absent key is not an empty "
+                "permission list, and the SDK renames fields across majors"
+            )
+        grants = list(raw.get("$permissions") or [])
+        security_flag = raw.get(security_key)
+        unparseable = [g for g in grants if parse_grant(g) is None]
     except Exception as e:  # noqa: BLE001 - any failure must be recorded, not swallowed
         report.indeterminate.append(
             f"get_{kind}({container_id}) failed: {e} — permissions UNKNOWN, "
@@ -142,13 +170,17 @@ def _read_container(
         )
         return
 
-    grants = list(raw.get("$permissions") or [])
+    if security_flag is None:
+        report.indeterminate.append(
+            f"{kind} {container_id}: {security_key} absent from the response — cannot "
+            f"tell whether per-item permissions apply, so this container is UNKNOWN"
+        )
     container = ContainerPermissions(
         kind=kind,
         container_id=container_id,
         grants=grants,
-        security_flag=raw.get(security_key),
-        unparseable=[g for g in grants if parse_grant(g) is None],
+        security_flag=security_flag,
+        unparseable=unparseable,
     )
     if container.unparseable:
         report.indeterminate.append(
@@ -203,7 +235,14 @@ def render_permissions_report(report: PermissionsReport) -> str:
         lines.append(f"{container.kind} {container.container_id}")
         lines.append(f"  {flag_name}: {container.security_flag}")
         if not container.grants:
-            lines.append("  permissions: [] — reachable only with an API key")
+            if container.security_flag:
+                lines.append(
+                    f"  permissions: [] at the container — but {flag_name} is ON, so an "
+                    f"individual item may still carry its own grant. THIS TOOL DOES NOT "
+                    f"READ PER-ITEM PERMISSIONS."
+                )
+            else:
+                lines.append("  permissions: [] — reachable only with an API key")
         else:
             lines += [f"  permission: {g}" for g in container.grants]
         if container.is_open_to_anyone:

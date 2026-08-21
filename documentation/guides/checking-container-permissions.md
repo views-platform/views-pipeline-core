@@ -24,8 +24,21 @@ python -m views_pipeline_core.modules.appwrite.audit --permissions --target fore
 python -m views_pipeline_core.modules.appwrite.audit --permissions --target unfao
 ```
 
-Add `--collection <id> --collection-name <name>` for a partner shelf that is not one of
-those two. Both flags or neither — one alone would silently fall back to production.
+For a shelf that is not one of those two — `crafd` is the current example — give **both**
+halves of the pair:
+
+```bash
+python -m views_pipeline_core.modules.appwrite.audit --permissions \
+    --bucket crafd_bucket --collection crafd
+```
+
+Both flags or neither. A bucket and its card drawer are one shelf, and giving half the
+pair leaves the other half pointing at production. The command refuses rather than
+guessing.
+
+*(An earlier version of this guide said `--collection-name`. That flag belongs to the
+provisioning command, not this one, and the audit command rejects it — exiting 2, which
+this same guide teaches means "could not determine". Corrected 2026-08-22.)*
 
 ---
 

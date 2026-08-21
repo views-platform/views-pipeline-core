@@ -215,6 +215,14 @@ _RECORDED_NOT_SWALLOWED: Dict[Tuple[str, str], str] = {
     ): "records the failure in `report.indeterminate` and returns what it has; the audit "
     "must survive any substrate error in order to report that it could not complete",
     (
+        "__main__.py",
+        "main",
+    ): "a ConfigurationException from `build_file_manager` — a half-loaded environment or "
+    "half a coordinate pair — must not exit 1, because this CLI's own exit table defines 1 "
+    "as a substantive finding (a broken pairing, or a container open to anyone). It prints "
+    "COULD NOT START and returns 2, the could-not-complete code. `tools/wipe_fao_shelf.py` "
+    "carries the identical wrapper for the identical reason (C-271)",
+    (
         "permissions.py",
         "_read_container",
     ): "records the failure in `PermissionsReport.indeterminate` naming the container, "
