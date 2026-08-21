@@ -33,7 +33,7 @@ tool versions** (numpy per lockfile, `pyarrow 16.1.0`). The committed bytes + `S
 are canonical regardless. **A change to this fixture is a change to the contract (§10)** —
 do not regenerate casually.
 
-**`pyarrow` is the version-sensitive one; `views_frames` is not.** Parquet bytes vary
+**`pyarrow` is the version-sensitive one; `views_frames` is not — and that now includes across a MAJOR.** Measured 2026-08-21 in an isolated environment at the pinned toolchain (pyarrow 16.1.0, numpy 1.26.4): the shard emitted through `views_frames.io.arrow` under **1.10.2** and under **2.0.0** hash identically, and both equal the committed fixture (`203650fd…12c54`). All 61 frames-dependent tests pass at 2.0.0 there. So the views-frames 2.0.0 adoption (#286) is **not** a fixture re-vendor — it is blocked only by views-pipeline-core, every published release of which (through 3.1.1) pins `views-frames <2.0.0`. Recorded here so the byte question is not re-opened when that constraint widens. Parquet bytes vary
 across pyarrow versions — that is why the pin is `>=16.1.0,<17.0.0` and why a local
 pyarrow 23.x fails byte-parity while CI passes (register **C-72**). `views_frames` sits
 above it: the fixture was generated under `1.0.0`, CI has reproduced it continuously under
