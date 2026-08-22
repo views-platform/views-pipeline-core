@@ -25,8 +25,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ## [3.1.2] — unreleased
 
-A security-posture release. Provisioning no longer creates containers that anyone can
-read, write and delete.
+**A security release. Two production collections were readable and writable by anyone on
+the internet, and this is the fix at the root.**
+
+On **2026-08-14** an unauthenticated request carrying only the Appwrite project ID — no
+key, no session — returned **all 111 rows** of the FAO metadata collection and **all 461**
+of the internal forecasts collection. Both were granted
+`read/create/update/delete("any")` with `documentSecurity: false`. Both were closed the
+same day. A follow-up on the 15th found the FAO collection untouched since creation and
+eleven altered rows in the internal one, each subsequently cleared against its own
+provenance.
+
+The grants came from this package: `AppwriteProvisioner.ensure_collection` hardcoded them,
+and until #331 the ordinary delivery path called it as a side effect of uploading a file.
+The exposure window ran from 2025-10-22 to 2026-08-14.
+
+**If you provision Appwrite containers with this package, check yours** — see *Operators*
+below. Recorded as views-appwrite C-83 (Tier 1) and views-pipeline-core C-292.
 
 ### Changed
 
@@ -44,8 +59,9 @@ read, write and delete.
   collection automatically. The grant dates to 2025-10-22.
 
   **Nothing already provisioned changes** — Appwrite applies grants at creation and the
-  existing-collection path does not re-apply them. Whether live containers are open is a
-  separate question; see below.
+  existing-collection path does not re-apply them, and now says so instead of returning
+  OK: passing `permissions` for a collection that already exists is refused with
+  `PERMISSIONS_NOT_APPLICABLE` rather than silently discarded.
 
   Safe to tighten because every consumer on the platform authenticates with a server API
   key, which bypasses container permissions. Buckets already run at `permissions=[]` and
@@ -65,9 +81,22 @@ read, write and delete.
 
 ### Operators
 
-If you provisioned a metadata collection with this tool before 3.1.2, run
-`... audit --permissions --target <shelf>` and check the verdict. Remediation is a console
-action; this release does not and cannot perform it.
+If you provisioned a metadata collection or bucket with this package before 3.1.2,
+**check it**. `--target` accepts only the two shelves this repo knows (`forecasts`,
+`unfao`); for anything else give both halves of the coordinate pair:
+
+```bash
+python -m views_pipeline_core.modules.appwrite.audit --permissions --target unfao
+python -m views_pipeline_core.modules.appwrite.audit --permissions \
+    --bucket <bucket id> --collection <collection id>
+```
+
+Exit **0** nothing open · **1** something open · **2** could not determine — which is not
+an all-clear.
+
+The probe reads container permissions and, where per-item security is on, the permissions
+of the individual files and documents too, because Appwrite unions the two. It cannot
+change anything and has no `--fix`. Remediation is a deliberate console action.
 
 ---
 

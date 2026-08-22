@@ -306,6 +306,27 @@ class AppwriteProvisioner:
                 if not attr_result.success:
                     return attr_result
 
+                if permissions is not None:
+                    # A caller who states permissions is asking for a grant to be
+                    # applied. Appwrite fixes grants at creation, so on this branch
+                    # nothing can be. Returning success here is C-291's exact shape —
+                    # "reported OK while writing nothing" — on the security-relevant
+                    # argument, in the method that was fixed for C-291 in #473.
+                    return OperationResult(
+                        success=False,
+                        error=(
+                            f"Collection '{coll_id}' already exists, and permissions are "
+                            f"applied only at creation — the {len(permissions)} "
+                            f"permission(s) you passed were NOT applied and nothing was "
+                            f"written. Change them deliberately in the Appwrite console, "
+                            f"or call this without `permissions` if you only meant to "
+                            f"ensure the schema. Inspect what is actually there with "
+                            f"`python -m views_pipeline_core.modules.appwrite.audit "
+                            f"--permissions`."
+                        ),
+                        code="PERMISSIONS_NOT_APPLICABLE",
+                    )
+
                 return OperationResult(
                     success=True,
                     data={

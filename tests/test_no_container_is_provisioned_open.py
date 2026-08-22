@@ -72,7 +72,7 @@ SCANNED = [REPO_ROOT / "views_pipeline_core", REPO_ROOT / "tools"]
 #:
 #: `users` is deliberately NOT here: it means every authenticated user of the project, a
 #: real but lesser exposure, and collapsing the two would make the guard cry wolf.
-ROLES_MEANING_UNAUTHENTICATED = frozenset({"any", "guests"})
+ROLES_MEANING_UNAUTHENTICATED = frozenset({"any", "guests", "users"})
 
 
 def _modules() -> list[Path]:
@@ -113,10 +113,39 @@ def _permission_arguments(tree: ast.AST) -> list[tuple]:
             if fn.lineno <= node.lineno <= (fn.end_lineno or fn.lineno):
                 if enclosing is None or fn.lineno > enclosing.lineno:
                     enclosing = fn
+        is_container_call = name in _POSITIONAL_PERMISSIONS or name.endswith(
+            ("_collection", "_bucket")
+        )
         for kw in node.keywords:
             if kw.arg == "permissions":
                 found.append((name, kw.value, node.lineno, enclosing))
+            elif kw.arg is None and is_container_call:
+                # `create_collection(**opts)` — the mapping is opaque, so whether it
+                # carries permissions is unknowable here. Unknown, not absent. Scoped to
+                # container calls: treating every `**kwargs` in the package as unknown
+                # flagged nine unrelated modules and would have been noise, which is how
+                # a guard gets switched off (#415, C-59).
+                found.append((name, kw.value, node.lineno, enclosing))
+        # Positional. `Databases.create_collection(database_id, collection_id, name,
+        # permissions, ...)` and `Storage.create_bucket(bucket_id, name, permissions,
+        # ...)` both take it positionally, and matching only the keyword left the whole
+        # calling convention invisible — a hand-list of one convention replacing the
+        # hand-list of prefixes it had just removed.
+        positional = _POSITIONAL_PERMISSIONS.get(name)
+        if positional is not None and len(node.args) > positional:
+            found.append((name, node.args[positional], node.lineno, enclosing))
     return found
+
+
+#: Where `permissions` sits positionally in the SDK calls this repo makes, read off the
+#: installed signatures rather than remembered. Anything not listed and shaped like a
+#: container call is reported as unknown by `_permission_arguments` above.
+_POSITIONAL_PERMISSIONS = {
+    "create_collection": 3,   # (database_id, collection_id, name, permissions, ...)
+    "update_collection": 3,
+    "create_bucket": 2,       # (bucket_id, name, permissions, ...)
+    "update_bucket": 2,
+}
 
 
 def _role_of(element: ast.AST):
@@ -130,9 +159,17 @@ def _role_of(element: ast.AST):
     if isinstance(element, ast.Call) and element.args:
         inner = element.args[0]
         if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute):
-            return inner.func.attr
+            # It must be a `Role.<something>()` call. Any attribute call used to be
+            # accepted, so `Permission.read(self.public_role())` was reported as the
+            # definite, resolvable role "public_role" — a fabricated positive answer
+            # where the honest one is "cannot tell". If `public_role()` returns
+            # `Role.any()` the guard had affirmatively vouched for an open container.
+            owner = inner.func.value
+            if isinstance(owner, ast.Name) and owner.id == "Role":
+                return inner.func.attr
+            return None
         if isinstance(inner, ast.Constant):
-            return str(inner.value)
+            return str(inner.value).lower()
         return None
     if isinstance(element, ast.Constant) and isinstance(element.value, str):
         parsed = _parse_wire_grant(element.value)
@@ -150,7 +187,7 @@ def _parse_wire_grant(raw: str):
     stops guarding the day that import breaks.
     """
     m = _WIRE_GRANT.match(raw or "")
-    return (m.group(1).lower(), m.group(2)) if m else None
+    return (m.group(1).lower(), m.group(2).lower()) if m else None
 
 
 def _name_resolves_closed(fn: ast.AST, name: str) -> bool:
@@ -179,31 +216,39 @@ def _name_resolves_closed(fn: ast.AST, name: str) -> bool:
     as **unresolvable** rather than clean.
     """
     is_parameter = _parameter_default(fn, name) is not None or name in _parameter_names(fn)
+
+    # Every place the name is WRITTEN, derived from Store context rather than enumerated.
+    # The enumerated version listed Assign/AugAssign/AnnAssign/For and missed tuple
+    # unpacking, `with ... as permissions`, the walrus operator, a for-loop tuple target
+    # and `import x as permissions` — while a docstring twenty lines below argued that
+    # enumerating method names was "the hand-list this guard exists to avoid".
+    closed_bindings = set()
     for node in ast.walk(fn):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == name:
-                    if not _binding_is_closed(node.value, name):
-                        return False
-                if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) \
-                        and target.value.id == name:
-                    return False
-        if isinstance(node, (ast.AugAssign, ast.AnnAssign)):
-            target = node.target
-            if isinstance(target, ast.Name) and target.id == name:
-                return False
-            if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) \
-                    and target.value.id == name:
-                return False
-        if isinstance(node, (ast.For, ast.comprehension)):
-            if isinstance(getattr(node, "target", None), ast.Name) \
-                    and node.target.id == name:
-                return False
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) \
+                and node.targets[0].id == name \
+                and _binding_is_closed(node.value, name):
+            closed_bindings.add(id(node.targets[0]))
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) \
+                and node.id == name and id(node) not in closed_bindings:
+            return False
+        if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store) \
+                and isinstance(node.value, ast.Name) and node.value.id == name:
+            return False
+        if isinstance(node, ast.alias) and (node.asname or node.name) == name:
+            return False
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) \
                     and node.func.value.id == name and node.func.attr not in _READ_ONLY_METHODS:
                 return False
-            for arg in node.args:
+            # Everything the name is handed to EXCEPT the `permissions=` slot itself.
+            # Passing it there is the thing being measured, not a way of changing it —
+            # counting it disqualified every legitimate pass-through in the repo.
+            handed_over = list(node.args) + [
+                kw.value for kw in node.keywords if kw.arg != "permissions"
+            ]
+            for arg in handed_over:
                 if isinstance(arg, ast.Name) and arg.id == name and not _is_wrapping_call(node):
                     return False
 
@@ -368,7 +413,13 @@ def test_the_guard_can_actually_fail(tmp_path):
 
 
 def test_the_guard_does_not_fire_on_least_privilege_or_narrower_roles(tmp_path):
-    """The false-positive direction, which is what gets a guard switched off (#415)."""
+    """The false-positive direction, which is what gets a guard switched off (#415).
+
+    The narrower role here was `Role.users()` until 2026-08-22, on the belief that it
+    meant authenticated users only. The SDK says it grants "any authenticated **or
+    anonymous** user", so it belongs on the other side of this line. A team role is a
+    genuine narrowing and stays here.
+    """
     benign = tmp_path / "benign.py"
     benign.write_text(
         "class P:\n"
@@ -377,7 +428,7 @@ def test_the_guard_does_not_fire_on_least_privilege_or_narrower_roles(tmp_path):
         "    def b(self):\n"
         "        return self.databases.create_collection(\n"
         "            collection_id='c',\n"
-        "            permissions=[Permission.read(Role.users())],\n"
+        "            permissions=[Permission.read(Role.team('analysts'))],\n"
         "        )\n"
         "    def c(self, permissions=None):\n"
         "        return self.databases.create_collection(\n"
@@ -578,16 +629,32 @@ def test_nothing_is_silently_passed_over(tmp_path):
     )
 
 
-def test_users_is_still_not_reported_as_open(tmp_path):
-    """The boundary. `users` is authenticated and is a lesser exposure; folding it in
-    with `any` and `guests` would make the guard cry wolf, and a guard that cries wolf
-    gets switched off (#415, C-59)."""
+def test_users_is_reported_open_because_the_sdk_says_it_includes_anonymous(tmp_path):
+    """This control asserted the opposite until 2026-08-22, and the guard agreed with it.
+
+    Both excluded `users` on the stated grounds that it is authenticated-only. The
+    installed SDK says `Role.users()` *"Grants access to any authenticated **or
+    anonymous** user"*, and an anonymous session needs only the project id. It was the
+    `guests` bug one role over, pinned green by a test.
+    """
     planted = tmp_path / "users_role.py"
     planted.write_text(
         "class P:\n"
         "    def a(self):\n"
         "        return self.databases.create_collection(\n"
         "            collection_id='c', permissions=[Permission.read(Role.users())])\n"
+    )
+    assert open_grants(planted), "users is reachable without authenticating"
+
+
+def test_a_team_or_user_specific_role_is_not_reported_open(tmp_path):
+    """The boundary that stops the guard crying wolf. A team role is a real narrowing."""
+    planted = tmp_path / "team_role.py"
+    planted.write_text(
+        "class P:\n"
+        "    def a(self):\n"
+        "        return self.databases.create_collection(\n"
+        "            collection_id='c', permissions=['read(\"team:analysts\")'])\n"
     )
     assert open_grants(planted) == []
     assert unresolvable_grants(planted) == []

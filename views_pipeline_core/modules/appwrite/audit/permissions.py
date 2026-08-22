@@ -52,9 +52,14 @@ _GRANT = re.compile(r'^\s*(\w+)\s*\(\s*"([^"]*)"\s*\)\s*$')
 #: population this module exists to detect. Treating only `any` as open let a container
 #: granted to `guests` render as a full all-clear (found 2026-08-22).
 #:
-#: `users` is deliberately absent: it means every signed-in user of the project, a real
-#: but lesser exposure. It is reported and not flagged.
-ROLES_MEANING_UNAUTHENTICATED = frozenset({"any", "guests"})
+#: `users` is here too, and the reason it was not is worth recording: this module
+#: excluded it on the stated grounds that it "means every signed-in user of the project".
+#: The installed SDK's own docstring says otherwise — `Role.users()` *"Grants access to
+#: any authenticated **or anonymous** user"* — and an anonymous session needs only the
+#: project id, which this module says four times is not a secret. Excluding it was the
+#: same error as excluding `guests`, one role over, justified by a claim the substrate
+#: contradicts (C-218). Corrected 2026-08-22.
+ROLES_MEANING_UNAUTHENTICATED = frozenset({"any", "guests", "users"})
 
 #: Verbs that let a caller change or destroy partner-facing data. `read` on a partner's
 #: metadata is a disclosure; these are an integrity loss, and the distinction is worth
@@ -70,7 +75,7 @@ def parse_grant(raw: str) -> Optional[tuple]:
     the tally as though it granted nothing.
     """
     match = _GRANT.match(raw or "")
-    return (match.group(1).lower(), match.group(2)) if match else None
+    return (match.group(1).lower(), match.group(2).lower()) if match else None
 
 
 @dataclass
@@ -88,6 +93,10 @@ class ContainerPermissions:
     grants: List[str] = field(default_factory=list)
     security_flag: Optional[bool] = None
     unparseable: List[str] = field(default_factory=list)
+    #: `(item_id, verbs)` for individual documents or files carrying their own grant to an
+    #: unauthenticated role. Only populated when `security_flag` is on, because that is
+    #: the only state in which per-item grants take effect.
+    open_items: List[tuple] = field(default_factory=list)
 
     @property
     def verbs_open_to_anyone(self) -> List[str]:
@@ -105,7 +114,7 @@ class ContainerPermissions:
 
     @property
     def is_open_to_anyone(self) -> bool:
-        return bool(self.verbs_open_to_anyone)
+        return bool(self.verbs_open_to_anyone or self.open_items)
 
 
 @dataclass
@@ -160,7 +169,15 @@ def _read_container(
                 "$permissions absent from the response — an absent key is not an empty "
                 "permission list, and the SDK renames fields across majors"
             )
-        grants = list(raw.get("$permissions") or [])
+        declared = raw["$permissions"]
+        if not isinstance(declared, list):
+            # `or []` used to stand here, which turned None, 0, "" and {} into a clean
+            # report — precisely the values that look like a stripped or nulled field.
+            raise TypeError(
+                f"$permissions is {type(declared).__name__}, not a list — a non-list is "
+                f"not an empty permission list"
+            )
+        grants = list(declared)
         security_flag = raw.get(security_key)
         unparseable = [g for g in grants if parse_grant(g) is None]
     except Exception as e:  # noqa: BLE001 - any failure must be recorded, not swallowed
@@ -175,6 +192,7 @@ def _read_container(
             f"{kind} {container_id}: {security_key} absent from the response — cannot "
             f"tell whether per-item permissions apply, so this container is UNKNOWN"
         )
+
     container = ContainerPermissions(
         kind=kind,
         container_id=container_id,
@@ -188,6 +206,53 @@ def _read_container(
             f"could not be parsed: {container.unparseable} — treated as unknown, not empty"
         )
     report.containers.append(container)
+
+
+def _read_items(file_manager, container: ContainerPermissions, report: PermissionsReport) -> None:
+    """Check the ITEMS inside a container whose per-item security is on.
+
+    Appwrite **unions** container grants with per-item grants when `documentSecurity` /
+    `fileSecurity` is on, so a bucket with `permissions=[]` can still hold a file carrying
+    `read("any")`. `ensure_bucket` defaults `file_security=True`, which makes that the
+    expected state of every live bucket — so without this, the bucket half of every
+    all-clear rested on a question the tool never asked.
+
+    The listings already exist: `walk.py` pages every file and document and returns the
+    raw records, each carrying its own `$permissions`. Reusing them costs one walk and
+    means the verdict covers what it claims to cover, rather than reporting INCOMPLETE
+    forever — which is how a tool stops being run (C-244).
+    """
+    from views_pipeline_core.modules.appwrite.audit.walk import (
+        list_all_documents,
+        list_all_files,
+    )
+
+    if container.kind == "bucket":
+        items = list_all_files(file_manager, container.container_id, report)
+        noun = "file"
+    else:
+        items = list_all_documents(file_manager, report)
+        noun = "document"
+
+    for item in items:
+        grants = item.get("$permissions") or []
+        if not isinstance(grants, list):
+            report.indeterminate.append(
+                f"{noun} {item.get('$id')}: $permissions is "
+                f"{type(grants).__name__}, not a list"
+            )
+            continue
+        open_verbs = []
+        for raw in grants:
+            parsed = parse_grant(raw)
+            if parsed is None:
+                report.indeterminate.append(
+                    f"{noun} {item.get('$id')}: unreadable grant {raw!r}"
+                )
+            elif parsed[1] in ROLES_MEANING_UNAUTHENTICATED:
+                open_verbs.append(parsed[0])
+        if open_verbs:
+            container.open_items.append((str(item.get("$id")), sorted(set(open_verbs))))
 
 
 def read_permissions(file_manager) -> PermissionsReport:
@@ -213,6 +278,12 @@ def read_permissions(file_manager) -> PermissionsReport:
         "fileSecurity",
         report,
     )
+
+    # Only where per-item grants can actually take effect. With the flag off they are
+    # ignored by the substrate, so reading them would be noise.
+    for container in report.containers:
+        if container.security_flag:
+            _read_items(file_manager, container, report)
     return report
 
 
@@ -235,17 +306,29 @@ def render_permissions_report(report: PermissionsReport) -> str:
         lines.append(f"{container.kind} {container.container_id}")
         lines.append(f"  {flag_name}: {container.security_flag}")
         if not container.grants:
-            if container.security_flag:
-                lines.append(
-                    f"  permissions: [] at the container — but {flag_name} is ON, so an "
-                    f"individual item may still carry its own grant. THIS TOOL DOES NOT "
-                    f"READ PER-ITEM PERMISSIONS."
-                )
-            else:
+            if container.security_flag is False:
                 lines.append("  permissions: [] — reachable only with an API key")
+            else:
+                # True, or None meaning the flag could not be read. Both mean this tool
+                # cannot claim key-only access: per-item grants are either known to be
+                # possible, or of unknown possibility.
+                lines.append(
+                    f"  permissions: [] at the container — but {flag_name} is "
+                    f"{container.security_flag!r}, so an individual item may carry its "
+                    f"own grant. THIS TOOL DOES NOT READ PER-ITEM PERMISSIONS."
+                )
         else:
             lines += [f"  permission: {g}" for g in container.grants]
-        if container.is_open_to_anyone:
+        if container.open_items:
+            lines.append(
+                f"  >> {len(container.open_items)} individual item(s) carry their own "
+                f"grant to an unauthenticated role, and {flag_name} is on so they apply:"
+            )
+            for item_id, verbs in container.open_items[:10]:
+                lines.append(f"       {item_id}: {', '.join(verbs)}")
+            if len(container.open_items) > 10:
+                lines.append(f"       ... and {len(container.open_items) - 10} more")
+        if container.verbs_open_to_anyone:
             verbs = ", ".join(container.verbs_open_to_anyone)
             lines.append(f"  >> OPEN TO ANYONE: {verbs}")
             mutating = container.mutating_verbs_open_to_anyone
@@ -261,23 +344,31 @@ def render_permissions_report(report: PermissionsReport) -> str:
                 )
         lines.append("")
 
-    if report.indeterminate:
-        lines.append(
-            "VERDICT: INCOMPLETE — at least one container could not be read. "
-            "Nothing below should be read as an all-clear."
-        )
-    elif report.open_containers:
+    # OPEN and INCOMPLETE are independent facts and both are stated. Until 2026-08-22 a
+    # single malformed grant string suppressed the OPEN verdict entirely: the body printed
+    # ">> OPEN TO ANYONE: read, delete" and the run then ended "INCOMPLETE — at least one
+    # container could not be read", which the operator guide teaches means "the key lacks
+    # a scope, get a better key and re-run". A live open container read as a credentials
+    # chore. One condition must never hide another.
+    if report.open_containers:
         names = ", ".join(c.container_id for c in report.open_containers)
         lines.append(f"VERDICT: OPEN — {len(report.open_containers)} container(s): {names}")
         lines.append(
             "This tool does not change permissions and has no --fix. Whether a "
-            "partner-facing container should permit `any` is C-292, and it is an "
-            "operator decision."
+            "partner-facing container should permit an unauthenticated role is C-292, "
+            "and it is an operator decision."
         )
-    else:
+    if report.indeterminate:
         lines.append(
-            "VERDICT: no container grants anything to `any`. Every container read "
-            "successfully."
+            f"VERDICT: INCOMPLETE — {len(report.indeterminate)} thing(s) could not be "
+            f"determined, listed at the top. This is not an all-clear"
+            + (", and it does not reduce the OPEN finding above." if report.open_containers
+               else ".")
+        )
+    if not (report.open_containers or report.indeterminate):
+        lines.append(
+            "VERDICT: no container grants anything to an unauthenticated role, and "
+            "everything this tool can check was checked."
         )
     return "\n".join(lines)
 

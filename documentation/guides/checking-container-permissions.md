@@ -7,10 +7,11 @@ environment variables. No engineering background assumed.
 open to the public while locking the *file folders* beside them. **This was not
 theoretical.** On 14 August 2026 an anonymous request carrying only our project ID — no
 password, no login — returned every row of two production drawers: 111 from the FAO one
-and 461 from the internal one. Both were closed the same day, and a follow-up on the 15th
-found nothing had been altered. New drawers are now locked by default (ADR-061).
+and 461 from the internal one. Both were closed the same day. A follow-up on the 15th found
+the FAO drawer untouched and eleven altered cards in the internal one, each of which was
+then checked against its own record and explained. New drawers are now locked by default (ADR-061).
 
-So: the known ones have been looked at and are clean. This guide is for the next one, and
+So: the known ones have been looked at, and what was found is written above. The source entry is careful to say that is **not** the same as "verified clean" — one residual cannot be ruled out even in principle. This guide is for the next one, and
 for the next time someone asks.
 
 ---

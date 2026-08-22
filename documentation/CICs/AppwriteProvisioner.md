@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-08-21 (C-292, ADR-061)
+**Last reviewed:** 2026-08-22 (C-292, C-300, ADR-061)
 **Related ADRs:** ADR-046 (Appwrite storage integration), ADR-047 (destination authority),
 ADR-061 (least-privilege provisioning), ADR-040 (declarations over inference)
 

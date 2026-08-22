@@ -45,9 +45,25 @@ OPEN_GRANTS = ['read("any")', 'create("any")', 'update("any")', 'delete("any")']
 
 
 def _manager(collection_result=None, bucket_result=None, collection_raises=None,
-             bucket_raises=None):
-    """A file manager shaped like `AppWriteFileModule` as far as the probe reaches."""
+             bucket_raises=None, files=None, documents=None):
+    """A file manager shaped like `AppWriteFileModule` as far as the probe reaches.
+
+    `files` and `documents` feed the per-item read, which runs only where the container's
+    security flag is on — the state every live bucket is in.
+    """
     databases, storage = MagicMock(), MagicMock()
+    databases.list_documents.side_effect = [
+        {"total": len(documents or []), "documents": list(documents or [])},
+    ] + [{"total": len(documents or []), "documents": []}] * 50
+    # `list_files` returns an OperationResult; `list_documents` returns the raw page.
+    # Two pages so the walk terminates on a short one, the way the real substrate ends it.
+    from views_pipeline_core.modules.appwrite.file import OperationResult
+    _file_pages = [
+        OperationResult(success=True,
+                        data={"total": len(files or []), "files": list(files or [])}),
+        OperationResult(success=True, data={"total": len(files or []), "files": []}),
+    ]
+    list_files = MagicMock(side_effect=_file_pages + [_file_pages[-1]] * 50)
     if collection_raises:
         databases.get_collection.side_effect = collection_raises
     else:
@@ -59,6 +75,7 @@ def _manager(collection_result=None, bucket_result=None, collection_raises=None,
     return SimpleNamespace(
         databases=databases,
         storage=storage,
+        list_files=list_files,          # `walk.list_all_files` calls this on the manager
         config=SimpleNamespace(
             database_id="metadata_db", collection_id="crafd", bucket_id="crafd_forecasts"
         ),
@@ -110,19 +127,86 @@ def test_a_locked_down_shelf_is_reported_clean():
     assert "reachable only with an API key" in report.render()
 
 
-def test_a_narrower_role_is_not_reported_as_open_to_anyone():
-    """`users` is a real grant and a lesser exposure. Collapsing the two would make the
-    probe cry wolf, and a diagnostic that cries wolf stops being run (C-244)."""
+def test_users_is_reported_open_because_the_sdk_says_it_includes_anonymous():
+    """This test asserted the opposite until 2026-08-22, and the module agreed with it.
+
+    Both excluded `users` on the stated grounds that it means "every signed-in user of the
+    project". The installed SDK's own docstring says *"Grants access to any authenticated
+    **or anonymous** user"*, and an anonymous session needs only the project id — which
+    this module says four times is not a secret. It was the `guests` bug one role over,
+    justified by a belief the substrate contradicts (C-218), and pinned green by this test.
+    """
     manager = _manager(
-        collection_result={"$permissions": ['read("users")'], "documentSecurity": True},
+        collection_result={"$permissions": ['read("users")'], "documentSecurity": False},
+        bucket_result={"$permissions": [], "fileSecurity": False},
+    )
+
+    report = read_permissions(manager)
+
+    assert not report.is_clean
+    assert report.containers[0].verbs_open_to_anyone == ["read"]
+    assert permissions_exit_code(report) == 1
+
+
+def test_a_single_open_file_inside_a_locked_bucket_is_caught():
+    """The case that made "the bucket is empty, therefore clean" a false verdict.
+
+    Appwrite UNIONS container grants with per-item grants when `fileSecurity` is on, and
+    `ensure_bucket` defaults it on — so this is the state of every live bucket. A bucket
+    with `permissions=[]` holding one file carrying `read("any")` is publicly readable,
+    and until 2026-08-22 this tool printed "reachable only with an API key" over it.
+
+    The listings are the ones `walk.py` already pages, so this costs one walk rather than
+    a second implementation.
+    """
+    manager = _manager(
+        collection_result={"$permissions": [], "documentSecurity": False},
         bucket_result={"$permissions": [], "fileSecurity": True},
+        files=[
+            {"$id": "shard_a", "$permissions": []},
+            {"$id": "shard_b", "$permissions": ['read("any")']},
+        ],
+    )
+
+    report = read_permissions(manager)
+
+    assert not report.is_clean
+    assert permissions_exit_code(report) == 1
+    bucket = [c for c in report.containers if c.kind == "bucket"][0]
+    assert bucket.open_items == [("shard_b", ["read"])]
+    assert bucket.verbs_open_to_anyone == [], "the container itself is still clean"
+    rendered = report.render()
+    assert "shard_b: read" in rendered
+    assert "VERDICT: OPEN" in rendered
+
+
+def test_items_are_not_read_when_per_item_security_is_off():
+    """The control, and the reason this is not just always-on. With the flag off Appwrite
+    ignores per-item grants entirely, so reading them would be noise — and an item-level
+    grant that cannot take effect is not a finding."""
+    manager = _manager(
+        collection_result={"$permissions": [], "documentSecurity": False},
+        bucket_result={"$permissions": [], "fileSecurity": False},
+        files=[{"$id": "shard_b", "$permissions": ['read("any")']}],
     )
 
     report = read_permissions(manager)
 
     assert report.is_clean
-    assert report.containers[0].verbs_open_to_anyone == []
-    assert 'read("users")' in report.render(), "it must still be shown, just not flagged"
+    assert manager.list_files.call_count == 0, "no walk should have happened"
+
+
+def test_a_role_this_module_does_not_know_is_shown_but_not_flagged():
+    """The boundary that keeps the guard from crying wolf. A team or user-specific role
+    is a real grant and a real narrowing; it is printed and not treated as public."""
+    manager = _manager(
+        collection_result={"$permissions": ['read("team:analysts")'],
+                           "documentSecurity": False},
+        bucket_result={"$permissions": [], "fileSecurity": False},
+    )
+    report = read_permissions(manager)
+    assert report.is_clean
+    assert 'read("team:analysts")' in report.render()
 
 
 def test_an_open_bucket_is_caught_too():

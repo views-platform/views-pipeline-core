@@ -47,9 +47,21 @@ our project ID — no password, no login, nothing anyone would call a credential
 | the internal one | **all 461 rows came back** | read, alter and delete, by anyone |
 | the CRAF'd one | refused | nothing — locked |
 
-Both open drawers were closed that same day. A follow-up the next day found that **no card
-had been altered since it was created**, on either — so there is no evidence anyone used
-it.
+Both open drawers were closed that same day. A follow-up the next day checked whether
+anything had been changed:
+
+| card drawer | cards altered since they were created |
+|---|---|
+| the FAO one | **none** |
+| the internal one | **11**, all cleared by checking their contents against their own record |
+| the CRAF'd one | none |
+
+**An earlier version of this paragraph said no card had been altered on either. That was
+wrong** — it read "the two delivery collections are untouched" in the source and did not
+notice that the two named there were the FAO and CRAF'd ones, not the internal one. Same
+direction as the original error, understating exposure, from the same evidence, in the
+paragraph written to correct it. The eleven were investigated and explained; that is not
+the same as there having been none.
 
 The CRAF'd drawer was clean because it was made *after* the code stopped creating drawers
 automatically. That detail matters, because reasoning from the one clean drawer to the
