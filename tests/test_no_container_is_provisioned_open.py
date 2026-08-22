@@ -91,14 +91,14 @@ def _enclosing_functions(tree: ast.AST) -> list:
 
 
 def _permission_arguments(tree: ast.AST) -> list[tuple]:
-    """`(call_name, keyword_node, lineno, enclosing_fn)` per permission-setting call.
+    """`(call_name, keyword_node, lineno, enclosing_fn)` for EVERY call passing `permissions=`.
 
-    **Scope widened 2026-08-22.** It previously matched `create_*` only, which left three
-    holes a review found: `ensure_collection(permissions=[...])` — the library's own API,
-    and the form printed in `AppwriteProvisioner.md` §8 as an Example of Correct Usage —
-    was invisible, as were `update_collection` / `update_bucket`, the verbs any remediation
-    script would use. The ADR and the CIC both name this guard as what prevents recurrence,
-    so a sanctioned path it cannot audit is worse than no claim at all.
+    **Derived, not prefix-matched.** This filtered on `create_`, then on
+    `create_`/`update_`/`ensure_` after a review found `ensure_collection` invisible. That
+    was still a hand-list, and `upsert_collection` walked straight through it — the exact
+    C-259 / C-294 shape, in the guard written to stop that shape. The question the guard
+    actually cares about is "does this call set permissions", and the keyword answers it
+    without anyone maintaining a vocabulary.
     """
     functions = _enclosing_functions(tree)
     found = []
@@ -106,16 +106,13 @@ def _permission_arguments(tree: ast.AST) -> list[tuple]:
         if not isinstance(node, ast.Call):
             continue
         name = node.func.attr if isinstance(node.func, ast.Attribute) else (
-            node.func.id if isinstance(node.func, ast.Name) else None
+            node.func.id if isinstance(node.func, ast.Name) else "<call>"
         )
-        if not name or not (name.startswith("create_") or name.startswith("update_")
-                            or name.startswith("ensure_")):
-            continue
         enclosing = None
         for fn in functions:
             if fn.lineno <= node.lineno <= (fn.end_lineno or fn.lineno):
                 if enclosing is None or fn.lineno > enclosing.lineno:
-                    enclosing = fn  # innermost wins
+                    enclosing = fn
         for kw in node.keywords:
             if kw.arg == "permissions":
                 found.append((name, kw.value, node.lineno, enclosing))
@@ -126,19 +123,14 @@ def _role_of(element: ast.AST):
     """The role a single permission element grants, or `None` if unreadable.
 
     Two spellings, because Appwrite accepts both and this guard missed one of them:
-
-      - `Permission.read(Role.any())` — the SDK constructors
-      - `'read("any")'` — the wire string those constructors return, verbatim
-
-    The literal-string form was invisible until 2026-08-22. That is not an exotic
-    spelling: `provisioning.py` tells callers `Permission`/`Role` are no longer imported
-    and that a wider grant is constructed at the call site, which steers a contributor
-    toward exactly the string form. **The documented remedy produced the blind spot.**
+    `Permission.read(Role.any())`, and `'read("any")'` — the wire string that constructor
+    returns, verbatim. The string form was invisible until 2026-08-22, and it is the form
+    `provisioning.py`'s own comment steers a caller toward.
     """
     if isinstance(element, ast.Call) and element.args:
         inner = element.args[0]
         if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute):
-            return inner.func.attr          # Role.any() -> "any"
+            return inner.func.attr
         if isinstance(inner, ast.Constant):
             return str(inner.value)
         return None
@@ -154,54 +146,114 @@ _WIRE_GRANT = re.compile(r'^\s*(\w+)\s*\(\s*"([^"]*)"\s*\)\s*$')
 def _parse_wire_grant(raw: str):
     """`'read("any")'` -> `('read', 'any')`. Mirrors `audit/permissions.py::parse_grant`.
 
-    Duplicated rather than imported on purpose: a guard that imports the module it is
-    guarding fails silently the day that import breaks, and this file must run against a
-    checkout it cannot execute.
+    Duplicated rather than imported on purpose: a guard that imports the module it guards
+    stops guarding the day that import breaks.
     """
     m = _WIRE_GRANT.match(raw or "")
     return (m.group(1).lower(), m.group(2)) if m else None
 
 
-def _name_is_mutated(fn: ast.AST, name: str) -> bool:
-    """Is `name` grown anywhere in `fn` — `+=`, `.append`, `.extend`, `.insert`?
+def _name_resolves_closed(fn: ast.AST, name: str) -> bool:
+    """Is `name` guaranteed not to introduce a grant of its own inside `fn`?
 
-    Without this, `permissions = []` followed by `permissions.append(...)` reads as
-    least privilege. Verified to pass silently before 2026-08-22.
+    True in exactly two situations, both of which mean *the default is closed and any
+    widening came from the caller* — and callers are scanned, because
+    `_permission_arguments` now matches on the `permissions=` keyword rather than on a
+    list of function-name prefixes:
+
+      - every binding of the name is a literal empty list (`if x is None: x = []`)
+      - the name is a parameter that is never rebound at all, or rebound only by the
+        default-applying idiom `x = x or []`
+
+    **Conservative by construction, and that is the design.** The previous version tried
+    to work out which assignment won — last-by-line-number, with special cases for `or []`
+    and for the sentinel conditional. Six planted attacks walked through it: a wide grant
+    in one arm of an `if`, `permissions[:] = [...]`, a mutating helper call, a shadowed
+    pass-through. Each fix added a case and each case had a gap, which is the signature of
+    the wrong machinery in the wrong place — a test is not where dataflow analysis belongs.
+
+    So there is no ordering here. Anything that could put a grant into this name — a
+    binding to a non-empty literal, a slice assignment, an augmented assignment, a loop
+    target, a method call that is not read-only, or handing the name to a function that
+    could mutate it — makes the answer False, and False means the caller reports the site
+    as **unresolvable** rather than clean.
     """
+    is_parameter = _parameter_default(fn, name) is not None or name in _parameter_names(fn)
     for node in ast.walk(fn):
-        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) \
-                and node.target.id == name:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    if not _binding_is_closed(node.value, name):
+                        return False
+                if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) \
+                        and target.value.id == name:
+                    return False
+        if isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            target = node.target
+            if isinstance(target, ast.Name) and target.id == name:
+                return False
+            if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name) \
+                    and target.value.id == name:
+                return False
+        if isinstance(node, (ast.For, ast.comprehension)):
+            if isinstance(getattr(node, "target", None), ast.Name) \
+                    and node.target.id == name:
+                return False
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) \
+                    and node.func.value.id == name and node.func.attr not in _READ_ONLY_METHODS:
+                return False
+            for arg in node.args:
+                if isinstance(arg, ast.Name) and arg.id == name and not _is_wrapping_call(node):
+                    return False
+
+    default = _parameter_default(fn, name)
+    if default is not None:
+        if isinstance(default, ast.Constant) and default.value is None:
             return True
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-                and node.func.attr in {"append", "extend", "insert"} \
-                and isinstance(node.func.value, ast.Name) and node.func.value.id == name:
-            return True
+        return isinstance(default, ast.List) and not default.elts
+    return is_parameter
+
+
+def _parameter_names(fn: ast.AST) -> set:
+    args = fn.args
+    return {a.arg for a in list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs)}
+
+
+def _binding_is_closed(value: ast.AST, name: str) -> bool:
+    """Is this assignment to `name` incapable of introducing a grant?
+
+    `x = []` is. `x = x or []` is — it applies the closed default and otherwise leaves the
+    caller's own value, which the caller's own call site is checked for. `x = [WIDE]`,
+    `x = build()` and `x = y` are not.
+    """
+    if isinstance(value, ast.List) and not value.elts:
+        return True
+    if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or) \
+            and len(value.values) == 2 \
+            and isinstance(value.values[0], ast.Name) and value.values[0].id == name \
+            and isinstance(value.values[1], ast.List) and not value.values[1].elts:
+        return True
     return False
 
 
-def _last_binding_before(fn: ast.AST, name: str, lineno: int):
-    """The final plain assignment to `name` above `lineno`, or `None`.
+#: Methods that read a list without changing it. Anything else on the name is treated as
+#: a possible mutation, because `append` was not the only way and enumerating them all is
+#: the hand-list this guard exists to avoid.
+_READ_ONLY_METHODS = frozenset({"copy", "count", "index"})
 
-    **Last, not first.** The previous version returned on the first `= []` it walked into,
-    so `permissions = []` followed by `permissions = WIDE` — and even a `= []` written
-    *after* the call — vouched for the call. Order is now respected.
-    """
-    best = None
-    for node in ast.walk(fn):
-        if not isinstance(node, ast.Assign) or node.lineno >= lineno:
-            continue
-        if any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
-            if best is None or node.lineno > best.lineno:
-                best = node
-    return best.value if best is not None else None
+
+def _is_wrapping_call(node: ast.Call) -> bool:
+    """`list(permissions)` / `tuple(permissions)` — copies, not mutations."""
+    return isinstance(node.func, ast.Name) and node.func.id in {"list", "tuple", "len", "sorted"}
 
 
 def _parameter_default(fn: ast.AST, name: str):
     """The declared default for parameter `name`, or `None` if it has none.
 
     A wide default — `def go(self, permissions=[Permission.read(Role.any())])` — restored
-    the original defect verbatim and was reported clean, because only parameter *names*
-    were read and never their defaults.
+    the original defect verbatim and read clean, because only parameter *names* were ever
+    inspected.
     """
     args = fn.args
     positional = list(args.posonlyargs) + list(args.args)
@@ -216,30 +268,12 @@ def _parameter_default(fn: ast.AST, name: str):
     return None
 
 
-
-def _is_caller_passthrough(node: ast.AST, fn: ast.AST) -> bool:
-    """`list(permissions)` / `list(permissions or [])` where `permissions` is a parameter.
-
-    Narrow on purpose. It matches the one shape that means "whatever the caller gave us",
-    and nothing else — a bare name, a comprehension, or a call to anything but `list`
-    stays unresolvable.
-    """
-    if fn is None or not isinstance(node, ast.Call):
-        return False
-    if not (isinstance(node.func, ast.Name) and node.func.id == "list" and node.args):
-        return False
-    params = {a.arg for a in list(fn.args.posonlyargs) + list(fn.args.args) + list(fn.args.kwonlyargs)}
-    inner = node.args[0]
-    if isinstance(inner, ast.BoolOp) and isinstance(inner.op, ast.Or):
-        inner = inner.values[0]
-    return isinstance(inner, ast.Name) and inner.id in params
-
-
 def _roles_granted(value: ast.AST, enclosing: ast.AST = None, lineno: int = 0) -> tuple:
     """`(roles, resolvable)` for a permissions argument.
 
-    `resolvable` is False when this module cannot read the value. The caller must treat
-    that as **unknown**, never as "grants nothing".
+    Three answers, and the third is the one that matters: a literal list is read; a name
+    provably empty everywhere is read as empty; **everything else is unresolvable**, which
+    the suite reports rather than passes over.
     """
     if isinstance(value, ast.List):
         roles = []
@@ -255,37 +289,15 @@ def _roles_granted(value: ast.AST, enclosing: ast.AST = None, lineno: int = 0) -
         right, ok_right = _roles_granted(value.orelse, enclosing, lineno)
         if ok_left and ok_right:
             return (left + right, True)
-        # `permissions=[] if permissions is None else list(permissions)` — the sentinel
-        # shape. One branch is a literal empty list (the default, provably closed) and the
-        # other passes the caller's own argument through. That second branch is genuinely
-        # unreadable *here*, and it does not need to be readable here: since 2026-08-22
-        # `ensure_*` calls are in scope, so a caller supplying a wide grant is caught at
-        # its own call site, where the reason for it is visible. The split is deliberate —
-        # this function pins the default, the caller scan pins the widening.
-        if ok_left and not left and _is_caller_passthrough(value.orelse, enclosing):
-            return ([], True)
         return ([], False)
 
+    if isinstance(value, ast.Call) and _is_wrapping_call(value) and value.args:
+        return _roles_granted(value.args[0], enclosing, lineno)
+
     if isinstance(value, ast.Name) and enclosing is not None:
-        name = value.id
-        if _name_is_mutated(enclosing, name):
-            return ([], False)          # grown after binding — cannot vouch for it
-        default = _parameter_default(enclosing, name)
-        if default is not None and not (
-            isinstance(default, ast.Constant) and default.value is None
-        ):
-            roles, ok = _roles_granted(default, None, lineno)
-            if not ok or roles:
-                return (roles, ok)      # a wide or unreadable default is the answer
-        bound = _last_binding_before(enclosing, name, lineno)
-        if bound is None:
-            return ([], False)
-        if isinstance(bound, ast.List) and not bound.elts:
-            return ([], True)           # provably empty at the call
-        if isinstance(bound, ast.BoolOp) and isinstance(bound.op, ast.Or):
-            # `permissions = permissions or [...]` — the tail is the default
-            return _roles_granted(bound.values[-1], None, lineno)
-        return _roles_granted(bound, enclosing, lineno)
+        if _name_resolves_closed(enclosing, value.id):
+            return ([], True)
+        return ([], False)
 
     return ([], False)
 
@@ -399,16 +411,39 @@ def test_a_passthrough_of_a_parameter_normalised_to_empty_is_resolved(tmp_path):
     assert unresolvable_grants(passthrough) == []
 
 
-def test_a_passthrough_that_is_never_normalised_is_still_unknown(tmp_path):
-    """The boundary. Without the normalisation the guard has no idea what arrives, and
-    must say so — otherwise the resolution above becomes a hole shaped like itself."""
-    unnormalised = tmp_path / "unnormalised.py"
-    unnormalised.write_text(
+def test_an_unmutated_parameter_is_the_callers_value_and_resolves(tmp_path):
+    """A parameter defaulted to `None`, never rebound except by `x = x or []`, and never
+    mutated, is exactly what the caller passed — and the caller's own call site is now
+    checked, because `_permission_arguments` matches the `permissions=` keyword rather
+    than a list of function-name prefixes. Reporting it here as well would flag three
+    legitimate sites in this repo and train the reader to skip the output (#415, C-59).
+    """
+    passthrough = tmp_path / "passthrough.py"
+    passthrough.write_text(
         "class P:\n"
-        "    def a(self, permissions=None):\n"
-        "        return self.storage.create_bucket(bucket_id='b', permissions=permissions)\n"
+        "    def ensure(self, permissions=None):\n"
+        "        return self.databases.create_collection(\n"
+        "            collection_id='c',\n"
+        "            permissions=[] if permissions is None else list(permissions))\n"
+        "    def upload(self, permissions=None):\n"
+        "        permissions = permissions or []\n"
+        "        return self.storage.create_file(bucket_id='b', permissions=permissions)\n"
     )
-    assert len(unresolvable_grants(unnormalised)) == 1
+    assert open_grants(passthrough) == []
+    assert unresolvable_grants(passthrough) == []
+
+
+def test_a_wide_parameter_default_is_not_the_callers_business(tmp_path):
+    """The boundary. `permissions=None` hands the decision to the caller;
+    `permissions=[WIDE]` makes the decision here, and read as least privilege until the
+    default itself was inspected."""
+    wide = tmp_path / "wide_default.py"
+    wide.write_text(
+        "class P:\n"
+        "    def a(self, permissions=[Permission.read(Role.any())]):\n"
+        "        return self.databases.create_collection(collection_id='c', permissions=permissions)\n"
+    )
+    assert open_grants(wide) or unresolvable_grants(wide)
 
 
 def test_the_five_holes_a_review_found_are_closed(tmp_path):
@@ -479,22 +514,68 @@ def test_the_five_holes_a_review_found_are_closed(tmp_path):
     )
 
 
-def test_reassignment_order_is_respected(tmp_path):
-    """`permissions = []` then `permissions = WIDE` must not be vouched for by the first.
+def test_nothing_is_silently_passed_over(tmp_path):
+    """The invariant, stated once. Every site is READ or REPORTED — never neither.
 
-    The previous resolver returned on the first `= []` it walked into, so order did not
-    matter — and an assignment placed *after* the call vouched for it too.
+    This replaces a test asserting which assignment "wins". Deciding that meant modelling
+    execution order, and six planted attacks walked through it: a wide grant in one arm of
+    an `if`, `permissions[:] = [...]`, a helper that mutates its argument, a shadowed
+    pass-through. The guard no longer tries. A name it cannot prove closed is
+    unresolvable, and unresolvable is an assertion failure of its own — so the two have no
+    gap between them, which is the property that actually matters.
     """
-    planted = tmp_path / "reassigned.py"
-    planted.write_text(
-        "class P:\n"
-        "    def a(self, permissions=None):\n"
-        "        if permissions is None:\n"
-        "            permissions = []\n"
-        "        permissions = [Permission.read(Role.any())]\n"
-        "        return self.databases.create_collection(collection_id='c', permissions=permissions)\n"
+    cases = {
+        "wide_in_one_branch": (
+            "class P:\n"
+            "    def a(self, permissions=None, public=False):\n"
+            "        if public:\n"
+            "            permissions = [Permission.read(Role.any())]\n"
+            "        else:\n"
+            "            permissions = []\n"
+            "        return self.databases.create_collection(collection_id='c', permissions=permissions)\n"
+        ),
+        "slice_assignment": (
+            "class P:\n"
+            "    def a(self, permissions=None):\n"
+            "        permissions = []\n"
+            "        permissions[:] = [Permission.read(Role.any())]\n"
+            "        return self.databases.create_collection(collection_id='c', permissions=permissions)\n"
+        ),
+        "mutated_by_a_helper": (
+            "class P:\n"
+            "    def a(self, permissions=None):\n"
+            "        permissions = []\n"
+            "        widen(permissions)\n"
+            "        return self.databases.create_collection(collection_id='c', permissions=permissions)\n"
+        ),
+        "shadowed_before_the_sentinel": (
+            "class P:\n"
+            "    def ensure(self, permissions=None):\n"
+            "        permissions = [Permission.read(Role.any())]\n"
+            "        return self.databases.create_collection(\n"
+            "            collection_id='c',\n"
+            "            permissions=[] if permissions is None else list(permissions))\n"
+        ),
+        # No `create_`/`update_`/`ensure_` prefix. The scope was a hand-list until
+        # 2026-08-22 and this walked straight through it — C-259's shape, inside the guard
+        # written to stop C-259's shape.
+        "no_recognised_prefix": (
+            "class P:\n"
+            "    def a(self):\n"
+            "        return self.databases.upsert_collection(\n"
+            "            collection_id='c', permissions=[Permission.read(Role.any())])\n"
+        ),
+    }
+    silent = []
+    for name, src in cases.items():
+        planted = tmp_path / f"{name}.py"
+        planted.write_text(src)
+        if not (open_grants(planted) or unresolvable_grants(planted)):
+            silent.append(name)
+    assert not silent, (
+        f"the guard passed over these without reporting anything: {silent}. Each can put "
+        f"a grant to an unauthenticated role into a live container."
     )
-    assert open_grants(planted), "the last binding before the call is what governs"
 
 
 def test_users_is_still_not_reported_as_open(tmp_path):
