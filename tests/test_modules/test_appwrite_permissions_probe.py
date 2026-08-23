@@ -421,3 +421,95 @@ def test_container_permissions_is_inert():
     )
     assert container.is_open_to_anyone
     assert not hasattr(container, "databases") and not hasattr(container, "storage")
+
+
+# ----------------------------------------------------------------------------------
+# Survivors of an independent mutation audit. Each of these mutations left the whole
+# suite green before 2026-08-23.
+# ----------------------------------------------------------------------------------
+
+
+def test_the_unknowns_are_printed_before_any_verdict():
+    """C-249 was a defect of the renderer alone — the data recorded that the read was
+    incomplete and the renderer stated a conclusion above it without looking.
+
+    This module's docstring claims that ordering as its fix, and nothing asserted it:
+    moving `COULD NOT DETERMINE` below the verdict lines was green. The sibling renderer
+    in `audit/report.py` has `test_the_incompleteness_warning_precedes_any_interpretation`;
+    this one did not.
+    """
+    manager = _manager(
+        collection_raises=AppwriteException("missing scope"),
+        bucket_result={"$permissions": ['read("any")'], "fileSecurity": False},
+    )
+
+    rendered = read_permissions(manager).render()
+
+    assert rendered.index("COULD NOT DETERMINE") < rendered.index("VERDICT:"), (
+        "the reader must meet what could not be established before any conclusion"
+    )
+
+
+def test_an_absent_security_flag_is_unknown_not_off():
+    """Deleting the `security_flag is None` branch was green.
+
+    That branch is the only thing between a renamed SDK field and a false all-clear: the
+    installed SDK is migrating `get_collection` to a TablesDB API which renames
+    `documentSecurity` to `rowSecurity`. With the field absent, `security_flag` is None,
+    the per-item walk never runs, and the report would otherwise print "everything this
+    tool can check was checked" at exit 0.
+    """
+    manager = _manager(
+        collection_result={"$permissions": []},   # no documentSecurity
+        bucket_result={"$permissions": []},       # no fileSecurity
+    )
+
+    report = read_permissions(manager)
+
+    assert not report.is_clean
+    assert permissions_exit_code(report) == 2
+    assert sum("absent from the response" in n for n in report.indeterminate) == 2
+
+
+def test_an_open_document_inside_a_locked_collection_is_caught():
+    """Only the bucket/file half of `_read_items` was exercised. Replacing the document
+    branch with `items = []` was green — so the collection path, which is where the
+    measured exposure actually was, had no coverage at all."""
+    manager = _manager(
+        collection_result={"$permissions": [], "documentSecurity": True},
+        bucket_result={"$permissions": [], "fileSecurity": False},
+        documents=[
+            {"$id": "card_a", "$permissions": []},
+            {"$id": "card_b", "$permissions": ['read("any")', 'update("any")']},
+        ],
+    )
+
+    report = read_permissions(manager)
+
+    collection = [c for c in report.containers if c.kind == "collection"][0]
+    assert collection.open_items == [("card_b", ["read", "update"])]
+    assert collection.verbs_open_to_anyone == [], "the container itself is clean"
+    assert permissions_exit_code(report) == 1
+    assert "card_b: read, update" in report.render()
+
+
+@pytest.mark.parametrize("verb", ["create", "update", "delete", "write"])
+def test_every_mutating_verb_is_classified_as_mutating(verb):
+    """`write` was in `MUTATING_VERBS` and untested — it could be removed silently.
+
+    The distinction earns its place in the output: `read` on a partner's metadata is a
+    disclosure, these are an integrity loss, and the renderer says so only for these.
+    """
+    container = ContainerPermissions(
+        kind="collection", container_id="c", grants=[f'{verb}("any")'], security_flag=False
+    )
+    assert container.mutating_verbs_open_to_anyone == [verb]
+
+
+def test_read_alone_is_not_reported_as_a_mutating_grant():
+    """The control for the parametrisation above."""
+    container = ContainerPermissions(
+        kind="collection", container_id="c", grants=['read("any")'], security_flag=False
+    )
+    assert container.is_open_to_anyone
+    assert container.mutating_verbs_open_to_anyone == []

@@ -95,6 +95,7 @@ history of this particular population is three wrong counts in two days.
 from __future__ import annotations
 
 import ast
+import re
 import pathlib
 from typing import Dict, List, Set, Tuple
 
@@ -688,3 +689,96 @@ def test_the_substrate_checks_stay_on_the_vendor_modules():
         p.startswith("views_pipeline_core/modules/") for p in vendor
     ), f"the substrate checks leaked outside modules/: {sorted(vendor)[:3]}"
     assert "views_pipeline_core/managers/prediction/savers.py" not in vendor
+
+
+# ---------------------------------------------------------------------------
+# The allowlists as declarations. C-292 / independent mutation audit 2026-08-23.
+#
+# The guards above check the CODE against these dictionaries. Nothing checked the
+# dictionaries. An audit demonstrated three consequences, all green against the full
+# suite: entries naming files and functions that do not exist were accepted; entries
+# justified by the empty string were accepted; and a registered defect could be MOVED
+# from `_TRACKED_DEFECTS` into `_RECORDED_NOT_SWALLOWED` in one line, which drops the
+# register-id requirement and makes `_MAX_TRACKED_DEFECTS` count zero.
+#
+# That last one is the shape C-350/C-351 records: an assertion about conformance standing
+# in for an assertion about the property, with the thing conformed to left unguarded.
+# ---------------------------------------------------------------------------
+
+
+def _live_broad_handlers() -> set:
+    """`(filename, owner)` for every bare `except Exception` in the governed tree."""
+    live = set()
+    for path, tree in _iter_governed_files(WHOLE_PACKAGE):
+        functions = _enclosing_functions(tree)
+        qualified = _qualified_names(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler) or node.type is None:
+                continue
+            if ast.unparse(node.type).strip() == "Exception":
+                live.add((path.name, _owner(functions, node.lineno, qualified)))
+    return live
+
+
+def test_every_broad_handler_allowlist_entry_excuses_something_that_exists():
+    """A stale exemption is an exemption for code that is gone.
+
+    Deleting a guarded `except Exception` left its entry behind with nothing noticing —
+    so the next handler added to that same function inherits an exemption nobody granted
+    it. Same rot as C-256's un-reconciled worklist and C-259's hardcoded name set.
+    """
+    declared = set(_RECORDED_NOT_SWALLOWED) | set(_TRACKED_DEFECTS)
+    stale = declared - _live_broad_handlers()
+    assert not stale, (
+        f"allowlist entries that excuse nothing: {sorted(stale)}. Either the handler was "
+        f"removed and the entry should go with it, or the entry names the wrong function "
+        f"and has never been doing anything."
+    )
+
+
+def test_no_allowlist_entry_is_justified_by_nothing():
+    """An exemption without a reason is an exemption nobody can review.
+
+    The empty string was accepted by every one of these dictionaries. Forty characters is
+    not a quality bar, it is a floor that a placeholder cannot clear.
+    """
+    for table_name, table in (
+        ("_RECORDED_NOT_SWALLOWED", _RECORDED_NOT_SWALLOWED),
+        ("_BOUNDED_BY_REALITY", _BOUNDED_BY_REALITY),
+        ("_TRACKED_DEFECTS", _TRACKED_DEFECTS),
+    ):
+        for location, justification in table.items():
+            assert len(justification.strip()) > 40, (
+                f"{table_name}{location} is exempted with "
+                f"{len(justification.strip())} characters of reason"
+            )
+
+
+def test_a_tracked_defect_cannot_be_laundered_into_the_legitimate_allowlist():
+    """The side door out of the ceiling.
+
+    `_TRACKED_DEFECTS` is capped and every entry must name a register ID.
+    `_RECORDED_NOT_SWALLOWED` is uncapped and requires no ID. Moving an entry between
+    them is one line, and it converts "a registered defect we are not hiding" into "a
+    legitimate exemption" while `_MAX_TRACKED_DEFECTS` counts zero and reports health.
+
+    The two dictionaries must therefore be disjoint, and the ceiling test must not be
+    satisfiable by emptying the thing it counts.
+    """
+    overlap = set(_TRACKED_DEFECTS) & set(_RECORDED_NOT_SWALLOWED)
+    assert not overlap, (
+        f"{sorted(overlap)} is in both dictionaries. The comment above "
+        f"`_TRACKED_DEFECTS` says they are deliberately kept apart precisely so this "
+        f"cannot happen quietly."
+    )
+    assert _TRACKED_DEFECTS, (
+        "`_TRACKED_DEFECTS` is empty. That means either every tracked defect was fixed — "
+        "in which case delete the dictionary, the ceiling and this test together, "
+        "deliberately — or one was moved into `_RECORDED_NOT_SWALLOWED`. The ceiling "
+        "test cannot tell those two apart, which is why this one exists."
+    )
+    for location, justification in _TRACKED_DEFECTS.items():
+        assert re.search(r"C-\d+", justification), (
+            f"{location} suppresses the guard for genuinely defective code without "
+            f"naming a register entry"
+        )

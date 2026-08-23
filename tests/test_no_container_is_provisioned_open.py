@@ -114,7 +114,7 @@ def _permission_arguments(tree: ast.AST) -> list[tuple]:
                 if enclosing is None or fn.lineno > enclosing.lineno:
                     enclosing = fn
         is_container_call = name in _POSITIONAL_PERMISSIONS or name.endswith(
-            ("_collection", "_bucket")
+            ("_collection", "_bucket", "_document", "_file")
         )
         for kw in node.keywords:
             if kw.arg == "permissions":
@@ -137,15 +137,56 @@ def _permission_arguments(tree: ast.AST) -> list[tuple]:
     return found
 
 
-#: Where `permissions` sits positionally in the SDK calls this repo makes, read off the
-#: installed signatures rather than remembered. Anything not listed and shaped like a
-#: container call is reported as unknown by `_permission_arguments` above.
-_POSITIONAL_PERMISSIONS = {
-    "create_collection": 3,   # (database_id, collection_id, name, permissions, ...)
-    "update_collection": 3,
-    "create_bucket": 2,       # (bucket_id, name, permissions, ...)
-    "update_bucket": 2,
-}
+def _derive_positional_permissions() -> dict:
+    """Where `permissions` sits positionally, read off the INSTALLED SDK signatures.
+
+    This was a hand-written dict of four names. An independent mutation audit emptied it
+    entirely and 268 tests stayed green, then passed a wide grant positionally to
+    `create_document` and `create_file` — the two calls the delivery path actually makes —
+    and the guard saw nothing. Neither was in the dict. That is the C-259 hand-list shape
+    surviving one layer below the docstring that claims to have eliminated it.
+
+    Deriving it means a method that gains, loses or moves the argument is followed
+    automatically, and a method this repo starts calling is covered the first time it is.
+    """
+    import inspect
+
+    found = {}
+    try:
+        from appwrite.services.databases import Databases
+        from appwrite.services.storage import Storage
+    except ImportError:  # pragma: no cover - the appwrite extra is optional
+        return found
+
+    services = [Databases, Storage]
+
+    # This repo's own public API too. `AppwriteProvisioner.ensure_collection` takes
+    # `permissions` at index 4, and an audit passed a wide grant to it positionally with
+    # the guard silent — deriving only from the SDK misses the wrapper the CIC tells
+    # callers to use. Imported defensively: this file must still run if the module moves.
+    try:
+        from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
+        services.append(AppwriteProvisioner)
+    except ImportError:  # pragma: no cover - the appwrite extra is optional
+        pass
+
+    for service in services:
+        for name, member in inspect.getmembers(service, inspect.isfunction):
+            if name.startswith("_"):
+                continue
+            try:
+                params = list(inspect.signature(member).parameters)[1:]  # drop self
+            except (TypeError, ValueError):  # pragma: no cover - C-extension members
+                continue
+            if "permissions" in params:
+                found[name] = params.index("permissions")
+    return found
+
+
+#: Derived at import from the installed SDK — see above. Empty only if the appwrite extra
+#: is absent, in which case `test_the_positional_map_is_derived_and_populated` fails
+#: rather than the guard quietly covering nothing.
+_POSITIONAL_PERMISSIONS = _derive_positional_permissions()
 
 
 def _role_of(element: ast.AST):
@@ -562,6 +603,93 @@ def test_the_five_holes_a_review_found_are_closed(tmp_path):
     assert not missed, (
         f"the guard reports these as clean: {missed}. Each grants an unauthenticated "
         f"role and each passed silently before 2026-08-22."
+    )
+
+
+def test_a_positional_permissions_argument_is_seen_wherever_it_sits(tmp_path):
+    """Found by an independent mutation audit: emptying the positional map left 268 tests
+    green, and a wide grant passed positionally to `ensure_collection`, `create_document`
+    or `create_file` walked straight through the guard written to stop exactly that.
+    `create_document` and `create_file` are the two calls the delivery path makes.
+    """
+    planted = tmp_path / "positional.py"
+    planted.write_text(
+        "class P:\n"
+        "    def a(self, prov):\n"
+        "        return prov.ensure_collection({}, None, None, None, ['read(\"any\")'])\n"
+        "    def b(self):\n"
+        "        return self.databases.create_document(d, c, 'i', data, ['read(\"any\")'])\n"
+        "    def c(self):\n"
+        "        return self.storage.create_file(b, 'i', f, ['read(\"any\")'])\n"
+    )
+    reported = open_grants(planted) + unresolvable_grants(planted)
+    assert len(reported) == 3, f"one per call; got {reported}"
+
+
+def test_the_positional_map_is_derived_and_matches_the_installed_sdk():
+    """The map is read off the SDK at import. Pinning it against the SDK again here is
+    not circular — it proves the derivation ran and found something, which is what fails
+    if the appwrite extra is missing or the SDK reshapes its signatures."""
+    import inspect
+
+    from appwrite.services.databases import Databases
+    from appwrite.services.storage import Storage
+
+    assert _POSITIONAL_PERMISSIONS, (
+        "the positional map derived to nothing — the guard would then see no positional "
+        "argument anywhere, which is indistinguishable from a codebase with none"
+    )
+    for service, method in (
+        (Databases, "create_collection"), (Databases, "create_document"),
+        (Storage, "create_bucket"), (Storage, "create_file"),
+    ):
+        params = list(inspect.signature(getattr(service, method)).parameters)[1:]
+        assert _POSITIONAL_PERMISSIONS.get(method) == params.index("permissions"), (
+            f"{method}: the SDK has permissions at index "
+            f"{params.index('permissions')}, the guard derived "
+            f"{_POSITIONAL_PERMISSIONS.get(method)!r}"
+        )
+
+
+def test_the_scan_still_covers_the_tools_tree():
+    """`SCANNED` can drop `tools/` and stay green: the >50-module floor in
+    `test_the_scan_reads_the_package` is satisfied by the package alone (125 files) while
+    `tools/` holds 2. C-275 records `tools/` as SDK-calling, destructive code that a
+    guard's territory must include."""
+    assert any("tools" in p.parts for p in _modules()), (
+        "tools/ has left the guard's territory and the module-count floor cannot see it"
+    )
+
+
+def test_the_collection_default_survives_reformatting(tmp_path):
+    """`test_the_collection_default_is_least_privilege` asserts an `inspect.getsource`
+    substring, so a pure line-break reformat turns it red with "the least-privilege
+    default is no longer applied" — a false accusation that names no file. This asserts
+    the structure instead, and additionally pins `document_security`, which an audit
+    flipped to True with the whole suite green.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(AppwriteProvisioner.ensure_collection)))
+    calls = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "create_collection"
+    ]
+    assert calls, "ensure_collection no longer calls create_collection"
+    kwargs = {k.arg: k.value for k in calls[0].keywords}
+    assert isinstance(kwargs["permissions"], ast.IfExp), (
+        "the sentinel default is gone; permissions is now "
+        f"{type(kwargs['permissions']).__name__} at "
+        "views_pipeline_core/modules/appwrite/provisioning.py"
+    )
+    assert isinstance(kwargs["document_security"], ast.Constant)
+    assert kwargs["document_security"].value is False, (
+        "document_security was flipped. With it True, per-item grants become additive "
+        "to the container's, which changes how every existing document is evaluated"
     )
 
 

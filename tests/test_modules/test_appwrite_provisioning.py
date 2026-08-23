@@ -585,3 +585,47 @@ def test_ensuring_the_schema_alone_still_succeeds_on_an_existing_collection():
 
     assert result.success is True
     assert result.code == "EXISTS"
+
+
+def test_creating_a_bucket_grants_nothing_by_default():
+    """`ensure_bucket` had no assertion on what reaches the SDK, in either direction.
+
+    An independent mutation audit made it ignore the caller's `permissions` entirely,
+    force `file_security=False` and default `antivirus` off — three changes, one of them
+    the exact defect this branch exists for — and 300 tests stayed green. The collection
+    path had `test_creating_a_collection_grants_nothing_by_default`; the bucket path had
+    no twin. That is the one-tool-two-postures asymmetry
+    `test_bucket_and_collection_now_have_the_same_posture` was written to close, reopened
+    one level below the signature it compares.
+    """
+    from unittest.mock import MagicMock
+    from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
+
+    fm = MagicMock()
+    provisioner = AppwriteProvisioner(fm)
+    provisioner.ensure_bucket("newbucket", name="New", create_metadata_db=False)
+
+    kwargs = fm.storage.create_bucket.call_args.kwargs
+    assert kwargs["permissions"] == [], (
+        f"a new bucket must grant nothing; the SDK was called with "
+        f"{kwargs['permissions']!r}"
+    )
+    assert kwargs["file_security"] is True, (
+        "with file_security off, per-file permissions are ignored and only the bucket "
+        "grant governs — a silent widening of what a single grant reaches"
+    )
+    assert kwargs["antivirus"] is True
+
+
+def test_an_explicit_bucket_grant_reaches_the_sdk_unchanged():
+    """The other direction. If the caller's list were dropped the parameter would be
+    decoration, and the next person needing a wider grant would hardcode one again."""
+    from unittest.mock import MagicMock
+    from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
+
+    fm = MagicMock()
+    AppwriteProvisioner(fm).ensure_bucket(
+        "newbucket", name="New", permissions=['read("users")'], create_metadata_db=False
+    )
+
+    assert fm.storage.create_bucket.call_args.kwargs["permissions"] == ['read("users")']
