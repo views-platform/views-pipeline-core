@@ -225,6 +225,14 @@ _RECORDED_NOT_SWALLOWED: Dict[Tuple[str, str], str] = {
     "carries the identical wrapper for the identical reason (C-271)",
     (
         "permissions.py",
+        "_read_items",
+    ): "records the failure in `PermissionsReport.indeterminate` naming the container, so "
+    "a container whose items could not be listed renders as UNKNOWN rather than as having "
+    "no per-item grants. Catching narrowly would be worse for the same reason as the "
+    "sibling entry below: an uncaught raise here escapes `read_permissions` and exits 1, "
+    "which this CLI defines as a container being open — an alarm on a clean shelf",
+    (
+        "permissions.py",
         "_read_container",
     ): "records the failure in `PermissionsReport.indeterminate` naming the container, "
     "so a permission that could not be read renders as UNKNOWN rather than as locked "

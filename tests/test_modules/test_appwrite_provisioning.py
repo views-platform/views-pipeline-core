@@ -557,6 +557,38 @@ def test_an_explicit_grant_reaches_the_sdk_unchanged():
     assert fm.databases.create_collection.call_args.kwargs["permissions"] == ['read("users")']
 
 
+def test_an_explicit_empty_list_is_not_refused_on_an_existing_collection():
+    """`permissions=[]` is the posture ADR-061 tells callers to state, and it is what the
+    default applies. Refusing it made `ensure_collection` non-idempotent — fine on first
+    run, hard failure on every re-run — with the message "the 0 permission(s) you passed
+    were NOT applied". `ensure_bucket` has always treated `None` and `[]` as the same
+    thing. Found 2026-08-24."""
+    provisioner, fm = _provisioner_with_existing_collection()
+
+    result = provisioner.ensure_collection(metadata={}, permissions=[])
+
+    assert result.success is True
+    assert result.code == "EXISTS"
+    fm.databases.create_collection.assert_not_called()
+
+
+def test_the_refusal_happens_before_anything_is_written():
+    """It says "nothing was written". It sat after `ensure_attributes`, which writes.
+
+    A refusal that has already had side effects is not a refusal, and the sentence in the
+    error was simply false — the audit counted seven attribute-creation calls firing
+    before the `success=False` return that denied them.
+    """
+    provisioner, fm = _provisioner_with_existing_collection()
+
+    result = provisioner.ensure_collection(metadata={}, permissions=['read("any")'])
+
+    assert result.code == "PERMISSIONS_NOT_APPLICABLE"
+    fm.databases.create_string_attribute.assert_not_called()
+    fm.databases.create_datetime_attribute.assert_not_called()
+    fm.databases.create_integer_attribute.assert_not_called()
+
+
 def test_permissions_on_an_existing_collection_are_refused_not_discarded():
     """C-291's shape, on the security-relevant argument.
 
@@ -568,7 +600,7 @@ def test_permissions_on_an_existing_collection_are_refused_not_discarded():
     """
     provisioner, fm = _provisioner_with_existing_collection()
 
-    result = provisioner.ensure_collection(metadata={}, permissions=[])
+    result = provisioner.ensure_collection(metadata={}, permissions=['read("users")'])
 
     assert result.success is False
     assert result.code == "PERMISSIONS_NOT_APPLICABLE"

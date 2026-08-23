@@ -300,18 +300,24 @@ class AppwriteProvisioner:
                         ),
                         code="COORDINATE_MISMATCH",
                     )
-                attr_result = self.ensure_attributes(
-                    db_id, collection["$id"], metadata or {}
-                )
-                if not attr_result.success:
-                    return attr_result
-
-                if permissions is not None:
-                    # A caller who states permissions is asking for a grant to be
-                    # applied. Appwrite fixes grants at creation, so on this branch
-                    # nothing can be. Returning success here is C-291's exact shape —
-                    # "reported OK while writing nothing" — on the security-relevant
-                    # argument, in the method that was fixed for C-291 in #473.
+                # BEFORE any write, and gated on a non-empty list rather than on
+                # `is not None`. Two corrections, both found 2026-08-24:
+                #
+                # `permissions=[]` is the least-privilege posture ADR-061 tells callers
+                # to state, and it is identical to the default. Refusing it made the
+                # method non-idempotent — succeed once, hard-fail on every re-run — and
+                # produced the message "the 0 permission(s) you passed were NOT applied".
+                # `ensure_bucket` treats `None` and `[]` identically and always has.
+                #
+                # And this sat AFTER `ensure_attributes`, so it claimed "nothing was
+                # written" having already created attributes on the live collection.
+                # A refusal that has already written is not a refusal.
+                if permissions:
+                    # A caller stating a non-empty grant is asking for it to be applied.
+                    # Appwrite fixes grants at creation, so on this branch nothing can
+                    # be. Returning success here is C-291's exact shape — "reported OK
+                    # while writing nothing" — on the security-relevant argument, in the
+                    # method that was fixed for C-291 in #473.
                     return OperationResult(
                         success=False,
                         error=(
@@ -326,6 +332,12 @@ class AppwriteProvisioner:
                         ),
                         code="PERMISSIONS_NOT_APPLICABLE",
                     )
+
+                attr_result = self.ensure_attributes(
+                    db_id, collection["$id"], metadata or {}
+                )
+                if not attr_result.success:
+                    return attr_result
 
                 return OperationResult(
                     success=True,

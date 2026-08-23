@@ -96,22 +96,33 @@ python -m views_pipeline_core.modules.appwrite.provisioning ensure-collection \
 ```
 
 ```python
-# A deliberately wider grant, stated where the reason is visible. Note the role: this
-# grants every AUTHENTICATED user of the project, not the public.
+# A deliberately wider grant, stated where the reason is visible. `team:` scopes it to a
+# named group; `any`, `guests` and `users` are all reachable without authenticating and
+# the repo's guard fails on every one of them.
 provisioner.ensure_collection(
     metadata={},
-    # Read access for the internal dashboard, agreed <date>, ticket #NNN.
-    permissions=[Permission.read(Role.users())],
+    # Read access for the analysis team's dashboard, agreed <date>, ticket #NNN.
+    permissions=[Permission.read(Role.team("analysts"))],
 )
 ```
 
-**This example previously used `Role.any()`.** That was wrong to print in a document
-headed *Examples of Correct Usage*: `Role.any()` is the unauthenticated public, and it is
-the exact grant this class was changed to stop producing. A contributor copying it would
-have shipped an open partner collection — and until 2026-08-22 the guard could not see it,
-because it only inspected raw `create_*` calls and not this API. Both are fixed; the
-example is corrected here because a CIC that demonstrates the defect is worse than one
-that omits the case.
+**This example has been wrong twice, in the same place, and the history is the point.**
+
+It first printed `Role.any()` — the unauthenticated public, and the exact grant this class
+was changed to stop producing. That was corrected on 2026-08-22 to `Role.users()`, with a
+note explaining that it grants *"every AUTHENTICATED user of the project, not the public"*.
+
+**That note was false.** The installed SDK's own docstring reads *"Grants access to any
+authenticated **or anonymous** user"*, and an anonymous session needs only the project id.
+`ROLES_MEANING_UNAUTHENTICATED` now contains `users`, so a contributor copying the second
+version into this package hits a red suite — and a contributor copying it into a sibling
+repo, which the guard does not scan, ships an open partner collection. ADR-061 lists
+`Role.users()` under *Alternatives rejected* and has since it was written; the CIC
+recommended what the ADR refused.
+
+Two corrections in three days, in a section headed *Examples of Correct Usage*, both
+narrowing what "public" means and both still too wide. If a third is needed, the honest
+move is to delete the example rather than narrow it again.
 
 ## 9. Examples of Incorrect Usage
 

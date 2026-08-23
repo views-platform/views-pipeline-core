@@ -74,8 +74,27 @@ def parse_grant(raw: str) -> Optional[tuple]:
     an unknown, and an unknown must reach `indeterminate` rather than be dropped from
     the tally as though it granted nothing.
     """
-    match = _GRANT.match(raw or "")
+    if not isinstance(raw, str):
+        # A non-string element used to raise TypeError out of `re.match`. Because the
+        # unparseable tally sat inside `_read_container`'s try, that raise deleted the
+        # WHOLE container from the report — its readable `read("any")` grants included.
+        # An open container became invisible, not merely demoted. Found 2026-08-24.
+        return None
+    match = _GRANT.match(raw)
     return (match.group(1).lower(), match.group(2).lower()) if match else None
+
+
+def role_is_unauthenticated(role: str) -> bool:
+    """Is this role reachable without authenticating?
+
+    Matches on the leading segment. Appwrite's roles take a `role/status` form —
+    `Role.users("unverified")` emits `users/unverified`, verified against the installed
+    SDK — and an exact-string test read that as an unknown, narrow role: clean, exit 0.
+    That is the `guests` miss one spelling over, and it is the spelling a widening caller
+    is most likely to write, because the status argument is the reason to call
+    `Role.users()` with an argument at all.
+    """
+    return role.split("/", 1)[0] in ROLES_MEANING_UNAUTHENTICATED
 
 
 @dataclass
@@ -104,7 +123,7 @@ class ContainerPermissions:
         found = []
         for raw in self.grants:
             parsed = parse_grant(raw)
-            if parsed and parsed[1] in ROLES_MEANING_UNAUTHENTICATED:
+            if parsed and role_is_unauthenticated(parsed[1]):
                 found.append(parsed[0])
         return found
 
@@ -179,13 +198,24 @@ def _read_container(
             )
         grants = list(declared)
         security_flag = raw.get(security_key)
-        unparseable = [g for g in grants if parse_grant(g) is None]
     except Exception as e:  # noqa: BLE001 - any failure must be recorded, not swallowed
         report.indeterminate.append(
             f"get_{kind}({container_id}) failed: {e} — permissions UNKNOWN, "
             f"which is not the same as locked down"
         )
         return
+
+    # Deliberately OUTSIDE the try above. `parse_grant` is now total, but the principle
+    # is the point: a tally of what could not be read must never be able to discard what
+    # WAS read. When this sat inside the try, one malformed element removed the container
+    # from the report entirely — grants, verdict and all.
+    unparseable = [g for g in grants if parse_grant(g) is None]
+    if unparseable:
+        report.indeterminate.append(
+            f"{kind} {container_id}: {len(unparseable)} permission string(s) could not "
+            f"be parsed: {unparseable} — treated as unknown, not empty. The grants that "
+            f"WERE readable are still reported below."
+        )
 
     if security_flag is None:
         report.indeterminate.append(
@@ -200,11 +230,6 @@ def _read_container(
         security_flag=security_flag,
         unparseable=unparseable,
     )
-    if container.unparseable:
-        report.indeterminate.append(
-            f"{kind} {container_id}: {len(container.unparseable)} permission string(s) "
-            f"could not be parsed: {container.unparseable} — treated as unknown, not empty"
-        )
     report.containers.append(container)
 
 
@@ -227,15 +252,49 @@ def _read_items(file_manager, container: ContainerPermissions, report: Permissio
         list_all_files,
     )
 
-    if container.kind == "bucket":
-        items = list_all_files(file_manager, container.container_id, report)
-        noun = "file"
-    else:
-        items = list_all_documents(file_manager, report)
-        noun = "document"
+    from views_pipeline_core.modules.appwrite.audit.walk import unique_by_id
+
+    try:
+        if container.kind == "bucket":
+            items = list_all_files(file_manager, container.container_id, report)
+            noun = "file"
+        else:
+            items = list_all_documents(file_manager, report)
+            noun = "document"
+    except Exception as e:  # noqa: BLE001 - a walk fault must be recorded, not raised
+        # `_read_container` wraps its payload handling for exactly this reason and says
+        # why: an uncaught raise exits 1, which this module defines as "a container IS
+        # open". `_read_items` was added without the same wrapper.
+        report.indeterminate.append(
+            f"{container.kind} {container.container_id}: could not list its items: {e} "
+            f"— per-item permissions UNKNOWN"
+        )
+        return
+
+    # The only caller of these walks that skipped this. `walk.py` documents it as the
+    # sole detector of an offset-unstable page: a container shifting under concurrent
+    # writes returns `total` rows of which some are repeats and an equal number were
+    # never seen, so the count guard agrees with itself and says nothing. A file granted
+    # `read("any")` can be one of the never-seen rows.
+    items = unique_by_id(items, report, noun)
 
     for item in items:
-        grants = item.get("$permissions") or []
+        if not isinstance(item, dict):
+            report.indeterminate.append(
+                f"{noun} record is {type(item).__name__}, not a mapping — cannot read "
+                f"its permissions"
+            )
+            continue
+        if "$permissions" not in item:
+            # `or []` stood here, which turned an absent key, None, 0, "" and {} into
+            # "carries no grant" — the same conflation `_read_container` raises KeyError
+            # for 60 lines above, reintroduced on the half that covers production.
+            report.indeterminate.append(
+                f"{noun} {item.get('$id')}: $permissions absent from the record — an "
+                f"absent key is not an empty permission list"
+            )
+            continue
+        grants = item["$permissions"]
         if not isinstance(grants, list):
             report.indeterminate.append(
                 f"{noun} {item.get('$id')}: $permissions is "
@@ -249,7 +308,7 @@ def _read_items(file_manager, container: ContainerPermissions, report: Permissio
                 report.indeterminate.append(
                     f"{noun} {item.get('$id')}: unreadable grant {raw!r}"
                 )
-            elif parsed[1] in ROLES_MEANING_UNAUTHENTICATED:
+            elif role_is_unauthenticated(parsed[1]):
                 open_verbs.append(parsed[0])
         if open_verbs:
             container.open_items.append((str(item.get("$id")), sorted(set(open_verbs))))
@@ -308,14 +367,17 @@ def render_permissions_report(report: PermissionsReport) -> str:
         if not container.grants:
             if container.security_flag is False:
                 lines.append("  permissions: [] — reachable only with an API key")
-            else:
-                # True, or None meaning the flag could not be read. Both mean this tool
-                # cannot claim key-only access: per-item grants are either known to be
-                # possible, or of unknown possibility.
+            elif container.security_flag is True:
                 lines.append(
-                    f"  permissions: [] at the container — but {flag_name} is "
-                    f"{container.security_flag!r}, so an individual item may carry its "
-                    f"own grant. THIS TOOL DOES NOT READ PER-ITEM PERMISSIONS."
+                    f"  permissions: [] at the container, and {flag_name} is on — so "
+                    f"per-item grants apply, and {len(container.open_items)} of the "
+                    f"items read carry one."
+                )
+            else:
+                lines.append(
+                    f"  permissions: [] at the container — but {flag_name} could not be "
+                    f"read, so whether per-item grants apply is UNKNOWN and they were "
+                    f"not inspected."
                 )
         else:
             lines += [f"  permission: {g}" for g in container.grants]
@@ -373,12 +435,33 @@ def render_permissions_report(report: PermissionsReport) -> str:
     return "\n".join(lines)
 
 
-def permissions_exit_code(report: PermissionsReport) -> int:
-    """0 nothing open, 1 something open, 2 could not complete.
+#: A finding outranks an incomplete read. Both are reported in the text, but a status
+#: code is one number and it must carry the actionable half.
+EXIT_CLEAN, EXIT_OPEN, EXIT_INCOMPLETE = 0, 1, 2
 
-    Ordering matters: `indeterminate` wins. A run that could not read one container and
-    found the other locked down has not established that nothing is open.
+
+def permissions_exit_code(report: PermissionsReport) -> int:
+    """0 nothing open · 1 something open · 2 could not complete.
+
+    **A finding wins over an incomplete read**, which is the opposite of what this
+    returned until 2026-08-24. `indeterminate` used to win unconditionally, so a run that
+    found an open container AND hit one unparseable grant exited 2 — and the operator
+    guide teaches 2 as *"usually the key lacks a read scope; get a key that can read
+    collections and run it again"*. A live open container was reported to any cron job or
+    CI step as a credentials chore.
+
+    Indeterminate notes are cheap: an absent security flag, one unreadable grant string,
+    a record with no `$id`, a walk hitting the page guard. Any of them would have masked
+    a finding. The renderer was fixed for exactly this on 2026-08-22 — *"one condition
+    must never hide another"* — and the fix was applied to the human-readable half only.
+
+    2 still means *incomplete*, and an incomplete run that found nothing open has NOT
+    established that nothing is open. That is the C-232 rule and it is unchanged: only a
+    positive finding is allowed to outrank it, because a positive finding is already the
+    louder answer.
     """
+    if report.open_containers:
+        return EXIT_OPEN
     if report.indeterminate:
-        return 2
-    return 1 if report.open_containers else 0
+        return EXIT_INCOMPLETE
+    return EXIT_CLEAN

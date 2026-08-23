@@ -59,7 +59,8 @@ collection crafd
   documentSecurity: False
   permissions: [] — reachable only with an API key
 
-VERDICT: no container grants anything to `any`. Every container read successfully.
+VERDICT: no container grants anything to an unauthenticated role, and everything
+this tool can check was checked.
 ```
 
 Exit code **0**. `permissions: []` is not "nobody can use it" — our own system key still
@@ -90,7 +91,8 @@ COULD NOT DETERMINE (1):
   - get_collection(crafd) failed: missing scope (collections.read) — permissions UNKNOWN,
     which is not the same as locked down
 
-VERDICT: INCOMPLETE — at least one container could not be read.
+VERDICT: INCOMPLETE — 1 thing(s) could not be determined, listed at the top.
+This is not an all-clear.
 ```
 
 Exit code **2**. **Do not read this as "fine".** The tool could not look. Usually the key
@@ -125,12 +127,22 @@ way, and whether anything suggests they were used.
 
 **Buckets look different from collections.** A bucket's flag is `fileSecurity`, a
 collection's is `documentSecurity`. Both mean roughly "can individual items carry their own
-permissions". With no container-level grants, neither matters much — but the tool prints
-whichever applies so the output matches what the console shows you.
+permissions". **When one of them is ON and the container grants nothing, per-item permissions are the
+only thing that can open it** — so the tool reads the individual files and documents too,
+and says so. When it is OFF, per-item grants are ignored by Appwrite and the tool does not
+read them. When the tool cannot tell which, it says that instead of guessing.
 
-**`users` is not `any`.** A row saying `read("users")` grants every logged-in user of the
-project. Narrower than public, still more than we need. The tool shows it but does not flag
-it as open, because treating the two as identical would make the tool cry wolf.
+**`users` IS effectively public — this section said the opposite until 2026-08-24.** A row
+saying `read("users")`, or `read("users/unverified")`, is flagged as open and exits 1. The
+reason is in Appwrite's own documentation: that role grants *"any authenticated **or
+anonymous** user"*, and anyone can open an anonymous session with just the project ID.
+
+This guide previously told you the tool shows `users` without flagging it. If you saw a
+`users` row flagged and came here to check whether the tool was over-reporting: **it was
+not.** Treat it exactly like `Any`.
+
+**What is genuinely narrower:** a row naming a team or a specific user — `team:analysts`,
+`user:abc`. Those are real narrowings, and the tool shows them without flagging them.
 
 ---
 

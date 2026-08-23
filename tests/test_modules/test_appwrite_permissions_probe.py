@@ -252,9 +252,18 @@ def test_a_failed_read_is_not_a_clean_verdict():
     assert "VERDICT: no container grants" not in rendered
 
 
-def test_indeterminate_outranks_an_open_finding_in_the_exit_code():
-    """Finding one open container while failing to read another has not established the
-    scope of the exposure. 2 says *incomplete*, and that is the honest code."""
+def test_a_finding_outranks_an_incomplete_read_in_the_exit_code():
+    """Reversed on 2026-08-24, and the reversal is the point.
+
+    This asserted the opposite: that any indeterminacy demoted an open container to
+    exit 2. But the operator guide teaches 2 as *"usually the key lacks a read scope; get
+    a key that can read collections and run it again"* — so a live open container was
+    reported to a cron job as a credentials chore. Indeterminate notes are cheap; any one
+    of them would have masked a finding.
+
+    Both facts are still printed. Only the single status number had to choose, and it
+    now carries the actionable half.
+    """
     manager = _manager(
         collection_result={"$permissions": OPEN_GRANTS, "documentSecurity": False},
         bucket_raises=AppwriteException("bucket not found"),
@@ -262,9 +271,27 @@ def test_indeterminate_outranks_an_open_finding_in_the_exit_code():
 
     report = read_permissions(manager)
 
-    assert report.open_containers, "the open collection is still reported"
+    assert report.open_containers
+    assert report.indeterminate
+    assert permissions_exit_code(report) == 1, "a finding is the louder answer"
+
+    rendered = report.render()
+    assert "VERDICT: OPEN" in rendered
+    assert "INCOMPLETE" in rendered, "the incomplete half must still be stated in the text"
+
+
+def test_an_incomplete_read_that_found_nothing_open_is_still_not_clean():
+    """The half of the old rule that must survive. C-232: a run that could not look has
+    not established that there is nothing to see."""
+    manager = _manager(
+        collection_result={"$permissions": [], "documentSecurity": False},
+        bucket_raises=AppwriteException("missing scope"),
+    )
+
+    report = read_permissions(manager)
+
+    assert not report.is_clean
     assert permissions_exit_code(report) == 2
-    assert "INCOMPLETE" in report.render()
 
 
 def test_an_unparseable_permission_string_becomes_an_unknown_not_an_empty():
@@ -365,21 +392,55 @@ def test_no_container_id_is_unknown_not_clean():
     assert permissions_exit_code(report) == 2
 
 
-def test_an_empty_list_under_item_security_does_not_claim_key_only_access():
-    """`fileSecurity=True` is the EXPECTED production state — `ensure_bucket` defaults it.
+def test_an_empty_container_under_item_security_says_the_items_were_read():
+    """This test asserted the opposite until 2026-08-24, and pinned a false string.
 
-    With it on, per-item permissions are additive to the container's, so an individual
-    file can carry `read("any")` while the bucket carries nothing. This probe does not
-    read per-item permissions and must not print "reachable only with an API key" over a
-    question it never asked. All three live buckets are in exactly this state.
+    It required the output to contain "THIS TOOL DOES NOT READ PER-ITEM PERMISSIONS" —
+    on exactly the containers where `_read_items` had just read them. The condition that
+    prints that line is the same condition that triggers the walk. So the operator was
+    told the question was never asked, on the runs where it was, and whoever fixed the
+    message would have seen this test go red and reverted.
+
+    `fileSecurity=True` with no container grants is the state of all three live buckets,
+    so this is the sentence they would actually produce.
     """
     manager = _manager(
         collection_result={"$permissions": [], "documentSecurity": False},
         bucket_result={"$permissions": [], "fileSecurity": True},
+        files=[{"$id": "shard_a", "$permissions": []}],
     )
+
     rendered = read_permissions(manager).render()
-    assert "DOES NOT READ PER-ITEM PERMISSIONS" in rendered
-    assert "reachable only with an API key" not in rendered.split("bucket crafd_forecasts")[1]
+    bucket_block = rendered.split("\nbucket crafd_forecasts\n")[1]
+
+    assert "per-item grants apply" in bucket_block
+    assert "reachable only with an API key" not in bucket_block, (
+        "with per-item security on, the container's empty list is not the whole answer"
+    )
+    assert "DOES NOT READ PER-ITEM PERMISSIONS" not in rendered, (
+        "it does read them — claiming otherwise makes a true all-clear read as unverified"
+    )
+
+
+def test_an_unreadable_security_flag_says_the_items_were_NOT_read():
+    """The third state, and the one that must not be collapsed into either other.
+
+    With the flag absent the walk does not run, so the tool has neither checked per-item
+    grants nor established that they cannot apply. It must say so rather than borrowing
+    either of the other two sentences.
+    """
+    manager = _manager(
+        collection_result={"$permissions": [], "documentSecurity": False},
+        bucket_result={"$permissions": []},   # no fileSecurity key at all
+    )
+
+    report = read_permissions(manager)
+    bucket_block = report.render().split("\nbucket crafd_forecasts\n")[1]
+
+    assert "could not be read" in bucket_block
+    assert "not inspected" in bucket_block
+    assert not report.is_clean and permissions_exit_code(report) == 2
+
 
 # ----------------------------------------------------------------------------------
 # The grant parser, and the substrate it models

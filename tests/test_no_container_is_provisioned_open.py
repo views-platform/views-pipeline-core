@@ -70,8 +70,13 @@ SCANNED = [REPO_ROOT / "views_pipeline_core", REPO_ROOT / "tools"]
 #: the same unauthenticated population. Treating only `any` as open let a container granted
 #: to `guests` read as a full all-clear (found 2026-08-22).
 #:
-#: `users` is deliberately NOT here: it means every authenticated user of the project, a
-#: real but lesser exposure, and collapsing the two would make the guard cry wolf.
+#: `users` IS here, and this comment said the opposite while sitting directly above a set
+#: containing it. The installed SDK reads `Role.users()` as *"Grants access to any
+#: authenticated **or anonymous** user"*, and an anonymous session needs only the project
+#: id. Roles are matched on the segment before `/`, because `Role.users("unverified")`
+#: emits `users/unverified` and an exact-string test read that as a narrow, unknown role.
+#:
+#: Genuinely narrower roles — `team:...`, `user:...` — are shown and not flagged.
 ROLES_MEANING_UNAUTHENTICATED = frozenset({"any", "guests", "users"})
 
 
@@ -113,8 +118,17 @@ def _permission_arguments(tree: ast.AST) -> list[tuple]:
             if fn.lineno <= node.lineno <= (fn.end_lineno or fn.lineno):
                 if enclosing is None or fn.lineno > enclosing.lineno:
                     enclosing = fn
-        is_container_call = name in _POSITIONAL_PERMISSIONS or name.endswith(
-            ("_collection", "_bucket", "_document", "_file")
+        # Any call whose name matches something the derived map knows, or any call on a
+        # `databases`/`storage` receiver. The previous gate was a four-suffix tuple —
+        # a hand-list one layer above the prefix hand-list it replaced, and
+        # `create_documents` (the SDK's plural bulk API) and `createCollection` walked
+        # through it.
+        receiver = getattr(getattr(node.func, "value", None), "id", "") or ""
+        attr_chain = getattr(getattr(node.func, "value", None), "attr", "") or ""
+        is_container_call = (
+            name in _POSITIONAL_PERMISSIONS
+            or receiver in _CONTAINER_RECEIVERS
+            or attr_chain in _CONTAINER_RECEIVERS
         )
         for kw in node.keywords:
             if kw.arg == "permissions":
@@ -165,8 +179,9 @@ def _derive_positional_permissions() -> dict:
     # the guard silent — deriving only from the SDK misses the wrapper the CIC tells
     # callers to use. Imported defensively: this file must still run if the module moves.
     try:
+        from views_pipeline_core.modules.appwrite.file import AppWriteFileModule
         from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
-        services.append(AppwriteProvisioner)
+        services.extend([AppwriteProvisioner, AppWriteFileModule])
     except ImportError:  # pragma: no cover - the appwrite extra is optional
         pass
 
@@ -182,6 +197,11 @@ def _derive_positional_permissions() -> dict:
                 found[name] = params.index("permissions")
     return found
 
+
+#: Receivers whose methods address Appwrite containers. Two names, both from the SDK's
+#: own service objects, so a call on either is treated as container-shaped whatever the
+#: method is called.
+_CONTAINER_RECEIVERS = frozenset({"databases", "storage"})
 
 #: Derived at import from the installed SDK — see above. Empty only if the appwrite extra
 #: is absent, in which case `test_the_positional_map_is_derived_and_populated` fails
@@ -210,7 +230,12 @@ def _role_of(element: ast.AST):
                 return inner.func.attr
             return None
         if isinstance(inner, ast.Constant):
-            return str(inner.value).lower()
+            # Only a string is a role. `Permission.read(None)` used to resolve to the
+            # confident role "none" and the site was reported clean — the same fabricated
+            # certainty the branch above was fixed for, on the other argument shape.
+            if isinstance(inner.value, str):
+                return inner.value.lower()
+            return None
         return None
     if isinstance(element, ast.Constant) and isinstance(element.value, str):
         parsed = _parse_wire_grant(element.value)
@@ -283,12 +308,18 @@ def _name_resolves_closed(fn: ast.AST, name: str) -> bool:
             if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) \
                     and node.func.value.id == name and node.func.attr not in _READ_ONLY_METHODS:
                 return False
-            # Everything the name is handed to EXCEPT the `permissions=` slot itself.
-            # Passing it there is the thing being measured, not a way of changing it —
-            # counting it disqualified every legitimate pass-through in the repo.
-            handed_over = list(node.args) + [
-                kw.value for kw in node.keywords if kw.arg != "permissions"
-            ]
+            # Everything the name is handed to EXCEPT the permissions slot itself, in
+            # either calling form. Passing it there is the thing being measured, not a
+            # way of changing it. Excluding only the keyword form left the positional
+            # form disqualifying every legitimate forward — `upload_file(bucket, path,
+            # id, permissions, ...)` in `file.py` reported itself unresolvable.
+            called = node.func.attr if isinstance(node.func, ast.Attribute) else (
+                node.func.id if isinstance(node.func, ast.Name) else None
+            )
+            skip_index = _POSITIONAL_PERMISSIONS.get(called)
+            handed_over = [
+                arg for i, arg in enumerate(node.args) if i != skip_index
+            ] + [kw.value for kw in node.keywords if kw.arg != "permissions"]
             for arg in handed_over:
                 if isinstance(arg, ast.Name) and arg.id == name and not _is_wrapping_call(node):
                     return False
@@ -399,7 +430,10 @@ def open_grants(path: Path) -> list[str]:
     offenders = []
     for name, value, lineno, enclosing in _permission_arguments(tree):
         roles, resolvable = _roles_granted(value, enclosing, lineno)
-        open_roles = sorted(set(roles) & ROLES_MEANING_UNAUTHENTICATED)
+        open_roles = sorted({
+            r for r in roles
+            if r.split("/", 1)[0] in ROLES_MEANING_UNAUTHENTICATED
+        })
         if resolvable and open_roles:
             offenders.append(f"{where}:{lineno} -> {name}(permissions granting {open_roles})")
     return offenders
