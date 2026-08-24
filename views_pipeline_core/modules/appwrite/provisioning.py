@@ -43,9 +43,19 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from appwrite.exception import AppwriteException
-from appwrite.permission import Permission
 from appwrite.query import Query
-from appwrite.role import Role
+
+# `Permission` and `Role` are deliberately NOT imported. This module grants nothing by
+# default (ADR-061), so a caller wanting a wider grant constructs it and passes it in,
+# where the reason for it is visible.
+#
+# That is a CONVENTION, not the enforcement. Nothing inspects this import list and the
+# import can be restored in one line. What actually prevents a container being created
+# open is `tests/test_no_container_is_provisioned_open.py`, which AST-walks every
+# `permissions=` argument and fails on any grant to a role reachable without
+# authenticating. An earlier version of
+# this comment credited the missing import with the protection — a claim the evidence made
+# consistent but did not support (C-273).
 
 from views_pipeline_core.modules.appwrite.file import (
     INITIAL_RETRY_DELAY,
@@ -210,8 +220,33 @@ class AppwriteProvisioner:
         collection_name: str = None,
         collection_id: str = None,
         database_id: str = None,
+        permissions: List[str] = None,
     ) -> OperationResult:
-        """Create the metadata collection (and its database) if they do not exist."""
+        """Create the metadata collection (and its database) if they do not exist.
+
+        **`permissions` defaults to `[]` — least privilege (C-292, ADR-061).** An empty
+        list is not "no access": a server API key bypasses container permissions, and
+        every consumer on this platform authenticates with one. It means *only* the key.
+
+        Until 2026-08-14 this method hardcoded
+        `Permission.{read,create,update,delete}(Role.any())` with `document_security=False`,
+        making every collection it created readable, writable and deletable by anyone
+        holding the project id — which is not a secret. `ensure_bucket`, in this same
+        class, has always defaulted to `permissions=[]`; the two halves of one tool
+        disagreed, and nobody chose it. The grant was carried verbatim through #331
+        under the rule that a relocation must not change behaviour, and predates it.
+
+        It was not merely reachable by CLI. Before #331 this creation path ran from
+        `upload_file_with_metadata`, `upload_file_from_bytes_with_metadata` and
+        `check_file_exists_by_hash` — so an ordinary delivery to a new partner created
+        an open collection automatically.
+
+        **Widening is now something a caller states**, and stating it should come with a
+        reason. This changes nothing already provisioned: Appwrite applies these grants
+        at creation, and the existing-collection branch below does not re-apply them.
+        Inspect live containers with
+        `python -m views_pipeline_core.modules.appwrite.audit --permissions`.
+        """
         db_id = database_id or self.config.database_id
         coll_name = collection_name or self.config.collection_name
         coll_id = collection_id or self.config.collection_id
@@ -266,6 +301,39 @@ class AppwriteProvisioner:
                         ),
                         code="COORDINATE_MISMATCH",
                     )
+                # BEFORE any write, and gated on a non-empty list rather than on
+                # `is not None`. Two corrections, both found 2026-08-24:
+                #
+                # `permissions=[]` is the least-privilege posture ADR-061 tells callers
+                # to state, and it is identical to the default. Refusing it made the
+                # method non-idempotent — succeed once, hard-fail on every re-run — and
+                # produced the message "the 0 permission(s) you passed were NOT applied".
+                # `ensure_bucket` treats `None` and `[]` identically and always has.
+                #
+                # And this sat AFTER `ensure_attributes`, so it claimed "nothing was
+                # written" having already created attributes on the live collection.
+                # A refusal that has already written is not a refusal.
+                if permissions:
+                    # A caller stating a non-empty grant is asking for it to be applied.
+                    # Appwrite fixes grants at creation, so on this branch nothing can
+                    # be. Returning success here is C-291's exact shape — "reported OK
+                    # while writing nothing" — on the security-relevant argument, in the
+                    # method that was fixed for C-291 in #473.
+                    return OperationResult(
+                        success=False,
+                        error=(
+                            f"Collection '{coll_id}' already exists, and permissions are "
+                            f"applied only at creation — the {len(permissions)} "
+                            f"permission(s) you passed were NOT applied and nothing was "
+                            f"written. Change them deliberately in the Appwrite console, "
+                            f"or call this without `permissions` if you only meant to "
+                            f"ensure the schema. Inspect what is actually there with "
+                            f"`python -m views_pipeline_core.modules.appwrite.audit "
+                            f"--permissions`."
+                        ),
+                        code="PERMISSIONS_NOT_APPLICABLE",
+                    )
+
                 attr_result = self.ensure_attributes(
                     db_id, collection["$id"], metadata or {}
                 )
@@ -286,12 +354,12 @@ class AppwriteProvisioner:
                 database_id=db_id,
                 collection_id=coll_id,
                 name=coll_name,
-                permissions=[
-                    Permission.read(Role.any()),
-                    Permission.create(Role.any()),
-                    Permission.update(Role.any()),
-                    Permission.delete(Role.any()),
-                ],
+                # Least privilege by default — see this method's docstring and ADR-061.
+                # `document_security=False` is retained deliberately: with no
+                # container-level grants there is nothing for per-document permissions
+                # to narrow, and flipping it would change how every existing document
+                # is evaluated for no benefit we can name.
+                permissions=[] if permissions is None else list(permissions),
                 document_security=False,
                 enabled=True,
             )

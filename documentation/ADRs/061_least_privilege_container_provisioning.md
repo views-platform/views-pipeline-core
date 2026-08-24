@@ -1,0 +1,280 @@
+# ADR-061: Lock partner storage by default, and make anyone who opens it say so
+
+**Status:** Implemented
+**Date:** 2026-08-14
+**Implementation Date:** 2026-08-14
+**Deciders:** Simon, VIEWS platform team
+**Concern:** C-292 · **Supersedes the behaviour carried through:** #331
+
+---
+
+## What this is about
+
+When we deliver a forecast to a partner — FAO, CRAF'd — two things go across to a
+storage service called Appwrite:
+
+- **the file itself**, which sits in a *bucket*: a folder
+- **an index card** describing that file, which sits in a *collection*: a card drawer
+  beside the folder
+
+Partners find files by reading the index cards.
+
+## What was wrong
+
+**The folders were locked. The card drawers were open to the public.** Anyone who knew our
+project's ID — which is not a password, and sits in plain text in our configuration —
+could read, alter or delete any partner's index cards.
+
+The same piece of setup code created both. It locked one and left the other open, and
+nobody ever chose that: the open setting was copied forward, years ago, by a change that
+was deliberately trying not to alter any behaviour.
+
+Worse, it did not need anyone to run a setup command. Until 31 July, the ordinary act of
+sending a file to a new partner **created the card drawer as a side effect** — so it
+happened silently, as part of normal work, for about nine months.
+
+And we could not have found out. Nothing we owned could read a permission and tell us
+whether a real drawer was locked or open.
+
+## It was not theoretical — it was measured
+
+On **14 August 2026** someone checked, from the views-models side. A request carrying only
+our project ID — no password, no login, nothing anyone would call a credential — returned:
+
+| card drawer | anonymous request | what it permitted |
+|---|---|---|
+| the FAO one | **all 111 rows came back** | read, alter and delete, by anyone |
+| the internal one | **all 461 rows came back** | read, alter and delete, by anyone |
+| the CRAF'd one | refused | nothing — locked |
+
+Both open drawers were closed that same day. A follow-up the next day checked whether
+anything had been changed:
+
+| card drawer | cards altered since they were created |
+|---|---|
+| the FAO one | **none** |
+| the internal one | **11**, all cleared by checking their contents against their own record |
+| the CRAF'd one | none |
+
+**An earlier version of this paragraph said no card had been altered on either. That was
+wrong** — it read "the two delivery collections are untouched" in the source and did not
+notice that the two named there were the FAO and CRAF'd ones, not the internal one. Same
+direction as the original error, understating exposure, from the same evidence, in the
+paragraph written to correct it. The eleven were investigated and explained; that is not
+the same as there having been none.
+
+The CRAF'd drawer was clean because it was made *after* the code stopped creating drawers
+automatically. That detail matters, because reasoning from the one clean drawer to the
+other two is exactly the mistake this record made a week later: an inspection carried out
+after the fix was read as proof that nothing had ever been wrong. Recorded as C-300 here,
+and as C-83 in views-appwrite, which measured it.
+
+## What was decided
+
+**Storage we create is locked by default. Opening it up is something the requester has to
+ask for explicitly, in the code, where their reason is visible.**
+
+Three things follow:
+
+1. **New card drawers are created locked.** Locked means *only our own system key can
+   reach them* — that key is what our pipeline and the partner-facing service both
+   already use, so nothing about delivery changes.
+2. **There is now a command that tells you what a real drawer permits.** It only looks; it
+   cannot change anything. If it is unable to check, it says so rather than reporting that
+   all is well.
+3. **An automatic test refuses any future change that creates open storage.**
+
+## What was deliberately not decided
+
+**Drawers that already exist are untouched.** The setting is applied when a drawer is
+created, so nothing live moved. Whether any existing drawer is open is still an open
+question, and answering it means someone with access looking — which is why the command
+in point 2 exists.
+
+Also left alone: how narrow our access key itself should be, and a per-card permission
+setting we do not use.
+
+## Context — the same thing again, for whoever maintains this
+
+Everything below is the engineering record. It is written for someone working in this
+code, and it repeats what is above in the vocabulary of the codebase.
+
+**The one question this ADR answers:** what access should a container created by this repo
+grant by default? Not in scope: what an already-provisioned container should permit (an
+operator action against a partner-facing store), API key scope narrowing, and whether
+`document_security` should be `True`.
+
+`AppwriteProvisioner.ensure_collection` created every metadata collection with:
+
+```python
+permissions=[
+    Permission.read(Role.any()),
+    Permission.create(Role.any()),
+    Permission.update(Role.any()),
+    Permission.delete(Role.any()),
+],
+document_security=False,
+```
+
+`Role.any()` is **anyone**, including unauthenticated callers holding only the project id.
+`document_security=False` means those grants govern every document with no per-document
+narrowing. So every collection this tool created was readable, writable and **deletable**
+by anyone who could reach the endpoint.
+
+**Two things that sentence depends on, stated rather than assumed.**
+
+*Who can reach the endpoint.* Our default is `https://cloud.appwrite.io/v1`
+(`modules/appwrite/file.py:41`) — Appwrite's hosted service, on the public internet, with
+no network restriction of ours in front of it. So "anyone who could reach the endpoint"
+means anyone, from anywhere. If the platform ever moves to a self-hosted or
+network-restricted instance, this sentence needs re-checking rather than re-reading.
+
+*Why the project id is not a credential.* Not because it appears in browser code — **there
+is no client-side code anywhere on this platform**; no `package.json` and no JS, TS or HTML
+touching Appwrite in any of the 24 repos. It is not a credential because it is carried as
+an ordinary environment variable across five repos, CI configuration and operator shells,
+and has never been handled as a secret. The API key is the secret; the project id
+identifies which project the key is for.
+
+Three things made this worse than a bad default.
+
+**`ensure_bucket`, in the same class, has always defaulted to `permissions=[]`** with
+`file_security=True`, and the CLI never overrides either. One command produced a locked
+bucket and an open collection. Nobody chose that; the two halves simply never met.
+
+**It was not CLI-only.** Before #331 (2026-07-31), `create_metadata_collection_if_not_exists`
+was called from `upload_file_with_metadata`, `upload_file_from_bytes_with_metadata` and
+`check_file_exists_by_hash` — the ordinary delivery path. The grant dates to commit
+`f0351d3` ("add aw+tests", 2025-10-22), which introduced the Appwrite module. For roughly nine months, **an ordinary delivery to a new partner created an
+open collection automatically.**
+
+**Nothing could see it.** The word `permission` appeared in no test in this repo, and
+`modules/appwrite/audit/` — the package whose entire job is reading this seam — never read
+or reported a permission. We shipped something that created open containers and owned
+nothing that could tell us whether any live container was open.
+
+The provenance is #331: the grant was relocated verbatim under that PR's stated rule that
+a relocation must not change behaviour. That rule was right and it is why this survived —
+a faithful move carries a defect faithfully.
+
+**ADR-046 has argued for least privilege throughout** — the phrase appears four times in
+it, every one about API key *scopes* and none about container permissions. Two are quoted
+here as representative: "create scopes, which blocked least privilege", and the §5
+supersession note that auto-bucket creation "blocked least privilege platform-wide". The
+count is reproducible with `grep -ci 'least privilege' documentation/ADRs/046*.md`. The
+ADR and the code have disagreed since #331, in the same part of the system, about the same
+principle.
+
+## Decision
+
+**A container this repo provisions grants nothing by default. Widening is an argument the
+caller passes, and a reason the caller records.**
+
+`ensure_collection` gains `permissions: List[str] = None`, applied as
+`permissions=[] if permissions is None else list(permissions)` — the same sentinel shape
+`ensure_bucket` already uses, so the two methods now have one posture.
+
+`Permission` and `Role` are **not imported** by `provisioning.py`. A caller wanting a wider
+grant constructs it at the call site, where the reason for it is visible.
+
+**That import removal is a convention, not the enforcement — do not mistake one for the
+other.** Nothing inspects the import list, and the import can be restored in a single line.
+What actually prevents recurrence is
+`tests/test_no_container_is_provisioned_open.py`, which AST-walks every call in `views_pipeline_core/` and `tools/` that passes a
+`permissions=` argument and fails on any grant to a role reachable without
+authenticating.
+
+**It matched a `create_*` prefix until 2026-08-22, and the change matters more than the
+detail:** `upsert_collection` walked straight through the prefix, which is the hand-list
+failure this repo records as C-259 and C-294, inside the guard written to stop it. Scope is
+now derived from the argument itself. If you are looking for the thing that will stop you, that is the thing.
+(An earlier revision of this ADR, and of that test's own docstring, credited the missing
+import with the protection — a claim the evidence made consistent but did not support.
+Corrected 2026-08-21; recorded as an instance of C-273.)
+
+### An empty list is not "no access"
+
+This is the point most likely to be misread later. A **server API key bypasses container
+permissions**, and every consumer on this platform authenticates with one — verified
+across views-faoapi (`managers/appwrite/auth.py`, `client.set_key`), views-crafdapi,
+views-appwrite, views-models and views-postprocessing, swept for `set_session` /
+`create_anonymous_session` / `set_jwt` with zero hits. `Role.any()` was load-bearing for
+nothing.
+
+The empirical confirmation is in our own system rather than in documentation: **buckets
+have always been created with `permissions=[]` and deliveries to them work today.** Same
+project, same key, same endpoint.
+
+### `document_security` stays `False`
+
+Deliberate, and not an oversight. With no container-level grants there is nothing for
+per-document permissions to narrow, and flipping it would change how every existing
+document is evaluated for no benefit anyone can name. Revisit it if per-document access
+is ever actually wanted.
+
+## Consequences
+
+- **Nothing already provisioned changes.** Appwrite applies these grants at creation, and
+  the existing-collection branch does not re-apply them. Whether live containers are open
+  is a separate question, answered by the probe below and remediated — if needed — by an
+  operator.
+- **New partner onboarding is closed by default**, which matters now: #473 shipped the CLI
+  flags that make creating a partner collection easy.
+- **How you would know this decision was wrong.** It rests on one belief about the
+  substrate: *a server API key bypasses container permissions*. If that is false,
+  `permissions=[]` removes access that partners depend on. The symptom would be
+  **deliveries failing with authorization errors after 3.1.2** — and if you are reading
+  this because that is happening, this decision is the first thing to check, and reverting
+  is a one-line change to the default plus a re-provision. The belief is argued from our
+  own system rather than from documentation (see above), and every consumer was swept for
+  anonymous access across all repos and languages with zero hits — but it remains a belief
+  about someone else's platform, and it is written down here so the symptom has a path back
+  to the cause.
+- **We can now see.** `python -m views_pipeline_core.modules.appwrite.audit --permissions`
+  reports what a shelf's collection and bucket actually permit. It is read-only and has no
+  `--fix`, deliberately: a mutating tool pointed at partner-facing production is what
+  `tools/wipe_fao_shelf.py` and C-249/C-250 record going wrong.
+- **The probe distinguishes three outcomes**, not two — absent / read / **unreadable**. A
+  container whose permissions could not be read exits 2 and renders `INCOMPLETE`. A
+  security diagnostic that reported "nothing open" when it was merely not allowed to look
+  would be wrong in the reassuring direction.
+- **A guard enforces this**, deriving rather than listing: `tests/test_no_container_is_provisioned_open.py`
+  AST-walks every `permissions=` argument in `views_pipeline_core/` and `tools/`.
+  A grant it cannot statically resolve is reported as **unknown**, not passed over.
+- Widening now costs a caller an explicit argument. That is the intended cost.
+
+## Alternatives rejected
+
+**Leave it and document it.** What C-292 did yesterday, on the reasonable ground that
+partner-facing permissions should not be decided inside a hotfix. The delivery-path history
+found the next day changes the calculus: this was not a latent CLI hazard, it ran
+automatically for nine months.
+
+**Grant `Role.users()` instead.** Narrower, and still wrong — it grants every authenticated
+user of the project, which is not the same as "the pipeline". With key auth there is no
+reason to grant a role at all.
+
+**Tighten live containers in the same change.** Rejected on the boundary this repo's
+`CLAUDE.md` draws between decisions I make and decisions the operator makes: anything
+touching an external party is theirs. Altering a live container changes what a partner can
+reach, so it belongs to the operator — and only after looking at what is actually there.
+
+**Delete the parameter and hardcode `[]`.** Simpler, and it removes the ability to widen
+deliberately — so the next person needing a wider grant edits the library instead of stating
+their intent at the call site. `test_the_collection_default_is_least_privilege` pins the
+parameter for this reason.
+
+## Related
+
+- **C-292** — the concern this resolves for new containers; live containers remain open
+  until inspected
+- **ADR-046** — the Appwrite storage integration, which argued least privilege for the key
+  while the code granted `Role.any()` on the container
+- **ADR-047** — destination authority; local disk is authoritative, Appwrite is secondary
+- **C-232 / C-244 / C-249** — three past incidents in the risk register, all the same
+  shape: a check that could not tell "there is nothing there" from "I was not able to
+  look", and reported the reassuring one. They are why the probe has three outcomes rather
+  than two
+- **C-218** — the belief-mirroring suite at this seam; why the probe's parser is pinned
+  against real SDK output rather than a hand-written string
+- **#331** (the relocation that carried it), **#473** (the CLI flags that made it reachable)

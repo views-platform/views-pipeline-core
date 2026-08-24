@@ -23,7 +23,85 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.1.1] — unreleased
+## [3.1.2] — unreleased
+
+**A security release. Two production collections were readable and writable by anyone on
+the internet, and this is the fix at the root.**
+
+On **2026-08-14** an unauthenticated request carrying only the Appwrite project ID — no
+key, no session — returned **all 111 rows** of the FAO metadata collection and **all 461**
+of the internal forecasts collection. Both were granted
+`read/create/update/delete("any")` with `documentSecurity: false`. Both were closed the
+same day. A follow-up on the 15th found the FAO collection untouched since creation and
+eleven altered rows in the internal one, each subsequently cleared against its own
+provenance.
+
+The grants came from this package: `AppwriteProvisioner.ensure_collection` hardcoded them,
+and until #331 the ordinary delivery path called it as a side effect of uploading a file.
+The exposure window ran from 2025-10-22 to 2026-08-14.
+
+**If you provision Appwrite containers with this package, check yours** — see *Operators*
+below. Recorded as views-appwrite C-83 (Tier 1) and views-pipeline-core C-292.
+
+### Changed
+
+- **`ensure_collection` provisions least-privilege by default** (ADR-061, C-292). It
+  hardcoded `Permission.{read,create,update,delete}(Role.any())` with
+  `document_security=False`, so every metadata collection it created was readable,
+  writable and **deletable** by anyone holding the project id — which is not a secret.
+  `ensure_bucket`, in the same class, has always defaulted to `permissions=[]`; one tool
+  had two postures and nobody chose it. The default is now `[]` and widening is an
+  argument the caller passes. `Permission` and `Role` are no longer imported by the module.
+
+  **This was not a CLI-only hazard.** Before #331 this creation path ran from
+  `upload_file_with_metadata`, `upload_file_from_bytes_with_metadata` and
+  `check_file_exists_by_hash`, so an ordinary delivery to a new partner created an open
+  collection automatically. The grant dates to 2025-10-22.
+
+  **Nothing already provisioned changes** — Appwrite applies grants at creation and the
+  existing-collection path does not re-apply them, and now says so instead of returning
+  OK: passing `permissions` for a collection that already exists is refused with
+  `PERMISSIONS_NOT_APPLICABLE` rather than silently discarded.
+
+  Safe to tighten because every consumer on the platform authenticates with a server API
+  key, which bypasses container permissions. Buckets already run at `permissions=[]` and
+  deliveries to them work.
+
+### Added
+
+- **`--permissions` on the audit CLI.** `python -m views_pipeline_core.modules.appwrite.audit
+  --permissions` reports what a shelf's collection and bucket actually permit and flags
+  anything granted to `any`. Nothing in this repo could read a permission before — the
+  package whose job is auditing this seam never looked at one. Read-only, no `--fix`.
+  Three outcomes: absent / read / **unreadable**, exiting 2 on the last, so a container
+  the key may not read never renders as locked down.
+- **A derived guard** (`tests/test_no_container_is_provisioned_open.py`) AST-walking every call in the package and `tools/` that passes a
+  `permissions=` argument — by keyword, or at a positional index derived from the
+  installed SDK's signatures rather than listed. A grant it cannot resolve
+  statically is reported as unknown rather than passed over.
+
+### Operators
+
+If you provisioned a metadata collection or bucket with this package before 3.1.2,
+**check it**. `--target` accepts only the two shelves this repo knows (`forecasts`,
+`unfao`); for anything else give both halves of the coordinate pair:
+
+```bash
+python -m views_pipeline_core.modules.appwrite.audit --permissions --target unfao
+python -m views_pipeline_core.modules.appwrite.audit --permissions \
+    --bucket <bucket id> --collection <collection id>
+```
+
+Exit **0** nothing open · **1** something open · **2** could not determine — which is not
+an all-clear.
+
+The probe reads container permissions and, where per-item security is on, the permissions
+of the individual files and documents too, because Appwrite unions the two. It cannot
+change anything and has no `--fix`. Remediation is a deliberate console action.
+
+---
+
+## [3.1.1] — 2026-08-14
 
 A patch release. It exists because the first CRAF'd delivery could not run.
 
@@ -71,7 +149,7 @@ A patch release. It exists because the first CRAF'd delivery could not run.
 
 ---
 
-## [3.1.0] — unreleased
+## [3.1.0] — 2026-08-13
 
 A minor release. **Nothing here breaks a 3.0.x consumer** — every addition is optional,
 and the one new config key defaults to today's behaviour.
@@ -130,7 +208,7 @@ That is the guard behaving as designed, not a reason to skip the reasoning.
 
 ---
 
-## [3.0.1] — unreleased
+## [3.0.1] — 2026-08-11
 
 A patch release. **Nothing here breaks a 3.0.0 consumer**, and the one behaviour change
 refuses loudly rather than degrading quietly — see the note on the version choice below.

@@ -62,6 +62,11 @@ from views_pipeline_core.modules.appwrite.audit.targets import (
     TARGETS,
     build_file_manager,
 )
+from views_pipeline_core.modules.appwrite.audit.permissions import (
+    PermissionsReport,
+    permissions_exit_code,
+    read_permissions,
+)
 from views_pipeline_core.modules.appwrite.audit.timeline import add_timeline
 from views_pipeline_core.modules.appwrite.audit.walk import (
     unique_by_id,
@@ -76,6 +81,9 @@ __all__ = [
     "build_file_manager",
     "TARGETS",
     "unique_by_id",
+    "PermissionsReport",
+    "read_permissions",
+    "permissions_exit_code",
 ]
 
 
