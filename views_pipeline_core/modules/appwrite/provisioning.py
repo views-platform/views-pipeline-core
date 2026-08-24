@@ -52,7 +52,8 @@ from appwrite.query import Query
 # That is a CONVENTION, not the enforcement. Nothing inspects this import list and the
 # import can be restored in one line. What actually prevents a container being created
 # open is `tests/test_no_container_is_provisioned_open.py`, which AST-walks every
-# `create_*(permissions=...)` call and fails on any grant to `any`. An earlier version of
+# `permissions=` argument and fails on any grant to a role reachable without
+# authenticating. An earlier version of
 # this comment credited the missing import with the protection — a claim the evidence made
 # consistent but did not support (C-273).
 
