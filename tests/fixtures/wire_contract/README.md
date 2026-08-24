@@ -40,3 +40,12 @@ above it: the fixture was generated under `1.0.0`, CI has reproduced it continuo
 `1.6.0`, and `1.10.2` was verified to regenerate **all five artifacts byte-identically**
 before the pin was raised (2026-08-02). Raising it again does not require regenerating the
 fixture — but it does require proving that, the same way.
+
+**Confirmed across a `views_frames` MAJOR (2026-08-21).** The shard emitted through
+`views_frames.io.arrow` under **1.10.2** and under **2.0.0** hashes identically, and both
+equal the committed fixture (`203650fd…12c54`) — measured in an isolated environment at the
+pinned toolchain (pyarrow 16.1.0, numpy 1.26.4), where all 61 frames-dependent tests also
+pass at 2.0.0. So the views-frames 2.0.0 adoption (#286) is **not** a fixture re-vendor. It
+is blocked only by views-pipeline-core, every published release of which (through 3.1.1)
+pins `views-frames <2.0.0`. Recorded so the byte question is not re-opened when that
+constraint widens.

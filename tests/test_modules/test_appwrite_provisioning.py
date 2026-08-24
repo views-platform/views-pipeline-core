@@ -482,3 +482,182 @@ class TestCollectionIdentityIsTheId:
 
         assert result.success
         provisioner.databases.create_collection.assert_called_once()
+
+
+# ----------------------------------------------------------------------------------
+# Permissions — C-292, ADR-061. This file contained the word zero times before
+# 2026-08-22, so the headline security change was pinned only by an AST guard and an
+# `inspect.getsource` substring match. Neither executes the method.
+# ----------------------------------------------------------------------------------
+
+
+def _provisioner_with_existing_collection():
+    """A provisioner whose target collection already exists, coordinates agreeing."""
+    from unittest.mock import MagicMock
+    from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
+
+    fm = MagicMock()
+    fm.config.database_id = "db"
+    fm.config.database_name = "Db"
+    fm.config.collection_id = "crafd"
+    fm.config.collection_name = "crafd"
+    fm.databases.list.return_value = {"total": 1, "databases": [{"$id": "db", "name": "Db"}]}
+    fm.databases.list_collections.return_value = {
+        "total": 1, "collections": [{"$id": "crafd", "name": "crafd"}]
+    }
+    fm.databases.list_attributes.return_value = {"total": 0, "attributes": []}
+    return AppwriteProvisioner(fm), fm
+
+
+def test_creating_a_collection_grants_nothing_by_default():
+    """The behavioural assertion the AST guard cannot make: what actually reaches the SDK.
+
+    The guard reads source; `test_the_collection_default_is_least_privilege` matches a
+    source substring. Neither runs the method, so neither would notice a default that was
+    correct in the text and wrong in the call.
+    """
+    from unittest.mock import MagicMock
+    from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
+
+    fm = MagicMock()
+    fm.config.database_id = "db"
+    fm.config.database_name = "Db"
+    fm.config.collection_id = "newshelf"
+    fm.config.collection_name = "newshelf"
+    fm.databases.list.return_value = {"total": 1, "databases": [{"$id": "db", "name": "Db"}]}
+    fm.databases.list_collections.return_value = {"total": 0, "collections": []}
+    fm.databases.list_attributes.return_value = {"total": 0, "attributes": []}
+
+    AppwriteProvisioner(fm).ensure_collection(metadata={})
+
+    kwargs = fm.databases.create_collection.call_args.kwargs
+    assert kwargs["permissions"] == [], (
+        f"a new collection must grant nothing; the SDK was called with "
+        f"{kwargs['permissions']!r}"
+    )
+
+
+def test_an_explicit_grant_reaches_the_sdk_unchanged():
+    """The other half. A caller who states a grant must get it — otherwise the parameter
+    is decoration and the next person hardcodes one again."""
+    from unittest.mock import MagicMock
+    from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
+
+    fm = MagicMock()
+    fm.config.database_id = "db"
+    fm.config.database_name = "Db"
+    fm.config.collection_id = "newshelf"
+    fm.config.collection_name = "newshelf"
+    fm.databases.list.return_value = {"total": 1, "databases": [{"$id": "db", "name": "Db"}]}
+    fm.databases.list_collections.return_value = {"total": 0, "collections": []}
+    fm.databases.list_attributes.return_value = {"total": 0, "attributes": []}
+
+    AppwriteProvisioner(fm).ensure_collection(metadata={}, permissions=['read("users")'])
+
+    assert fm.databases.create_collection.call_args.kwargs["permissions"] == ['read("users")']
+
+
+def test_an_explicit_empty_list_is_not_refused_on_an_existing_collection():
+    """`permissions=[]` is the posture ADR-061 tells callers to state, and it is what the
+    default applies. Refusing it made `ensure_collection` non-idempotent — fine on first
+    run, hard failure on every re-run — with the message "the 0 permission(s) you passed
+    were NOT applied". `ensure_bucket` has always treated `None` and `[]` as the same
+    thing. Found 2026-08-24."""
+    provisioner, fm = _provisioner_with_existing_collection()
+
+    result = provisioner.ensure_collection(metadata={}, permissions=[])
+
+    assert result.success is True
+    assert result.code == "EXISTS"
+    fm.databases.create_collection.assert_not_called()
+
+
+def test_the_refusal_happens_before_anything_is_written():
+    """It says "nothing was written". It sat after `ensure_attributes`, which writes.
+
+    A refusal that has already had side effects is not a refusal, and the sentence in the
+    error was simply false — the audit counted seven attribute-creation calls firing
+    before the `success=False` return that denied them.
+    """
+    provisioner, fm = _provisioner_with_existing_collection()
+
+    result = provisioner.ensure_collection(metadata={}, permissions=['read("any")'])
+
+    assert result.code == "PERMISSIONS_NOT_APPLICABLE"
+    fm.databases.create_string_attribute.assert_not_called()
+    fm.databases.create_datetime_attribute.assert_not_called()
+    fm.databases.create_integer_attribute.assert_not_called()
+
+
+def test_permissions_on_an_existing_collection_are_refused_not_discarded():
+    """C-291's shape, on the security-relevant argument.
+
+    Appwrite fixes grants at creation, so the existing-collection branch cannot apply
+    them. It used to return `success=True, code="EXISTS"` with nothing in the result
+    saying the permissions had been dropped — so an operator running this as remediation
+    on an open collection was told OK while the grants stayed exactly as they were. That
+    is the defect this same method was fixed for in #473.
+    """
+    provisioner, fm = _provisioner_with_existing_collection()
+
+    result = provisioner.ensure_collection(metadata={}, permissions=['read("users")'])
+
+    assert result.success is False
+    assert result.code == "PERMISSIONS_NOT_APPLICABLE"
+    assert "NOT applied" in result.error
+    fm.databases.create_collection.assert_not_called()
+
+
+def test_ensuring_the_schema_alone_still_succeeds_on_an_existing_collection():
+    """The control. If any call with an existing collection now failed, #473's repair
+    path — the reason `ensure-collection` exists — would be broken."""
+    provisioner, _ = _provisioner_with_existing_collection()
+
+    result = provisioner.ensure_collection(metadata={})
+
+    assert result.success is True
+    assert result.code == "EXISTS"
+
+
+def test_creating_a_bucket_grants_nothing_by_default():
+    """`ensure_bucket` had no assertion on what reaches the SDK, in either direction.
+
+    An independent mutation audit made it ignore the caller's `permissions` entirely,
+    force `file_security=False` and default `antivirus` off — three changes, one of them
+    the exact defect this branch exists for — and 300 tests stayed green. The collection
+    path had `test_creating_a_collection_grants_nothing_by_default`; the bucket path had
+    no twin. That is the one-tool-two-postures asymmetry
+    `test_bucket_and_collection_now_have_the_same_posture` was written to close, reopened
+    one level below the signature it compares.
+    """
+    from unittest.mock import MagicMock
+    from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
+
+    fm = MagicMock()
+    provisioner = AppwriteProvisioner(fm)
+    provisioner.ensure_bucket("newbucket", name="New", create_metadata_db=False)
+
+    kwargs = fm.storage.create_bucket.call_args.kwargs
+    assert kwargs["permissions"] == [], (
+        f"a new bucket must grant nothing; the SDK was called with "
+        f"{kwargs['permissions']!r}"
+    )
+    assert kwargs["file_security"] is True, (
+        "with file_security off, per-file permissions are ignored and only the bucket "
+        "grant governs — a silent widening of what a single grant reaches"
+    )
+    assert kwargs["antivirus"] is True
+
+
+def test_an_explicit_bucket_grant_reaches_the_sdk_unchanged():
+    """The other direction. If the caller's list were dropped the parameter would be
+    decoration, and the next person needing a wider grant would hardcode one again."""
+    from unittest.mock import MagicMock
+    from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
+
+    fm = MagicMock()
+    AppwriteProvisioner(fm).ensure_bucket(
+        "newbucket", name="New", permissions=['read("users")'], create_metadata_db=False
+    )
+
+    assert fm.storage.create_bucket.call_args.kwargs["permissions"] == ['read("users")']
