@@ -180,9 +180,14 @@ grant constructs it at the call site, where the reason for it is visible.
 **That import removal is a convention, not the enforcement — do not mistake one for the
 other.** Nothing inspects the import list, and the import can be restored in a single line.
 What actually prevents recurrence is
-`tests/test_no_container_is_provisioned_open.py`, which AST-walks every
-`create_*(permissions=...)` call in `views_pipeline_core/` and `tools/` and fails on any
-grant to `any`. If you are looking for the thing that will stop you, that is the thing.
+`tests/test_no_container_is_provisioned_open.py`, which AST-walks every call in `views_pipeline_core/` and `tools/` that passes a
+`permissions=` argument and fails on any grant to a role reachable without
+authenticating.
+
+**It matched a `create_*` prefix until 2026-08-22, and the change matters more than the
+detail:** `upsert_collection` walked straight through the prefix, which is the hand-list
+failure this repo records as C-259 and C-294, inside the guard written to stop it. Scope is
+now derived from the argument itself. If you are looking for the thing that will stop you, that is the thing.
 (An earlier revision of this ADR, and of that test's own docstring, credited the missing
 import with the protection — a claim the evidence made consistent but did not support.
 Corrected 2026-08-21; recorded as an instance of C-273.)
@@ -234,7 +239,7 @@ is ever actually wanted.
   security diagnostic that reported "nothing open" when it was merely not allowed to look
   would be wrong in the reassuring direction.
 - **A guard enforces this**, deriving rather than listing: `tests/test_no_container_is_provisioned_open.py`
-  AST-walks every `create_*(permissions=...)` call in `views_pipeline_core/` and `tools/`.
+  AST-walks every `permissions=` argument in `views_pipeline_core/` and `tools/`.
   A grant it cannot statically resolve is reported as **unknown**, not passed over.
 - Widening now costs a caller an explicit argument. That is the intended cost.
 

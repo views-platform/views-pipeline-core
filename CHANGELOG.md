@@ -75,8 +75,9 @@ below. Recorded as views-appwrite C-83 (Tier 1) and views-pipeline-core C-292.
   package whose job is auditing this seam never looked at one. Read-only, no `--fix`.
   Three outcomes: absent / read / **unreadable**, exiting 2 on the last, so a container
   the key may not read never renders as locked down.
-- **A derived guard** (`tests/test_no_container_is_provisioned_open.py`) AST-walking every
-  `create_*(permissions=...)` call in the package and `tools/`. A grant it cannot resolve
+- **A derived guard** (`tests/test_no_container_is_provisioned_open.py`) AST-walking every call in the package and `tools/` that passes a
+  `permissions=` argument — by keyword, or at a positional index derived from the
+  installed SDK's signatures rather than listed. A grant it cannot resolve
   statically is reported as unknown rather than passed over.
 
 ### Operators

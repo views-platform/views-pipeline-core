@@ -265,3 +265,59 @@ declared permissions.
 is reported in the text and collapses to `1` in the status code. A third code would be more
 honest and would break every caller that keys on the published 0/1/2 table. **Trigger:** a second
 consumer of the exit code.
+
+
+---
+
+## Addendum, 2026-08-24 — the open question, closed as unanswerable from this sample
+
+The report left one distinction open: *are fixes inherently as defective as any other code,
+or is new code defective and all of this happened to be new?* A peer session searched all 16
+platform registers — 1,307 entries — for any entry attributing a defect to a specific prior
+fix. **It found two**, both in views-frames. Registers here record what a defect is and where
+it lives, never that it arrived in the commit that fixed something else. So the question cannot
+be answered retrospectively from the corpus at all.
+
+Their proposed discriminator was cheap and correct: split findings per 100 lines by the age of
+the **lines touched**, not the age of the file. Run here:
+
+**Exposure — what this branch actually touched:**
+
+| | lines |
+|---|---:|
+| added | 3,562 |
+| pre-existing lines modified | **21** |
+| …of which production code | **10** |
+
+**Age of the line each traced finding landed in:**
+
+| finding | line introduced | found | age |
+|---|---|---|---:|
+| R2 `or []` in `_read_container` | 2026-08-14 | 2026-08-22 | 8 days |
+| R2 `users` excluded | 2026-08-14 | 2026-08-22 | 8 days |
+| R2 INCOMPLETE hides OPEN | 2026-08-14 | 2026-08-22 | 8 days |
+| R2 discards permissions | 2026-07-31 | 2026-08-22 | 22 days |
+| R3 unparseable deletes container | 2026-08-22 | 2026-08-24 | 2 days |
+| R3 `or []` in `_read_items` | 2026-08-22 | 2026-08-24 | 2 days |
+| R3 renderer false claim | 2026-08-22 | 2026-08-24 | 2 days |
+| R3 refuses `[]` | 2026-08-22 | 2026-08-24 | 2 days |
+| R3 exit code | 2026-08-14 | 2026-08-24 | 10 days |
+
+Range 2–22 days, median 8. **Every finding landed in a line younger than three weeks.**
+
+**The measurement cannot discriminate, and the reason is stronger than confounding.** The
+independent variable has no variance: the branch modified ten pre-existing production lines,
+so there is essentially no old-code exposure to compute a density against. The three findings
+recorded as "pre-existing" are not lines this branch touched and got wrong — they are a sibling
+repository's vendored copy, a function that was never tested, and an allowlist structure. None
+is a case of an old line being modified and proving defective.
+
+So the correct status of the distinction is **untested, and untestable from this sample** —
+not "confounded but leaning". C-303's claim stands as measured (fix commits carry the same
+defect density as the original commit, 0.6–0.8 per 100 lines) and does **not** extend to a claim
+about old code, because no old code was in the sample.
+
+**The one extra field that would settle it**, on a future round that touches real legacy
+surface: `git blame` each changed hunk at the time of the fix and bucket findings by the age of
+the lines modified. If fixes are inherently defective, density holds constant across blame-age.
+If newness drives it, density falls with age. One column, no new instrument.
