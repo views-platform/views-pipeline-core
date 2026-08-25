@@ -1,6 +1,7 @@
 """
 Tests for CoreConfigSniffer — central config contract validation.
 """
+import logging
 import pytest
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 
@@ -779,3 +780,71 @@ class TestEvaluationSequencing:
             "the default must stay the strict scheme — an unstated scheme getting the "
             "looser contract is how a config stops being checked without anyone deciding"
         )
+
+
+# ----------------------------------------------------------------------------------
+# Reconciliation type deprecation — #490
+# ----------------------------------------------------------------------------------
+
+
+def _ensemble_config_with_reconciliation(recon):
+    """A minimal ensemble config that reaches `_check_reconciliation_config`."""
+    return {
+        "name": "test_ensemble",
+        "models": ["a", "b"],
+        "aggregation": "mean",
+        "targets": ["ln_ged_sb_dep"],
+        "level": "pgm",
+        "deployment_status": "shadow",
+        "run_type": "calibration",
+        "reconciliation": recon,
+        "reconcile_with": "some_cm_model",
+    }
+
+
+def test_the_deprecated_reconciliation_type_is_warned_about_not_refused(caplog):
+    """#490. `pgm_cm_point` is deprecated and still accepted, deliberately.
+
+    Two live ensembles declare it — `skinny_love` and `white_mustang` — so refusing it
+    would fail both at config validation. The issue's ordering exists to avoid that:
+    deprecate here, move those configs in views-models, remove the value last.
+    """
+    from views_pipeline_core.modules.validation.core_config_sniffer import (
+        CoreConfigSniffer,
+        DEPRECATED_RECONCILIATION_TYPES,
+    )
+
+    assert "pgm_cm_point" in DEPRECATED_RECONCILIATION_TYPES
+
+    sniffer = CoreConfigSniffer(_ensemble_config_with_reconciliation("pgm_cm_point"), target="ensemble")
+    with caplog.at_level(logging.WARNING):
+        sniffer._check_reconciliation_config()
+
+    assert any("DEPRECATED" in r.message or "DEPRECATED" in r.getMessage()
+               for r in caplog.records), "the deprecation must be visible in a run log"
+    assert any("#490" in r.getMessage() for r in caplog.records)
+
+
+def test_the_replacement_type_produces_no_deprecation_warning(caplog):
+    """The control. If everything warned, the warning would carry no information."""
+    from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
+
+    sniffer = CoreConfigSniffer(_ensemble_config_with_reconciliation("pgm_cm"), target="ensemble")
+    with caplog.at_level(logging.WARNING):
+        sniffer._check_reconciliation_config()
+
+    assert not any("DEPRECATED" in r.getMessage() for r in caplog.records)
+
+
+def test_the_deprecated_type_is_still_a_supported_type():
+    """Deprecated is not removed. Removing it before the two live configs move would
+    break them at validation time, which is the failure the issue's ordering prevents."""
+    from views_pipeline_core.modules.validation.core_config_sniffer import (
+        DEPRECATED_RECONCILIATION_TYPES,
+        SUPPORTED_RECONCILIATION_TYPES,
+    )
+
+    assert DEPRECATED_RECONCILIATION_TYPES <= SUPPORTED_RECONCILIATION_TYPES, (
+        "a deprecated type that is no longer supported is a removed type, and removal "
+        "is step 3 of #490, not step 1"
+    )

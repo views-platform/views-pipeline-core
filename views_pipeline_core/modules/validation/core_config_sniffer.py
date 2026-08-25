@@ -155,6 +155,22 @@ SUPPORTED_AGGREGATE_METHODS = frozenset({"arithmetic_mean"})
 # Reconciliation — optional config key; controls hierarchical prediction reconciliation.
 # "pgm_cm_point" = the DataFrame ensemble path; "pgm_cm" = the frames-native PFE path
 # (point + probabilistic, mode auto-detected at runtime — epic #233).
+
+#: Deprecated 2026-08-25 (#490), still accepted. Two live ensembles declare it —
+#: `skinny_love` and `white_mustang` — so removing it now would fail both at config
+#: validation. Removal is ordered: deprecate here, move those two configs to `pgm_cm`
+#: in views-models, then delete the value and its `== "pgm_cm_point"` dispatch.
+#:
+#: **The name is honoured on one of its two paths, not both.** `ensemble.py:682` and
+#: `dataframe_ensemble.py:818` gate on `reconciliation_type == "pgm_cm_point"`, so on
+#: the DataFrame path the string genuinely selects point reconciliation.
+#: `prediction_frame_ensemble.py:646` gates on `if ctx.reconciliation:` — truthiness,
+#: not equality — so on the frames path a config saying "point" gets whatever
+#: `views_frames_reconcile` auto-detects, which for a sampled ensemble is
+#: ALIGNED_DRAWS rather than POINT_BROADCAST. A declared value whose name asserts
+#: something the code does not honour is the shape C-273 records.
+DEPRECATED_RECONCILIATION_TYPES = frozenset({"pgm_cm_point"})
+
 SUPPORTED_RECONCILIATION_TYPES = frozenset({"pgm_cm_point", "pgm_cm"})
 # Reconciliation types that require a CM model (`reconcile_with`). Explicit membership, not a
 # prefix match, so a future self-contained type can be supported without demanding reconcile_with.
@@ -576,6 +592,22 @@ class CoreConfigSniffer:
                 f"CoreConfigSniffer: reconciliation='{recon}' is not supported. "
                 f"Supported: {sorted(SUPPORTED_RECONCILIATION_TYPES)}. "
                 f"Update SUPPORTED_RECONCILIATION_TYPES in core_config_sniffer.py when ready."
+            )
+        if recon in DEPRECATED_RECONCILIATION_TYPES:
+            # A warning, not a refusal. Two live ensembles declare this today and a
+            # refusal would fail them at validation — the ordering #490 sets out exists
+            # to avoid exactly that. Loud enough to be seen in a run log, quiet enough
+            # not to break one.
+            logger.warning(
+                "CoreConfigSniffer: reconciliation=%r is DEPRECATED (#490) and will be "
+                "removed once no config declares it. Move to 'pgm_cm', the frames-native "
+                "path, which reaches draw-aware reconciliation; the DataFrame path this "
+                "selects cannot. Note also that %r is honoured as point reconciliation "
+                "only on the DataFrame path — the PredictionFrame path gates on "
+                "truthiness, so a sampled ensemble declaring it gets aligned-draws "
+                "reconciliation despite the name.",
+                recon,
+                recon,
             )
         if recon in RECONCILIATION_TYPES_REQUIRING_CM:
             recon_with = self._c.get("reconcile_with")
