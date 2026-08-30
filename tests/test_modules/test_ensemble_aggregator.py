@@ -5,11 +5,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from views_pipeline_core.modules.aggregation.aggregator import (
+from views_pipeline_core.modules.aggregation.aggregation import (
     AggregationModule,
     _ModelSpec,
 )
-from views_pipeline_core.modules.aggregation.aggregator import (
+from views_pipeline_core.modules.aggregation.aggregation import (
     _arrow_series_to_numpy,
 )
 
@@ -818,7 +818,9 @@ class TestAddModelParquetDispatch:
         )
 
         with (
-            patch.object(AggregationModule, "_load_parquet_direct", return_value=dummy_df) as mock_direct,
+            patch.object(
+                AggregationModule, "_load_parquet_direct", return_value=dummy_df
+            ) as mock_direct,
             patch.object(AggregationModule, "_load_to_polars") as mock_legacy,
         ):
             mgr.add_model(data=path, name="m1")
@@ -841,7 +843,9 @@ class TestAddModelParquetDispatch:
         )
 
         with (
-            patch.object(AggregationModule, "_load_to_polars", return_value=dummy_df) as mock_legacy,
+            patch.object(
+                AggregationModule, "_load_to_polars", return_value=dummy_df
+            ) as mock_legacy,
             patch.object(AggregationModule, "_load_parquet_direct") as mock_direct,
         ):
             mgr.add_model(data=csv_path, name="m1")
@@ -860,7 +864,9 @@ class TestAddModelParquetDispatch:
         )
 
         with (
-            patch.object(AggregationModule, "_load_to_polars", return_value=dummy_df) as mock_legacy,
+            patch.object(
+                AggregationModule, "_load_to_polars", return_value=dummy_df
+            ) as mock_legacy,
             patch.object(AggregationModule, "_load_parquet_direct") as mock_direct,
         ):
             mgr.add_model(data=pdf, name="m1")
@@ -869,8 +875,12 @@ class TestAddModelParquetDispatch:
 
     def test_end_to_end_parquet_aggregation(self, tmp_path):
         """Two Arrow parquets → add_model both → aggregate() → correct shape and values."""
-        path1 = _make_arrow_parquet(tmp_path, "m1.parquet", n_rows=3, n_samples=2, value=1.0)
-        path2 = _make_arrow_parquet(tmp_path, "m2.parquet", n_rows=3, n_samples=2, value=3.0)
+        path1 = _make_arrow_parquet(
+            tmp_path, "m1.parquet", n_rows=3, n_samples=2, value=1.0
+        )
+        path2 = _make_arrow_parquet(
+            tmp_path, "m2.parquet", n_rows=3, n_samples=2, value=3.0
+        )
 
         mgr = AggregationModule(
             index_cols=["month_id", "country_id"],
