@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.1.2] — unreleased
+## [3.1.2] — 2026-08-26
 
 **A security release. Two production collections were readable and writable by anyone on
 the internet, and this is the fix at the root.**
