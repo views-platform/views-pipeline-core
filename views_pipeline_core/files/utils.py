@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Optional, Union
 from datetime import datetime
 
 from views_pipeline_core.data.constants import model_artifact_filename
+from views_pipeline_core.modules.validation.core_config_sniffer import config_maturity
 
 if TYPE_CHECKING:  # annotation-only; never imported at runtime
     import pandas as pd
@@ -118,7 +119,8 @@ def create_log_file(path_generated,
     model_config (dict): Configuration dictionary for the model containing keys:
         - "run_type" (str): The type of run (e.g., "calibration", "evaluation").
         - "name" (str): The name of the model.
-        - "deployment_status" (str): The deployment status of the model.
+        - "maturity" (str), or the legacy "deployment_status" — read via
+          `config_maturity()`, which accepts either (ADR-057).
     model_timestamp (str): Timestamp for the model.
     data_generation_timestamp (str): Timestamp for data generation.
     data_fetch_timestamp (str): Timestamp for data fetching.
@@ -131,7 +133,13 @@ def create_log_file(path_generated,
     
     run_type = model_config["run_type"]
     model_name = model_config["name"]
-    deployment_status = model_config["deployment_status"]
+    # ADR-057 / #496. A source that finished the migration to `config_maturity.py`
+    # declares `maturity` and no longer has `deployment_status`, so subscripting the
+    # legacy key raised KeyError on every run of a migrated model. The log records
+    # whichever vocabulary the config declares; the one reader of the value back out
+    # (`validate_ensemble_model_deployment_status`) normalises it, so a legacy log and a
+    # migrated config already reconcile.
+    deployment_status = config_maturity(model_config)
     
     create_specific_log_file(path_generated, run_type, model_name, deployment_status,
                     model_timestamp, data_generation_timestamp, data_fetch_timestamp, model_type)

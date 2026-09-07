@@ -93,6 +93,57 @@ def normalise_maturity(value: str | None) -> str | None:
     return LEGACY_STATUS_TO_MATURITY.get(value)
 
 
+def config_maturity(config: Dict[str, Any]) -> str:
+    """This config's maturity, under whichever key it declares (ADR-057, #496).
+
+    Returns the raw declared value — `candidate` from a migrated source, `shadow` from a
+    legacy one. It does **not** translate; `normalise_maturity` does that, and callers
+    that need to compare two sources apply it to both (`member_maturity.py`).
+
+    ## Why this exists rather than `config.get("maturity") or config.get("deployment_status")`
+
+    Two call sites is where this repo's WET-before-DRY rule says to *look* at extracting,
+    not necessarily to extract. Two things decided it:
+
+    **The `or` form is quieter than what it replaces.** On a config declaring neither key
+    it yields `None`, and `create_log_file` would then write `Deployment Status: None`
+    into the run log — which `validate_ensemble_model_deployment_status` reads back and
+    hands to `normalise_maturity`, whose docstring says `None` means *indeterminate, not
+    benign*. Today that config raises `KeyError` instead. Turning a loud failure into a
+    `None` persisted to disk is the Cluster J shape, so this raises.
+
+    **The precedence rule already exists and is stated three times** — here, in
+    `_check_deployment_status` (new key wins, warn on both, raise on neither) and in
+    `ModelManager.__load_maturity_config` (new *file* wins, warn on both). A local `or` at
+    each site would be a fourth statement of it, and one that silently disagrees with the
+    other three on the both-present and neither-present cases. The register records six
+    instances of a guard being wrong about its own scope because the rule was hand-written
+    at each site rather than derived from one.
+
+    Precedent: `combined_targets()` in `managers/configuration/configuration.py`, this
+    repo's existing accessor for a field whose key was retired (#380/#381).
+
+    Raises:
+        KeyError: if neither key is declared. `CoreConfigSniffer._check_deployment_status`
+            already raises for this at config load, so reaching it here means the sniffer
+            was bypassed — which is how C-305 happened, and is worth failing on rather
+            than defaulting.
+    """
+    maturity = config.get("maturity")
+    if maturity is not None:
+        return maturity
+
+    status = config.get("deployment_status")
+    if status is not None:
+        return status
+
+    raise KeyError(
+        f"Config for '{config.get('name')}' declares neither 'maturity' nor the legacy "
+        f"'deployment_status'. Add 'maturity' (one of {sorted(SUPPORTED_MATURITIES)}) to "
+        f"{MATURITY_CONFIG_FILENAME}."
+    )
+
+
 #: The file that carries the field, old name and new. `model_path` and the config loader
 #: accept both during the transition window; the new name wins when both are present.
 LEGACY_MATURITY_CONFIG_FILENAME = "config_deployment.py"

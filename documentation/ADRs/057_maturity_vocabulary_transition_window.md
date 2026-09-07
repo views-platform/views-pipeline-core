@@ -94,6 +94,31 @@ rule, and is tested as one.
   a source grep for one filename would report a model that had finished renaming as
   non-compliant.
 
+## Reading the field, and what the run log records (#496)
+
+Accepting both keys at the sniffer is not the same as being able to *read* the field.
+Two sites subscripted `config["deployment_status"]` directly — `create_log_file`, which
+runs on every run, and `validate_ensemble_model` — so a source that had completed the
+migration passed validation and then crashed later, further from its cause. That is the
+shape #495 half-fixed and #496 finished.
+
+**A config's declared maturity is read through `config_maturity(config)`**, which applies
+the same precedence as everything else here: the new key wins, and a config declaring
+neither raises. It returns the *declared* value and does not translate — translation is
+`normalise_maturity`'s job, applied by whoever compares two sources.
+
+**The run log records whichever vocabulary the config declares.** A migrated source writes
+`Deployment Status: candidate` where it previously wrote `shadow`. That is safe because
+the only reader of the value normalises it before use (`member_maturity.py` normalises
+both the ensemble's and the member's), so a legacy log and a migrated config reconcile
+without either being rewritten — which is what makes a mixed fleet possible during the
+window.
+
+**Traced 2026-09-07: nothing outside pipeline-core reads that log line.** The readers are
+`ensemble/check.py` and the member-copy loop in `files/utils.py`; every other occurrence
+of the string platform-wide is a README table or a config docstring. So the vocabulary
+written into the log is an internal concern, and the key name did not need to change.
+
 ## What is enforced, and where
 
 `tests/test_modules/test_maturity_vocabulary_transition.py` — one case per row of the
@@ -104,8 +129,17 @@ filename resolution, both names and neither.
 Six mutations verified to fail the suite, including the one that matters most: giving
 `deployed` an automatic mapping to `graduate`.
 
+`tests/test_modules/test_migrated_source_completes_a_run.py` (#496) — drives
+`handle_single_log_creation` and `validate_ensemble_model`, the functions a run actually
+calls, and asserts on the log file that lands on disk. It goes through the entry points
+deliberately: the existing transition tests call the checks directly, which is why
+seventeen passing tests could not see C-305 — **a composition defect is invisible to a
+test that never composes.** Five further mutations verified, including reverting either
+subscript, inverting the key precedence, and returning `None` instead of raising.
+
 ## Related
 
 - **views-models ADR-017** (the vocabulary change) — their #341 and #342
 - **ADR-058** — the ensemble member rules, which use this vocabulary
-- Issues **#398** (epic), **#399** (this), **#400** (the member rules)
+- Issues **#398** (epic), **#399** (this), **#400** (the member rules), **#494**/**#495**
+  (the sniffer gate, C-305), **#496** (the two remaining reads)
