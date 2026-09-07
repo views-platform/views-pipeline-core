@@ -38,14 +38,13 @@ from views_pipeline_core.modules.dataloaders.datafactory_contract import (
 from views_pipeline_core.configs import PipelineConfig
 from views_pipeline_core.modules.validation.core_config_sniffer import (
     CoreConfigSniffer,
-    LEGACY_MATURITY_CONFIG_FILENAME,
-    MATURITY_CONFIG_FILENAME,
     MAX_SHIFT_COUNT,
 )
 
 from views_pipeline_core.managers.configuration.configuration import combined_targets
 from views_pipeline_core.managers.configuration.script_config import (
     load_config_from_script,
+    load_maturity_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -270,33 +269,13 @@ class ModelManager:
     def __load_maturity_config(self) -> Union[Dict, None]:
         """Load the maturity config under either name, preferring the new one (ADR-057).
 
-        views-models ADR-017 renames `config_deployment.py` to `config_maturity.py`. For
-        one transition window both are accepted, so the rename does not have to land in
-        two repositories simultaneously.
-
-        Preference is for the new name. Finding both is not an error — a half-finished
-        rename is a normal intermediate state — but it warns, because a file that is
-        being silently ignored is how the wrong config gets edited for a week.
+        Delegates to `load_maturity_config`, the one implementation, which the two
+        ensemble managers also call. It used to live here alone, and the ensembles
+        hardcoded the legacy pair instead — so the transition window worked for models
+        and silently did not for ensembles (#496).
         """
-        scripts = self._script_paths
-        has_new = scripts.get(MATURITY_CONFIG_FILENAME) is not None
-        has_legacy = scripts.get(LEGACY_MATURITY_CONFIG_FILENAME) is not None
-
-        if has_new and has_legacy:
-            logger.warning(
-                "Both %s and %s exist for '%s'. Reading %s and IGNORING %s — delete the "
-                "legacy file once the rename is confirmed (ADR-057).",
-                MATURITY_CONFIG_FILENAME,
-                LEGACY_MATURITY_CONFIG_FILENAME,
-                self._model_path.model_name,
-                MATURITY_CONFIG_FILENAME,
-                LEGACY_MATURITY_CONFIG_FILENAME,
-            )
-
-        if has_new:
-            return self._load_config(MATURITY_CONFIG_FILENAME, "get_maturity_config")
-        return self._load_config(
-            LEGACY_MATURITY_CONFIG_FILENAME, "get_deployment_config"
+        return load_maturity_config(
+            self._script_paths, self._model_path.model_name, load=self._load_config
         )
 
     def _load_config(self, script_name: str, config_method: str) -> Union[Dict, None]:

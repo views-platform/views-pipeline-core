@@ -37,6 +37,8 @@ every other occurrence platform-wide is a README table or a config docstring.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from views_pipeline_core.files.utils import (
@@ -291,11 +293,13 @@ def test_an_ensemble_declaring_neither_key_still_gets_the_default():
     now passed explicitly, so a caller's tolerance for a missing field is visible at the
     call rather than implied by which accessor it reached for.
     """
-    from views_pipeline_core.managers.ensemble.context import DEFAULT_DEPLOYMENT_STATUS
-
     ctx = _build_ensemble_context(_ensemble_config())
 
-    assert ctx.deployment_status == DEFAULT_DEPLOYMENT_STATUS
+    # The literal, not `DEFAULT_DEPLOYMENT_STATUS` imported from the module under test.
+    # Comparing the output to the constant that produced it is true for every value the
+    # constant could hold — swept through six and it passed on all of them, which is a
+    # test that cannot fail.
+    assert ctx.deployment_status == "shadow"
 
 
 def test_the_default_is_opt_in_not_the_accessors_behaviour():
@@ -309,3 +313,212 @@ def test_the_default_is_opt_in_not_the_accessors_behaviour():
         config_maturity({"name": "m"})
 
     assert config_maturity({"name": "m"}, default="shadow") == "shadow"
+
+
+# ----------------------------------------------------------------------------------
+# The accessor's own contract — the parts a call site can get wrong
+# ----------------------------------------------------------------------------------
+
+
+def test_the_accessor_tests_presence_the_same_way_the_sniffer_does():
+    """A declared-but-empty `maturity` must not fall through to the legacy key.
+
+    `_check_deployment_status` tests presence with `is not None` and refuses an empty
+    maturity. Under truthiness this accessor would answer `"shadow"` for that same config
+    — a plausible legacy value, produced for a config the file's own guard rejects. The
+    argument for extracting the accessor was that the precedence rule should be stated
+    once; a second spelling of it inside the extraction would have been the drift.
+    """
+    assert config_maturity({"maturity": "", "deployment_status": "shadow"}) == ""
+
+
+def test_the_default_cannot_be_passed_positionally():
+    """`default` is keyword-only, and that is the enforcement of "visible at the call".
+
+    The docstring argues that a caller's tolerance for a missing field should be readable
+    at the call site. `config_maturity(cfg, "shadow")` reads as neither, so the signature
+    refuses it. Without the `*` the argument is a comment rather than a rule — and the
+    other three tests all pass `default=` by keyword, so none of them can see it go.
+    """
+    with pytest.raises(TypeError):
+        config_maturity({"name": "m"}, "shadow")  # type: ignore[misc]
+
+
+def test_the_sentinel_is_a_type_not_a_value():
+    """"No default given" and "a default of None" must not be the same thing.
+
+    If the sentinel were `None`, `default=None` would silently mean "raise" instead of
+    "return None" — and `None` is exactly the value this accessor exists never to hand
+    back, because `create_log_file` would write `Deployment Status: None` to the run log.
+    Typing the sentinel makes that distinction real rather than asserted in a comment.
+    """
+    from views_pipeline_core.modules.validation.core_config_sniffer import (
+        _RAISE,
+        _RaiseIfAbsent,
+    )
+
+    assert isinstance(_RAISE, _RaiseIfAbsent)
+    assert _RAISE is not None, "a None sentinel would conflate unset with a None default"
+
+
+# ----------------------------------------------------------------------------------
+# Sites four and five — upstream of everything above, and they made it unreachable
+# ----------------------------------------------------------------------------------
+
+
+def _scripts(tmp_path, filename, function, value):
+    """Write a real config script and return the `get_scripts()`-shaped map for it."""
+    script = tmp_path / filename
+    script.write_text(f"def {function}():\n    return {{'maturity': '{value}'}}\n"
+                      if function == "get_maturity_config"
+                      else f"def {function}():\n    return {{'deployment_status': '{value}'}}\n")
+    return {filename: script}
+
+
+def test_a_migrated_ensemble_can_load_its_maturity_config(tmp_path):
+    """The defect that made the two sites #496 names unreachable.
+
+    Both ensemble managers asked for `("config_deployment.py", "get_deployment_config")`
+    by hand, while `ModelManager` resolved either name. So an ensemble that had completed
+    the rename — precisely what ADR-057 asks for — loaded `None`, its combined config
+    declared neither vocabulary, and `CoreConfigSniffer.sniff_all` refused the run on the
+    first statement of `execute_single_run`. The log-writing and member-check sites were
+    never reached, so fixing them alone would not have made a migrated ensemble runnable.
+    """
+    from views_pipeline_core.managers.configuration.script_config import (
+        load_maturity_config,
+    )
+
+    scripts = _scripts(tmp_path, "config_maturity.py", "get_maturity_config", "graduate")
+
+    assert load_maturity_config(scripts, "test_ensemble") == {"maturity": "graduate"}
+
+
+def test_a_legacy_ensemble_still_loads_through_the_old_pair(tmp_path):
+    """The other half of the window: the rename must not be required yet."""
+    from views_pipeline_core.managers.configuration.script_config import (
+        load_maturity_config,
+    )
+
+    scripts = _scripts(tmp_path, "config_deployment.py", "get_deployment_config", "shadow")
+
+    assert load_maturity_config(scripts, "test_ensemble") == {"deployment_status": "shadow"}
+
+
+@pytest.fixture
+def resolver_warnings():
+    """Collect WARNING records from the resolver's own logger.
+
+    Deliberately not `caplog`, and this file learned it the hard way: written with
+    `caplog` this test passed alone and captured NOTHING in the full suite, because
+    `LoggingModule` sets `propagate = False` and `disabled = True` on this package's
+    loggers, so what `caplog` can see depends on which test ran first. The same fixture
+    and the same reason already exist in `test_maturity_vocabulary_transition.py`.
+    """
+    from views_pipeline_core.managers.configuration import script_config
+
+    records: list[logging.LogRecord] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Collector(level=logging.WARNING)
+    logger = script_config.logger
+    previous_level, previous_disabled = logger.level, logger.disabled
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    logger.disabled = False  # a disabled logger drops records before any handler sees them
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+        logger.disabled = previous_disabled
+
+
+def test_the_new_filename_wins_and_says_so(tmp_path, resolver_warnings):
+    """Both files present is a normal half-finished rename — preferred, not refused.
+
+    It warns, because a file that is being silently ignored is how the wrong config gets
+    edited for a week.
+    """
+    from views_pipeline_core.managers.configuration.script_config import (
+        load_maturity_config,
+    )
+
+    scripts = {
+        **_scripts(tmp_path, "config_maturity.py", "get_maturity_config", "graduate"),
+        **_scripts(tmp_path, "config_deployment.py", "get_deployment_config", "shadow"),
+    }
+
+    assert load_maturity_config(scripts, "test_ensemble") == {"maturity": "graduate"}
+
+    text = " ".join(r.getMessage() for r in resolver_warnings)
+    assert "config_deployment.py" in text and "ADR-057" in text, (
+        f"the ignored file must be named, and the rule cited. Got: {text!r}"
+    )
+
+
+def test_one_file_alone_warns_about_nothing(tmp_path, resolver_warnings):
+    """The control: proves the fixture above can actually observe silence.
+
+    Without it, a warning assertion that never fires and a capture that never works look
+    identical — which is precisely how the `caplog` version of the test above went green
+    while seeing nothing.
+    """
+    from views_pipeline_core.managers.configuration.script_config import (
+        load_maturity_config,
+    )
+
+    load_maturity_config(
+        _scripts(tmp_path, "config_maturity.py", "get_maturity_config", "graduate"),
+        "test_ensemble",
+    )
+
+    assert resolver_warnings == []
+
+
+def test_no_caller_resolves_the_maturity_config_filename_by_hand():
+    """Derived, not hand-listed — the rule this repo has been wrong about six times.
+
+    The defect was not that `config_deployment.py` appeared somewhere; it was that a
+    *call site* passed the legacy filename and the legacy entry point as arguments,
+    instead of asking for "the maturity config". So this walks the AST for those two
+    strings as VALUES — prose mentioning them, including the comment left at each site
+    saying what it used to do, is not the defect and must not be flagged. A guard that
+    fires on its own explanation gets allowlisted into uselessness.
+
+    One place in the package may name them, and the window then closes in one edit
+    rather than in however many sites a grep happens to find.
+
+    Templates are excluded: they generate a model's own files and are a separate
+    (registered) problem — pipeline-core still scaffolds new sources onto the legacy
+    vocabulary, which is why ADR-057's close condition is not reachable by migration
+    alone.
+    """
+    import ast
+    import pathlib
+
+    package = pathlib.Path(__file__).resolve().parents[2] / "views_pipeline_core"
+    # The entry point, not the filename. `config_deployment.py` legitimately appears as
+    # a value twice more — `LEGACY_MATURITY_CONFIG_FILENAME` in the sniffer, and
+    # `ModelPathManager`'s resolution of the legacy path — and both are the transition
+    # window working as designed. What no call site may do is name the legacy *loader*,
+    # because that is the half that cannot be resolved from a filename.
+    legacy = {"get_deployment_config"}
+
+    offenders = sorted(
+        str(f.relative_to(package))
+        for f in package.rglob("*.py")
+        if "templates" not in f.parts
+        and any(
+            isinstance(node, ast.Constant) and node.value in legacy
+            for node in ast.walk(ast.parse(f.read_text()))
+        )
+    )
+
+    assert offenders == ["managers/configuration/script_config.py"], (
+        "the legacy entry point must appear as a value in exactly one "
+        f"place — the resolver. Found: {offenders}"
+    )

@@ -7,7 +7,7 @@ Fail Loud and Proud: raises immediately on any contract violation.
 """
 from __future__ import annotations
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Union
 
 from views_pipeline_core.data.constants import (
     PARTITION_TRAIN as _PARTITION_TRAIN,
@@ -93,13 +93,32 @@ def normalise_maturity(value: str | None) -> str | None:
     return LEGACY_STATUS_TO_MATURITY.get(value)
 
 
-#: Sentinel for "no default — raise". `None` cannot serve, because `None` is a value a
-#: caller might legitimately want back, and conflating "unset" with "None" is the
-#: distinction `normalise_maturity` exists to preserve.
-_RAISE = object()
+class _RaiseIfAbsent:
+    """The type of the "no default given — raise" sentinel.
+
+    A distinct type rather than `object()` or `None`, for two reasons. It makes the
+    signature honest — `default: Union[str, _RaiseIfAbsent]` says a default must be a
+    real string, and `-> str` is then true of every legal call. And it makes the sentinel
+    testable: `_RAISE = None` (the obvious "simplification") stops being a silent
+    behaviour swap and becomes a value that fails the `isinstance` check, so omitting
+    `default` starts returning `None` instead of raising and the existing tests say so.
+
+    `None` in particular cannot serve as the sentinel, because `None` is exactly the value
+    this accessor exists never to produce: `create_log_file` would write
+    `Deployment Status: None` to the run log, which `normalise_maturity`'s docstring calls
+    *indeterminate, not benign*.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover — diagnostics only
+        return "<no default: raise>"
 
 
-def config_maturity(config: Dict[str, Any], default: str | None = _RAISE) -> str:
+_RAISE = _RaiseIfAbsent()
+
+
+def config_maturity(
+    config: Dict[str, Any], *, default: Union[str, _RaiseIfAbsent] = _RAISE
+) -> str:
     """This config's maturity, under whichever key it declares (ADR-057, #496).
 
     Returns the raw declared value — `candidate` from a migrated source, `shadow` from a
@@ -152,7 +171,7 @@ def config_maturity(config: Dict[str, Any], default: str | None = _RAISE) -> str
     if status is not None:
         return status
 
-    if default is not _RAISE:
+    if not isinstance(default, _RaiseIfAbsent):
         return default
 
     raise KeyError(

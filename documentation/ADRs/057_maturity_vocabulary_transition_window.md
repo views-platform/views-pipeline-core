@@ -104,8 +104,10 @@ shape #495 half-fixed and #496 finished.
 
 **A config's declared maturity is read through `config_maturity(config)`**, which applies
 the same precedence as everything else here: the new key wins, and a config declaring
-neither raises. It returns the *declared* value and does not translate — translation is
-`normalise_maturity`'s job, applied by whoever compares two sources.
+neither raises **unless the caller passes a `default`**, which exactly one site does and
+which is stated below. It returns the *declared* value and does not translate —
+translation is `normalise_maturity`'s job, applied by whoever compares two sources. The
+`default` is keyword-only, so a call that tolerates an absent field reads as one.
 
 **A third site was found while tracing, and it was the worse one.**
 `EnsembleContext.from_config` read the legacy key with a silent default, so a migrated
@@ -116,6 +118,28 @@ with nothing to signal it. It now reads through the same accessor, with the pre-
 default passed explicitly (`config_maturity(configs, default=...)`) so that a caller's
 tolerance for a missing field is visible at the call rather than implied by which
 accessor it reached for.
+
+**Sites four and five were upstream of all of it, and made the rest unreachable.** Both
+ensemble managers asked their loader for `("config_deployment.py",
+"get_deployment_config")` by hand, while `ModelManager` resolved either filename. So an
+ensemble that had completed the rename loaded *nothing*, its combined config declared
+neither vocabulary, and the sniffer refused the run on the first statement of
+`execute_single_run` — before either of the two sites #496 names was reached. The
+resolution now lives once, in `managers/configuration/script_config.load_maturity_config`,
+which all three managers call; a test walks the package AST and asserts the legacy entry
+point `get_deployment_config` appears as a value in that one file and nowhere else, so
+closing the window is one edit rather than a grep. The filename alone is not enough to
+resolve: the two files expose differently-named functions, which is why a call site that
+knew about the rename but not about `get_maturity_config` would still have loaded `None`.
+
+**Known and not fixed here: this repo's own scaffolder still mints the legacy vocabulary.**
+`templates/model/template_config_deployment.py` and its ensemble twin write
+`config_deployment.py` declaring `deployment_status`, and there is no
+`template_config_maturity.py`. The close condition above — *no configs on the legacy
+vocabulary* — cannot be reached by migration alone while the generator keeps creating new
+legacy configs: views-models migrates its fleet, scaffolds one new model, and the count
+returns to one. Tracked separately rather than fixed inside a bugfix, because changing what
+the templates emit changes what every new source looks like and deserves its own review.
 
 **The run log records whichever vocabulary the config declares.** A migrated source writes
 `Deployment Status: candidate` where it previously wrote `shadow`. That is safe because

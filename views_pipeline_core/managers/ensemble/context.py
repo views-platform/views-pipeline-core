@@ -44,6 +44,19 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 #: and unendorsed: whether an unstated deployment status should default at all, or refuse,
 #: is ADR-017 follow-up work. Changing it here would have made a behaviour-neutral refactor
 #: not behaviour-neutral.
+#:
+#: **#496: this is a LEGACY-vocabulary value, and it is the one that will hide.** `"shadow"`
+#: is not a maturity — it is a `LEGACY_STATUS_TO_MATURITY` key, and `normalise_maturity`
+#: maps it to `candidate`. When ADR-057's window closes, the sweep that removes the legacy
+#: vocabulary will look for the key `deployment_status` and for the literals `"shadow"`,
+#: `"baseline"`, `"deployed"`; this line holds one of those literals behind a constant
+#: named for the key, in a file that is not the sniffer, and would survive both searches.
+#: Named here so the sweep has something to find. It is also the only place in the package
+#: that manufactures a maturity value for a config that declared none — every other legacy
+#: value in the system was written by a human into a config file, and reaches the pipeline
+#: with the `_check_deployment_status` warning naming the file to edit. This one arrives
+#: silently, which is why the call site passes it explicitly rather than letting the
+#: accessor default.
 DEFAULT_DEPLOYMENT_STATUS = "shadow"
 
 

@@ -41,6 +41,7 @@ from .ensemble import EnsemblePathManager
 
 from views_pipeline_core.managers.configuration.script_config import (
     load_config_from_script,
+    load_maturity_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,8 +96,12 @@ class DataFrameEnsembleManager:
         )
 
         self._script_paths = ensemble_path.get_scripts()
-        self._config_deployment = self._load_config(
-            "config_deployment.py", "get_deployment_config"
+        # ADR-057 / #496. Was `("config_deployment.py", "get_deployment_config")` by
+        # hand, so an ensemble that had completed the rename loaded `None` here and the
+        # sniffer then refused the run for declaring neither vocabulary. `ModelManager`
+        # already resolved both names; the ensembles did not, and nothing said so.
+        self._config_deployment = load_maturity_config(
+            self._script_paths, ensemble_path.model_name, load=self._load_config
         )
         self._config_hyperparameters = self._load_config(
             "config_hyperparameters.py", "get_hp_config"
