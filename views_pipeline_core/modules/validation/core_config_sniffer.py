@@ -208,10 +208,18 @@ class CoreConfigSniffer:
     execute_single_run / execute_sweep_run time.
     """
 
+    #: `deployment_status` is deliberately NOT here (#494). The maturity field is checked
+    #: by `_check_deployment_status`, which accepts either vocabulary (ADR-057) and already
+    #: refuses the case where neither is present — with a better message than this list can
+    #: give, because it names `config_maturity.py` and lists the valid maturities.
+    #:
+    #: Listing it here defeated the window it sits in front of: `_check_mandatory_keys`
+    #: runs FIRST in `sniff_all`, so a model that had completed the migration and carried
+    #: only `maturity` failed on the legacy key's absence before the dual-vocabulary check
+    #: was reached. Completing the migration made a model unrunnable.
     MANDATORY_KEYS_UNIVERSAL = [
         "name", "level", "creator",
         "steps",
-        "deployment_status",
     ]
     MANDATORY_KEYS_MODEL = [
         "algorithm", "time_steps", "prediction_format",

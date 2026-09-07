@@ -39,8 +39,15 @@ the execution engine.
   pipeline units, plus `MANDATORY_KEYS_MODEL` (`algorithm`, `time_steps`,
   `prediction_format`, `rolling_origin_stride`) for non-ensemble configs. Ensemble
   vs model identity is declared via the required `target` parameter (ADR-003).
-- Guarantees that `deployment_status` is a recognised value; raises immediately if the
-  model is `"deprecated"`.
+- Guarantees that the source's **maturity** is a recognised value, in **either
+  vocabulary** (ADR-057's transition window): `maturity` (`candidate` / `graduate` /
+  `retired`) or the legacy `deployment_status` (`shadow` / `deployed` / `baseline` /
+  `deprecated`). The new key wins when both are present, and using the legacy one warns.
+  Raises immediately if the source is `retired` / `"deprecated"`.
+  **This check is also what requires the field at all** — it refuses a config declaring
+  neither, naming `config_maturity.py` and listing the valid maturities. `deployment_status`
+  is deliberately absent from `MANDATORY_KEYS_UNIVERSAL`: listing it there ran before this
+  check and rejected a source that had *completed* the migration (#494).
 - Guarantees that `level` is in the set of currently supported levels (`{"cm", "pgm"}`).
 - Guarantees that `time_steps` (explicit or derived from `len(steps)` for ensembles)
   and `rolling_origin_stride` are in the currently supported value sets. When both
@@ -126,8 +133,8 @@ the execution engine.
 - `KeyError` — a mandatory config key is absent (including `skip_predictions_delivery`
   when `prediction_format='prediction_frame'`).
 - `TypeError` — `time_steps` is not `int`; `skip_predictions_delivery` is not `bool`.
-- `ValueError` — invalid or deprecated `deployment_status`; target / metric
-  mismatch; partition overlap; unrecognised `prediction_format` value.
+- `ValueError` — an unrecognised or `retired` maturity, in either vocabulary; target /
+  metric mismatch; partition overlap; unrecognised `prediction_format` value.
 - `NotImplementedError` — `time_steps`, `rolling_origin_stride`, `level`
   (unsupported), or `test_len` (unsupported partition size) has a valid type but
   is not yet supported by the pipeline.
@@ -215,7 +222,10 @@ if result:   # sniff_all returns None; absence of exception is the success signa
   values are supported.
 - Mandatory keys are split into two sets: `MANDATORY_KEYS_UNIVERSAL` (required for
   all pipeline units) and `MANDATORY_KEYS_MODEL` (required only for non-ensemble
-  configs). Ensemble vs model identity is declared via the required `target`
+  configs). **The maturity field is in neither**, on purpose — `_check_mandatory_keys`
+  runs first in `sniff_all`, so a key listed there is required by *name*, which cannot
+  express "either of two names". `_check_deployment_status` owns that requirement instead
+  and states it in the right vocabulary (#494). Ensemble vs model identity is declared via the required `target`
   parameter (ADR-003 compliance), not inferred from config content. `_VALID_TARGETS`
   frozenset defines the closed set of supported values.
 - `_resolve_time_steps()` is a validation-only helper that derives the effective

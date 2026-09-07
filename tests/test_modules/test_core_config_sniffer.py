@@ -37,6 +37,68 @@ def _valid_partition():
     }
 
 
+def _maturity_only_configs():
+    """A model that has completed the ADR-057 migration: `config_maturity.py` only.
+
+    This is what `ModelManager.__load_maturity_config()` actually produces once a source
+    is migrated — it prefers the new file and does not merge the legacy one, so the
+    resulting config carries `maturity` and no `deployment_status`.
+    """
+    configs = _valid_configs()
+    del configs["deployment_status"]
+    configs["maturity"] = "candidate"
+    return configs
+
+
+class TestTheTransitionWindowSurvivesSniffAll:
+    """ADR-057 opens a window in which either vocabulary is valid. #494: a gate that runs
+    before the window's own check was closing it again.
+
+    `test_maturity_vocabulary_transition.py` exercises `_check_deployment_status()`
+    directly, on a hand-built dict. That cannot see an ordering defect in `sniff_all()`,
+    which is where the failure actually lived — so these go through the whole entry point.
+    """
+
+    def test_a_migrated_model_passes_the_whole_sniffer(self):
+        """The end state ADR-057 exists to reach. Before #494 this raised
+        `KeyError: ['deployment_status']` from `_check_mandatory_keys()`, which runs
+        first — so completing the migration made a model unrunnable."""
+        CoreConfigSniffer(
+            _maturity_only_configs(), _valid_partition(), target="model"
+        ).sniff_all("calibration")
+
+    def test_an_unmigrated_model_still_passes_the_whole_sniffer(self):
+        """The other half of a window: the legacy vocabulary keeps working."""
+        CoreConfigSniffer(
+            _valid_configs(), _valid_partition(), target="model"
+        ).sniff_all("calibration")
+
+    def test_a_model_declaring_neither_is_still_refused(self):
+        """Removing the key from the mandatory list must not make it optional.
+
+        `_check_deployment_status()` already refuses this case, and refuses it better —
+        it names `config_maturity.py` and lists the valid maturities, where the generic
+        mandatory-keys error said only 'the appropriate config_*.py file'."""
+        configs = _valid_configs()
+        del configs["deployment_status"]
+        with pytest.raises(KeyError) as exc:
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+        message = str(exc.value)
+        assert "maturity" in message
+        assert "config_maturity.py" in message, (
+            "the refusal must name the file to edit, not a wildcard"
+        )
+
+    def test_a_migrated_ensemble_passes_too(self):
+        """Ensembles take MANDATORY_KEYS_UNIVERSAL without MANDATORY_KEYS_MODEL, so they
+        exercise a different branch of `_check_mandatory_keys`."""
+        configs = _maturity_only_configs()
+        for key in ("algorithm", "time_steps", "prediction_format", "rolling_origin_stride"):
+            configs.pop(key, None)
+        configs["models"] = ["member_a"]
+        CoreConfigSniffer(configs, _valid_partition(), target="ensemble").sniff_all("calibration")
+
+
 class TestCoreConfigSniffer:
 
     # ── Happy path ────────────────────────────────────────────────────────
