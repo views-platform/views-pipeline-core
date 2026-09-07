@@ -144,6 +144,20 @@ class EnsembleContext(BaseStageContext):
             # this field. Nothing does today; the field is carried and unused. The
             # default is preserved and now stated, because defaulting here predates #496
             # and removing it would be a behaviour change riding on a bugfix.
+            #
+            # Two things this default is NOT. It is not a live fallback: all three
+            # ensemble entry points run `CoreConfigSniffer.sniff_all` first, and
+            # `_check_deployment_status` refuses a config declaring neither key, so
+            # nothing that reaches here can be missing one. And it is not a maturity —
+            # see DEFAULT_DEPLOYMENT_STATUS above, which is a legacy value this repo
+            # manufactures for a config that declared none.
+            #
+            # One behaviour widened, deliberately, and recorded here rather than left to
+            # be discovered: the old `configs.get("deployment_status", DEFAULT)` returned
+            # `None` for a config declaring the key with a null value, while
+            # `config_maturity` treats present-but-`None` as absent and returns the
+            # default. Both inputs are junk; the difference is that one puts `None` into
+            # a field annotated `str` and the other puts a value the window understands.
             deployment_status=config_maturity(
                 configs, default=DEFAULT_DEPLOYMENT_STATUS
             ),

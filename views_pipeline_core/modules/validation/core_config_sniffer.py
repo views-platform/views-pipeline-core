@@ -93,6 +93,42 @@ def normalise_maturity(value: str | None) -> str | None:
     return LEGACY_STATUS_TO_MATURITY.get(value)
 
 
+def _declared(config: Dict[str, Any], key: str) -> str | None:
+    """The value under `key`, or `None` if the config does not declare one.
+
+    Presence is `is not None`, not truthiness, and deliberately: `_check_deployment_status`
+    tests it exactly this way. Under truthiness a config declaring `maturity: ""` alongside
+    a legacy `deployment_status` would fall through and return the legacy value — for a
+    config the file's own guard rejects, and plausibly. Two spellings of one rule is the
+    drift `config_maturity` exists to prevent.
+
+    A blank value is refused rather than returned, and this is the one place the accessor
+    judges a value rather than reporting it. The reason is specific and is not about the
+    vocabulary: `create_log_file` writes this value into `Deployment Status: <value>`, and
+    `read_log_file` splits every line on `": "` — so a blank value writes a line that
+    cannot be parsed, and the parse failure takes down the WHOLE log file, not that field.
+    Downstream, `validate_ensemble_model_deployment_status` catches the `ValueError` and
+    returns `False`, so the next ensemble run reports the *member* as failing validation.
+    A blank maturity therefore surfaces as a wrong accusation about a different model.
+
+    Vocabulary validity stays the sniffer's job — `maturity: "shadwo"` is not judged here,
+    because a second statement of the value rules is exactly the drift above. What is
+    refused is the one value that cannot survive the round trip this accessor feeds.
+    """
+    value = config.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        raise ValueError(
+            f"Config for '{config.get('name')}' declares '{key}' as an empty value. "
+            f"An empty maturity writes an unparseable line into the run log, which makes "
+            f"the whole log unreadable and surfaces as a validation failure against a "
+            f"different model. Set '{key}' to one of {sorted(SUPPORTED_MATURITIES)} in "
+            f"{MATURITY_CONFIG_FILENAME}, or remove the key."
+        )
+    return value
+
+
 class _RaiseIfAbsent:
     """The type of the "no default given — raise" sentinel.
 
@@ -163,11 +199,11 @@ def config_maturity(
             load, so reaching it here means the sniffer was bypassed — which is how C-305
             happened, and is worth failing on rather than defaulting.
     """
-    maturity = config.get("maturity")
+    maturity = _declared(config, "maturity")
     if maturity is not None:
         return maturity
 
-    status = config.get("deployment_status")
+    status = _declared(config, "deployment_status")
     if status is not None:
         return status
 

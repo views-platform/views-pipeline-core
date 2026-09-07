@@ -142,6 +142,25 @@ returns to one. Tracked as **#498** rather than fixed inside a bugfix, because c
 emit changes what every new source looks like — including what maturity a brand-new model
 is born declaring — and deserves its own review.
 
+**A config declaring BOTH keys changes what it records, and that can change an ADR-058
+verdict.** Before #496 the log recorded `deployment_status` unconditionally; now the new
+key wins, so a config carrying `maturity: graduate` *and* `deployment_status: deployed`
+records `graduate` where it used to record `deployed`. Both normalise differently —
+`deployed` has no safe mapping and yields *indeterminate*, `graduate` is a maturity — so
+ADR-058's R2 rule can reach a different verdict on the same config on consecutive days.
+This is the intended behaviour of the precedence rule rather than a side effect, and it is
+the reason `_check_deployment_status` warns on both-present: the window is meant to be
+passed through, not lived in.
+
+**One value is refused rather than reported: a blank one.** `config_maturity` does not
+judge vocabulary — `maturity: "shadwo"` is the sniffer's business, and restating the value
+rules in the accessor is the drift it exists to prevent — but an empty string is refused,
+because it is the one value that cannot survive the round trip. `create_log_file` would
+write `Deployment Status: ` and `read_log_file`, which splits every line on `": "`, then
+fails on the whole file; `validate_ensemble_model_deployment_status` catches that
+`ValueError` and returns `False`, so the next ensemble run reports the *member* as failing
+validation. A blank maturity would surface as a wrong accusation about a different model.
+
 **The run log records whichever vocabulary the config declares.** A migrated source writes
 `Deployment Status: candidate` where it previously wrote `shadow`. That is safe because
 the only reader of the value normalises it before use (`member_maturity.py` normalises

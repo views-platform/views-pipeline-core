@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Optional, Union
 from datetime import datetime
 
 from views_pipeline_core.data.constants import model_artifact_filename
-from views_pipeline_core.modules.validation.core_config_sniffer import config_maturity
 
 if TYPE_CHECKING:  # annotation-only; never imported at runtime
     import pandas as pd
@@ -139,6 +138,13 @@ def create_log_file(path_generated,
     # whichever vocabulary the config declares; the one reader of the value back out
     # (`validate_ensemble_model_deployment_status`) normalises it, so a legacy log and a
     # migrated config already reconcile.
+    # Imported here, not at module scope, for the reason stated at the top of this file:
+    # `core_config_sniffer` imports `views_frames.SpatialLevel`, so a module-level import
+    # pulls numpy and views_frames onto the import chain of a module deliberately kept off
+    # it (#320, C-223). Measured: 0.103s -> 0.013s to import this module, and neither
+    # numpy nor views_frames loaded.
+    from views_pipeline_core.modules.validation.core_config_sniffer import config_maturity
+
     deployment_status = config_maturity(model_config)
     
     create_specific_log_file(path_generated, run_type, model_name, deployment_status,

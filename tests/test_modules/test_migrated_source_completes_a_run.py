@@ -235,6 +235,26 @@ def test_a_migrated_ensemble_reaches_the_member_check(monkeypatch, declared, exp
     )
 
 
+def test_the_ensemble_site_raises_rather_than_passing_None_to_the_member_check(monkeypatch):
+    """The neither-key case at the SECOND site, which the parametrisation above misses.
+
+    Found by mutation: replacing `config_maturity(config)` in `check.py` with
+    `config.get("maturity", config.get("deployment_status"))` — the exact `.get()`-or form
+    the accessor's docstring argues against — passed the whole suite. Both failures the
+    change's mutation table credits to that argument came from the `create_log_file` path,
+    so the rule was pinned at one of its two sites and asserted at the other.
+
+    What the `or` form would do here: hand `None` to `ensemble_may_contain_member`, where
+    `normalise_maturity(None)` returns `None` meaning *indeterminate* — and an
+    indeterminate ensemble maturity compared against a real member maturity is a rule
+    evaluated on a value nobody supplied.
+    """
+    config = {"name": "no_vocabulary", "models": ["member_a"], "run_type": "calibration"}
+
+    with pytest.raises(KeyError, match="config_maturity.py"):
+        _drive_validate_ensemble_model(monkeypatch, config, member_status="candidate")
+
+
 # ----------------------------------------------------------------------------------
 # The third site — not named in #496, found tracing every reader of the field
 # ----------------------------------------------------------------------------------
@@ -320,16 +340,51 @@ def test_the_default_is_opt_in_not_the_accessors_behaviour():
 # ----------------------------------------------------------------------------------
 
 
-def test_the_accessor_tests_presence_the_same_way_the_sniffer_does():
-    """A declared-but-empty `maturity` must not fall through to the legacy key.
+def test_a_declared_but_empty_maturity_is_refused_not_passed_through():
+    """The one value that cannot survive the round trip this accessor feeds.
 
-    `_check_deployment_status` tests presence with `is not None` and refuses an empty
-    maturity. Under truthiness this accessor would answer `"shadow"` for that same config
-    — a plausible legacy value, produced for a config the file's own guard rejects. The
-    argument for extracting the accessor was that the precedence rule should be stated
-    once; a second spelling of it inside the extraction would have been the drift.
+    Reproduced end to end before this guard existed: `config_maturity({"maturity": ""})`
+    returned `""`, `create_log_file` wrote the line `Deployment Status: `, and
+    `read_log_file` on that file raised `ValueError: not enough values to unpack` —
+    taking down the WHOLE log, not that field. `validate_ensemble_model_deployment_status`
+    catches the ValueError and returns `False`, so the next ensemble run reports the
+    *member* as failing validation. A blank maturity surfaces as a wrong accusation about
+    a different model.
+
+    Note what is NOT refused: `maturity: "shadwo"`. Vocabulary validity is the sniffer's
+    job, and restating the value rules here is exactly the drift this accessor exists to
+    prevent. What is refused is the value that corrupts the artifact.
     """
-    assert config_maturity({"maturity": "", "deployment_status": "shadow"}) == ""
+    with pytest.raises(ValueError, match="empty value"):
+        config_maturity({"name": "m", "maturity": "", "deployment_status": "shadow"})
+
+
+def test_the_empty_value_is_refused_before_it_reaches_the_log(tmp_path):
+    """The chain above, at the entry point rather than at the accessor.
+
+    A unit test of the accessor cannot see whether the caller reaches it — which is the
+    C-305 lesson this whole file exists to apply.
+    """
+    with pytest.raises(ValueError, match="empty value"):
+        handle_single_log_creation(
+            _PathManager(tmp_path), _config(maturity="  "), train=True
+        )
+
+
+def test_presence_is_tested_the_same_way_the_sniffer_tests_it():
+    """`is not None`, not truthiness — so a declared key is never skipped silently.
+
+    Under truthiness, `maturity: ""` would fall through to the legacy key and this
+    accessor would answer `"shadow"`: a plausible legacy value, produced for a config the
+    file's own guard rejects. It now raises instead, which is the point — a declared key
+    is *answered for*, never stepped over.
+    """
+    with pytest.raises(ValueError):
+        config_maturity({"name": "m", "maturity": "", "deployment_status": "shadow"})
+
+    assert config_maturity({"deployment_status": "shadow"}) == "shadow", (
+        "an absent maturity, as opposed to an empty one, still falls through"
+    )
 
 
 def test_the_default_cannot_be_passed_positionally():
