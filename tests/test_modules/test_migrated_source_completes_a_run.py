@@ -20,8 +20,13 @@ directly, which is why 17 passing tests could not see C-305: **a composition def
 invisible to a test that never composes.** The sniffer was correct and the caller was
 wrong, and every test called the sniffer.
 
-So these drive `handle_single_log_creation` and `handle_ensemble_log_creation` — the
-functions a real run calls — and let them write a real log to a real directory. The
+So these drive `handle_single_log_creation` — the function a real run calls — and let it
+write a real log to a real directory, then read that file back through
+`validate_ensemble_model_deployment_status`, the function the next ensemble run uses.
+
+(`handle_ensemble_log_creation` is deliberately NOT claimed here. It has zero execution
+coverage anywhere in this repo — an earlier draft of this docstring said these tests drove
+it, which was false, and is the C-304 shape appearing inside a file written to stop it.) The
 assertion is on the file that lands on disk, because that file is the interface: it is
 read back by `validate_ensemble_model_deployment_status` on the next ensemble run.
 
@@ -44,6 +49,9 @@ import pytest
 from views_pipeline_core.files.utils import (
     handle_single_log_creation,
     read_log_file,
+)
+from views_pipeline_core.modules.validation.ensemble.check import (
+    validate_ensemble_model_deployment_status,
 )
 from views_pipeline_core.modules.validation.core_config_sniffer import config_maturity
 
@@ -125,13 +133,41 @@ def test_the_log_is_readable_back_by_the_function_that_consumes_it(tmp_path):
     """
     path_manager = _PathManager(tmp_path)
     handle_single_log_creation(
-        path_manager, _config(maturity="candidate"), train=True
+        path_manager, _config(maturity="graduate"), train=True
     )
 
     log = read_log_file(path_manager.data_generated / "calibration_log.txt")
 
     for key in ("Single Model Name", "Deployment Status", "Data Generation Timestamp"):
         assert key in log, f"{key} missing — the ensemble reader subscripts it"
+
+    # And then actually call the consumer, because the three assertions above are about
+    # a dict and the test's name is about a function. Caught by mutation: making
+    # `validate_ensemble_model_deployment_status` reject new-vocabulary values left this
+    # file entirely green — the round trip was asserted, never performed.
+    assert validate_ensemble_model_deployment_status(
+        path_manager.data_generated, "calibration", "graduate"
+    ) is True, (
+        "a graduate ensemble reading a graduate member's freshly-written log must "
+        "validate — this is the whole point of writing the declared vocabulary rather "
+        "than translating on the way out"
+    )
+
+
+def test_the_round_trip_can_actually_fail(tmp_path):
+    """The control for the assertion above.
+
+    A round trip that returns True for everything proves nothing. ADR-058's R2 says a
+    graduate ensemble's members must all be graduate, so the same path with a `candidate`
+    member must come back False — and it must do so having actually read the file, which
+    is what distinguishes this from asserting the rule against a hand-built dict.
+    """
+    path_manager = _PathManager(tmp_path)
+    handle_single_log_creation(path_manager, _config(maturity="candidate"), train=True)
+
+    assert validate_ensemble_model_deployment_status(
+        path_manager.data_generated, "calibration", "graduate"
+    ) is False, "a candidate member must not validate into a graduate ensemble (R2)"
 
 
 # ----------------------------------------------------------------------------------
