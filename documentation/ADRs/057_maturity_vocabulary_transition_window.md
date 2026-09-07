@@ -138,8 +138,9 @@ knew about the rename but not about `get_maturity_config` would still have loade
 `template_config_maturity.py`. The close condition above — *no configs on the legacy
 vocabulary* — cannot be reached by migration alone while the generator keeps creating new
 legacy configs: views-models migrates its fleet, scaffolds one new model, and the count
-returns to one. Tracked separately rather than fixed inside a bugfix, because changing what
-the templates emit changes what every new source looks like and deserves its own review.
+returns to one. Tracked as **#498** rather than fixed inside a bugfix, because changing what the templates
+emit changes what every new source looks like — including what maturity a brand-new model
+is born declaring — and deserves its own review.
 
 **The run log records whichever vocabulary the config declares.** A migrated source writes
 `Deployment Status: candidate` where it previously wrote `shadow`. That is safe because
