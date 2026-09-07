@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from views_pipeline_core.managers.configuration.configuration import combined_targets
+from views_pipeline_core.modules.validation.core_config_sniffer import config_maturity
 from views_pipeline_core.types import BaseStageContext
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -123,8 +124,15 @@ class EnsembleContext(BaseStageContext):
             use_weights=configs.get("use_weights", False),
             weights=configs.get("weights", {}),
             timestamp=configs.get("timestamp", ""),
-            deployment_status=configs.get(
-                "deployment_status", DEFAULT_DEPLOYMENT_STATUS
+            # #496. This read the legacy key alone, so a migrated ensemble declaring
+            # `maturity: graduate` silently got "shadow" — not a crash, a wrong value,
+            # which normalises to `candidate` and would have skipped ADR-058's R2 rule
+            # ("a graduate ensemble's members must all be graduate") had anything read
+            # this field. Nothing does today; the field is carried and unused. The
+            # default is preserved and now stated, because defaulting here predates #496
+            # and removing it would be a behaviour change riding on a bugfix.
+            deployment_status=config_maturity(
+                configs, default=DEFAULT_DEPLOYMENT_STATUS
             ),
             prediction_format=prediction_format,
             partition_dict=partition_dict or {},

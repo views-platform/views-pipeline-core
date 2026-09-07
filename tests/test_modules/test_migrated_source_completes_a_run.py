@@ -231,3 +231,81 @@ def test_a_migrated_ensemble_reaches_the_member_check(monkeypatch, declared, exp
         "the ensemble's own declared maturity must reach the member comparison "
         "unchanged — `normalise_maturity` is applied inside it, on both sides"
     )
+
+
+# ----------------------------------------------------------------------------------
+# The third site — not named in #496, found tracing every reader of the field
+# ----------------------------------------------------------------------------------
+
+
+def _build_ensemble_context(config):
+    """Drive the real `_build_context`, the way the characterization tests do.
+
+    Reuses `test_ensemble_context_characterization`'s helper rather than calling
+    `from_config` directly: that helper bypasses `__init__` (which pulls in wandb,
+    logging and four ADR-045 stages) while still running the real body, which is where
+    the line under test lives.
+    """
+    from tests.test_managers.test_ensemble_context_characterization import _build
+    from views_pipeline_core.managers.ensemble.dataframe_ensemble import (
+        DataFrameEnsembleManager,
+    )
+
+    return _build(DataFrameEnsembleManager, config)
+
+
+def _ensemble_config(**keys):
+    base = {
+        "name": "test_ensemble",
+        "models": ["purple_alien"],
+        "aggregation": "mean",
+        "regression_targets": ["lr_sb_best"],
+    }
+    base.update(keys)
+    return base
+
+
+def test_a_migrated_ensembles_context_carries_its_declared_maturity():
+    """`EnsembleContext.from_config` read the legacy key alone, with a silent default.
+
+    Unlike the two sites #496 names, this one did not crash on a migrated config — it
+    returned `"shadow"`, the default, for an ensemble declaring `maturity: graduate`. A
+    wrong value rather than a missing one, and `shadow` normalises to `candidate`, so an
+    ensemble that had declared itself graduate would have been treated as a candidate.
+
+    Nothing reads this field today, which is why it was a trap rather than a live defect:
+    the first consumer added would have inherited the wrong value with no way to tell.
+    """
+    ctx = _build_ensemble_context(_ensemble_config(maturity="graduate"))
+
+    assert ctx.deployment_status == "graduate", (
+        "the ensemble declared graduate; the context must not silently say shadow"
+    )
+
+
+def test_an_ensemble_declaring_neither_key_still_gets_the_default():
+    """The behaviour that predates #496 and is deliberately preserved.
+
+    This site has always defaulted, and removing that would be a behaviour change riding
+    on a bugfix — the thing `member_maturity`'s docstring warns against. The default is
+    now passed explicitly, so a caller's tolerance for a missing field is visible at the
+    call rather than implied by which accessor it reached for.
+    """
+    from views_pipeline_core.managers.ensemble.context import DEFAULT_DEPLOYMENT_STATUS
+
+    ctx = _build_ensemble_context(_ensemble_config())
+
+    assert ctx.deployment_status == DEFAULT_DEPLOYMENT_STATUS
+
+
+def test_the_default_is_opt_in_not_the_accessors_behaviour():
+    """The distinction the `default` argument exists to keep.
+
+    If `config_maturity` defaulted by itself, the two loud sites would have gone quiet
+    when this one was fixed — one accessor silently changing three call sites' failure
+    modes at once.
+    """
+    with pytest.raises(KeyError):
+        config_maturity({"name": "m"})
+
+    assert config_maturity({"name": "m"}, default="shadow") == "shadow"

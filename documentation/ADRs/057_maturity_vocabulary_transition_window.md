@@ -107,6 +107,16 @@ the same precedence as everything else here: the new key wins, and a config decl
 neither raises. It returns the *declared* value and does not translate — translation is
 `normalise_maturity`'s job, applied by whoever compares two sources.
 
+**A third site was found while tracing, and it was the worse one.**
+`EnsembleContext.from_config` read the legacy key with a silent default, so a migrated
+ensemble declaring `maturity: graduate` got `"shadow"` — a wrong value rather than a
+missing one, normalising to `candidate`. Nothing reads that field today, so it was a trap
+rather than a live defect: the first consumer added would have inherited the wrong value
+with nothing to signal it. It now reads through the same accessor, with the pre-existing
+default passed explicitly (`config_maturity(configs, default=...)`) so that a caller's
+tolerance for a missing field is visible at the call rather than implied by which
+accessor it reached for.
+
 **The run log records whichever vocabulary the config declares.** A migrated source writes
 `Deployment Status: candidate` where it previously wrote `shadow`. That is safe because
 the only reader of the value normalises it before use (`member_maturity.py` normalises
@@ -135,7 +145,9 @@ calls, and asserts on the log file that lands on disk. It goes through the entry
 deliberately: the existing transition tests call the checks directly, which is why
 seventeen passing tests could not see C-305 — **a composition defect is invisible to a
 test that never composes.** Five further mutations verified, including reverting either
-subscript, inverting the key precedence, and returning `None` instead of raising.
+subscript, inverting the key precedence, returning `None` instead of raising, reverting
+the ensemble context to its legacy-key read, and collapsing the accessor's two failure
+modes into one.
 
 ## Related
 

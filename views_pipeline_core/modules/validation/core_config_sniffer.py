@@ -93,7 +93,13 @@ def normalise_maturity(value: str | None) -> str | None:
     return LEGACY_STATUS_TO_MATURITY.get(value)
 
 
-def config_maturity(config: Dict[str, Any]) -> str:
+#: Sentinel for "no default — raise". `None` cannot serve, because `None` is a value a
+#: caller might legitimately want back, and conflating "unset" with "None" is the
+#: distinction `normalise_maturity` exists to preserve.
+_RAISE = object()
+
+
+def config_maturity(config: Dict[str, Any], default: str | None = _RAISE) -> str:
     """This config's maturity, under whichever key it declares (ADR-057, #496).
 
     Returns the raw declared value — `candidate` from a migrated source, `shadow` from a
@@ -123,11 +129,20 @@ def config_maturity(config: Dict[str, Any]) -> str:
     Precedent: `combined_targets()` in `managers/configuration/configuration.py`, this
     repo's existing accessor for a field whose key was retired (#380/#381).
 
+    ## The `default` argument
+
+    Omit it and a config declaring neither key raises, which is what the two sites that
+    subscripted the legacy key did before #496. Pass one only where the previous
+    behaviour was already to default silently — `EnsembleContext.from_config` is the
+    single such site — so that a caller's tolerance for a missing field is visible at the
+    call rather than implied by which accessor it happened to use. Two shapes in the
+    codebase for one rule is how the rule drifts.
+
     Raises:
-        KeyError: if neither key is declared. `CoreConfigSniffer._check_deployment_status`
-            already raises for this at config load, so reaching it here means the sniffer
-            was bypassed — which is how C-305 happened, and is worth failing on rather
-            than defaulting.
+        KeyError: if neither key is declared and no `default` was given.
+            `CoreConfigSniffer._check_deployment_status` already raises for this at config
+            load, so reaching it here means the sniffer was bypassed — which is how C-305
+            happened, and is worth failing on rather than defaulting.
     """
     maturity = config.get("maturity")
     if maturity is not None:
@@ -136,6 +151,9 @@ def config_maturity(config: Dict[str, Any]) -> str:
     status = config.get("deployment_status")
     if status is not None:
         return status
+
+    if default is not _RAISE:
+        return default
 
     raise KeyError(
         f"Config for '{config.get('name')}' declares neither 'maturity' nor the legacy "
