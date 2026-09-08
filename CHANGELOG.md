@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.2.0] — unreleased
+## [3.2.0] — 2026-09-08
 
 **A minor release that unblocks views-models' vocabulary migration.** Nothing here breaks a
 3.1.x consumer: the additions are new files, and the fixes make code work that previously
