@@ -302,7 +302,9 @@ Refer to `documentation/development_guidelines.md` for coding standards and `doc
 ## 15. Quick Start
 
 1. Run `build_model_scaffold.py` or `build_ensemble_scaffold.py` found in the `views-models` repository.
-2. Update `config_deployment.py`, `config_hyperparameters.py`, `config_queryset.py`, `config_meta.py`.
+2. Update `config_maturity.py`, `config_hyperparameters.py`, `config_queryset.py`, `config_meta.py`.
+   (Sources scaffolded before ADR-057 carry `config_deployment.py` instead; either is read
+   while the transition window is open, and the new name wins when both are present.)
 3. Run calibration:
 
    ```bash

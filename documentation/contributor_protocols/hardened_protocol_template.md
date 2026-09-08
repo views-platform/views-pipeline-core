@@ -35,7 +35,10 @@ All data entering the pipeline must pass through structural auditing.
 ## 2. Contributor Requirements
 
 ### Adding a New Model (Downstream Repos)
-1. **Config scripts:** Export `get_hp_config()`, `get_deployment_config()`, `get_meta_config()`.
+1. **Config scripts:** Export `get_hp_config()`, `get_meta_config()`, and
+   `get_maturity_config()` (in `config_maturity.py`). The legacy
+   `get_deployment_config()` is still accepted while ADR-057's window is open, but a new
+   model should be scaffolded onto the current vocabulary (#498).
 2. **Partition dict:** Must have `train` and `test` keys with `(first_month, last_month)` tuples.
 3. **Model scripts:** Export train/predict functions matching expected signatures.
 4. **Predictions:** Must be `pd.DataFrame` with `pred_*` columns and correct MultiIndex, or `PredictionFrame` with valid identifiers.

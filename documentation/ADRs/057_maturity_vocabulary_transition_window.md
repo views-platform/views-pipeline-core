@@ -132,34 +132,47 @@ closing the window is one edit rather than a grep. The filename alone is not eno
 resolve: the two files expose differently-named functions, which is why a call site that
 knew about the rename but not about `get_maturity_config` would still have loaded `None`.
 
-**Known and not fixed here: this repo's own scaffolder still mints the legacy vocabulary.**
-`templates/model/template_config_deployment.py` and its ensemble twin write
-`config_deployment.py` declaring `deployment_status`, and there is no
-`template_config_maturity.py`. The close condition above — *no configs on the legacy
-vocabulary* — cannot be reached by migration alone while the generator keeps creating new
-legacy configs: views-models migrates its fleet, scaffolds one new model, and the count
-returns to one. Tracked as **#498** rather than fixed inside a bugfix, because changing what the templates
-emit changes what every new source looks like — including what maturity a brand-new model
-is born declaring — and deserves its own review.
+**The scaffolder now emits the current vocabulary (#498).**
+`templates/{model,ensemble}/template_config_maturity.py` generate `config_maturity.py`
+declaring `maturity: candidate`. Until #498 this repo shipped only a generator for the
+retired vocabulary, so the close condition above was unsatisfiable by construction:
+views-models could migrate every source and the count would return to one the next time
+anybody scaffolded a model.
 
-**A config declaring BOTH keys changes what it records, and that can change an ADR-058
-verdict.** Before #496 the log recorded `deployment_status` unconditionally; now the new
-key wins, so a config carrying `maturity: graduate` *and* `deployment_status: deployed`
-records `graduate` where it used to record `deployed`. Both normalise differently —
-`deployed` has no safe mapping and yields *indeterminate*, `graduate` is a maturity — so
-ADR-058's R2 rule can reach a different verdict on the same config on consecutive days.
-This is the intended behaviour of the precedence rule rather than a side effect, and it is
-the reason `_check_deployment_status` warns on both-present: the window is meant to be
-passed through, not lived in.
+**A new source is born `candidate`, and the generator takes no parameter that could say
+otherwise.** This is the decision #498 asked for, and it is deliberate in both halves.
+`candidate` because maturity is *earned* — a source is not finished the moment it is
+created — and because it is the conservative end of the ladder: a candidate cannot join a
+graduate ensemble (ADR-058 R2 refuses), so a wrong value fails loudly rather than shipping a
+forecast nobody vetted. It also preserves the old behaviour exactly, since the retired
+default `shadow` normalises to `candidate`. **No parameter**, because the parameter is the
+mechanism: views-models #444 wrote `maturity: graduate` onto thirteen models whose own
+configs said `shadow`, and its revert calls that "a promotion" that "no guard would have
+caught". A parameter would also let the scaffolder emit `retired` — a source that refuses to
+run the moment it exists.
 
-**One value is refused rather than reported: a blank one.** `config_maturity` does not
-judge vocabulary — `maturity: "shadwo"` is the sniffer's business, and restating the value
-rules in the accessor is the drift it exists to prevent — but an empty string is refused,
-because it is the one value that cannot survive the round trip. `create_log_file` would
-write `Deployment Status: ` and `read_log_file`, which splits every line on `": "`, then
-fails on the whole file; `validate_ensemble_model_deployment_status` catches that
-`ValueError` and returns `False`, so the next ensemble run reports the *member* as failing
-validation. A blank maturity would surface as a wrong accusation about a different model.
+**The two legacy generators are kept, working and silent.** views-models' scaffolders import
+them by module name, and their fleet cannot accept `maturity` yet — around nine of their test
+modules plus two CI tools require `config_deployment.py` in every source directory. Refusing
+or deleting here would break their CI to enforce a rename they cannot take, which is the flag
+day this ADR exists to avoid. They carry no runtime warning on purpose: a warning reaches a
+human running an interactive scaffolder who cannot act on it, and a warning that instructs a
+reader to break their build is how a team learns to ignore warnings. The deprecation is in the
+module docstring, and `tests/test_templates_scaffold_the_current_vocabulary.py` pins the set of
+templates minting the retired vocabulary at exactly those two — so a third cannot appear, and
+deleting the pair when views-models flips is a one-line edit.
+
+**Each generator refuses to write the other's filename.** The output path is chosen in
+views-models and the entry point is chosen here, so the two halves of the rename are decided
+in different repositories — and a file named `config_maturity.py` defining
+`get_deployment_config` would load as `None` and be refused for the wrong reason. That is
+C-307 reproduced from the one layer where both halves are visible at once, and it is now
+closed at that layer.
+
+**What this does NOT do: close the window.** The close condition is still views-models
+reporting no configs on the legacy vocabulary, and they are at 123 legacy files and zero new
+ones. This repo can no longer be the *reason* the count cannot reach zero; it cannot reach it
+alone.
 
 **The run log records whichever vocabulary the config declares.** A migrated source writes
 `Deployment Status: candidate` where it previously wrote `shadow`. That is safe because
