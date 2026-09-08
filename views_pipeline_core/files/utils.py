@@ -141,7 +141,8 @@ def create_log_file(path_generated,
     # Imported here, not at module scope, for the reason stated at the top of this file:
     # `core_config_sniffer` imports `views_frames.SpatialLevel`, so a module-level import
     # pulls numpy and views_frames onto the import chain of a module deliberately kept off
-    # it (#320, C-223). Measured: 0.103s -> 0.013s to import this module, and neither
+    # it (#320, C-223). Measured with a bare interpreter: 0.012s to import this module,
+    # against 0.131s for the sniffer it would otherwise pull in — and neither
     # numpy nor views_frames loaded.
     from views_pipeline_core.modules.validation.core_config_sniffer import config_maturity
 

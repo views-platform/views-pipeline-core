@@ -33,7 +33,10 @@ from views_pipeline_core.files.utils import (
 from views_pipeline_core.modules.aggregation.aggregator import (
     AggregationModule,
 )
-from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
+from views_pipeline_core.modules.validation.core_config_sniffer import (
+    CoreConfigSniffer,
+    SUPPORTED_RECONCILIATION_TYPES,
+)
 from views_pipeline_core.modules.validation.ensemble import validate_ensemble_model
 
 from .context import EnsembleContext
@@ -846,8 +849,28 @@ class DataFrameEnsembleManager:
                     wandb_module=self._wandb_module,
                 )
         else:
+            # DERIVED, not hand-listed: anything the sniffer ACCEPTS that this path does
+            # not implement is a refusal, not a shrug. Until 3.2.0 this branch logged
+            # "No valid reconciliation type specified" at INFO and returned the frame
+            # unreconciled — which was false and dangerous for `pgm_cm`, a value the
+            # sniffer not only accepts but actively RECOMMENDS ("Move to 'pgm_cm', the
+            # frames-native path"). An operator following our own deprecation warning
+            # published unreconciled forecasts under an INFO line. No views-models
+            # ensemble declared `pgm_cm` when this was found, so refusing breaks nothing
+            # and protects the first one that does.
+            unimplemented_here = SUPPORTED_RECONCILIATION_TYPES - {"pgm_cm_point"}
+            if reconciliation_type in unimplemented_here:
+                raise PipelineException(
+                    f"reconciliation={reconciliation_type!r} is accepted by the config "
+                    f"sniffer but is NOT implemented on the DataFrame path, which can "
+                    f"only do point reconciliation. Publishing here would silently return "
+                    f"unreconciled predictions. Either run this ensemble on the "
+                    f"PredictionFrame path (prediction_format='prediction_frame'), which "
+                    f"reaches draw-aware reconciliation, or declare 'pgm_cm_point'.",
+                    wandb_module=self._wandb_module,
+                )
             logger.info(
-                "No valid reconciliation type specified. "
+                "No reconciliation type specified. "
                 "Returning predictions without reconciliation."
             )
 

@@ -213,8 +213,24 @@ def test_a_retired_maturity_still_blocks_when_the_legacy_value_is_benign():
 def test_the_legacy_vocabulary_is_fully_accounted_for():
     """Every old value is either mapped or explicitly flagged as needing a decision.
 
-    Enforced at import by an assert in the sniffer; restated here so the failure is a
-    named test rather than a collection error nobody reads.
+    The sniffer enforces this with a module-level `assert`, which fires at import.
+
+    **This test does NOT convert that into a named failure, and its docstring used to claim
+    it did** — "restated here so the failure is a named test rather than a collection error
+    nobody reads". It cannot: this module imports the sniffer's constants at module scope,
+    so breaking the invariant raises during COLLECTION and the whole file errors out before
+    any test runs. Verified by mutation: emptying `LEGACY_STATUSES_WITHOUT_A_SAFE_MAPPING`
+    gives `1 error during collection`, and this test never executes.
+
+    A subprocess probe was tried as the fix and removed again: it could only report while
+    the constants were importable — that is, never when it was needed — which is the
+    unfireable-guard shape (C-312) this release spent its audit removing.
+
+    So what this test is FOR, stated honestly: it names the invariant in a place a reader
+    looking for it will find, and it re-checks the derivation against the same sets in case
+    the import-time assert is ever relaxed to a warning. The loud failure is the collection
+    error, and that is adequate — it names this file and prints the assert's own message.
+
     """
     accounted = set(LEGACY_STATUS_TO_MATURITY) | LEGACY_STATUSES_WITHOUT_A_SAFE_MAPPING
     assert accounted == SUPPORTED_DEPLOYMENT_STATUSES, (

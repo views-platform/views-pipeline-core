@@ -2,7 +2,9 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-05-26
+**Last reviewed:** 2026-09-08 (3.2.0 release audit). Previously stamped 2026-05-26 while
+carrying sections updated for #495 — a freshness date older than its own content, which
+invites a reader to distrust the parts that are right.
 **Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern), ADR-042 (PredictionFrame Adoption)
 
 ---
@@ -75,8 +77,11 @@ the execution engine.
   value (`"stochastic"` or `"point"`). When `evaluation_mode="point"`,
   `aggregate_method` must be present and supported (`"arithmetic_mean"`).
 - Guarantees that the optional `reconciliation` key, when present, is a supported
-  value (`"pgm_cm_point"`). When `reconciliation="pgm_cm_point"`,
-  `reconcile_with` must be a non-empty string identifying the CM model.
+  value — **`"pgm_cm"` or the deprecated `"pgm_cm_point"`**. Both require
+  `reconcile_with` to be a non-empty string identifying the CM model. `"pgm_cm_point"`
+  passes with a warning: it was deprecated on 2026-08-25 (#490) because it cannot reach
+  draw-aware reconciliation, and this document named it as the only supported value until
+  the 3.2.0 audit — steering new configs onto the path the sniffer itself warns about.
 - Guarantees that the optional `output_scale` key, when present, is a supported
   value (`"log"` or `"natural"`). When absent, validation is skipped (gradual adoption).
 
@@ -110,10 +115,11 @@ the execution engine.
   (list-in-cell parquet delivery) runs. Must be a `bool`, not a truthy value.
 - `evaluation_mode: str` (optional config key) — when present, must be `"stochastic"`
   or `"point"`. When `"point"`, requires `aggregate_method` to also be present.
-- `reconciliation: str` (optional config key) — when present, must be
-  `"pgm_cm_point"`. Requires `reconcile_with` to specify the CM model name.
+- `reconciliation: str` (optional config key) — when present, must be `"pgm_cm"` (the
+  frames-native path) or `"pgm_cm_point"` (deprecated, #490, accepted with a warning).
 - `reconcile_with: str` (conditionally required) — the CM model used for PGM-CM
-  reconciliation. Required when `reconciliation="pgm_cm_point"`.
+  reconciliation. Required by **both** reconciliation types
+  (`RECONCILIATION_TYPES_REQUIRING_CM`), not only by `pgm_cm_point`.
 
 ---
 

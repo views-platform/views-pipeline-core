@@ -111,7 +111,15 @@ def test_every_real_artifact_shape_on_this_machine_is_matched():
     stamps = []
     for artifact in siblings.rglob("*_model_*.pt"):
         parts = set(artifact.parts)
-        if parts & {"envs", "site-packages", ".git"}:
+        # `.git`, `envs` and `site-packages` are not this machine's real artifacts. Nor are
+        # pytest's own temp trees: `test_ignores_unrelated_files` in THIS file writes
+        # `calibration_model_20260422.pt` fixtures into one, so when the repo sits anywhere
+        # under /tmp this test walks up, finds its own suite's leftovers, and fails on
+        # them. Found during the 3.2.0 audit by running the suite from a copy under /tmp:
+        # 3 of 55 "real artifacts" were fixtures this file had just created.
+        if parts & {"envs", "site-packages", ".git"} or any(
+            part.startswith("pytest-of-") for part in artifact.parts
+        ):
             continue
         stamps.append(artifact.stem.split("_model_", 1)[1])
         if len(stamps) >= 200:

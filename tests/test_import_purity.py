@@ -271,7 +271,10 @@ def test_log_file_utils_does_not_pull_in_the_heavy_chain():
     can sit on the frame-native import chain without loading it. #496 added
     `config_maturity` to it, and a module-level import of the sniffer would have pulled
     `views_frames.SpatialLevel` — and numpy behind it — straight back onto that chain:
-    measured at 0.103s to import versus 0.035s with the import inside the function.
+    measured at 0.131s to import the sniffer versus 0.012s for this module with the
+    import inside the function — both with a bare interpreter, because timing through
+    `conda run` folds conda's own startup into the number and was how this figure came
+    to disagree with the one in `files/utils.py` (0.035 vs 0.013).
 
     The property was documented in a comment and pinned by nothing, which is why it was
     a comment away from being lost. If this turns red, move the offending import into the

@@ -43,7 +43,7 @@ correct move was to revive the intent, not to delete the function.
 
 Two rules, in `modules/validation/ensemble/member_maturity.py`:
 
-- **R1** — an *active* ensemble (`candidate` or `graduate`) may not contain a `retired`
+- **R1** — no ensemble may contain a `retired`
   member. This is the pre-existing `deprecated`-member check restated. Its behaviour is
   unchanged; the pre-existing tests for it pass untouched, which is how that is
   demonstrated rather than asserted.
@@ -109,3 +109,21 @@ run — see C-281, which is exactly that, caught one PR earlier.
 - **ADR-057** — the vocabulary transition window
 - Issues **#398** (epic), **#399**, **#400** (this)
 - Register **C-218** (belief-mirroring tests), **C-281** (log capture that could not see)
+
+## Correction, 2026-09-08 (3.2.0 release audit)
+
+**R1 was stated here with a qualifier the code has never implemented.** This ADR,
+`member_maturity.py`'s module docstring, and an `ACTIVE_MATURITIES` constant all said R1
+applied to an *active* ensemble (`candidate` or `graduate`). The implementation refuses a
+retired member unconditionally — it does not consult the ensemble's maturity at all.
+
+The code is right and the prose was wrong. An ensemble whose own maturity is
+indeterminate — a legacy `deployed`, which ADR-057 deliberately refuses to translate —
+would otherwise skip R1 entirely, and that is precisely the case where a retired member is
+most likely to go unnoticed.
+
+`ACTIVE_MATURITIES` was read by no production code. The one test that used it parametrised
+*over* it, so the non-active case was unreachable by construction and no test could observe
+the disagreement. The constant is deleted and the sentence corrected, per C-304's rule:
+when prose and code disagree and the code is right, delete the sentence rather than
+teaching the code to match it.

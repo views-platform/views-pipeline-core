@@ -34,7 +34,6 @@ import logging
 import pytest
 
 from views_pipeline_core.modules.validation.ensemble.member_maturity import (
-    ACTIVE_MATURITIES,
     GRADUATE_MATURITY,
     ensemble_may_contain_member,
 )
@@ -83,13 +82,22 @@ def _check(ensemble, member, **kwargs):
     )
 
 
-# ── R1: an active ensemble may not contain a retired member ───────────────────
+# ── R1: NO ensemble may contain a retired member ──────────────────────────────
 
 
-@pytest.mark.parametrize("ensemble", sorted(ACTIVE_MATURITIES))
+@pytest.mark.parametrize(
+    "ensemble",
+    # Every maturity, plus the two that normalise to INDETERMINATE. The previous version
+    # parametrised over `ACTIVE_MATURITIES`, which made the indeterminate case unreachable
+    # by construction — so no test could see that R1 is, and always was, unconditional.
+    # `deployed` is the one that matters: ADR-057 refuses to translate it, so an ensemble
+    # carrying it has no maturity the rules can read, and that is exactly when a retired
+    # member is most likely to slip through.
+    ["candidate", "graduate", "retired", "deployed", None],
+)
 @pytest.mark.parametrize("retired", ["retired", "deprecated"])
-def test_r1_an_active_ensemble_rejects_a_retired_member(ensemble, retired, messages):
-    """Both vocabularies, both active maturities. This is the check that always worked."""
+def test_r1_no_ensemble_accepts_a_retired_member(ensemble, retired, messages):
+    """Both vocabularies, every ensemble maturity including indeterminate."""
     assert _check(ensemble, retired) is False
     assert messages, "the member was rejected without saying why"
     assert "config_maturity.py" in messages[0].getMessage(), (
@@ -97,7 +105,7 @@ def test_r1_an_active_ensemble_rejects_a_retired_member(ensemble, retired, messa
     )
 
 
-@pytest.mark.parametrize("ensemble", sorted(ACTIVE_MATURITIES))
+@pytest.mark.parametrize("ensemble", ["candidate", "graduate"])
 def test_r1_an_active_ensemble_accepts_a_candidate_member(ensemble):
     """Negative control for R1 — but not for graduate, where R2 takes over."""
     if ensemble == GRADUATE_MATURITY:
@@ -174,14 +182,20 @@ def test_an_unreadable_ensemble_status_skips_r2_and_says_so(messages):
 # ── the shape of the rules themselves ─────────────────────────────────────────
 
 
-def test_graduate_is_one_of_the_active_maturities():
-    """R2 is stricter than R1 on the same ensembles; if graduate ever left the active set
-    the two rules would be describing disjoint populations."""
-    assert GRADUATE_MATURITY in ACTIVE_MATURITIES
+def test_r2_is_stricter_than_r1_on_the_same_ensemble():
+    """The relationship between the two rules, asserted through behaviour.
 
+    This replaces two tests that related `GRADUATE_MATURITY` to an `ACTIVE_MATURITIES`
+    constant — two literals defined four lines apart, in a set no production code read.
+    They could only fail if someone edited a set that had no effect, and could NOT fail if
+    someone broke the rule the set was supposed to express.
 
-def test_retired_is_not_active():
-    assert "retired" not in ACTIVE_MATURITIES
+    Stated as behaviour instead: a graduate ensemble refuses a candidate member that a
+    candidate ensemble accepts. That is the whole content of "R2 is stricter", and it
+    fails if either rule moves.
+    """
+    assert _check("candidate", "candidate") is True
+    assert _check(GRADUATE_MATURITY, "candidate") is False
 
 
 def test_missing_statuses_do_not_crash():

@@ -22,7 +22,7 @@ Here is a detailed table describing the new configuration files and their respec
 
 | Configuration File                        | Type            | Scope           | Description                                                                                             |
 |-------------------------------------------|-----------------|-----------------|---------------------------------------------------------------------------------------------------------|
-| **config_deployment.py**                | Behavioral      | All             | Manages settings for model deployment across various environments, affecting runtime behavior.          |
+| **config_maturity.py**                  | Behavioral      | All             | Declares how finished the source is — `candidate`, `graduate` or `retired` (ADR-057). Legacy name: `config_deployment.py`, carrying `deployment_status`; either is accepted while the transition window is open. |
 | **config_hyperparameters.py**           | Operational     | All             | Defines hyperparameters that influence the training process of the model.                              |
 | **config_meta.py**                      | Documentation   | All             | Contains metadata about the model, such as the algorithm used and the identity of the creator.          |
 | **config_partitions.py**                | Operational     | All             | Defines temporal partition boundaries (train/test splits) per run type.                                 |
@@ -74,7 +74,7 @@ The following keys are optional in `config_meta.py`. When present, they are vali
 |-----|-------------|---------|
 | `output_scale` | `"log"`, `"natural"` | Declares whether the model returns predictions in log-scale (no internal transform undo) or natural-scale (model undoes transforms internally). Used by `validate_output_scale_consistency()` to detect incompatible scales in ensemble constituent models. See C-158. |
 | `evaluation_mode` | `"stochastic"`, `"point"` | Controls whether samples are kept or collapsed during evaluation. |
-| `reconciliation` | `"pgm_cm_point"` | Enables hierarchical prediction reconciliation. Requires `reconcile_with`. |
+| `reconciliation` | `"pgm_cm"`, or the deprecated `"pgm_cm_point"` (#490) | Enables hierarchical prediction reconciliation. Requires `reconcile_with` for both. |
 
 ### Considerations
 

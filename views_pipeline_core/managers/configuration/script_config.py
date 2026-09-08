@@ -151,6 +151,13 @@ def load_maturity_config(
     """
     loader = load or (lambda name, method: load_config_from_script(script_paths, name, method))
 
+    # `is not None`, matching `get_scripts()`, which maps a real Path to `str(path)` and
+    # anything else to `None` — so `None` is this map's absent marker, and the sniffer
+    # tests key presence the same way. `bool(...)` would be behaviourally identical for
+    # every input `get_scripts()` can produce (a mutation to it survives the whole suite,
+    # checked 2026-09-08); the two differ only on an empty-string path, which that method
+    # cannot emit. Recorded so the surviving mutation reads as a fact about reachability
+    # rather than as a coverage gap.
     has_new = script_paths.get(MATURITY_CONFIG_FILENAME) is not None
     has_legacy = script_paths.get(LEGACY_MATURITY_CONFIG_FILENAME) is not None
 

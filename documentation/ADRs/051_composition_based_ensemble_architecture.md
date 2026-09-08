@@ -62,7 +62,7 @@ the pattern works before extending to PredictionFrame support.
    ensembles continue to use `EnsembleManager`.
 
 5. **CoreConfigSniffer integration (C-55 fix).** `execute_single_run()` calls
-   `CoreConfigSniffer(configs, partition_dict).sniff_all(run_type)` before WandB
+   `CoreConfigSniffer(configs, partition_dict, target=path.target).sniff_all(run_type)` before WandB
    login, matching `ForecastingModelManager` behavior.
 
 ### Architecture

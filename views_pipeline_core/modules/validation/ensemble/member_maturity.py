@@ -10,7 +10,7 @@ sniffer never sees member configs.
 
 ## The two rules
 
-- **R1** — an *active* ensemble (`candidate` or `graduate`) may not contain a `retired`
+- **R1** — no ensemble may contain a `retired`
   member. This is the live `deprecated`-member check restated in the new vocabulary. It
   has always worked and its behaviour is unchanged.
 - **R2** — every member of a `graduate` ensemble must itself be `graduate`. This is the
@@ -45,9 +45,17 @@ from views_pipeline_core.modules.validation.core_config_sniffer import (
 
 logger = logging.getLogger(__name__)
 
-#: Ensembles in these maturities are *active* — they are expected to produce output, so a
-#: retired member is a real problem rather than a bookkeeping mismatch (R1).
-ACTIVE_MATURITIES = frozenset({"candidate", "graduate"})
+#: R1 deliberately has no such constant. An earlier version defined `ACTIVE_MATURITIES =
+#: {"candidate", "graduate"}` and three artifacts — this docstring, ADR-058 and the
+#: constant's own comment — described R1 as "an ACTIVE ensemble may not contain a retired
+#: member". The code has never consulted the ensemble's maturity for R1: it refuses a
+#: retired member unconditionally, which is the safer rule and the right one, because an
+#: ensemble whose own maturity is indeterminate (a legacy `deployed`, which has no safe
+#: translation) would otherwise skip the check entirely. The constant was read by tests
+#: only, and the test that used it parametrised OVER it — so the non-active case was
+#: unreachable by construction and no test could see the disagreement. Deleted rather than
+#: wired up, per C-304's rule: when prose and code disagree and the code is right, delete
+#: the sentence.
 
 #: The maturity whose members are held to the same standard as the ensemble itself (R2).
 GRADUATE_MATURITY = "graduate"
@@ -85,7 +93,9 @@ def ensemble_may_contain_member(
     ensemble_maturity = normalise_maturity(ensemble_status)
     member_maturity = normalise_maturity(member_status)
 
-    # R1 — an active ensemble may not contain a retired member.
+    # R1 — no ensemble may contain a retired member. Unconditional: the ensemble's own
+    # maturity is not consulted, so an ensemble whose maturity is indeterminate cannot
+    # skip the check. See the note above the R2 constant.
     if member_maturity == RETIRED_MATURITY:
         logger.error(
             "Model '%s' is retired and cannot be used in ensemble '%s'. %s.",

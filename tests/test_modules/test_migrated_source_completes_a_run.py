@@ -551,6 +551,77 @@ def test_the_new_filename_wins_and_says_so(tmp_path, resolver_warnings):
     )
 
 
+def test_the_warning_names_the_source_it_is_about(tmp_path, resolver_warnings):
+    """`owner_name` is the whole point of the warning, and nothing asserted it.
+
+    Found by mutation during the 3.2.0 release audit: replacing `owner_name` in the
+    warning's arguments with a wrong constant passed the entire suite. The existing test
+    asserted only that the ignored FILENAME and `ADR-057` appear — never the name of the
+    source the message is about.
+
+    That matters because `owner_name` is exactly what the extraction had to re-plumb.
+    `ModelManager.__load_maturity_config` read `self._model_path.model_name`; the two
+    ensemble managers now pass `ensemble_path.model_name` to the same parameter. A fourth
+    caller passing a member's name, a Path, or an empty string would make the
+    half-finished-rename warning name the wrong source — the only thing that warning
+    exists to say — with the suite green.
+    """
+    from views_pipeline_core.managers.configuration.script_config import (
+        load_maturity_config,
+    )
+
+    scripts = {
+        **_scripts(tmp_path, "config_maturity.py", "get_maturity_config", "graduate"),
+        **_scripts(tmp_path, "config_deployment.py", "get_deployment_config", "shadow"),
+    }
+
+    load_maturity_config(scripts, "purple_alien")
+
+    text = " ".join(r.getMessage() for r in resolver_warnings)
+    assert "purple_alien" in text, (
+        f"the warning must name the source whose legacy file is being ignored, or the "
+        f"reader cannot tell which config to delete. Got: {text!r}"
+    )
+
+
+def test_a_none_valued_script_path_reads_as_absent(tmp_path, resolver_warnings):
+    """Presence is `is not None`, and `get_scripts()` is why.
+
+    `ModelPathManager.get_scripts()` maps a non-`Path` entry to `None`, so `None` is the
+    absent marker this resolver must honour. Found by mutation: changing the presence
+    checks from `is not None` to `bool(...)` passed the entire suite, so nothing pinned
+    which of the two the resolver meant.
+
+    **This test does not discriminate between the two forms, and saying so is the point.**
+    `None` reads as absent under both, so the mutation survives. The only input that
+    separates them is a falsy-but-not-`None` path — an empty string — which
+    `get_scripts()` cannot produce: it maps a real `Path` to `str(path)` and anything else
+    to `None`. Writing a test for that input would pin a distinction no run can reach,
+    which is the shape C-312 records one file over.
+
+    So what is pinned here is the reachable half: a `None`-mapped new filename falls
+    through to the legacy file and does NOT warn about a half-finished rename. The choice
+    of `is not None` is a readability decision, argued at the call site, not a behavioural
+    one.
+    """
+    from views_pipeline_core.managers.configuration.script_config import (
+        load_maturity_config,
+    )
+
+    scripts = {
+        "config_maturity.py": None,
+        **_scripts(tmp_path, "config_deployment.py", "get_deployment_config", "shadow"),
+    }
+
+    assert load_maturity_config(scripts, "purple_alien") == {
+        "deployment_status": "shadow"
+    }, "a None-mapped new filename must read as ABSENT and fall through to the legacy file"
+
+    assert resolver_warnings == [], (
+        "a None-mapped filename is not a half-finished rename, so it must not warn"
+    )
+
+
 def test_one_file_alone_warns_about_nothing(tmp_path, resolver_warnings):
     """The control: proves the fixture above can actually observe silence.
 

@@ -559,7 +559,9 @@ class CoreConfigSniffer:
             raise NotImplementedError(
                 f"CoreConfigSniffer: level='{level}' is not supported. "
                 f"Supported: {SUPPORTED_LEVELS}. "
-                f"Update SUPPORTED_LEVELS in core_config_sniffer.py when ready."
+                f"SUPPORTED_LEVELS is DERIVED from views_frames.SpatialLevel, so it cannot be "
+                f"edited here — a new level is added in views-frames and arrives "
+                f"automatically (#288)."
             )
 
     def _check_deployment_status(self) -> None:

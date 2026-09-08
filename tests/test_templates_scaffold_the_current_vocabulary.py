@@ -45,11 +45,28 @@ TEMPLATES_ROOT = REPO_ROOT / "views_pipeline_core" / "templates"
 
 MATURITY_TEMPLATES = sorted(TEMPLATES_ROOT.glob("*/template_config_maturity.py"))
 LEGACY_TEMPLATES = sorted(TEMPLATES_ROOT.glob("*/template_config_deployment.py"))
-CONFIG_TEMPLATES = sorted(TEMPLATES_ROOT.glob("*/template_config_*.py"))
+#: EVERY generator, not just the config ones. The first version of the census globbed
+#: `template_config_*.py` and therefore could not see
+#: `templates/package/template_example_manager.py`, which emits `'deployment_status':
+#: 'shadow'` and ships in the wheel — so the census asserted "a third legacy minter cannot
+#: appear" while the third one already existed, one directory over. Scope derived from the
+#: filesystem, which is the rule this repo has now been wrong about nine times.
+ALL_TEMPLATES = sorted(TEMPLATES_ROOT.glob("*/template_*.py"))
 
-#: The families that exist today. Asserted rather than assumed, so a third family cannot
-#: appear with no maturity template and no test noticing.
-FAMILIES = {"model", "ensemble"}
+#: Every template family on disk, DERIVED. An earlier version of this hand-wrote
+#: `{"model", "ensemble"}` under a docstring claiming it was derived — and `templates/package/`
+#: already existed and was absent from it, which is standing proof the literal was wrong the
+#: day it was written. Worse, the assertion was inverted: a new family with NO maturity
+#: template leaves the left-hand side unchanged, so it passed. It fired only when a new
+#: family DID have one, which is the safe case.
+#:
+#: This repo has recorded six prior instances of a guard being wrong about its own scope.
+#: That is why the scope is read off the filesystem here and nowhere restated.
+FAMILIES = {
+    d.name
+    for d in TEMPLATES_ROOT.iterdir()
+    if d.is_dir() and not d.name.startswith("__") and any(d.glob("template_*.py"))
+}
 
 
 def _load(template_path: Path):
@@ -102,16 +119,46 @@ def _ids(paths: list[Path]) -> list[str]:
 # ----------------------------------------------------------------------------------
 
 
-def test_every_family_has_a_maturity_template():
-    """Derived, not listed: a third family must not arrive without one.
+#: Families that scaffold a SOURCE (a model or an ensemble) and therefore need a maturity
+#: config. `package` scaffolds an architecture package, which is not a source and declares
+#: no maturity — stated here, with its reason, rather than silently absent from a literal.
+FAMILIES_THAT_SCAFFOLD_A_SOURCE = {"model", "ensemble"}
 
-    The whole defect #498 records is that one family of generated file was left on the
-    retired vocabulary while everything else moved. Asserting per-family coverage is the
-    only thing that would say so.
+
+def test_the_family_list_still_describes_the_directories_on_disk():
+    """The control for every other test in this file, and the one that was missing.
+
+    Everything below is parametrised over globbed template paths, so if a family stops
+    matching the glob its tests vanish silently and the file still reports all-green.
+    This is the only assertion that notices a family arriving or leaving.
     """
-    assert {p.parent.name for p in MATURITY_TEMPLATES} == FAMILIES, (
-        f"maturity templates found for {sorted(p.parent.name for p in MATURITY_TEMPLATES)}, "
-        f"expected {sorted(FAMILIES)}"
+    assert FAMILIES_THAT_SCAFFOLD_A_SOURCE <= FAMILIES, (
+        f"a family that scaffolds sources is no longer on disk: "
+        f"{sorted(FAMILIES_THAT_SCAFFOLD_A_SOURCE - FAMILIES)}"
+    )
+    unclassified = FAMILIES - FAMILIES_THAT_SCAFFOLD_A_SOURCE - {"package"}
+    assert not unclassified, (
+        f"new template family/families {sorted(unclassified)} on disk. Decide whether each "
+        f"scaffolds a SOURCE — if so it needs a template_config_maturity.py and must be "
+        f"added to FAMILIES_THAT_SCAFFOLD_A_SOURCE; if not, exempt it here with a reason."
+    )
+
+
+def test_every_source_scaffolding_family_has_a_maturity_template():
+    """A family that scaffolds a source must be able to scaffold its maturity.
+
+    The defect #498 records is that one family of generated file was left on the retired
+    vocabulary while everything else moved. Note the direction: this compares the DERIVED
+    set of families-with-a-maturity-template against the classified set, so a new source
+    family with no maturity template FAILS — which is the case the previous version of
+    this test passed on.
+    """
+    with_template = {p.parent.name for p in MATURITY_TEMPLATES}
+
+    assert FAMILIES_THAT_SCAFFOLD_A_SOURCE <= with_template, (
+        f"{sorted(FAMILIES_THAT_SCAFFOLD_A_SOURCE - with_template)} scaffolds sources but "
+        f"has no template_config_maturity.py, so every source it creates is born with no "
+        f"maturity config and is refused by the sniffer on its first run (ADR-057, #498)."
     )
 
 
@@ -275,7 +322,7 @@ def test_exactly_two_templates_still_mint_the_retired_vocabulary(tmp_path):
     flips, is a one-line edit here rather than a grep.
     """
     minters = set()
-    for template in CONFIG_TEMPLATES:
+    for template in ALL_TEMPLATES:
         module = _load(template)
         parameters = list(inspect.signature(module.generate).parameters)
         # Supply whatever a template needs beyond the path; skip any that needs something
@@ -298,6 +345,14 @@ def test_exactly_two_templates_still_mint_the_retired_vocabulary(tmp_path):
     assert minters == {
         "model/template_config_deployment.py",
         "ensemble/template_config_deployment.py",
+        # Not a config generator: it emits an EXAMPLE manager for a new architecture
+        # package, whose comments walk the reader through where each config value comes
+        # from — including `config_deployment.py`. It teaches the retired vocabulary to
+        # every new package author, and it is in the wheel. Listed rather than fixed here
+        # because rewriting the example is a documentation change with its own reasoning,
+        # and it was found by this census rather than by the change that should have
+        # caught it (#499). Tracked so the set cannot grow again unnoticed.
+        "package/template_example_manager.py",
     }, (
         f"the set of templates minting the retired vocabulary changed: {sorted(minters)}. "
         f"A new template must emit `maturity` (ADR-057, #498); the two legacy generators "
@@ -306,10 +361,22 @@ def test_exactly_two_templates_still_mint_the_retired_vocabulary(tmp_path):
 
 
 def _emitted_name(template: Path) -> str:
-    """`template_config_meta.py` -> `config_meta.py`.
+    """The filename this template must be asked to write.
 
-    The templates that refuse a mismatched path (#498) need the real name; the rest do not
-    care, and giving every template its own name keeps the census from tripping over its
-    own probe.
+    Two things have to be right, and both are DERIVED from the template rather than
+    listed. The stem, because the two maturity/deployment generators refuse a mismatched
+    filename (#498) and would raise instead of being censused. And the suffix, because
+    `templates/utils` has three writers and each enforces its own extension —
+    `save_shell_script` takes `.sh` only, `save_text_file` takes `.txt` or `.gitignore`,
+    `save_python_script` takes `.py`. Widening this census from `template_config_*` to
+    every template is what surfaced that; the first version assumed `.py` and blew up on
+    `template_run_sh`.
     """
-    return template.stem.replace("template_", "") + ".py"
+    source = template.read_text()
+    if "save_shell_script" in source:
+        suffix = ".sh"
+    elif "save_text_file" in source:
+        suffix = ".txt"
+    else:
+        suffix = ".py"
+    return template.stem.replace("template_", "") + suffix

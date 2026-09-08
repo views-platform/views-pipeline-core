@@ -8,7 +8,7 @@
 
 ## Context
 
-This project already uses a RED/BEIGE/GREEN test taxonomy in `test_audit_security_robustness.py`, `test_explicit_tasks.py`, and `test_prediction_frame.py`. The test suite contains ~1,000+ test functions across 35 files, with strong coverage of managers and validation modules but gaps in visualization, mapping, templates, and package management.
+**Correction, 2026-09-08 (3.2.0 release audit).** This paragraph claimed the project "already uses a RED/BEIGE/GREEN test taxonomy" in three named files and counted "~1,000+ test functions across 35 files". Measured: the markers appear as three section banners in `tests/test_audit_security_robustness.py` and **nowhere else** — the other two named files contain none — and the suite is 2785 tests across 176 files. Nothing reads the markers, so the claim below that the taxonomy is "enforceable" is unbacked: there is no guard. The taxonomy is a way of thinking about tests in this repo, which is useful; it is not a mechanism, and describing it as one is how a reader comes to believe coverage is measured when it is not.
 
 The standalone `audit_suite.py` provides additional non-pytest auditing with the same traffic-light classification.
 
@@ -43,6 +43,8 @@ Testing is critical infrastructure, not optional documentation. Tests must cover
 | All others | GREEN minimum |
 
 ### Known Coverage Gaps
+
+**Stale as of 2026-09-08 and corrected here rather than rewritten:** of the five gaps listed, `modules/mapping/` and `modules/visualizations/` no longer exist (removed by ADR-054's extraction); `templates/` and `modules/reconciliation/` have since acquired dedicated tests. Only `managers/package/` (PackageManager) is still uncovered. A gap list that names deleted modules teaches a reader the wrong shape of the problem.
 
 These modules currently have no dedicated tests:
 - `modules/mapping/` (MappingModule)
