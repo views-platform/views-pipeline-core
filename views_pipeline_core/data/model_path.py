@@ -858,7 +858,7 @@ class ModelPathManager:
         """
         model_dir = self.models / self.model_name
         if not self._check_if_dir_exists(model_dir) and self._validate:
-            error = f"{self.target.title()} directory {model_dir} does not exist. Please create it first using `make_new_model.py` or set validate to `False`."
+            error = f"{self.target.title()} directory {model_dir} does not exist. Create it with `views-models/tools/scaffold/build_model_scaffold.py` (or `build_ensemble_scaffold.py`), or set validate to `False`."
             logger.error(error, exc_info=True)
             raise FileNotFoundError(error)
         return model_dir
@@ -905,7 +905,7 @@ class ModelPathManager:
         raise FileNotFoundError(
             f"Expected a maturity config for '{self.model_dir.name}': neither "
             f"{new_name} nor {legacy_name} exists. Create one (e.g. via "
-            f"`make_new_model.py`), or construct ModelPathManager with `validate=False`. "
+            f"`views-models/tools/scaffold/build_model_scaffold.py` (or `build_ensemble_scaffold.py`)), or construct ModelPathManager with `validate=False`. "
             f"Both names are accepted during the ADR-057 transition window; "
             f"config_maturity.py is the one to create now."
         )
@@ -934,7 +934,7 @@ class ModelPathManager:
         if self._validate and not self._check_if_dir_exists(directory=directory):
             error = (
                 f"Expected model path {directory} does not exist. "
-                f"Create it (e.g. via `make_new_model.py`) or construct "
+                f"Create it (e.g. via `views-models/tools/scaffold/build_model_scaffold.py` (or `build_ensemble_scaffold.py`)) or construct "
                 f"ModelPathManager with `validate=False`."
             )
             logger.error(error)

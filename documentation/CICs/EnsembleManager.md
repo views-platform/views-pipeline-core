@@ -47,7 +47,8 @@ hierarchical PGM-CM consistency.
   raises `ValueError` if any model returns fewer outputs than expected.
 - Guarantees that `ReconciliationModule` is applied during forecasting when
   `self.__activate_reconciliation` is `True` and `configs["reconciliation"]`
-  is `"pgm_cm_point"`.
+  is `"pgm_cm"` (frames-native) or the deprecated `"pgm_cm_point"` (#490), which is
+  accepted with a warning because it cannot reach draw-aware reconciliation.
 - Guarantees that `validate_ensemble_model(configs, saved=args.saved)` is
   called before execution when `args.train` is `False` (i.e., when using
   existing artifacts). Data freshness checks (Conditions 2+3) are only
@@ -74,7 +75,8 @@ hierarchical PGM-CM consistency.
   a valid model name resolvable by `ModelPathManager`.
 - `configs["aggregation"]` -- the aggregation method (e.g., `"mean"`,
   `"median"`, `"concat"`, `"vincentization"`).
-- `configs["reconciliation"]` -- optional. If `"pgm_cm_point"`, hierarchical
+- `configs["reconciliation"]` -- optional. If `"pgm_cm"` or the deprecated
+  `"pgm_cm_point"`, hierarchical
   reconciliation is applied during forecasting.
 - `configs["reconcile_with"]` -- optional. The CM ensemble model name used
   as the reconciliation target.

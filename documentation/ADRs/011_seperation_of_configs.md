@@ -22,7 +22,7 @@ Here is a detailed table describing the new configuration files and their respec
 
 | Configuration File                        | Type            | Scope           | Description                                                                                             |
 |-------------------------------------------|-----------------|-----------------|---------------------------------------------------------------------------------------------------------|
-| **config_deployment.py**                | Behavioral      | All             | Manages settings for model deployment across various environments, affecting runtime behavior.          |
+| **config_maturity.py**                  | Behavioral      | All             | Declares how finished the source is — `candidate`, `graduate` or `retired` (ADR-057). Legacy name: `config_deployment.py`, carrying `deployment_status`; either is accepted while the transition window is open. |
 | **config_hyperparameters.py**           | Operational     | All             | Defines hyperparameters that influence the training process of the model.                              |
 | **config_meta.py**                      | Documentation   | All             | Contains metadata about the model, such as the algorithm used and the identity of the creator.          |
 | **config_partitions.py**                | Operational     | All             | Defines temporal partition boundaries (train/test splits) per run type.                                 |
