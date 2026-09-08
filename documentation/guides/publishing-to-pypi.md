@@ -4,7 +4,8 @@ A runbook for releasing this package, written to be followed **solo, cold, month
 Every command is copy-pasteable; the *why* is spelled out where getting it wrong is
 expensive.
 
-> **Last verified:** 2026-08-03, preparing `3.0.0`. Mechanism confirmed against
+> **Last verified:** 2026-09-08, preparing `3.2.0` — the draft-Release note below was
+> found stale and corrected then. Before that: 2026-08-03, preparing `3.0.0`. Mechanism confirmed against
 > views-evaluation 1.0.0, which shipped 2026-08-02 through a mechanism-identical workflow
 > file (it differs only in the package name inside the version-guard URL).
 > Companion documents: `CHANGELOG.md` (what changed), the release gate in
@@ -31,9 +32,14 @@ on:
 > `pyproject.toml` at that commit still read `2.3.0`. The Release was then reverted to a
 > draft. So 2.3.1 is evidence that **the version guard works**, not that tags are inert.
 >
-> The tag has since been deleted. **The draft Release still exists** — which makes the
-> first row of the troubleshooting table below dangerous: publishing that draft re-fires a
-> run guaranteed to fail.
+> The tag has since been deleted, **and so has the draft Release** — checked 2026-09-08
+> against `gh api repos/views-platform/views-pipeline-core/releases --jq '.[] |
+> select(.draft==true)'`, which returns nothing. Until 3.2.0 this paragraph said in bold
+> that the draft still existed and that publishing it would re-fire a failing run. That was
+> true when written and had stopped being true; a warning designed to make a reader careful,
+> read at the exact moment they are being careful, about a hazard that no longer exists.
+> **If you are following this runbook, re-run that command rather than trusting this
+> sentence** — the point of the paragraph is now the check, not the claim.
 
 ---
 

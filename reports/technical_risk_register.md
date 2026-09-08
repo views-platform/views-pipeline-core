@@ -4,7 +4,65 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 312 concerns (189 resolved) + 41 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.1.2 — OPEN, prepared 2026-08-14, rewritten 2026-08-22.**
+> **Release gate — pipeline-core 3.2.0 — OPEN, prepared 2026-09-08.**
+> A migration-unblocking release. views-models attempted their ADR-017 vocabulary migration
+> on 2026-09-07, found the migrated sources unrunnable, and reverted 14 files. Everything
+> here exists so they can try again.
+>
+> **The through-line, and it is the reason this gate is worth reading:** every defect below
+> was found one layer earlier than the one before it, and each was found by widening the
+> question rather than by looking harder at the same place. #495 fixed what the sniffer's
+> KeyError pointed at. #496 was filed from the next two crashes. C-306 came from tracing
+> every *reader* of the field. C-307 came from tracing every *writer*. C-311 came from
+> asking whether the guard written for C-307 could fail at all. **A crash report enumerates
+> the places a defect is loud, and the loud sites are downstream by construction.**
+>
+> Disposition:
+>
+> - ~~**C-305**~~ **closed** — the mandatory-key check ran before the dual-vocabulary check
+>   it was meant to guard, so completing the migration made a source unrunnable. #495, #497.
+> - ~~**C-306**~~ **closed** — the third call site, the one that did not crash: a migrated
+>   ensemble read `graduate` as `shadow`. A wrong value rather than a missing one.
+> - ~~**C-307**~~ **closed** — sites four and five, upstream of everything else, and the
+>   entry that carries the general lesson above.
+> - ~~**C-308**~~ **closed** — a blank maturity made the whole run log unparseable and
+>   surfaced as a validation failure against a different model.
+> - ~~**C-309**~~ **closed** — a documented import-weight property was undone by a one-line
+>   import and pinned by nothing. Now pinned, with a control test proving the probe can fail.
+> - **C-310 — CONSCIOUSLY CARRIED.** Two guards on the ensemble validation path can be
+>   deleted with the whole suite staying green, and `handle_ensemble_log_creation` has never
+>   been executed by a test. **Not a maturity defect and not introduced here** — both
+>   pre-date 3.1.2. Covering them means writing the first tests that construct an ensemble
+>   run's log path end to end, which is real work with its own design questions and does not
+>   belong inside a release. The mutations that demonstrate both are recorded in the entry so
+>   the next person does not rediscover them. **Ships knowingly.**
+> - ~~**C-311**~~ **closed** — a guard exclusion added in #497 excluded nothing while its
+>   docstring implied it was load-bearing. Deleted; the suite is unchanged, which is the
+>   evidence it was dead.
+> - **C-312 — CONSCIOUSLY CARRIED, and it is a contradiction between two repositories.**
+>   ADR-057's decision table publishes "both config files present → new name wins, and it
+>   warns" as platform behaviour. That warning **cannot fire**: `_resolve_maturity_config_path`
+>   returns exactly one path, so a real script map can never hold both, and the warning fires
+>   only for dicts built by hand in tests. views-models ADR-017 §11 asserts the stronger claim
+>   that during the transition **both files are present and must agree** — and their own #456
+>   proved that when both exist on disk, the models break. **Three artifacts across two repos
+>   describe a state the code makes unreachable.** Not fixed here because the remedy is a
+>   decision — either the resolver should report both names so the warning can fire, or the
+>   warning and both ADR paragraphs should go — and settling a cross-repo contract inside a
+>   release is how a release stops being a release. Harmless today: nothing reads it. **Ships
+>   knowingly, and it is the first thing to settle after this release.**
+> - **C-193**, **C-206**, **C-216**, **C-221**, **C-254**, **C-257**, **C-287**, **C-288**,
+>   **C-289**, **C-293**, **C-294**, **C-295**, **C-297**, **C-299**, **C-303** — inherited
+>   unchanged from the 3.1.2 gate. None is a maturity-vocabulary defect and none is affected
+>   by this release.
+>
+> **Blocking on nothing.** The three merged PRs are green on CI, the suite is at 2776
+> passing, and the two carried entries are both pre-existing and both written down. **What
+> this release does NOT do is close ADR-057's transition window** — views-models is at 123
+> legacy configs and zero new ones. This repo can no longer be the *reason* that count cannot
+> reach zero; it cannot reach it alone.
+
+> **Release gate — pipeline-core 3.1.2 — ~~OPEN~~ SHIPPED 2026-08-26.** Prepared 2026-08-14, rewritten 2026-08-22.
 > A security-posture release. Provisioning created metadata collections open to `Role.any()`
 > on all four verbs with `document_security=False`. **This was not a latent defect — it was
 > an exploited-capable live exposure, measured.**
