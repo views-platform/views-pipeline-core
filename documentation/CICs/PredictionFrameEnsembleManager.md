@@ -94,9 +94,15 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   `prediction_store=False`).
 - `execute_single_run(args: ForecastingModelArgs)` -- must receive a
   `ForecastingModelArgs` instance; raises `ValueError` otherwise.
-- Config files (`config_deployment.py`, `config_hyperparameters.py`,
-  `config_meta.py`, `config_modelset.py`, `config_partitions.py`) are loaded
-  via `importlib` from `ensemble_path.get_scripts()`.
+- Config files (`config_hyperparameters.py`, `config_meta.py`,
+  `config_modelset.py`, `config_partitions.py`) are loaded via `importlib` from
+  `ensemble_path.get_scripts()`.
+- **The maturity config is loaded differently, and this changed in 3.2.0 (#497).** It goes
+  through `managers.configuration.script_config.load_maturity_config`, which resolves the
+  filename *and* its entry point together — `config_maturity.py` / `get_maturity_config`,
+  falling back to `config_deployment.py` / `get_deployment_config` while ADR-057's window
+  is open. This manager previously asked for the legacy pair by name, which is why a
+  migrated ensemble could not load its maturity config at all (C-307).
 - `config_modelset.py` -- optional. When present, its keys are merged into
   `config_meta` (modelset values take precedence). Collision warning logged.
   Contains the `"models"` list for ensemble constituent models.

@@ -29,7 +29,12 @@ def validate_model_conditions(path_generated, run_type, saved=False):
         True if all temporal conditions are met, False otherwise
 
     Raises:
-        Exception: If log file cannot be read (logged but not raised)
+        KeyError: if the log exists and parses but carries no `Single Model Name` or
+            `Deployment Status` line. Those reads are OUTSIDE the try below, deliberately —
+            a log missing them is malformed rather than absent, and silently returning
+            False would blame the member for a broken artifact. The docstring claimed
+            until 2026-09-08 that read failures were "logged but not raised"; that is true
+            only of the errors the try actually catches.
 
     Note:
         - Training cycle check (Condition 1) applies to all run types
@@ -116,8 +121,11 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     Args:
         path_generated: Path to model's data_generated directory containing log files
         run_type: Type of run to validate: 'calibration' | 'forecasting' | 'validation'
-        ensemble_deployment_status: Deployment status of ensemble:
-            'production' | 'shadow' | 'deprecated'
+        ensemble_deployment_status: the ensemble's declared maturity — `candidate`,
+            `graduate` or `retired`, or a legacy `shadow`/`baseline`/`deployed`/`deprecated`.
+            Both vocabularies are normalised inside `ensemble_may_contain_member`.
+            (`'production'` appeared here until 2026-09-08; views-models has never written
+            it, the branch that read it could never execute, and ADR-058 deleted it.)
 
     Returns:
         True if deployment status conditions are met, False otherwise
@@ -136,7 +144,7 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     Note:
         - Deprecated ensembles cannot be used
         - Deprecated constituent models cannot be used
-        - production models can only be in deployed ensembles
+        - a graduate ensemble's members must all be graduate (ADR-058 R2)
         - Prevents accidental use of outdated models
     """
 

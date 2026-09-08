@@ -74,7 +74,7 @@ The following keys are optional in `config_meta.py`. When present, they are vali
 |-----|-------------|---------|
 | `output_scale` | `"log"`, `"natural"` | Declares whether the model returns predictions in log-scale (no internal transform undo) or natural-scale (model undoes transforms internally). Used by `validate_output_scale_consistency()` to detect incompatible scales in ensemble constituent models. See C-158. |
 | `evaluation_mode` | `"stochastic"`, `"point"` | Controls whether samples are kept or collapsed during evaluation. |
-| `reconciliation` | `"pgm_cm_point"` | Enables hierarchical prediction reconciliation. Requires `reconcile_with`. |
+| `reconciliation` | `"pgm_cm"`, or the deprecated `"pgm_cm_point"` (#490) | Enables hierarchical prediction reconciliation. Requires `reconcile_with` for both. |
 
 ### Considerations
 

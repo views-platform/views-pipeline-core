@@ -14,7 +14,8 @@ Related types:
 Priority order (lowest → highest):
 1. Partition configuration (`partition_dict`)
 2. Hyperparameters (`config_hyperparameters`)
-3. Deployment configuration (`config_deployment`)
+3. Maturity configuration (`config_maturity`, or the legacy `config_deployment` while
+   ADR-057's transition window is open — resolved by `script_config.load_maturity_config`)
 4. Meta configuration (`config_meta`)
 5. Runtime configuration (`_runtime_config` – added dynamically, always highest)
 
