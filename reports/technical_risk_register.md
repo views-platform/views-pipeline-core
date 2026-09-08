@@ -4,7 +4,7 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 317 concerns (193 resolved) + 41 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.2.0 — OPEN, prepared 2026-09-08.**
+> **Release gate — pipeline-core 3.2.0 — ~~OPEN~~ SHIPPED 2026-09-08.** Prepared 2026-09-08.
 > A migration-unblocking release. views-models attempted their ADR-017 vocabulary migration
 > on 2026-09-07, found the migrated sources unrunnable, and reverted 14 files. Everything
 > here exists so they can try again.
