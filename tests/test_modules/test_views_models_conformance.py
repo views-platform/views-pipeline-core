@@ -50,9 +50,6 @@ import pytest
 from views_pipeline_core.cli.args import ForecastingModelArgs
 from views_pipeline_core.managers.configuration.configuration import combined_targets
 from views_pipeline_core.managers.ensemble.context import EnsembleContext
-from views_pipeline_core.modules.validation.core_config_sniffer import (
-    config_maturity,
-)
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "views_models" / "white_mustang_configs.py"
@@ -165,14 +162,52 @@ def test_a_real_config_builds_an_ensemble_context(combined):
 
     assert ctx.models == combined["models"]
     assert ctx.aggregation == combined["aggregation"]
-    # Read through `config_maturity`, so this is no longer the tautology it was under
-    # `configs.get("deployment_status", ...)` — it now asserts the ADR-057 precedence
-    # rule against a real config. Written as the accessor rather than the legacy key so
-    # it keeps holding when views-models re-vendors this fixture from a migrated source:
-    # with both keys present `maturity` wins and the legacy subscript would fail here,
-    # claiming the neighbour's config is non-conformant when the guard is what is stale.
-    assert ctx.deployment_status == config_maturity(combined)
+    # The expectation is restated here rather than computed by the function under test.
+    # An earlier version of this line read `== config_maturity(combined)` — the same
+    # accessor that produces the left-hand side, on the same dict — so it could only fail
+    # by raising, and a comment above it claimed it was "no longer a tautology". Writing
+    # the rule out is what makes it a check: if ADR-057's precedence changes, this
+    # disagrees with the code instead of following it.
+    #
+    # Not written as `combined["deployment_status"]` either: with both keys present
+    # `maturity` wins, so the legacy subscript would fail the moment views-models
+    # re-vendors this fixture from a migrated source — failing while blaming their config.
+    declared = combined.get("maturity", combined.get("deployment_status"))
+    assert ctx.deployment_status == declared, (
+        f"the context must carry the maturity the config declares. Config says "
+        f"{declared!r}; context says {ctx.deployment_status!r}"
+    )
     assert ctx.reconciliation == combined["reconciliation"]
+
+
+def test_the_guard_survives_the_migration_it_exists_to_unblock(combined):
+    """The re-vendoring case, which the real fixture cannot exercise on its own.
+
+    `white_mustang` is legacy-only, so on that config `configs["deployment_status"]` and
+    `config_maturity(configs)` return the same value — mutation-checked: reverting the
+    context to the legacy subscript leaves every other test in this file green. The
+    precedence rule is therefore untested here by the fixture alone.
+
+    ADR-057's close condition asks views-models to re-vendor exactly this config from a
+    migrated source. This simulates that: same real config, plus the key the migration
+    adds. If the context ever stops honouring the new key, this fails — and it fails
+    naming pipeline-core, not the neighbour's config, which is the whole point of a
+    conformance test that must not go stale against a migration it is meant to unblock.
+    """
+    migrated = {**combined, "maturity": "graduate"}
+
+    ctx = EnsembleContext.from_config(
+        migrated,
+        model_path=None,
+        args=ForecastingModelArgs(run_type="calibration", train=True),
+        partition_dict=None,
+        prediction_format="dataframe",
+    )
+
+    assert ctx.deployment_status == "graduate", (
+        "with both vocabularies present the new key wins (ADR-057). The context says "
+        f"{ctx.deployment_status!r}, which is the legacy value this config also carries"
+    )
 
 
 def test_the_required_keys_are_present_rather_than_defaulted(combined):

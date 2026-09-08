@@ -298,7 +298,11 @@ def validate_ensemble_model(config, saved=False):
             (pre-computed output means raw data fetch timing is irrelevant)
 
     Raises:
-        ValueError: If any constituent model fails validation
+        ValueError: If any constituent model fails validation — the message names the
+            ensemble and the member. Also, and with a different meaning, if the ENSEMBLE's
+            own config declares a blank maturity: `config_maturity` refuses that before
+            any member is examined, and its message names the key and the file. Same type,
+            two causes; read the message before blaming a member (#496, C-308).
     """
     from views_pipeline_core.data.model_path import ModelPathManager
     from views_pipeline_core.managers.model import ModelManager

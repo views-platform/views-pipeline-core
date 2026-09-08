@@ -93,7 +93,7 @@ def normalise_maturity(value: str | None) -> str | None:
     return LEGACY_STATUS_TO_MATURITY.get(value)
 
 
-def _declared(config: Dict[str, Any], key: str) -> str | None:
+def _declared(config: Dict[str, Any], key: str) -> Any:
     """The value under `key`, or `None` if the config does not declare one.
 
     Presence is `is not None`, not truthiness, and deliberately: `_check_deployment_status`
@@ -110,6 +110,12 @@ def _declared(config: Dict[str, Any], key: str) -> str | None:
     Downstream, `validate_ensemble_model_deployment_status` catches the `ValueError` and
     returns `False`, so the next ensemble run reports the *member* as failing validation.
     A blank maturity therefore surfaces as a wrong accusation about a different model.
+
+    The return is `Any`, not `str | None`, because that is the truth: a config declaring
+    `maturity: 12` gets `12` back. Judging the TYPE is the same job as judging the value,
+    and both belong to `_check_maturity_value`. An annotation promising `str` here would
+    be a claim this function does not enforce, which is the kind of claim this branch has
+    spent its time deleting.
 
     Vocabulary validity stays the sniffer's job — `maturity: "shadwo"` is not judged here,
     because a second statement of the value rules is exactly the drift above. What is
@@ -198,6 +204,11 @@ def config_maturity(
             `CoreConfigSniffer._check_deployment_status` already raises for this at config
             load, so reaching it here means the sniffer was bypassed — which is how C-305
             happened, and is worth failing on rather than defaulting.
+        ValueError: if a key IS declared but its value is blank. Distinct from the
+            KeyError on purpose — "you did not say" and "you said nothing" are different
+            mistakes with different fixes — and raised even when a `default` was given,
+            because a default answers an absent field, not a malformed one. See
+            `_declared` for why this one value is judged when no other is.
     """
     maturity = _declared(config, "maturity")
     if maturity is not None:

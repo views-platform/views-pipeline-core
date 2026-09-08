@@ -123,8 +123,27 @@ def load_maturity_config(
     Args:
         script_paths: the caller's resolved script map, from `get_scripts()`.
         owner_name: the model or ensemble name, for the both-files-present warning.
-        load: the loader, for callers that route through their own `_load_config`.
-            Defaults to `load_config_from_script`.
+        load: the loader to use. Defaults to `load_config_from_script`.
+
+    ## Why `load` exists, since every production caller passes the same thing
+
+    All three managers pass their own `_load_config`, which is a one-line delegate to
+    `load_config_from_script` with their own `_script_paths` — so the parameter can only
+    ever be handed something equivalent to the default, and a review flagged it as a dead
+    injection point. It is not dead: **it is the seam the existing test suite patches.**
+    Removing it and calling `load_config_from_script` directly was tried and turns 60
+    tests red with 161 collection errors, because those tests stub `_load_config` on the
+    manager to keep config loading off the disk. The parameter is a test seam, and saying
+    so here is cheaper than the next person rediscovering it the same way.
+
+    **Known limitation, deliberately not enforced.** `script_paths` and `load` are
+    independent arguments that must refer to the same script map: the presence check below
+    reads the first, the load uses the second. Nothing checks the agreement, and they agree
+    today only because every caller passes `self._script_paths` twice. That is C-250's
+    shape — two coordinates that must match, one enforced — and the reason it is carried
+    rather than fixed is that every fix costs more than the hazard: inspecting the
+    callable's closure is worse than the problem, and requiring one argument instead of two
+    means giving up the test seam above.
 
     Returns:
         The config dict, or `None` if neither file exists — which the sniffer then
