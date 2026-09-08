@@ -583,10 +583,19 @@ def test_no_caller_resolves_the_maturity_config_filename_by_hand():
     One place in the package may name them, and the window then closes in one edit
     rather than in however many sites a grep happens to find.
 
-    Templates are excluded: they generate a model's own files and are a separate
-    (registered) problem — pipeline-core still scaffolds new sources onto the legacy
-    vocabulary, which is why ADR-057's close condition is not reachable by migration
-    alone.
+    **What this guard cannot see, stated because it used to claim otherwise.** It compares
+    `ast.Constant` values for EXACT equality, and a template holds its output in one large
+    f-string — so `get_deployment_config` inside emitted code is a substring of a
+    multi-line constant and never matches. This file previously excluded `templates/` with
+    a paragraph explaining that they were "a separate registered problem", which read as
+    though the exclusion were load-bearing. It was not: measured, the offender list is
+    identical with and without it. The exclusion is gone and the templates are now swept
+    like everything else, which changes nothing today and stops the next template from
+    naming the legacy loader in ordinary code.
+
+    Generated OUTPUT is covered by a different guard, because it has to be:
+    `tests/test_templates_scaffold_the_current_vocabulary.py` generates each template and
+    asserts on the emitted text.
     """
     import ast
     import pathlib
@@ -602,8 +611,7 @@ def test_no_caller_resolves_the_maturity_config_filename_by_hand():
     offenders = sorted(
         str(f.relative_to(package))
         for f in package.rglob("*.py")
-        if "templates" not in f.parts
-        and any(
+        if any(
             isinstance(node, ast.Constant) and node.value in legacy
             for node in ast.walk(ast.parse(f.read_text()))
         )
