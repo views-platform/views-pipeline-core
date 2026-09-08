@@ -94,6 +94,85 @@ rule, and is tested as one.
   a source grep for one filename would report a model that had finished renaming as
   non-compliant.
 
+## Reading the field, and what the run log records (#496)
+
+Accepting both keys at the sniffer is not the same as being able to *read* the field.
+Two sites subscripted `config["deployment_status"]` directly — `create_log_file`, which
+runs on every run, and `validate_ensemble_model` — so a source that had completed the
+migration passed validation and then crashed later, further from its cause. That is the
+shape #495 half-fixed and #496 finished.
+
+**A config's declared maturity is read through `config_maturity(config)`**, which applies
+the same precedence as everything else here: the new key wins, and a config declaring
+neither raises **unless the caller passes a `default`**, which exactly one site does and
+which is stated below. It returns the *declared* value and does not translate —
+translation is `normalise_maturity`'s job, applied by whoever compares two sources. The
+`default` is keyword-only, so a call that tolerates an absent field reads as one.
+
+**A third site was found while tracing, and it was the worse one.**
+`EnsembleContext.from_config` read the legacy key with a silent default, so a migrated
+ensemble declaring `maturity: graduate` got `"shadow"` — a wrong value rather than a
+missing one, normalising to `candidate`. Nothing reads that field today, so it was a trap
+rather than a live defect: the first consumer added would have inherited the wrong value
+with nothing to signal it. It now reads through the same accessor, with the pre-existing
+default passed explicitly (`config_maturity(configs, default=...)`) so that a caller's
+tolerance for a missing field is visible at the call rather than implied by which
+accessor it reached for.
+
+**Sites four and five were upstream of all of it, and made the rest unreachable.** Both
+ensemble managers asked their loader for `("config_deployment.py",
+"get_deployment_config")` by hand, while `ModelManager` resolved either filename. So an
+ensemble that had completed the rename loaded *nothing*, its combined config declared
+neither vocabulary, and the sniffer refused the run on the first statement of
+`execute_single_run` — before either of the two sites #496 names was reached. The
+resolution now lives once, in `managers/configuration/script_config.load_maturity_config`,
+which all three managers call; a test walks the package AST and asserts the legacy entry
+point `get_deployment_config` appears as a value in that one file and nowhere else, so
+closing the window is one edit rather than a grep. The filename alone is not enough to
+resolve: the two files expose differently-named functions, which is why a call site that
+knew about the rename but not about `get_maturity_config` would still have loaded `None`.
+
+**Known and not fixed here: this repo's own scaffolder still mints the legacy vocabulary.**
+`templates/model/template_config_deployment.py` and its ensemble twin write
+`config_deployment.py` declaring `deployment_status`, and there is no
+`template_config_maturity.py`. The close condition above — *no configs on the legacy
+vocabulary* — cannot be reached by migration alone while the generator keeps creating new
+legacy configs: views-models migrates its fleet, scaffolds one new model, and the count
+returns to one. Tracked as **#498** rather than fixed inside a bugfix, because changing what the templates
+emit changes what every new source looks like — including what maturity a brand-new model
+is born declaring — and deserves its own review.
+
+**A config declaring BOTH keys changes what it records, and that can change an ADR-058
+verdict.** Before #496 the log recorded `deployment_status` unconditionally; now the new
+key wins, so a config carrying `maturity: graduate` *and* `deployment_status: deployed`
+records `graduate` where it used to record `deployed`. Both normalise differently —
+`deployed` has no safe mapping and yields *indeterminate*, `graduate` is a maturity — so
+ADR-058's R2 rule can reach a different verdict on the same config on consecutive days.
+This is the intended behaviour of the precedence rule rather than a side effect, and it is
+the reason `_check_deployment_status` warns on both-present: the window is meant to be
+passed through, not lived in.
+
+**One value is refused rather than reported: a blank one.** `config_maturity` does not
+judge vocabulary — `maturity: "shadwo"` is the sniffer's business, and restating the value
+rules in the accessor is the drift it exists to prevent — but an empty string is refused,
+because it is the one value that cannot survive the round trip. `create_log_file` would
+write `Deployment Status: ` and `read_log_file`, which splits every line on `": "`, then
+fails on the whole file; `validate_ensemble_model_deployment_status` catches that
+`ValueError` and returns `False`, so the next ensemble run reports the *member* as failing
+validation. A blank maturity would surface as a wrong accusation about a different model.
+
+**The run log records whichever vocabulary the config declares.** A migrated source writes
+`Deployment Status: candidate` where it previously wrote `shadow`. That is safe because
+the only reader of the value normalises it before use (`member_maturity.py` normalises
+both the ensemble's and the member's), so a legacy log and a migrated config reconcile
+without either being rewritten — which is what makes a mixed fleet possible during the
+window.
+
+**Traced 2026-09-07: nothing outside pipeline-core reads that log line.** The readers are
+`ensemble/check.py` and the member-copy loop in `files/utils.py`; every other occurrence
+of the string platform-wide is a README table or a config docstring. So the vocabulary
+written into the log is an internal concern, and the key name did not need to change.
+
 ## What is enforced, and where
 
 `tests/test_modules/test_maturity_vocabulary_transition.py` — one case per row of the
@@ -104,8 +183,19 @@ filename resolution, both names and neither.
 Six mutations verified to fail the suite, including the one that matters most: giving
 `deployed` an automatic mapping to `graduate`.
 
+`tests/test_modules/test_migrated_source_completes_a_run.py` (#496) — drives
+`handle_single_log_creation` and `validate_ensemble_model`, the functions a run actually
+calls, and asserts on the log file that lands on disk. It goes through the entry points
+deliberately: the existing transition tests call the checks directly, which is why
+seventeen passing tests could not see C-305 — **a composition defect is invisible to a
+test that never composes.** Five further mutations verified, including reverting either
+subscript, inverting the key precedence, returning `None` instead of raising, reverting
+the ensemble context to its legacy-key read, and collapsing the accessor's two failure
+modes into one.
+
 ## Related
 
 - **views-models ADR-017** (the vocabulary change) — their #341 and #342
 - **ADR-058** — the ensemble member rules, which use this vocabulary
-- Issues **#398** (epic), **#399** (this), **#400** (the member rules)
+- Issues **#398** (epic), **#399** (this), **#400** (the member rules), **#494**/**#495**
+  (the sniffer gate, C-305), **#496** (the two remaining reads)

@@ -63,8 +63,6 @@ def test_published_artifacts_do_not_quote_a_suite_size_only_this_machine_sees():
     see: the changelog and the release notes derived from it. Anything quoting a count
     there must be the reproducible one, or must say what the larger one needs.
     """
-    import re
-
     changelog = (REPO / "CHANGELOG.md").read_text()
     quoted = set(re.findall(r"\b(2[0-9]{3}) (?:tests? )?pass", changelog))
     unreproducible = {q for q in quoted if q != "2697"}

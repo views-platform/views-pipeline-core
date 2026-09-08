@@ -2,6 +2,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 from views_pipeline_core.files.utils import read_log_file
+from views_pipeline_core.modules.validation.core_config_sniffer import config_maturity
 from views_pipeline_core.modules.validation.ensemble.member_maturity import (
     ensemble_may_contain_member,
 )
@@ -292,12 +293,16 @@ def validate_ensemble_model(config, saved=False):
 
     Args:
         config: Ensemble configuration dict with keys: 'name', 'models',
-            'run_type', 'deployment_status'
+            'run_type', and 'maturity' (or the legacy 'deployment_status')
         saved: If True, skip data freshness checks in validate_model_conditions
             (pre-computed output means raw data fetch timing is irrelevant)
 
     Raises:
-        ValueError: If any constituent model fails validation
+        ValueError: If any constituent model fails validation — the message names the
+            ensemble and the member. Also, and with a different meaning, if the ENSEMBLE's
+            own config declares a blank maturity: `config_maturity` refuses that before
+            any member is examined, and its message names the key and the file. Same type,
+            two causes; read the message before blaming a member (#496, C-308).
     """
     from views_pipeline_core.data.model_path import ModelPathManager
     from views_pipeline_core.managers.model import ModelManager
@@ -313,7 +318,7 @@ def validate_ensemble_model(config, saved=False):
 
         if (
                 (not validate_model_conditions(path_generated, config["run_type"], saved=saved)) or
-                (not validate_ensemble_model_deployment_status(path_generated, config["run_type"], config["deployment_status"])) or
+                (not validate_ensemble_model_deployment_status(path_generated, config["run_type"], config_maturity(config))) or
                 (not validate_partition_config(ensemble_manager, model_manager, config["run_type"]))
         ):
             raise ValueError(

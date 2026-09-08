@@ -7,7 +7,7 @@ Fail Loud and Proud: raises immediately on any contract violation.
 """
 from __future__ import annotations
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Union
 
 from views_pipeline_core.data.constants import (
     PARTITION_TRAIN as _PARTITION_TRAIN,
@@ -91,6 +91,141 @@ def normalise_maturity(value: str | None) -> str | None:
     if value in SUPPORTED_MATURITIES:
         return value
     return LEGACY_STATUS_TO_MATURITY.get(value)
+
+
+def _declared(config: Dict[str, Any], key: str) -> Any:
+    """The value under `key`, or `None` if the config does not declare one.
+
+    Presence is `is not None`, not truthiness, and deliberately: `_check_deployment_status`
+    tests it exactly this way. Under truthiness a config declaring `maturity: ""` alongside
+    a legacy `deployment_status` would fall through and return the legacy value — for a
+    config the file's own guard rejects, and plausibly. Two spellings of one rule is the
+    drift `config_maturity` exists to prevent.
+
+    A blank value is refused rather than returned, and this is the one place the accessor
+    judges a value rather than reporting it. The reason is specific and is not about the
+    vocabulary: `create_log_file` writes this value into `Deployment Status: <value>`, and
+    `read_log_file` splits every line on `": "` — so a blank value writes a line that
+    cannot be parsed, and the parse failure takes down the WHOLE log file, not that field.
+    Downstream, `validate_ensemble_model_deployment_status` catches the `ValueError` and
+    returns `False`, so the next ensemble run reports the *member* as failing validation.
+    A blank maturity therefore surfaces as a wrong accusation about a different model.
+
+    The return is `Any`, not `str | None`, because that is the truth: a config declaring
+    `maturity: 12` gets `12` back. Judging the TYPE is the same job as judging the value,
+    and both belong to `_check_maturity_value`. An annotation promising `str` here would
+    be a claim this function does not enforce, which is the kind of claim this branch has
+    spent its time deleting.
+
+    Vocabulary validity stays the sniffer's job — `maturity: "shadwo"` is not judged here,
+    because a second statement of the value rules is exactly the drift above. What is
+    refused is the one value that cannot survive the round trip this accessor feeds.
+    """
+    value = config.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        raise ValueError(
+            f"Config for '{config.get('name')}' declares '{key}' as an empty value. "
+            f"An empty maturity writes an unparseable line into the run log, which makes "
+            f"the whole log unreadable and surfaces as a validation failure against a "
+            f"different model. Set '{key}' to one of {sorted(SUPPORTED_MATURITIES)} in "
+            f"{MATURITY_CONFIG_FILENAME}, or remove the key."
+        )
+    return value
+
+
+class _RaiseIfAbsent:
+    """The type of the "no default given — raise" sentinel.
+
+    A distinct type rather than `object()` or `None`, for two reasons. It makes the
+    signature honest — `default: Union[str, _RaiseIfAbsent]` says a default must be a
+    real string, and `-> str` is then true of every legal call. And it makes the sentinel
+    testable: `_RAISE = None` (the obvious "simplification") stops being a silent
+    behaviour swap and becomes a value that fails the `isinstance` check, so omitting
+    `default` starts returning `None` instead of raising and the existing tests say so.
+
+    `None` in particular cannot serve as the sentinel, because `None` is exactly the value
+    this accessor exists never to produce: `create_log_file` would write
+    `Deployment Status: None` to the run log, which `normalise_maturity`'s docstring calls
+    *indeterminate, not benign*.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover — diagnostics only
+        return "<no default: raise>"
+
+
+_RAISE = _RaiseIfAbsent()
+
+
+def config_maturity(
+    config: Dict[str, Any], *, default: Union[str, _RaiseIfAbsent] = _RAISE
+) -> str:
+    """This config's maturity, under whichever key it declares (ADR-057, #496).
+
+    Returns the raw declared value — `candidate` from a migrated source, `shadow` from a
+    legacy one. It does **not** translate; `normalise_maturity` does that, and callers
+    that need to compare two sources apply it to both (`member_maturity.py`).
+
+    ## Why this exists rather than `config.get("maturity") or config.get("deployment_status")`
+
+    Two call sites is where this repo's WET-before-DRY rule says to *look* at extracting,
+    not necessarily to extract. Two things decided it:
+
+    **The `or` form is quieter than what it replaces.** On a config declaring neither key
+    it yields `None`, and `create_log_file` would then write `Deployment Status: None`
+    into the run log — which `validate_ensemble_model_deployment_status` reads back and
+    hands to `normalise_maturity`, whose docstring says `None` means *indeterminate, not
+    benign*. Today that config raises `KeyError` instead. Turning a loud failure into a
+    `None` persisted to disk is the Cluster J shape, so this raises.
+
+    **The precedence rule already exists and is stated three times** — here, in
+    `_check_deployment_status` (new key wins, warn on both, raise on neither) and in
+    `ModelManager.__load_maturity_config` (new *file* wins, warn on both). A local `or` at
+    each site would be a fourth statement of it, and one that silently disagrees with the
+    other three on the both-present and neither-present cases. The register records six
+    instances of a guard being wrong about its own scope because the rule was hand-written
+    at each site rather than derived from one.
+
+    Precedent: `combined_targets()` in `managers/configuration/configuration.py`, this
+    repo's existing accessor for a field whose key was retired (#380/#381).
+
+    ## The `default` argument
+
+    Omit it and a config declaring neither key raises, which is what the two sites that
+    subscripted the legacy key did before #496. Pass one only where the previous
+    behaviour was already to default silently — `EnsembleContext.from_config` is the
+    single such site — so that a caller's tolerance for a missing field is visible at the
+    call rather than implied by which accessor it happened to use. Two shapes in the
+    codebase for one rule is how the rule drifts.
+
+    Raises:
+        KeyError: if neither key is declared and no `default` was given.
+            `CoreConfigSniffer._check_deployment_status` already raises for this at config
+            load, so reaching it here means the sniffer was bypassed — which is how C-305
+            happened, and is worth failing on rather than defaulting.
+        ValueError: if a key IS declared but its value is blank. Distinct from the
+            KeyError on purpose — "you did not say" and "you said nothing" are different
+            mistakes with different fixes — and raised even when a `default` was given,
+            because a default answers an absent field, not a malformed one. See
+            `_declared` for why this one value is judged when no other is.
+    """
+    maturity = _declared(config, "maturity")
+    if maturity is not None:
+        return maturity
+
+    status = _declared(config, "deployment_status")
+    if status is not None:
+        return status
+
+    if not isinstance(default, _RaiseIfAbsent):
+        return default
+
+    raise KeyError(
+        f"Config for '{config.get('name')}' declares neither 'maturity' nor the legacy "
+        f"'deployment_status'. Add 'maturity' (one of {sorted(SUPPORTED_MATURITIES)}) to "
+        f"{MATURITY_CONFIG_FILENAME}."
+    )
 
 
 #: The file that carries the field, old name and new. `model_path` and the config loader
