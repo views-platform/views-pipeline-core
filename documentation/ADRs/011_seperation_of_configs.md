@@ -22,7 +22,7 @@ Here is a detailed table describing the new configuration files and their respec
 
 | Configuration File                        | Type            | Scope           | Description                                                                                             |
 |-------------------------------------------|-----------------|-----------------|---------------------------------------------------------------------------------------------------------|
-| **config_deployment.py**                | Behavioral      | All             | Manages settings for model deployment across various environments, affecting runtime behavior.          |
+| **config_maturity.py**                  | Behavioral      | All             | Declares how finished the source is — `candidate`, `graduate` or `retired` (ADR-057). Legacy name: `config_deployment.py`, carrying `deployment_status`; either is accepted while the transition window is open. |
 | **config_hyperparameters.py**           | Operational     | All             | Defines hyperparameters that influence the training process of the model.                              |
 | **config_meta.py**                      | Documentation   | All             | Contains metadata about the model, such as the algorithm used and the identity of the creator.          |
 | **config_partitions.py**                | Operational     | All             | Defines temporal partition boundaries (train/test splits) per run type.                                 |
@@ -55,7 +55,12 @@ The division of the configuration into specific files is designed to:
 
 ### Mandatory vs Optional Configurations
 
-The four base configuration files (config_deployment, config_hyperparameters, config_meta, config_partitions) are mandatory for **all** pipeline unit types (models and ensembles). Their absence during path construction with `validate=True` raises `FileNotFoundError`.
+The four base configuration files (the maturity config, config_hyperparameters, config_meta, config_partitions) are mandatory for **all** pipeline unit types (models and ensembles). Their absence during path construction with `validate=True` raises `FileNotFoundError`.
+
+The maturity config is `config_maturity.py`, and `config_deployment.py` satisfies the
+requirement for as long as ADR-057's transition window is open — `_resolve_maturity_config_path`
+accepts either and prefers the new name. This paragraph named only the legacy file until
+#498; a source that had completed the rename read as missing a mandatory config.
 
 Two additional files are mandatory for **models only**: `config_queryset.py` and `config_sweep.py`. These are added in `_initialize_model_specific_scripts()` and are not required for ensembles.
 
@@ -69,7 +74,7 @@ The following keys are optional in `config_meta.py`. When present, they are vali
 |-----|-------------|---------|
 | `output_scale` | `"log"`, `"natural"` | Declares whether the model returns predictions in log-scale (no internal transform undo) or natural-scale (model undoes transforms internally). Used by `validate_output_scale_consistency()` to detect incompatible scales in ensemble constituent models. See C-158. |
 | `evaluation_mode` | `"stochastic"`, `"point"` | Controls whether samples are kept or collapsed during evaluation. |
-| `reconciliation` | `"pgm_cm_point"` | Enables hierarchical prediction reconciliation. Requires `reconcile_with`. |
+| `reconciliation` | `"pgm_cm"`, or the deprecated `"pgm_cm_point"` (#490) | Enables hierarchical prediction reconciliation. Requires `reconcile_with` for both. |
 
 ### Considerations
 

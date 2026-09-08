@@ -118,7 +118,8 @@ def create_log_file(path_generated,
     model_config (dict): Configuration dictionary for the model containing keys:
         - "run_type" (str): The type of run (e.g., "calibration", "evaluation").
         - "name" (str): The name of the model.
-        - "deployment_status" (str): The deployment status of the model.
+        - "maturity" (str), or the legacy "deployment_status" — read via
+          `config_maturity()`, which accepts either (ADR-057).
     model_timestamp (str): Timestamp for the model.
     data_generation_timestamp (str): Timestamp for data generation.
     data_fetch_timestamp (str): Timestamp for data fetching.
@@ -131,7 +132,21 @@ def create_log_file(path_generated,
     
     run_type = model_config["run_type"]
     model_name = model_config["name"]
-    deployment_status = model_config["deployment_status"]
+    # ADR-057 / #496. A source that finished the migration to `config_maturity.py`
+    # declares `maturity` and no longer has `deployment_status`, so subscripting the
+    # legacy key raised KeyError on every run of a migrated model. The log records
+    # whichever vocabulary the config declares; the one reader of the value back out
+    # (`validate_ensemble_model_deployment_status`) normalises it, so a legacy log and a
+    # migrated config already reconcile.
+    # Imported here, not at module scope, for the reason stated at the top of this file:
+    # `core_config_sniffer` imports `views_frames.SpatialLevel`, so a module-level import
+    # pulls numpy and views_frames onto the import chain of a module deliberately kept off
+    # it (#320, C-223). Measured with a bare interpreter: 0.012s to import this module,
+    # against 0.131s for the sniffer it would otherwise pull in — and neither
+    # numpy nor views_frames loaded.
+    from views_pipeline_core.modules.validation.core_config_sniffer import config_maturity
+
+    deployment_status = config_maturity(model_config)
     
     create_specific_log_file(path_generated, run_type, model_name, deployment_status,
                     model_timestamp, data_generation_timestamp, data_fetch_timestamp, model_type)

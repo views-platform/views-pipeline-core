@@ -23,7 +23,111 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.1.2] — unreleased
+## [3.2.0] — unreleased
+
+**A minor release that unblocks views-models' vocabulary migration.** Nothing here breaks a
+3.1.x consumer: the additions are new files, and the fixes make code work that previously
+raised.
+
+views-models ADR-017 renames a field on every source — `deployment_status` → `maturity`,
+carried in `config_deployment.py` → `config_maturity.py`. They attempted the migration on
+2026-09-07, found the migrated sources **unrunnable**, and reverted 14 files (their #444,
+#456). This release is why they can try again. **They must upgrade to get it**: their CI
+pins `views_pipeline_core==3.0.1`, and until they move, a migrated source still fails.
+
+### Added
+
+- **`templates/{model,ensemble}/template_config_maturity.py`** (#498, #499) — generators
+  that emit `config_maturity.py` declaring `maturity: candidate`. Until now this package
+  shipped a generator only for the retired vocabulary, so ADR-057's close condition —
+  *"when views-models reports no configs on the legacy vocabulary"* — was unsatisfiable by
+  construction: they could migrate every source and the count would return to one the next
+  time anyone scaffolded a model.
+
+  The emitted body is byte-identical to views-models' own reference file, which states
+  "copy this shape exactly; do not invent variations".
+
+  **`generate(script_path)` takes no maturity argument, deliberately.** A new source is a
+  candidate — maturity is earned, not declared at birth — and `candidate` is the
+  conservative end: it cannot join a graduate ensemble (ADR-058 R2 refuses), so a wrong
+  value fails loudly rather than shipping an unvetted forecast. The parameter is also the
+  mechanism that went wrong once already: views-models #444 wrote `maturity: graduate` onto
+  thirteen models whose own configs said `shadow`, which its revert calls "a promotion" that
+  "no guard would have caught".
+
+- **`managers/configuration/script_config.load_maturity_config`** (#497) — resolves the
+  maturity config under either filename *and* its matching entry point. The two files expose
+  differently-named functions (`get_maturity_config` vs `get_deployment_config`), so
+  resolving the filename alone loads nothing. All three managers now call it.
+
+- **`modules/validation/core_config_sniffer.config_maturity(config)`** (#497) — reads a
+  config's declared maturity under whichever key it carries. New key wins; the value is
+  returned untranslated; a config declaring neither raises unless the caller passes an
+  explicit `default`, which is keyword-only.
+
+### Fixed
+
+- **A migrated source could not complete a run** (#496, #497). Five call sites, not the two
+  the issue named:
+
+  | site | shape |
+  |---|---|
+  | `files/utils.py` — `create_log_file()` | `KeyError` on every run |
+  | `modules/validation/ensemble/check.py` — `validate_ensemble_model()` | `KeyError` |
+  | `managers/ensemble/context.py` — `from_config` | **silent wrong value**: a `graduate` ensemble read as `shadow` |
+  | both ensemble managers | **loaded nothing, and sat upstream of the other three** |
+
+  The last two are why this needed more than the issue asked for. Both ensemble managers
+  requested `("config_deployment.py", "get_deployment_config")` by hand while `ModelManager`
+  resolved either name — so a migrated *ensemble* loaded `None`, declared neither
+  vocabulary, and was refused by the sniffer before the other sites were ever reached.
+
+- **The sniffer's mandatory-key check closed the window it was meant to guard** (#495).
+  `deployment_status` was listed in `MANDATORY_KEYS_UNIVERSAL`, and `_check_mandatory_keys()`
+  runs first in `sniff_all()` — so a source that had *completed* the migration raised before
+  the dual-vocabulary check was reached. Completing the migration made a source unrunnable.
+
+- **A blank maturity made the whole run log unparseable, and blamed a different model**
+  (#497). An empty value wrote `Deployment Status: ` into the log; `read_log_file` splits on
+  `": "` and raised on the **whole file**; `validate_ensemble_model_deployment_status`
+  caught that and returned `False`, so the next ensemble run reported the *member* as
+  failing validation. The value is now refused before it reaches disk.
+
+### Changed
+
+- **Four documents stated contracts that were false**, rather than merely out of date, once
+  either vocabulary became acceptable: ADR-009 and the contributor protocol template both
+  declared a *migrated* source non-conformant by naming only `get_deployment_config()`;
+  ADR-011 called `config_deployment.py` mandatory; the README's own Quick Start told users
+  to edit it. All corrected to name both names during the transition window.
+
+- **The legacy templates are kept, working, and silent.** views-models imports them by
+  module name and their fleet cannot accept `maturity` yet — around nine of their test
+  modules plus two CI tools require `config_deployment.py` in every source directory.
+  Refusing or deleting here would break their CI to enforce a rename they cannot take. They
+  carry no runtime deprecation warning on purpose: it would reach a human running an
+  interactive scaffolder who cannot act on it.
+
+- **Each config generator now refuses to write the other's filename.** The output path is
+  chosen in views-models and the entry point here, so the two halves of the rename are
+  decided in different repositories — one string literal away from a `config_maturity.py`
+  that defines `get_deployment_config`, which loads as `None` and gets a run refused for
+  the wrong reason.
+
+### For operators and downstream repos
+
+**views-models** — this is the release ADR-017 Phase 2 waits on. Order matters and the
+reverse breaks your CI: migrate the configs *and* the test modules and CI tools that
+hardcode `config_deployment.py` first; only then point the scaffold builders at
+`template_config_maturity`.
+
+**views-faoapi and views-crafdapi** carry vendored forks of `ModelManager` with the
+hardcoded `("config_deployment.py", "get_deployment_config")` pair and declare no dependency
+on this package, so they cannot inherit the resolver above — and their loader returns `None`
+rather than raising, so a migrated source they consume fails **silently**. Sources consumed
+by those two should not be in the first migration batch.
+
+## [3.1.2] — 2026-08-26
 
 **A security release. Two production collections were readable and writable by anyone on
 the internet, and this is the fix at the root.**

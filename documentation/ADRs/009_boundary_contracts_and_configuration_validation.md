@@ -44,7 +44,11 @@ All architectural boundaries must declare explicit contracts. Configuration is a
 
 This library defines the contract that downstream model repositories must satisfy:
 
-- Config scripts must export `get_hp_config()`, `get_deployment_config()`, `get_meta_config()`
+- Config scripts must export `get_hp_config()`, `get_meta_config()`, and the maturity
+  entry point — `get_maturity_config()` in `config_maturity.py`, or the legacy
+  `get_deployment_config()` in `config_deployment.py` for as long as ADR-057's transition
+  window is open. Naming only the legacy pair here declared a *migrated* source
+  non-conformant, which is the opposite of what this contract is for (#498).
 - Partition dict must have `train` and `test` keys with `(first, last)` tuples
 - Model scripts must export train/predict functions with expected signatures
 - Predictions must be either `pd.DataFrame` with `pred_*` columns and correct MultiIndex, or `PredictionFrame` with valid identifiers

@@ -255,11 +255,27 @@ rather than assumed closed.
 deliberately not patched from here: a second repository, a one-line change with a security
 consequence, and `CLAUDE.md` puts a two-repository change in front of the operator.
 
-**4. The probe does not issue an unauthenticated request.** It reads declared configuration with
-an API key. `views-models/tools/credentials/close_resource_permissions.py` does probe anonymously
-and is what actually measured C-83. The two tools do not reference each other. **Trigger:** any
-decision to treat this probe's clean verdict as evidence about reachability rather than about
-declared permissions.
+**4. The probe does not issue an unauthenticated request, and the tool that does cannot read an
+ACL.** Sharpened 2026-08-26 by views-crafdapi, who arrived at it from the other side and whose
+framing is better than the one recorded here.
+
+This probe reads declared container permissions with an API key. It never tests reachability.
+`views-models/tools/credentials/close_resource_permissions.py` probes anonymously and is what
+measured C-83 — but its own code discriminates **three** ways and deliberately refuses a boolean:
+`4xx` refused, `total > 0` **READABLE BY ANYONE**, and `total == 0` recorded as *"accepted the
+request but returned nothing"*, which it pointedly does not call closed. Appwrite answers a
+rejected key on the file-listing endpoint with 200 and `total: 0`, so a refusal renders as
+emptiness.
+
+**So neither instrument alone distinguishes a closed container from a refusal rendered as
+emptiness.** The earlier wording here implied the anonymous probe was the complete answer and this
+one merely incomplete. Both are incomplete, in opposite directions, and a check that can actually
+establish the target state has to read the ACL *and* test reachability. views-crafdapi withdrew a
+finding of their own on discovering this, and corrected an argument they had already made on
+views-appwrite#160.
+
+**Trigger:** any decision to treat either tool's clean verdict as evidence about the other's
+question.
 
 **5. `permissions_exit_code` returns one number for two independent facts.** Open-and-incomplete
 is reported in the text and collapses to `1` in the status code. A third code would be more

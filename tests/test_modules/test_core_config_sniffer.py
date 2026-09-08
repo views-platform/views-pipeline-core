@@ -1,6 +1,7 @@
 """
 Tests for CoreConfigSniffer — central config contract validation.
 """
+import logging
 import pytest
 from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
 
@@ -34,6 +35,68 @@ def _valid_partition():
             "test": (445, 492),   # test_len = 48 = 36 + 12 ✓
         }
     }
+
+
+def _maturity_only_configs():
+    """A model that has completed the ADR-057 migration: `config_maturity.py` only.
+
+    This is what `ModelManager.__load_maturity_config()` actually produces once a source
+    is migrated — it prefers the new file and does not merge the legacy one, so the
+    resulting config carries `maturity` and no `deployment_status`.
+    """
+    configs = _valid_configs()
+    del configs["deployment_status"]
+    configs["maturity"] = "candidate"
+    return configs
+
+
+class TestTheTransitionWindowSurvivesSniffAll:
+    """ADR-057 opens a window in which either vocabulary is valid. #494: a gate that runs
+    before the window's own check was closing it again.
+
+    `test_maturity_vocabulary_transition.py` exercises `_check_deployment_status()`
+    directly, on a hand-built dict. That cannot see an ordering defect in `sniff_all()`,
+    which is where the failure actually lived — so these go through the whole entry point.
+    """
+
+    def test_a_migrated_model_passes_the_whole_sniffer(self):
+        """The end state ADR-057 exists to reach. Before #494 this raised
+        `KeyError: ['deployment_status']` from `_check_mandatory_keys()`, which runs
+        first — so completing the migration made a model unrunnable."""
+        CoreConfigSniffer(
+            _maturity_only_configs(), _valid_partition(), target="model"
+        ).sniff_all("calibration")
+
+    def test_an_unmigrated_model_still_passes_the_whole_sniffer(self):
+        """The other half of a window: the legacy vocabulary keeps working."""
+        CoreConfigSniffer(
+            _valid_configs(), _valid_partition(), target="model"
+        ).sniff_all("calibration")
+
+    def test_a_model_declaring_neither_is_still_refused(self):
+        """Removing the key from the mandatory list must not make it optional.
+
+        `_check_deployment_status()` already refuses this case, and refuses it better —
+        it names `config_maturity.py` and lists the valid maturities, where the generic
+        mandatory-keys error said only 'the appropriate config_*.py file'."""
+        configs = _valid_configs()
+        del configs["deployment_status"]
+        with pytest.raises(KeyError) as exc:
+            CoreConfigSniffer(configs, _valid_partition(), target="model").sniff_all("calibration")
+        message = str(exc.value)
+        assert "maturity" in message
+        assert "config_maturity.py" in message, (
+            "the refusal must name the file to edit, not a wildcard"
+        )
+
+    def test_a_migrated_ensemble_passes_too(self):
+        """Ensembles take MANDATORY_KEYS_UNIVERSAL without MANDATORY_KEYS_MODEL, so they
+        exercise a different branch of `_check_mandatory_keys`."""
+        configs = _maturity_only_configs()
+        for key in ("algorithm", "time_steps", "prediction_format", "rolling_origin_stride"):
+            configs.pop(key, None)
+        configs["models"] = ["member_a"]
+        CoreConfigSniffer(configs, _valid_partition(), target="ensemble").sniff_all("calibration")
 
 
 class TestCoreConfigSniffer:
@@ -779,3 +842,71 @@ class TestEvaluationSequencing:
             "the default must stay the strict scheme — an unstated scheme getting the "
             "looser contract is how a config stops being checked without anyone deciding"
         )
+
+
+# ----------------------------------------------------------------------------------
+# Reconciliation type deprecation — #490
+# ----------------------------------------------------------------------------------
+
+
+def _ensemble_config_with_reconciliation(recon):
+    """A minimal ensemble config that reaches `_check_reconciliation_config`."""
+    return {
+        "name": "test_ensemble",
+        "models": ["a", "b"],
+        "aggregation": "mean",
+        "targets": ["ln_ged_sb_dep"],
+        "level": "pgm",
+        "deployment_status": "shadow",
+        "run_type": "calibration",
+        "reconciliation": recon,
+        "reconcile_with": "some_cm_model",
+    }
+
+
+def test_the_deprecated_reconciliation_type_is_warned_about_not_refused(caplog):
+    """#490. `pgm_cm_point` is deprecated and still accepted, deliberately.
+
+    Two live ensembles declare it — `skinny_love` and `white_mustang` — so refusing it
+    would fail both at config validation. The issue's ordering exists to avoid that:
+    deprecate here, move those configs in views-models, remove the value last.
+    """
+    from views_pipeline_core.modules.validation.core_config_sniffer import (
+        CoreConfigSniffer,
+        DEPRECATED_RECONCILIATION_TYPES,
+    )
+
+    assert "pgm_cm_point" in DEPRECATED_RECONCILIATION_TYPES
+
+    sniffer = CoreConfigSniffer(_ensemble_config_with_reconciliation("pgm_cm_point"), target="ensemble")
+    with caplog.at_level(logging.WARNING):
+        sniffer._check_reconciliation_config()
+
+    assert any("DEPRECATED" in r.message or "DEPRECATED" in r.getMessage()
+               for r in caplog.records), "the deprecation must be visible in a run log"
+    assert any("#490" in r.getMessage() for r in caplog.records)
+
+
+def test_the_replacement_type_produces_no_deprecation_warning(caplog):
+    """The control. If everything warned, the warning would carry no information."""
+    from views_pipeline_core.modules.validation.core_config_sniffer import CoreConfigSniffer
+
+    sniffer = CoreConfigSniffer(_ensemble_config_with_reconciliation("pgm_cm"), target="ensemble")
+    with caplog.at_level(logging.WARNING):
+        sniffer._check_reconciliation_config()
+
+    assert not any("DEPRECATED" in r.getMessage() for r in caplog.records)
+
+
+def test_the_deprecated_type_is_still_a_supported_type():
+    """Deprecated is not removed. Removing it before the two live configs move would
+    break them at validation time, which is the failure the issue's ordering prevents."""
+    from views_pipeline_core.modules.validation.core_config_sniffer import (
+        DEPRECATED_RECONCILIATION_TYPES,
+        SUPPORTED_RECONCILIATION_TYPES,
+    )
+
+    assert DEPRECATED_RECONCILIATION_TYPES <= SUPPORTED_RECONCILIATION_TYPES, (
+        "a deprecated type that is no longer supported is a removed type, and removal "
+        "is step 3 of #490, not step 1"
+    )

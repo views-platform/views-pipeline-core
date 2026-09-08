@@ -103,7 +103,10 @@ def test_the_model_template_names_every_key_the_sniffer_requires():
         CoreConfigSniffer.MANDATORY_KEYS_MODEL
     )
     # `steps` and `time_steps` live in config_hyperparameters.py, not here.
-    elsewhere = {"steps", "time_steps", "deployment_status"}
+    # `deployment_status` was here too until #498 removed it: it left
+    # MANDATORY_KEYS_UNIVERSAL in #495, so the exemption had been excusing a key the
+    # derivation no longer produces — an allowlist entry that outlived its subject.
+    elsewhere = {"steps", "time_steps"}
 
     missing = [k for k in required if k not in elsewhere and f'"{k}"' not in generated]
     assert not missing, (

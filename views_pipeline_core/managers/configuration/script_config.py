@@ -39,7 +39,12 @@ import importlib.util
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
+
+from views_pipeline_core.modules.validation.core_config_sniffer import (
+    LEGACY_MATURITY_CONFIG_FILENAME,
+    MATURITY_CONFIG_FILENAME,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,3 +92,86 @@ def load_config_from_script(
         raise
 
     return None
+
+
+def load_maturity_config(
+    script_paths: Mapping[str, Path],
+    owner_name: str,
+    load: "Callable[[str, str], Optional[Dict[str, Any]]] | None" = None,
+) -> Optional[Dict[str, Any]]:
+    """Load the maturity config under either filename, preferring the new one (ADR-057).
+
+    views-models ADR-017 renames `config_deployment.py` to `config_maturity.py`, and the
+    two names carry different entry points — `get_maturity_config` and the legacy
+    `get_deployment_config`. Resolving the filename without also resolving the function
+    name loads nothing.
+
+    ## Why this is here rather than copied a third time
+
+    `ModelManager` resolved both names (#496 / ADR-057); the two ensemble managers asked
+    for `("config_deployment.py", "get_deployment_config")` by hand. So a migrated
+    *ensemble* — the rename done, exactly what ADR-057 asks for — loaded `None`, its
+    combined config declared neither key, and `CoreConfigSniffer.sniff_all` raised on the
+    first statement of the run. The two loud call sites #496 names are downstream of this
+    one and are never reached.
+
+    Three callers needing one rule is this repo's WET-before-DRY trigger, and the module
+    already holds the precedent: `load_config_from_script` was extracted at the same
+    count, for the same reason. Extracting it also means the transition window closes in
+    one place — when the legacy name goes, this function is the only thing to edit.
+
+    Args:
+        script_paths: the caller's resolved script map, from `get_scripts()`.
+        owner_name: the model or ensemble name, for the both-files-present warning.
+        load: the loader to use. Defaults to `load_config_from_script`.
+
+    ## Why `load` exists, since every production caller passes the same thing
+
+    All three managers pass their own `_load_config`, which is a one-line delegate to
+    `load_config_from_script` with their own `_script_paths` — so the parameter can only
+    ever be handed something equivalent to the default, and a review flagged it as a dead
+    injection point. It is not dead: **it is the seam the existing test suite patches.**
+    Removing it and calling `load_config_from_script` directly was tried and turns 60
+    tests red with 161 collection errors, because those tests stub `_load_config` on the
+    manager to keep config loading off the disk. The parameter is a test seam, and saying
+    so here is cheaper than the next person rediscovering it the same way.
+
+    **Known limitation, deliberately not enforced.** `script_paths` and `load` are
+    independent arguments that must refer to the same script map: the presence check below
+    reads the first, the load uses the second. Nothing checks the agreement, and they agree
+    today only because every caller passes `self._script_paths` twice. That is C-250's
+    shape — two coordinates that must match, one enforced — and the reason it is carried
+    rather than fixed is that every fix costs more than the hazard: inspecting the
+    callable's closure is worse than the problem, and requiring one argument instead of two
+    means giving up the test seam above.
+
+    Returns:
+        The config dict, or `None` if neither file exists — which the sniffer then
+        reports loudly, naming the file to add.
+    """
+    loader = load or (lambda name, method: load_config_from_script(script_paths, name, method))
+
+    # `is not None`, matching `get_scripts()`, which maps a real Path to `str(path)` and
+    # anything else to `None` — so `None` is this map's absent marker, and the sniffer
+    # tests key presence the same way. `bool(...)` would be behaviourally identical for
+    # every input `get_scripts()` can produce (a mutation to it survives the whole suite,
+    # checked 2026-09-08); the two differ only on an empty-string path, which that method
+    # cannot emit. Recorded so the surviving mutation reads as a fact about reachability
+    # rather than as a coverage gap.
+    has_new = script_paths.get(MATURITY_CONFIG_FILENAME) is not None
+    has_legacy = script_paths.get(LEGACY_MATURITY_CONFIG_FILENAME) is not None
+
+    if has_new and has_legacy:
+        logger.warning(
+            "Both %s and %s exist for '%s'. Reading %s and IGNORING %s — delete the "
+            "legacy file once the rename is confirmed (ADR-057).",
+            MATURITY_CONFIG_FILENAME,
+            LEGACY_MATURITY_CONFIG_FILENAME,
+            owner_name,
+            MATURITY_CONFIG_FILENAME,
+            LEGACY_MATURITY_CONFIG_FILENAME,
+        )
+
+    if has_new:
+        return loader(MATURITY_CONFIG_FILENAME, "get_maturity_config")
+    return loader(LEGACY_MATURITY_CONFIG_FILENAME, "get_deployment_config")

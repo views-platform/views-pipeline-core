@@ -251,3 +251,65 @@ def test_asking_for_appwrite_without_the_extra_names_the_install_command():
         "    assert 'ADR-047' in str(e), 'the message should say what NEEDS no extra'\n"
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# ----------------------------------------------------------------------------------
+# The log-writing module stays off the heavy chain (#496)
+# ----------------------------------------------------------------------------------
+
+HEAVY_PROBE = (
+    "import sys; {imports}; "
+    "heavy = sorted(m for m in ('numpy', 'pandas', 'views_frames') if m in sys.modules); "
+    "assert not heavy, f'heavy imports pulled in: {{heavy}}'"
+)
+
+
+def test_log_file_utils_does_not_pull_in_the_heavy_chain():
+    """`files/utils.py` writes the run log and must stay importable for that alone.
+
+    Its own header states the property: pandas is imported function-locally so the module
+    can sit on the frame-native import chain without loading it. #496 added
+    `config_maturity` to it, and a module-level import of the sniffer would have pulled
+    `views_frames.SpatialLevel` — and numpy behind it — straight back onto that chain:
+    measured at 0.131s to import the sniffer versus 0.012s for this module with the
+    import inside the function — both with a bare interpreter, because timing through
+    `conda run` folds conda's own startup into the number and was how this figure came
+    to disagree with the one in `files/utils.py` (0.035 vs 0.013).
+
+    The property was documented in a comment and pinned by nothing, which is why it was
+    a comment away from being lost. If this turns red, move the offending import into the
+    function that needs it — do not relax the test.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            HEAVY_PROBE.format(imports="import views_pipeline_core.files.utils"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_the_heavy_probe_can_actually_fail():
+    """The control. A probe that cannot fail is not a guard.
+
+    Without this, `test_log_file_utils_does_not_pull_in_the_heavy_chain` would pass
+    identically if the probe string were misspelled or the module names were wrong.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            HEAVY_PROBE.format(
+                imports="import views_pipeline_core.modules.validation.core_config_sniffer"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, (
+        "the sniffer imports views_frames at module scope, so this probe MUST fail — "
+        "if it passes, the probe is measuring nothing"
+    )

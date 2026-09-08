@@ -9,7 +9,6 @@ Run: `conda run -n views_pipeline pytest tests/test_falsification_development_af
 from __future__ import annotations
 
 import pathlib
-import re
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 
@@ -52,24 +51,73 @@ def test_no_artifact_claims_the_guard_matches_a_create_prefix():
     )
 
 
-def test_published_artifacts_do_not_quote_a_suite_size_only_this_machine_sees():
-    """A clean checkout runs 2697 tests; a developer machine with the sibling repos
-    checked out beside it runs 2712. The 15-test gap is cross-repo conformance that skips
-    when `../views-impact`, `../views-postprocessing` and `../views-faoapi` are absent —
-    documented and deliberate ("no CI runner can see it").
+def test_published_artifacts_do_not_quote_a_suite_size_without_naming_the_environment():
+    """A suite count is only meaningful with the environment that produced it.
 
-    Commit messages on this branch quoted the larger number throughout. Git history cannot
-    be corrected, so this guards the artifacts a reader outside this machine will actually
-    see: the changelog and the release notes derived from it. Anything quoting a count
-    there must be the reproducible one, or must say what the larger one needs.
+    Measured 2026-09-08 at the 3.2.0 candidate: this repo runs **2776 passed / 23 skipped**
+    on a developer machine with the sibling repos checked out beside it, and **2762 passed /
+    37 skipped** in a clean checkout with no siblings. The 14-test gap is cross-repo
+    conformance that skips when `../views-impact`, `../views-postprocessing` and
+    `../views-faoapi` are absent — documented and deliberate, and no CI runner can see it.
+
+    ## Two things about this guard were wrong until 3.2.0, and both are the same mistake
+
+    **It scanned `CHANGELOG.md` alone.** The release gate in `reports/technical_risk_register.md`
+    is the other artifact a releaser reads — `documentation/guides/publishing-to-pypi.md` sends
+    them there by name — and the 3.2.0 gate duly quoted the developer-machine number, outside
+    this guard's reach. A guard wrong about its own scope, which this repo has now recorded
+    nine times.
+
+    **It hardcoded the allowed count.** It permitted exactly `2697`, which was 65 tests stale
+    by the time anyone tripped it, and its own docstring quoted `2712` for the other side.
+    A guard that must be edited every time the suite grows is a guard that gets edited to
+    whatever makes it pass. Worse, its regex matched `passing` as well as `pass`, so quoting
+    the *correct* reproducible figure would have failed it.
+
+    So it no longer polices the NUMBER. It polices the thing that actually makes a number
+    useful: that the environment is named next to it. Its own message always said "quote
+    what a reader can reproduce, **or name the environment**" — only the first half was
+    enforced.
     """
     import re
 
-    changelog = (REPO / "CHANGELOG.md").read_text()
-    quoted = set(re.findall(r"\b(2[0-9]{3}) (?:tests? )?pass", changelog))
-    unreproducible = {q for q in quoted if q != "2697"}
-    assert not unreproducible, (
-        f"CHANGELOG quotes {sorted(unreproducible)} passing tests; a clean checkout sees "
-        f"2697. The difference is cross-repo conformance that skips without sibling "
-        f"checkouts. Quote what a reader can reproduce, or name the environment."
+    artifacts = {
+        "CHANGELOG.md": (REPO / "CHANGELOG.md").read_text(),
+        "reports/technical_risk_register.md": (
+            REPO / "reports" / "technical_risk_register.md"
+        ).read_text(),
+    }
+    # Words that tell a reader which machine produced the count. Any one of them, on the
+    # same line, is enough — this is a legibility rule, not a phrasing rule.
+    environment_named = ("clean checkout", "sibling", "developer machine", "CI", "no siblings")
+
+    naked = []
+    for name, text in artifacts.items():
+        for line in text.splitlines():
+            if not re.search(r"\b2[0-9]{3}\b\s*(?:tests?\s*)?pass", line):
+                continue
+            if not any(marker in line for marker in environment_named):
+                naked.append(f"{name}: {line.strip()[:120]}")
+
+    assert not naked, (
+        "a published artifact quotes a suite size with no environment beside it:\n  "
+        + "\n  ".join(naked)
+        + "\n\nA reader on a clean checkout sees a different number and concludes the "
+        "release is broken. Name the environment on the same line — 'clean checkout', "
+        "'with siblings', 'developer machine', 'CI' — or drop the count."
     )
+
+
+def test_the_suite_size_guard_can_actually_fail():
+    """The control. The previous version of this guard could not see the register at all,
+    and nobody noticed for a release cycle."""
+    import re
+
+    line = "> the suite is at 2776 passing"
+    assert re.search(r"\b2[0-9]{3}\b\s*(?:tests?\s*)?pass", line), (
+        "the pattern no longer matches a naked count, so the guard above is inert"
+    )
+    assert not any(
+        m in line for m in ("clean checkout", "sibling", "developer machine", "CI")
+    ), "the control line accidentally names an environment, so it proves nothing"
+

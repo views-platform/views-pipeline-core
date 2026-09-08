@@ -4,7 +4,8 @@ A runbook for releasing this package, written to be followed **solo, cold, month
 Every command is copy-pasteable; the *why* is spelled out where getting it wrong is
 expensive.
 
-> **Last verified:** 2026-08-03, preparing `3.0.0`. Mechanism confirmed against
+> **Last verified:** 2026-09-08, preparing `3.2.0` — the draft-Release note below was
+> found stale and corrected then. Before that: 2026-08-03, preparing `3.0.0`. Mechanism confirmed against
 > views-evaluation 1.0.0, which shipped 2026-08-02 through a mechanism-identical workflow
 > file (it differs only in the package name inside the version-guard URL).
 > Companion documents: `CHANGELOG.md` (what changed), the release gate in
@@ -31,9 +32,14 @@ on:
 > `pyproject.toml` at that commit still read `2.3.0`. The Release was then reverted to a
 > draft. So 2.3.1 is evidence that **the version guard works**, not that tags are inert.
 >
-> The tag has since been deleted. **The draft Release still exists** — which makes the
-> first row of the troubleshooting table below dangerous: publishing that draft re-fires a
-> run guaranteed to fail.
+> The tag has since been deleted, **and so has the draft Release** — checked 2026-09-08
+> against `gh api repos/views-platform/views-pipeline-core/releases --jq '.[] |
+> select(.draft==true)'`, which returns nothing. Until 3.2.0 this paragraph said in bold
+> that the draft still existed and that publishing it would re-fire a failing run. That was
+> true when written and had stopped being true; a warning designed to make a reader careful,
+> read at the exact moment they are being careful, about a hazard that no longer exists.
+> **If you are following this runbook, re-run that command rather than trusting this
+> sentence** — the point of the paragraph is now the check, not the claim.
 
 ---
 
@@ -43,6 +49,12 @@ on:
 # 1. Bump the version on a branch. A published version can NEVER be reused.
 $EDITOR pyproject.toml                        # [tool.poetry] version = "X.Y.Z"
 $EDITOR CHANGELOG.md                          # a release with no notes is a release nobody can adopt
+#   Write the heading as `## [X.Y.Z] — unreleased` while drafting, then STAMP THE DATE in
+#   step 5 once it is actually out. Every release before 3.1.2 shipped still saying
+#   "unreleased", because the marker is written when the section is drafted and nothing
+#   replaced it. 3.0.1, 3.1.0 and 3.1.1 were corrected in one batch on 2026-08-14, the
+#   note-to-self said the real fix belonged in this guide, and it was not added — so 3.1.2
+#   did it again on the very next release. It is one line and it is step 5.
 git commit -am "release: X.Y.Z" && git push   # PR -> merge to development -> merge to main
 
 # 2. Cut the GitHub Release FROM main. THIS is what publishes.
@@ -63,6 +75,13 @@ open https://pypi.org/project/views-pipeline-core/
 rm -rf /tmp/verify && python3.11 -m venv /tmp/verify   # 3.11 explicitly — see the range note
 /tmp/verify/bin/pip install views-pipeline-core==X.Y.Z
 /tmp/verify/bin/python -c "import views_pipeline_core; print('ok')"
+
+# 5. STAMP THE DATE. The release is out; the changelog still says otherwise.
+$EDITOR CHANGELOG.md          # `## [X.Y.Z] — unreleased`  ->  `## [X.Y.Z] — YYYY-MM-DD`
+git commit -am "docs(changelog): stamp X.Y.Z as released" && git push
+#   Do this now, not "later". Four consecutive releases shipped with the wrong marker
+#   because later never came. A reader checking whether the version they just installed
+#   was ever released is told it was not.
 ```
 
 Step 4 is not optional theatre. It is the only check that exercises what a *consumer* gets

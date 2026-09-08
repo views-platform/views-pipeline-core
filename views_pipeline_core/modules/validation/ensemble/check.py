@@ -2,6 +2,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 from views_pipeline_core.files.utils import read_log_file
+from views_pipeline_core.modules.validation.core_config_sniffer import config_maturity
 from views_pipeline_core.modules.validation.ensemble.member_maturity import (
     ensemble_may_contain_member,
 )
@@ -28,7 +29,12 @@ def validate_model_conditions(path_generated, run_type, saved=False):
         True if all temporal conditions are met, False otherwise
 
     Raises:
-        Exception: If log file cannot be read (logged but not raised)
+        KeyError: if the log exists and parses but carries no `Single Model Name` or
+            `Deployment Status` line. Those reads are OUTSIDE the try below, deliberately —
+            a log missing them is malformed rather than absent, and silently returning
+            False would blame the member for a broken artifact. The docstring claimed
+            until 2026-09-08 that read failures were "logged but not raised"; that is true
+            only of the errors the try actually catches.
 
     Note:
         - Training cycle check (Condition 1) applies to all run types
@@ -115,8 +121,11 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     Args:
         path_generated: Path to model's data_generated directory containing log files
         run_type: Type of run to validate: 'calibration' | 'forecasting' | 'validation'
-        ensemble_deployment_status: Deployment status of ensemble:
-            'production' | 'shadow' | 'deprecated'
+        ensemble_deployment_status: the ensemble's declared maturity — `candidate`,
+            `graduate` or `retired`, or a legacy `shadow`/`baseline`/`deployed`/`deprecated`.
+            Both vocabularies are normalised inside `ensemble_may_contain_member`.
+            (`'production'` appeared here until 2026-09-08; views-models has never written
+            it, the branch that read it could never execute, and ADR-058 deleted it.)
 
     Returns:
         True if deployment status conditions are met, False otherwise
@@ -135,7 +144,7 @@ def validate_ensemble_model_deployment_status(path_generated, run_type, ensemble
     Note:
         - Deprecated ensembles cannot be used
         - Deprecated constituent models cannot be used
-        - production models can only be in deployed ensembles
+        - a graduate ensemble's members must all be graduate (ADR-058 R2)
         - Prevents accidental use of outdated models
     """
 
@@ -292,12 +301,16 @@ def validate_ensemble_model(config, saved=False):
 
     Args:
         config: Ensemble configuration dict with keys: 'name', 'models',
-            'run_type', 'deployment_status'
+            'run_type', and 'maturity' (or the legacy 'deployment_status')
         saved: If True, skip data freshness checks in validate_model_conditions
             (pre-computed output means raw data fetch timing is irrelevant)
 
     Raises:
-        ValueError: If any constituent model fails validation
+        ValueError: If any constituent model fails validation — the message names the
+            ensemble and the member. Also, and with a different meaning, if the ENSEMBLE's
+            own config declares a blank maturity: `config_maturity` refuses that before
+            any member is examined, and its message names the key and the file. Same type,
+            two causes; read the message before blaming a member (#496, C-308).
     """
     from views_pipeline_core.data.model_path import ModelPathManager
     from views_pipeline_core.managers.model import ModelManager
@@ -313,7 +326,7 @@ def validate_ensemble_model(config, saved=False):
 
         if (
                 (not validate_model_conditions(path_generated, config["run_type"], saved=saved)) or
-                (not validate_ensemble_model_deployment_status(path_generated, config["run_type"], config["deployment_status"])) or
+                (not validate_ensemble_model_deployment_status(path_generated, config["run_type"], config_maturity(config))) or
                 (not validate_partition_config(ensemble_manager, model_manager, config["run_type"]))
         ):
             raise ValueError(

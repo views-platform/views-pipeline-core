@@ -162,24 +162,81 @@ def test_a_real_config_builds_an_ensemble_context(combined):
 
     assert ctx.models == combined["models"]
     assert ctx.aggregation == combined["aggregation"]
-    assert ctx.deployment_status == combined["deployment_status"]
+    # The expectation is restated here rather than computed by the function under test.
+    # An earlier version of this line read `== config_maturity(combined)` — the same
+    # accessor that produces the left-hand side, on the same dict — so it could only fail
+    # by raising, and a comment above it claimed it was "no longer a tautology". Writing
+    # the rule out is what makes it a check: if ADR-057's precedence changes, this
+    # disagrees with the code instead of following it.
+    #
+    # Not written as `combined["deployment_status"]` either: with both keys present
+    # `maturity` wins, so the legacy subscript would fail the moment views-models
+    # re-vendors this fixture from a migrated source — failing while blaming their config.
+    declared = combined.get("maturity", combined.get("deployment_status"))
+    assert ctx.deployment_status == declared, (
+        f"the context must carry the maturity the config declares. Config says "
+        f"{declared!r}; context says {ctx.deployment_status!r}"
+    )
     assert ctx.reconciliation == combined["reconciliation"]
+
+
+def test_the_guard_survives_the_migration_it_exists_to_unblock(combined):
+    """The re-vendoring case, which the real fixture cannot exercise on its own.
+
+    `white_mustang` is legacy-only, so on that config `configs["deployment_status"]` and
+    `config_maturity(configs)` return the same value — mutation-checked: reverting the
+    context to the legacy subscript leaves every other test in this file green. The
+    precedence rule is therefore untested here by the fixture alone.
+
+    ADR-057's close condition asks views-models to re-vendor exactly this config from a
+    migrated source. This simulates that: same real config, plus the key the migration
+    adds. If the context ever stops honouring the new key, this fails — and it fails
+    naming pipeline-core, not the neighbour's config, which is the whole point of a
+    conformance test that must not go stale against a migration it is meant to unblock.
+    """
+    migrated = {**combined, "maturity": "graduate"}
+
+    ctx = EnsembleContext.from_config(
+        migrated,
+        model_path=None,
+        args=ForecastingModelArgs(run_type="calibration", train=True),
+        partition_dict=None,
+        prediction_format="dataframe",
+    )
+
+    assert ctx.deployment_status == "graduate", (
+        "with both vocabularies present the new key wins (ADR-057). The context says "
+        f"{ctx.deployment_status!r}, which is the legacy value this config also carries"
+    )
 
 
 def test_the_required_keys_are_present_rather_than_defaulted(combined):
     """The keys this repo would otherwise silently default.
 
-    `from_config` supplies `"shadow"` for a missing `deployment_status` and `{}` for
+    `from_config` supplies `"shadow"` when neither maturity key is declared, and `{}` for
     missing weights. A real config that stopped declaring them would still build a
     context — and the run would proceed under a default nobody chose. That is the
     silent-substitution shape this epic exists to remove, so the presence is asserted
     separately from the value.
+
+    **The maturity key is asserted as "either vocabulary", not as `deployment_status`.**
+    ADR-057 makes both spellings legal for the window, and #496 exists because guards that
+    hard-required the legacy spelling made a *completed* migration fail. Requiring the old
+    name here would be the same defect in a conformance test: it would fail the moment
+    views-models re-vendors this fixture from a migrated source — which is exactly what
+    ADR-057's close condition asks them to do — and it would fail blaming their config.
     """
-    for key in ("name", "models", "aggregation", "level", "deployment_status"):
+    for key in ("name", "models", "aggregation", "level"):
         assert key in combined, (
-            f"a real views-models ensemble config no longer declares `{key}`. This repo "
-            f"reads it, and for `deployment_status` would silently substitute 'shadow'."
+            f"a real views-models ensemble config no longer declares `{key}`, and this "
+            f"repo reads it."
         )
+
+    assert "maturity" in combined or "deployment_status" in combined, (
+        "a real views-models ensemble config declares neither `maturity` nor the legacy "
+        "`deployment_status`. This repo reads one of them and would otherwise silently "
+        "substitute 'shadow'."
+    )
 
 
 # ----------------------------------------------------------------------------------
