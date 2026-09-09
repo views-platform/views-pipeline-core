@@ -390,6 +390,8 @@ class AggregationModule:
 
         pooled_cols = []
         rng = np.random.default_rng(42)
+        chosen_models = rng.choice(self.n_models, size=n_samples, p=weights)
+        chosen_samples = rng.integers(n_samples, size=n_samples)
 
         for target_column in self.target_cols:
 
@@ -417,17 +419,10 @@ class AggregationModule:
             n_rows, n_models, n_samples_check = model_stack.shape
             assert n_samples_check == n_samples
 
-            # Draw model indices and sample indices for ALL rows at once
-            # model_idx: (n_rows, n_samples) with values in [0, n_models)
-            model_idx = rng.choice(n_models, size=(n_rows, n_samples), p=weights)
-            # sample_idx: (n_rows, n_samples) with values in [0, n_samples)
-            sample_idx = rng.integers(n_samples, size=(n_rows, n_samples))
-
-            # row indices broadcasted to (n_rows, n_samples)
-            row_idx = np.arange(n_rows)[:, None]
-
-            # Advanced indexing: result shape (n_rows, n_samples)
-            pooled_array = model_stack[row_idx, model_idx, sample_idx]
+            # Draw one model and one sample column for each ensemble sample.
+            # The chosen model/sample pair is reused across all rows and all targets,
+            # preserving the joint covariance structure.
+            pooled_array = model_stack[:, chosen_models, chosen_samples]
 
             # Convert each row to a list
             pooled_lists = pooled_array.tolist()
