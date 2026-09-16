@@ -9,7 +9,8 @@
 
 ## What this is about
 
-A standing rule that this repo has already followed twice without writing down, and that a
+A standing rule this repo followed once in part (#378) and once in full (#510) without
+writing it down, and that a
 future contributor could violate without knowing it existed — which is CLAUDE.md's test for
 needing an ADR. It was surfaced by the review of #510, which found the rule living in a code
 comment, a test docstring, a CHANGELOG entry, a register row and a closing note on a
@@ -46,7 +47,10 @@ exception to that for one class of change, and the reason is the same one #378 g
 warning on a flag that *does nothing* reaches a human who cannot act on it, and a warning
 that tells a reader their build is about to break is one they learn to ignore. A retired
 value has, by definition, no behaviour left to deprecate gently; refusing is the only
-message that is true. ADR-056 records the same reasoning for the scaffolding filter.
+message that is true. A second, independent reason `DeprecationWarning` specifically is
+the wrong instrument here: ADR-056 makes generated model mains silence `DeprecationWarning`
+by name, so it would be filtered out in the only process that emits it
+(`managers/reporting/stage.py` records the same trap one layer down).
 
 ## Why not just delete it
 
@@ -56,7 +60,7 @@ carrying a removal reaches every un-migrated consumer unchecked — that is what
 shipped as 2.3.0. A name that raises at construction under a minor is, strictly, the same
 shape. This ADR accepts that cost knowingly and bounds it: the surface stays resolvable, the
 failure is loud and self-explaining, and practical exposure is checked at retirement time
-(for #510: no importer of the class in any of the 19 sibling repos on disk).
+(for #510: no importer of the class in any of the 18 other `views-*` repos on disk).
 
 ## What would show this decision to be wrong
 
@@ -71,5 +75,9 @@ step is where it should have been caught.
   the refusal at the boundary, the message pointing at an ADR, and the major-gated test.
 - `documentation/guides/publishing-to-pypi.md` gains a line: before cutting a major, run
   the suite and delete whatever the major-gated tests name.
-- Retirements before this ADR: #378's `long` follows the rule already; #510's does after
-  its review.
+- Retirements before this ADR: #378's `long` satisfies clauses 1–3 and **not** clause 4 —
+  and should not. It is a rejected *value* of a flag that survives, not a flag or a name,
+  so there is nothing to delete at a major: dropping its refusal branch would turn a
+  message that names the issue into a generic "should be one of". Clause 4 applies to
+  surface that is *going*, which `long`'s parent flag is not. #510's flag and stub satisfy
+  all four after its review.
