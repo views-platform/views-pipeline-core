@@ -61,6 +61,18 @@ def test_the_retired_flag_refuses_at_argument_validation(capsys):
     assert "To fix: drop the flag" in text
 
 
+def test_direct_construction_refuses_too():
+    """The refusal lives in `_validate`, so it fires on direct construction — the shape
+    the three ensemble managers use for child args — not only through `parse_args`.
+    Independent guard audit, mutation A10: moving the refusal into `from_namespace`
+    left the parse-based test green while direct construction stopped refusing."""
+    from views_pipeline_core.cli.args import ForecastingModelArgs
+
+    with pytest.raises(SystemExit) as info:
+        ForecastingModelArgs(run_type="calibration", train=True, update_viewser=True)
+    assert info.value.code == 1
+
+
 def test_without_the_flag_validation_passes():
     """The control. Same argv minus `-u` must construct normally."""
     from views_pipeline_core.cli.args import ForecastingModelArgs
@@ -71,14 +83,20 @@ def test_without_the_flag_validation_passes():
 
 
 def test_the_help_text_says_retired():
-    """The one thing an operator reads before typing the flag."""
+    """The one thing an operator reads before typing the flag.
+
+    Asserted on the `--update_viewser` action's own help string, not on the rendered
+    `--help` blob: a whole-output substring search was satisfied by ANY flag whose help
+    said RETIRED (independent guard audit, mutation H3). The long form is asserted to
+    exist because `_execute_shell_script` forwards `--update_viewser`, not `-u`, and the
+    argv used elsewhere in this file only exercises `-u` (mutation A11).
+    """
     from views_pipeline_core.cli.args import ForecastingModelArgs
 
-    with patch.object(sys, "argv", ["script.py", "--help"]), pytest.raises(SystemExit):
-        with patch("sys.stdout") as fake_out:
-            ForecastingModelArgs.parse_args()
-    rendered = "".join(str(c.args[0]) for c in fake_out.write.call_args_list if c.args)
-    assert "RETIRED" in rendered, "the help text no longer says the flag is retired"
+    actions = ForecastingModelArgs._create_parser()._option_string_actions
+    assert "--update_viewser" in actions and "-u" in actions, "one of the two forms is gone"
+    assert actions["--update_viewser"] is actions["-u"]
+    assert "RETIRED" in (actions["-u"].help or ""), "the flag's own help no longer says RETIRED"
 
 
 # ----------------------------------------------------------------------------------
@@ -100,6 +118,10 @@ def test_the_stub_refuses_on_construction():
 
     with pytest.raises(RuntimeError, match="retired on 2026-09-16"):
         UpdateViewser(None, None, None, None)
+    # And with arguments a real caller would pass — a stub that special-cased the None
+    # sentinel survived the first version of this test (guard audit, mutation S6).
+    with pytest.raises(RuntimeError, match="retired on 2026-09-16"):
+        UpdateViewser(object(), object(), "/tmp/x.parquet", [543, 544])
 
 
 def test_the_stub_keeps_the_recorded_signature():
@@ -128,6 +150,18 @@ _TARGETS = sorted(
     [f"import views_pipeline_core.modules.dataloaders.{m}" for m in _LAZY_SUBMODULES]
     + ["from views_pipeline_core.managers.model import ForecastingModelManager"]
 )
+
+
+def test_the_derived_targets_include_the_stub():
+    """The floor under the derivation. Deleting `"update_viewser"` from `_LAZY_SUBMODULES`
+    silently removed the stub from `_TARGETS` and every probe stayed green — a derived set
+    with no population check is a hand-list that edits itself. Independent guard audit,
+    2026-09-16, mutation F1."""
+    assert "update_viewser" in _LAZY_SUBMODULES, (
+        "the stub submodule is no longer registered on the facade, so the absence probe "
+        "never imports it — the one module that ever imported the library goes unprobed"
+    )
+    assert len(_TARGETS) >= 5, f"the probe target set collapsed to {_TARGETS}"
 
 
 @pytest.mark.parametrize("imports", _TARGETS)
