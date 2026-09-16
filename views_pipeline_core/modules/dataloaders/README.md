@@ -1,4 +1,4 @@
-# VIEWS Pipeline Core: Data Loading & Viewser Update Module
+# VIEWS Pipeline Core: Data Loading Module
 
 Core Classes — **one per file since #431** (they were both in `dataloaders.py` until then):
 
@@ -18,12 +18,10 @@ This module standardizes data acquisition for forecasting pipelines in the VIEWS
 | Functionality | Description |
 |---------------|-------------|
 | Queryset parsing | Extract raw variables, output names, ordered transformation chains |
-| Incremental updates | Replace raw GED / ACLED slices with newest values; recompute derived transformations |
 | Partitioning | Calibration / validation / forecasting month span definitions (train/test split logic) |
 | Drift detection | Input monitoring via configurable statistical tests (ADR‑014 alignment) |
 | Caching | Local raw parquet persistence with provenance log file creation |
 | Type safety | Numeric stabilization (`ensure_float64`) and index consistency |
-| Environment-driven updates | `.env` + LOA-driven update file resolution (country vs priogrid) |
 
 ---
 
@@ -52,35 +50,11 @@ This module standardizes data acquisition for forecasting pipelines in the VIEWS
 
 ---
 
-## Transformation Registry
-
-`transformation_mapping` provides name → function resolution for queryset replay:
-
-| Key | Callable | Category |
-|-----|----------|----------|
-| ops.ln | `views2.ln` | Log transform |
-| temporal.tlag | `views2.tlag` | Temporal lag |
-| temporal.decay | `views2.decay` | Decay weighting |
-| temporal.time_since | `views2.time_since` | Time since event |
-| temporal.moving_sum | `views2.moving_sum` | Rolling aggregation |
-| missing.fill | `missing.fill` | Imputation |
-| missing.replace_na | `missing.replace_na` | NA substitution |
-| spatial.countrylag | `splag_country.get_splag_country` | Country lag |
-| spatial.lag | `splag4d.get_splag4d` | 4D spatial lag |
-| spatial.treelag | `spatial_tree.get_tree_lag` | Tree lag |
-| spatial.sptime_dist | `spacetime_distance.get_spacetime_distances` | Space–time distances |
-| bool.gte | `views2.greater_or_equal` | Boolean threshold |
-| temporal.moving_average | `views2.moving_sum` (same primitive) | Rolling average |
-
-Special handling: `TRANSFORMATIONS_EXPECTING_DF = {"spatial.lag", "spatial.sptime_dist"}` forces DataFrame input.
-
----
-
 ## Class: ViewsDataLoader
 
 ### Overview
 
-Primary orchestration class for partition-aware model data ingestion. Integrates queryset resolution, partition slicing, drift detection, optional VIEWSER update, caching, and validation.
+Primary orchestration class for partition-aware model data ingestion. Integrates queryset resolution, partition slicing, drift detection, , caching, and validation.
 
 ### Initialization
 
@@ -168,17 +142,6 @@ Raises:
 | Raw parquet | `model_path/data/raw/{partition}_viewser_df.parquet` |
 | Fetch log | `model_path/data/raw/data_fetch_log_{partition}_{timestamp}.txt` |
 
-### Environment-Based Update (.env)
-
-Required keys for overwrite:
-- `month_to_update=[528, 529, 530]`
-- `pgm_path=/path/to/priogrid_updates.parquet`
-- `cm_path=/path/to/country_updates.parquet`
-
-Errors:
-- Missing `.env` → `FileNotFoundError`
-- Missing `month_to_update` → `ValueError`
-
 ### Example (Forecasting)
 
 ```python
@@ -213,8 +176,6 @@ Failure → log error + raise `RuntimeError`.
 | Queryset missing | `None` | Raise `RuntimeError` |
 | Drift fetch key error | Missing feature for drift | Retry without drift; log error |
 | Partition mismatch | Month range misaligned | Raise `RuntimeError` |
-| Update preprocessing | No column overlap | Raise `ValueError` |
-| External update staleness | viewser month > external month | Raise `ValueError` |
 | `.env` missing | File absent | Raise `FileNotFoundError` |
 
 ---
@@ -223,10 +184,8 @@ Failure → log error + raise `RuntimeError`.
 
 | Aspect | Consideration |
 |--------|---------------|
-| Transformation replay | Sequential per variable; optimize by grouping if needed |
 | Drift detection | Adds overhead; disable for development |
 | Large parquet writes | Use snappy compression (configured externally) |
-| Update mechanism | Only raw slice modifications → cheap |
 
 ---
 
@@ -246,7 +205,6 @@ Failure → log error + raise `RuntimeError`.
 | Pitfall | Resolution |
 |---------|------------|
 | Forgetting raw variables in queryset | Ensure `raw_*` rename present |
-| External file older than viewser | Refresh update parquet before run |
 | Using wrong LOA in `.env` paths | Match `priogrid_month` vs `country_month` |
 | Partition dict mis-specified | Pass full dict keyed by partition name |
 | Silent drift alerts | Inspect WARNING logs for “offender” entries |
@@ -288,9 +246,6 @@ forecast_df, forecast_alerts = loader.get_data(
 |----------|--------|
 | Can I skip drift detection? | Yes—set `drift_config_dict=None` before fetch. |
 | Why MultiIndex required? | Enables (month_id, entity_id) alignment for temporal + spatial transformations. |
-| Do updates mutate original DataFrame? | Yes—raw columns updated in place before transformation replay. |
-| How are transformation arguments parsed? | Safely with `ast.literal_eval` (`_smart_cast`). |
-| Can I partially update months? | Yes—pass specific `months_to_update` list in `.env`. |
 | What if transformation changes index length? | Module reindexes to original with warning. |
 
 ---

@@ -46,10 +46,14 @@ on:
 ## TL;DR — release an update
 
 ```bash
+# 0. If this is a MAJOR: run the suite first. Tests gated on the declared major (ADR-062)
+#    fail and name the one-window retirement shims to delete — delete them, THEN refresh
+#    the surface snapshot, not before.
 # 1. Bump the version on a branch. A published version can NEVER be reused.
 $EDITOR pyproject.toml                        # [tool.poetry] version = "X.Y.Z"
 $EDITOR CHANGELOG.md                          # a release with no notes is a release nobody can adopt
-#   Write the heading as `## [X.Y.Z] — unreleased` while drafting, then STAMP THE DATE in
+#   Between releases the top section is `## [Unreleased]` (keep-a-changelog's convention);
+#   step 1 renames it to `## [X.Y.Z] — unreleased` once the number is chosen, then STAMP THE DATE in
 #   step 5 once it is actually out. Every release before 3.1.2 shipped still saying
 #   "unreleased", because the marker is written when the section is drafted and nothing
 #   replaced it. 3.0.1, 3.1.0 and 3.1.1 were corrected in one batch on 2026-08-14, the

@@ -172,17 +172,29 @@ def _normalise(token: str) -> str:
 
 
 def _declared_dependency_names() -> set[str]:
-    """Dependency names under `[tool.poetry.dependencies]`, as written in the manifest."""
+    """`views*` dependency names under `[tool.poetry.dependencies]`, as written.
+
+    Hard-indexed, not `.get(..., {})`-chained. The first version chained, so a renamed
+    table or a PEP 621 migration would have returned an empty set — and this guard's own
+    failure message then recommends deleting the `viewser` EXEMPT entry, which disarms the
+    manifest source for good. The two sibling readers of this table
+    (`test_declared_dependencies_match_reality.py`, `test_package_metadata_is_publishable.py`)
+    both hard-index and KeyError loudly; this was the only silent one.
+
+    Scoped to `views*` because that is what this guard is about — the `views-` family and
+    `viewser`. `ingester3` is a pin too, but it is not a neighbour in this file's sense and
+    the `_HYPHENATED` pattern would never have matched it either.
+    """
     import tomllib
 
     manifest = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    deps = manifest.get("tool", {}).get("poetry", {}).get("dependencies", {})
-    return {name for name in deps if name != "python"}
+    deps = manifest["tool"]["poetry"]["dependencies"]
+    return {name for name in deps if name.startswith("views")}
 
 def declared_neighbours() -> set[str]:
     """Every other repo or package this package names, derived from its own source.
 
-    Two kinds of claim, both machine-checkable:
+    Three kinds of claim, all machine-checkable:
 
     1. **An import.** `import views_frames` is the strongest possible claim about a
        neighbour — it asserts an API exists and has a shape.
@@ -204,8 +216,7 @@ def declared_neighbours() -> set[str]:
     """
     found: set[str] = set()
     for dep in _declared_dependency_names():
-        if dep.startswith("views"):
-            found.add(_normalise(dep))
+        found.add(_normalise(dep))
     for path in sorted(PACKAGE.rglob("*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -622,7 +633,8 @@ def test_neighbour_has_a_conformance_check_or_a_stated_reason(neighbour):
 
     exemption = EXEMPT.get(neighbour)
     assert exemption is not None, (
-        f"`views-{neighbour}` is named in this package's source but has no conformance "
+        f"`{neighbour}` is a neighbour of this package (imported, named as `views-{neighbour}`, "
+        f"or declared in pyproject.toml) but has no conformance "
         f"test, no `_require_*` probe, and no entry in EXEMPT. Either add a check, or "
         f"add an EXEMPT entry saying why one is not needed and where the decision is "
         f"recorded. An unguarded boundary and a deliberately unguarded one must not "

@@ -27,29 +27,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ### Removed
 
-- **`views-transformation-library` is no longer a dependency**, and `UpdateViewser` — the only
-  thing that used it — is retired. It was ADR-037's emergency fallback for the February 2025
-  ingester outage: patch a cached VIEWSER frame with hand-supplied GED/ACLED months by replaying
-  the queryset's transformation chain. Measured from git: live for six weeks, commented out on
-  2025-11-24 with no recorded reason, never configured on any machine, and its own ADR listed
-  "letting the fallback system become permanent" as a risk. Three READMEs still told operators
-  to pass `-u`.
+- **`views-transformation-library` is no longer a dependency**, and `UpdateViewser` — the
+  only thing that used it — is retired. It was ADR-037's emergency fallback for the
+  February 2025 ingester outage. **The full account — what it was, when it was live, why it
+  is gone — is ADR-037's closing note, and is not restated here.** The flag-gated path was
+  dead from 2025-11-24 to retirement.
 
-  What leaves the environment: `views-transformation-library` itself, plus `stepshift` and
-  `xarray`, which nothing else pulled. What does **not** change: the `pandas<2.0` lock, which
-  `viewser` holds regardless (#308).
+  What leaves the declared dependency closure: the library, `stepshift` and `xarray`. The
+  package's undeclared runtime import of `views_forecasts` (C-216) still pulls the latter
+  two on paths that use it, and the `pandas<2.0` lock does not move — `viewser` holds it
+  (#308).
 
   **Nothing downstream depended on it arriving through this package.** Swept all 23 platform
   repos: the only other importer, views-impact, declares it itself.
 
-  **Kept for one window, refusing:** `--update_viewser` still parses and raises at the data-fetch
-  step naming the retirement and ADR-037, and `views_pipeline_core.modules.dataloaders.UpdateViewser`
-  still resolves and raises on construction. A minor release must not delete declared public
-  surface out from under `<4.0.0` pins, and a silent no-op must not become a silent absence.
-  Both go at 4.0.
+  **Kept for one window, refusing (ADR-062):** `--update_viewser` still parses and is
+  rejected at argument validation naming ADR-037, and
+  `views_pipeline_core.modules.dataloaders.UpdateViewser` still resolves, with its recorded
+  signature, and raises on construction. A test fails the build at major ≥ 4 naming what to
+  delete. Refusing at the args boundary rather than in a stage method is what makes it reach
+  the ensemble path (C-319).
 
-  If the ingester fails again, the fallback must be rebuilt on the frames-native path; ADR-037's
-  closing note says why re-enabling this one was never a one-line change.
+  **views-models' README still documents the flag** (`README.md:417-424`) and its `.env`
+  template still lists the three keys. Filed as views-models#472; until it lands, an
+  operator following that README gets the refusal above, which names the ADR.
 
 ## [3.2.0] — 2026-09-08
 

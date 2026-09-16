@@ -1,23 +1,21 @@
-"""`UpdateViewser` — RETIRED 2026-09-16. The name survives for one window; the class does not.
+"""`UpdateViewser` — RETIRED 2026-09-16 (C-318). The name survives for one window; the class does not.
 
-What it was: ADR-037's emergency fallback for the February 2025 ingester outage. When
-UCDP/ACLED months came back from viewser as zeros, this replayed a queryset's transformation
-chain over hand-supplied GED/ACLED files so a cached VIEWSER frame could be patched without a
-full re-fetch. It was the only reason this package depended on the transformation library.
+What it was, when it was live, and why it is gone: the closing note of
+`documentation/ADRs/037_ingester_emergency_solution.md`. That note is the one canonical
+account; this docstring does not restate it.
 
-Why it is gone: it was live for six weeks (2025-10-09 to 2025-11-24), switched off with no
-recorded reason, never configured on any machine, and its own ADR listed "letting the
-fallback system become permanent" as a risk. If the ingester fails again the fallback has to
-be rebuilt on the frames-native path — the retired file's own banner said so.
+Why this stub exists, and what it costs (ADR-062): `views_pipeline_core.modules.dataloaders.UpdateViewser`
+was a declared public name, and engine repos pin `views-pipeline-core <4.0.0`, so
+`tests/test_public_surface_requires_a_major_bump.py` refuses a minor release that deletes it.
+This stub satisfies that guard in letter and not in spirit — a name that raises at
+construction under a minor is exactly the #188 shape the guard was written against. It is
+the deliberate cost of retiring under a minor, taken because practical exposure is nil: no
+importer of this class exists in any of the 19 sibling repos on disk. The honest state is
+"resolves and refuses until 4.0, absent after"; `tests/test_modules/test_update_viewser_is_retired.py`
+asserts the first half and fails the build at major >= 4 so the second is not forgotten.
 
-Why this stub exists: `views_pipeline_core.modules.dataloaders.UpdateViewser` was a declared
-public name, and engine repos pin `views-pipeline-core <4.0.0`, so a minor release that
-deletes it reaches every consumer unchecked — `tests/test_public_surface_requires_a_major_bump.py`
-refuses exactly that. So for one window the name resolves and REFUSES on construction, the
-same way `--update_viewser` now refuses at the data-fetch step. Both go at 4.0.
-
-Nothing here imports the transformation library. That absence is pinned by
-`tests/test_modules/test_update_viewser_is_retired.py`.
+Nothing here imports the transformation library; the same test file probes every submodule
+of this package for its absence.
 """
 from __future__ import annotations
 
@@ -27,20 +25,14 @@ from typing import Any
 class UpdateViewser:
     """Retired. Constructing it raises; see the module docstring."""
 
-    # The four parameters the snapshot recorded at 3.0.0 — kept so the surface guard sees
-    # the same signature, not a narrowed one. None of them is read.
-    def __init__(
-        self,
-        queryset: Any = None,
-        viewser_df: Any = None,
-        data_path: Any = None,
-        months_to_update: Any = None,
-    ) -> None:
+    # The four parameters the surface snapshot recorded at 3.0.0, REQUIRED as recorded.
+    # The first version gave them `= None` defaults "so the guard sees the same
+    # signature" — it saw a wider one (optional where the snapshot says required), and
+    # the guard only flags the other direction, so the widening passed unnoticed.
+    def __init__(self, queryset: Any, viewser_df: Any, data_path: Any, months_to_update: Any) -> None:
         raise RuntimeError(
-            "UpdateViewser was retired on 2026-09-16. It was the ADR-037 emergency fallback "
-            "for the 2025 ingester outage, dead at runtime since 2025-11-24 and never "
-            "configured. Its dependency, the transformation library, is no longer "
-            "installed with this package. If the ingester fails again the fallback must be "
-            "rebuilt on the frames-native path — see "
-            "documentation/ADRs/037_ingester_emergency_solution.md. This name is removed at 4.0."
+            "UpdateViewser was retired on 2026-09-16 (C-318) and its dependency is no "
+            "longer installed. See the closing note of "
+            "documentation/ADRs/037_ingester_emergency_solution.md for what it was and "
+            "why it is gone. This name is removed at 4.0 (ADR-062)."
         )

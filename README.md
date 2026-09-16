@@ -72,7 +72,7 @@
 
 The pipeline transforms raw geo‑temporal data into validated, reconciled, and documented forecasts. Key features include:
 
-- Deterministic data preparation (queryset + transformation replay)
+- Deterministic data preparation (queryset-driven, drift-checked)
 - Strict naming & artifact conventions
 - Partition-aware evaluation (calibration/validation/forecasting)
 - Multi-model ensembling & hierarchical reconciliation
@@ -92,8 +92,8 @@ The pipeline transforms raw geo‑temporal data into validated, reconciled, and 
                          │
 ┌────────────────────────▼─────────────────────────┐
 │                 ViewsDataLoader                  │
-│  Queryset → Raw Fetch → Drift Check → Update     │
-│  → Transformation Replay → Partition Slice       │
+│  Queryset → Raw Fetch → Drift Check              │
+│  → Partition Slice                               │
 └───────────────┬──────────────────────────────────┘
                 │  DataFrame (month_id, entity_id)
                 ▼
@@ -172,7 +172,7 @@ Each stage receives an immutable frozen context object and is independently unit
 
 | Module                        | Role                                           |
 |-------------------------------|------------------------------------------------|
-| [dataloaders](./views_pipeline_core/modules/dataloaders/README.md) | Partition-aware data retrieval + drift detection + incremental update |
+| [dataloaders](./views_pipeline_core/modules/dataloaders/README.md) | Partition-aware data retrieval + drift detection |
 | transformations | Dataset transformation undo/management (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | reconciliation | Hierarchical grid ↔ country alignment (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |
 | reports | Tailwind-styled HTML evaluation/forecast report generation (extracted to [views-reporting](https://github.com/views-platform/views-reporting), ADR-054) |

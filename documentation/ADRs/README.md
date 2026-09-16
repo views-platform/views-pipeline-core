@@ -53,7 +53,7 @@ Domain decisions specific to `views-pipeline-core`.
 | [034](034_log_level_standards.md) | Log Level Standards | Proposed |
 | [035](035_log_files_for_input_data.md) | Log Files for Input Data | Proposed |
 | [036](036_ensemble_reconciliation.md) | Ensemble Reconciliation | Proposed |
-| [037](037_ingester_emergency_solution.md) | Ingester Emergency Solution | Proposed |
+| [037](037_ingester_emergency_solution.md) | Ingester Emergency Solution | Deprecated — fallback retired 2026-09-16 |
 | [038](038_model_actuals_preparation_hook.md) | Model Actuals Preparation Hook | Accepted |
 | [039](039_orchestrator_led_alignment.md) | Orchestrator-Led Alignment | Accepted |
 | [040](040_authority_over_inference.md) | Authority Over Inference | Accepted |
@@ -71,6 +71,7 @@ Domain decisions specific to `views-pipeline-core`.
 | [052](052_artifact_prediction_timestamp_contract.md) | Artifact Prediction Timestamp Contract | Accepted |
 | [053](053_eval_path_track_b_retirement.md) | Eval Path Track B Retirement | Accepted |
 | [054](054_visualization_and_reporting_extraction.md) | Visualization and Reporting Extraction | Implemented |
+| [062](062_retire_public_surface_by_refusing_for_one_window.md) | Retire public surface by refusing for one window | Accepted |
 
 ---
 

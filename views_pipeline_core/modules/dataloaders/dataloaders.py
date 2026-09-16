@@ -8,11 +8,9 @@ ground (C-164); at 1,746 lines, every change to the cache path scrolled past 560
 transformation-replay logic. #431 moved `UpdateViewser` to its own file; 2026-09-16 retired
 it. This file is one thing.
 
-`UpdateViewser` was retired on 2026-09-16 together with the transformation library it
-existed to call (the dependency is gone from `pyproject.toml`). It was ADR-037's emergency fallback for the February 2025 ingester outage —
-briefly live, switched off on 2025-11-24 with no recorded reason, and never configured. The
-`--update_viewser` flag is kept for one window and refuses, in `ModelManager`, so an operator
-following an old README gets told rather than ignored.
+`UpdateViewser` was retired on 2026-09-16 (C-318) with the transformation library it existed
+to call; the account is ADR-037's closing note. `--update_viewser` is refused at argument
+validation for one window (ADR-062).
 
 The neighbours carry the rest of the input side: `fetch_context` (run-scoped fetch
 parameters), `frame_cache` and `feature_frame_path` (the frames successor path, #289),
@@ -205,14 +203,13 @@ class ViewsDataLoader:
 
     Manages complete data pipeline from VIEWSER fetch to model-ready DataFrames.
     Supports partition-based splitting (calibration/validation/forecasting),
-    drift detection, optional VIEWSER updates, and automatic validation.
+    drift detection, and automatic validation.
 
     Key Features:
         - Fetches data from VIEWSER with queryset filters
         - Partitions data by time for train/test splits
         - Validates temporal alignment and completeness
         - Applies drift detection for production runs
-        - Updates VIEWSER data with latest GED/ACLED
         - Caches fetched data for reuse
 
     Partition Types:
@@ -258,7 +255,6 @@ class ViewsDataLoader:
         - Queryset must be defined in model configs
         - Raw data cached in data/raw/
         - Drift detection only on forecasting runs
-        - VIEWSER updates require .env configuration
     """
 
     def __init__(self, model_path: ModelPathManager, partition_dict: Dict = None, steps: int = 36, **kwargs):
@@ -351,7 +347,7 @@ class ViewsDataLoader:
         Fetch data from VIEWSER with queryset filters and drift detection.
 
         Downloads or loads data using model's queryset, applies transformations,
-        optionally performs drift detection, and updates with latest GED/ACLED.
+        and optionally performs drift detection.
 
         Internal Use:
             Core data fetching method called by get_data().
@@ -370,7 +366,6 @@ class ViewsDataLoader:
             2. Fetch data via queryset.publish().fetch_with_drift_detection()
             3. Log any drift detection alerts
             4. On KeyError: Retry without drift detection
-            5. Apply VIEWSER updates if enabled
             6. Convert to float64 for numerical stability
 
         Example:
@@ -389,7 +384,6 @@ class ViewsDataLoader:
         Note:
             - Uses month_first, month_last from instance
             - Drift detection config from self.drift_config_dict
-            - Updates applied based on args.update_viewser flag
             - Alerts logged as warnings if drift detected
         """
         logger.info(

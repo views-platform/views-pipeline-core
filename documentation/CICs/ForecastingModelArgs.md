@@ -66,7 +66,7 @@ Frozen dataclass that captures, validates, and serializes CLI arguments for the 
 | `drift_self_test` | `bool` | `False` |
 | `eval_type` | `str` | `"standard"` |
 | `report` | `bool` | `False` |
-| `update_viewser` | `bool` | `False` | Retired 2026-09-16 — parses for one window and refuses at the data-fetch step; removed at 4.0 |
+| `update_viewser` | `bool` | `False` |
 | `wandb_notifications` | `bool` | `False` |
 | `monthly` | `bool` | `False` |
 
@@ -87,6 +87,9 @@ Frozen dataclass that captures, validates, and serializes CLI arguments for the 
 - All constraint violations call `_exit_with_error(*messages)`, which prints error messages to stdout and calls `sys.exit(1)`. This is loud but makes unit testing harder -- tests must catch `SystemExit`.
 - Error messages include both the problem description and a "To fix:" suggestion.
 - There is no silent fallback or permissive mode. Invalid argument combinations always terminate the process.
+- **Retired values are refused here too**, not deeper in the run: `--eval_type long` (#378) and
+  `--update_viewser` (C-318, 2026-09-16) both parse and are then rejected in `_validate` with a
+  message naming the ADR that explains the retirement. ADR-062 records the rule.
 
 ---
 
@@ -181,6 +184,9 @@ All validation failures are tested by catching `SystemExit`.
 - The `_exit_with_error()` pattern using `sys.exit(1)` is inherited from `ModelArgs`. A future refactor could raise a custom exception instead, making testing cleaner.
 - `run_type` accepts `"testing"` in addition to `"calibration"`, `"validation"`, and `"forecasting"` (the parser only defines the latter three as choices, but programmatic construction allows `"testing"`).
 - The `monthly` flag mutates fields in `_validate()`, which is unusual for a dataclass. This is a deliberate convenience shorthand.
+- `update_viewser` is a **one-window retirement shim** (2026-09-16, C-318, ADR-062): the field and flag stay so
+  `-u` still parses, `_validate` refuses it, and both are deleted at 4.0 —
+  `tests/test_modules/test_update_viewser_is_retired.py` fails the build at major ≥ 4 naming what to remove.
 
 ---
 

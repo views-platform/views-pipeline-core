@@ -20,7 +20,6 @@ def mock_model_path():
     mock.model_name = "test_model"
     mock.data_raw = Path("/tmp/test_model/data/raw")
     mock.data_processed = Path("/tmp/test_model/data/processed")
-    mock.find_project_root.return_value = Path("/tmp/test_project")
     
     # Mock queryset
     mock_queryset = MagicMock(spec=Queryset)
@@ -307,7 +306,7 @@ class TestFetchDataFromViewser:
 
 
 # ============================================================================
-# Test UpdateViewser
+# Integration
 # ============================================================================
 
 
