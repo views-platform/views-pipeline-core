@@ -6,7 +6,11 @@ import numpy as np
 
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
 from views_pipeline_core.managers.model import ModelPathManager
-from viewser import Queryset
+
+# The viewser path under test needs the real class for `MagicMock(spec=Queryset)`. In an
+# environment without viewser (ADR-063: an extra from 4.0) this file skips at collection
+# instead of failing there.
+Queryset = pytest.importorskip("viewser").Queryset
 
 
 # ============================================================================

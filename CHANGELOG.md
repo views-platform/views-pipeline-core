@@ -25,6 +25,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ## [Unreleased]
 
+### Added
+
+- **pandas, pyarrow and tqdm are declared dependencies** (`pandas>=1.5.3,<3.0`,
+  `pyarrow>=14,<17`, `tqdm>=4.66,<5`). All three were undeclared and arrived only through
+  viewser's dependency chain (pandas also through ingester3, floor-only). Measured, not
+  inferred, by resolving this manifest *without* viewser into a fresh venv and importing
+  every module: `managers.prediction.savers` fails on pyarrow and `managers.ensemble` on
+  tqdm; and with pandas reachable only through ingester3's `>1.2.3`, the post-#510 tree
+  resolves to an untested pandas 3. The ranges intersect viewser's own caps, so nothing
+  resolves differently today; the pyarrow `<17` ceiling now lives here as well as in
+  views-storage, so #280 lifts both. ADR-063; register C-295.
+- **A `test-without-viewser` CI job** resolves the manifest with viewser left out (the
+  install set is derived from `pyproject.toml`, not listed), installs the package with
+  `--no-deps`, and imports every module from the installed wheel. Its first draft
+  installed then `pip uninstall`ed viewser — which leaves viewser's orphaned dependencies
+  on disk and would not have caught pyarrow; review caught that. The module walk is
+  derived from the filesystem because `pkgutil.walk_packages` does not descend into the
+  namespace package `views_pipeline_core/modules/` — the first draft silently walked half
+  the package.
+
+### Fixed
+
+- **A config_queryset.py that fails to import now raises, with the install command when
+  the missing module is a data-source client** — `viewser` (77 views-models sources) or
+  `datafactory_query` (23; it ships in views-datafactory). `ModelPathManager.get_queryset`
+  had swallowed every exception into `None`, so a missing client surfaced two calls later
+  as `RuntimeError: Could not find queryset for <model>` — a message about absence for a
+  file that exists (register C-321; the CIC had documented the pitfall since 2026-04). The
+  sibling config loader had always re-raised. Two consequences, stated so nobody meets them
+  cold: the first `get_queryset()` read in `_execute_data_fetching` runs *before* the wandb
+  run opens (by design — config faults fail crisp, without a spurious fetch alert), so a
+  missing client is now a clean `ImportError` with no wandb alert rather than a wandb-alerted
+  `DataFetchException` with the wrong text; and views-models' catalogs job, which calls this
+  for 94 of its 106 models (fixtures and baselines are skipped) with no per-model isolation
+  and commits the result, will abort the whole run on the first broken queryset instead of
+  writing "No description provided" — once it moves off its `views_pipeline_core==3.0.1`
+  pin. Also fixes `import importlib` → `import importlib.util` in the same module, which
+  only worked because another module imported it first.
+
+### Deprecated
+
+- **viewser becomes the `[viewser]` extra at 4.0** (ADR-063). Through 3.x it stays
+  required and is *not* named in extras — poetry-core would mark it `; extra == "viewser"`
+  in the wheel and stop installing it, which is the 4.0 change shipped early. A test fails
+  the build at major ≥ 4 until the flip is done and names the two consumers that must move
+  to `views-pipeline-core[viewser]` first (views-baseline; views-models' catalogs job).
+  What the flip will and will not do, so nobody plans on the wrong thing: it frees
+  hydranet, views-baseline's non-viewser models, postprocessing, reporting and the 13
+  ensembles from `pandas<2`/`pyarrow<17`; it does **not** reach the 56 viewser models on
+  pipeline-core 2.x (views-stepshifter, views-r2darts2 0.1.x), does **not** lift
+  `numpy<2` (views-evaluation holds it), and does **not** let the 18 viewser-fetching
+  darts models install darts 0.46 — those need datafactory querysets. Supersedes #511.
+
 ### Removed
 
 - **`views-transformation-library` is no longer a dependency**, and `UpdateViewser` — the

@@ -1,6 +1,7 @@
 """Import-purity guards — architectural rules asserted in a subprocess, not promised.
 
-Two rules live here:
+Five rules live here (the header once said two; three arrived without updating it):
+
 
 1. **pandas is a LEGACY option, never a foundational import** (#320, C-225). Importing
    the base manager — the class every engine must extend — must not load pandas.
@@ -10,6 +11,13 @@ Two rules live here:
    publishes a forecast, the least-privilege key the platform is moving to cannot be
    issued. The dependency runs one way — ``provisioning`` imports ``file``, never the
    reverse — and that is what these probes check.
+3. **The Appwrite SDK is an extra, and the package works without it** (#345, C-253) —
+   probed by BLOCKING the import, since the extra is installed here.
+4. **No module in the package imports viewser** (#511 map, ADR-063) — every module,
+   derived from the filesystem, imports under a blocked ``viewser``; and a model whose
+   config imports a missing data-source client gets the install command, not
+   "Could not find queryset" (C-321).
+5. **The log-writing module stays off the heavy chain** (#496).
 
 The frame-native goal (epic #300) requires that importing the base manager —
 the class every engine must extend — does not load pandas. These tests are the
@@ -21,8 +29,12 @@ loaded (fixtures, other suites), so in-process assertions would be meaningless.
 They assert pandas is NOT loaded, so they need pandas installed only in the
 sense that any environment qualifies — no env gate, no importorskip.
 """
+import importlib.util
 import subprocess
 import sys
+from pathlib import Path
+
+import pytest
 
 PROBE = (
     "import sys; {imports}; "
@@ -71,6 +83,15 @@ def test_manager_package_import_is_pandas_free():
 
 _PROVISIONING = "views_pipeline_core.modules.appwrite.provisioning"
 
+# The four probes below that import the appwrite package FOR REAL (not blocked) need the
+# SDK on disk. The `test-without-viewser` CI job installs no extras at all, so there they
+# skip rather than fail on a premise the job deliberately does not install. Derived from
+# the environment, not from a job name.
+_needs_the_appwrite_sdk = pytest.mark.skipif(
+    importlib.util.find_spec("appwrite") is None,
+    reason="imports the appwrite package for real; the SDK is the optional `appwrite` extra",
+)
+
 FORBIDDEN_PROBE = (
     "import sys; {imports}; "
     "assert '{forbidden}' not in sys.modules, "
@@ -86,6 +107,7 @@ def _run_forbidden_probe(imports: str, forbidden: str = _PROVISIONING):
     )
 
 
+@_needs_the_appwrite_sdk
 def test_storage_module_does_not_import_provisioning():
     """`file.py` is the delivery path's storage surface; it must not reach provisioning."""
     result = _run_forbidden_probe(
@@ -94,6 +116,7 @@ def test_storage_module_does_not_import_provisioning():
     assert result.returncode == 0, result.stderr
 
 
+@_needs_the_appwrite_sdk
 def test_datastore_does_not_import_provisioning():
     """`DatastoreModule` is what the savers call — the closest caller to a real upload."""
     result = _run_forbidden_probe(
@@ -102,6 +125,7 @@ def test_datastore_does_not_import_provisioning():
     assert result.returncode == 0, result.stderr
 
 
+@_needs_the_appwrite_sdk
 def test_appwrite_package_does_not_import_provisioning():
     """The package `__init__` must not re-export it into the delivery path either."""
     result = _run_forbidden_probe("import views_pipeline_core.modules.appwrite")
@@ -116,6 +140,7 @@ def test_savers_do_not_import_provisioning():
     assert result.returncode == 0, result.stderr
 
 
+@_needs_the_appwrite_sdk
 def test_provisioning_is_importable_on_its_own():
     """The rule is one-way, not a ban: the setup entrypoint must still work."""
     result = subprocess.run(
@@ -187,34 +212,51 @@ def test_the_local_savers_work_without_the_sdk_on_the_import_graph():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-_WITHOUT_EXTRA = '''
+_WITH_AN_IMPORT_BLOCKED = '''
 import builtins, sys
 _real = builtins.__import__
 def _blocked(name, *a, **k):
-    if name == "appwrite" or name.startswith("appwrite."):
-        raise ImportError("No module named '%s'" % name)
+    if name == "{blocked}" or name.startswith("{blocked}."):
+        # ModuleNotFoundError with `.name`, exactly what a genuinely absent package raises:
+        # code that keys on `.name` (the queryset loader) must see the real shape, and
+        # code that catches ImportError sees a subclass of it, as before.
+        raise ModuleNotFoundError("No module named '%s'" % name, name=name)
     return _real(name, *a, **k)
 builtins.__import__ = _blocked
-for _m in [m for m in sys.modules if m.startswith("appwrite")]:
+for _m in [m for m in sys.modules if m.startswith("{blocked}")]:
     del sys.modules[_m]
 {body}
 '''
 
 
-def _run_without_the_extra(body: str) -> subprocess.CompletedProcess:
-    """Run a probe in an interpreter where `import appwrite` always fails.
+def _run_with_import_blocked(blocked: str, body: str) -> subprocess.CompletedProcess:
+    """Run a probe in an interpreter where `import <blocked>` always fails.
 
-    The extra IS installed in this environment, so a test that merely checks the SDK is
+    The dependency IS installed in this environment, so a test that merely checks it is
     absent from `sys.modules` cannot tell "not imported" from "not installed". Blocking
-    the import is what makes the no-extra path genuinely exercised rather than assumed —
+    the import is what makes the without-it path genuinely exercised rather than assumed —
     the same reason `test_appwrite_pagination.py` builds its double from the SDK's real
     query encoding instead of from belief (C-218).
+
+    What this CANNOT see: a dependency that arrives only through the blocked package's own
+    chain (pyarrow and tqdm did, through viewser, until 3.3.0 declared them) — those are
+    installed regardless. The `test-without-viewser` CI job resolves the manifest without
+    viewser for that class; this probe is the in-process half.
+
+    Extracted on the second incident (appwrite, then viewser — WET before DRY): the two
+    copies differed only in the blocked name and in one raising a bare ImportError, which
+    was the less faithful of the two.
     """
     return subprocess.run(
-        [sys.executable, "-c", _WITHOUT_EXTRA.format(body=body)],
+        [sys.executable, "-c", _WITH_AN_IMPORT_BLOCKED.format(blocked=blocked, body=body)],
         capture_output=True,
         text=True,
     )
+
+
+def _run_without_the_extra(body: str) -> subprocess.CompletedProcess:
+    """The appwrite extra blocked — see `_run_with_import_blocked`."""
+    return _run_with_import_blocked("appwrite", body)
 
 
 def test_the_package_is_usable_with_the_extra_uninstalled():
@@ -249,6 +291,113 @@ def test_asking_for_appwrite_without_the_extra_names_the_install_command():
         "except ImportError as e:\n"
         "    assert \"pip install 'views-pipeline-core[appwrite]'\" in str(e), str(e)\n"
         "    assert 'ADR-047' in str(e), 'the message should say what NEEDS no extra'\n"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+# ----------------------------------------------------------------------------------
+# Nothing in the package imports viewser (#511 map; ADR-063)
+# ----------------------------------------------------------------------------------
+
+def _run_without_viewser(body: str) -> subprocess.CompletedProcess:
+    """viewser blocked — see `_run_with_import_blocked`."""
+    return _run_with_import_blocked("viewser", body)
+
+
+def test_the_viewser_block_can_actually_fail():
+    """The control — a probe that cannot fail is not a guard."""
+    result = _run_without_viewser("import viewser")
+    assert result.returncode != 0
+
+
+def test_every_module_in_the_package_imports_without_viewser():
+    """Import every module of the package under a blocked `viewser`.
+
+    The module list is DERIVED FROM THE FILESYSTEM, not from `pkgutil.walk_packages`:
+    `views_pipeline_core/modules/` has no `__init__.py`, and `walk_packages` does not
+    descend into namespace packages — the first version of this test walked 63 modules
+    and never saw dataloaders, wandb, appwrite, validation or reconciliation at all
+    (a guard wrong about its own scope, again). `__main__` modules are skipped because
+    importing one runs it.
+
+    The only import failure tolerated is a module refusing because a DECLARED extra is
+    absent — decided by the ROOT CAUSE of the ImportError being a ModuleNotFoundError for
+    one of that extra's own packages (read from the manifest), not by the extra's name
+    appearing in the message: a module-scope `import viewser` inside the appwrite package's
+    guarded block produced a message that named the extra and slipped through (guard
+    audit, mutation P5). Anything else — a missing required dependency, a module-scope
+    `import viewser` anywhere — fails the test and names the module.
+    """
+    result = _run_without_viewser(_IMPORT_EVERY_MODULE)
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The exit code is not the only signal: a module calling sys.exit(0) at import ended the
+    # walk early and green (guard audit, mutation P3b). The summary line proves it finished.
+    assert "modules walked;" in result.stdout, result.stdout
+
+
+# Shared with the `test-without-viewser` CI job, which runs THIS test from /tmp against the
+# installed wheel; keeping the walker in one place is what keeps the two in step.
+_IMPORT_EVERY_MODULE = """
+import importlib, pathlib, tomllib
+import views_pipeline_core as pkg
+root = pathlib.Path(pkg.__path__[0])
+manifest = pathlib.Path(%r)
+extras = tomllib.loads(manifest.read_text())["tool"]["poetry"].get("extras", {})
+extra_packages = {p.replace("-", "_") for pkgs in extras.values() for p in pkgs}
+def _root_missing_module(exc):
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, ModuleNotFoundError):
+            return (exc.name or "").split(".")[0]
+        exc = exc.__cause__ or exc.__context__
+    return None
+names = []
+for f in sorted(root.rglob("*.py")):
+    parts = list(f.relative_to(root).with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    if parts and parts[-1] == "__main__":
+        continue
+    names.append(".".join([pkg.__name__, *parts]))
+assert len(names) > 100, names
+failed, refused_by_extra = {}, {}
+for n in names:
+    try:
+        importlib.import_module(n)
+    except ImportError as e:
+        bucket = refused_by_extra if _root_missing_module(e) in extra_packages else failed
+        bucket[n] = str(e)
+assert not failed, failed
+print(len(names), "modules walked;", len(refused_by_extra), "refused by a declared extra")
+""" % str((Path(__file__).resolve().parents[1] / "pyproject.toml"))
+
+
+def test_a_viewser_model_without_viewser_says_how_to_install_it():
+    """End to end through the real loader: the message reaches the operator, not a
+    `RuntimeError('Could not find queryset')` two calls later (register C-321)."""
+    result = _run_without_viewser(
+        "import tempfile, pathlib\n"
+        "from unittest.mock import patch\n"
+        "from views_pipeline_core.data.model_path import ModelPathManager\n"
+        "root = pathlib.Path(tempfile.mkdtemp()); (root / '.gitignore').touch()\n"
+        "m = root / 'models' / 'probe_model'\n"
+        "for d in ('artifacts', 'configs', 'data/raw', 'data/processed', 'data/generated', "
+        "'reports', 'notebooks', 'logs'):\n"
+        "    (m / d).mkdir(parents=True)\n"
+        "for f in ('config_deployment', 'config_hyperparameters', 'config_meta', "
+        "'config_partitions', 'config_sweep'):\n"
+        "    (m / 'configs' / (f + '.py')).touch()\n"
+        "(m / 'main.py').touch(); (m / 'README.md').touch()\n"
+        "(m / 'configs' / 'config_queryset.py').write_text("
+        "'from viewser import Queryset\\ndef generate():\\n    return Queryset()\\n')\n"
+        "with patch.object(ModelPathManager, 'find_project_root', return_value=root):\n"
+        "    try:\n"
+        "        ModelPathManager('probe_model', validate=True).get_queryset()\n"
+        "        raise SystemExit('loaded a viewser queryset with viewser blocked')\n"
+        "    except ImportError as e:\n"
+        "        assert 'pip install viewser' in str(e), str(e)\n"
+        "        assert 'views-pipeline-core[viewser]' in str(e), str(e)\n"
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

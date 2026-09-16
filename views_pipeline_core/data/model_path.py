@@ -16,7 +16,7 @@ import re
 import pyprojroot
 from typing import Union, Optional, List, Dict
 import logging
-import importlib
+import importlib.util
 import hashlib
 from pathlib import Path
 
@@ -27,6 +27,25 @@ from views_pipeline_core.data.constants import cache_filename_prefix
 from views_pipeline_core.data.constants import model_artifact_stem_pattern
 
 logger = logging.getLogger(__name__)
+
+#: The data-source clients a model's `config_queryset.py` may import at module scope, and
+#: what to install when one is missing. Keyed by the module name a `ModuleNotFoundError`
+#: carries, so the loader can tell "that client is not installed" from "this file is
+#: broken" — and so an unrelated missing module is never blamed on a client. Both clients
+#: are deliberately outside this package's required set: viewser leaves at 4.0 (ADR-063);
+#: datafactory_query ships in views-datafactory, which the 23 datafactory models declare
+#: themselves (the message mirrors `modules/dataloaders/datafactory_contract.py`).
+DATA_SOURCE_CLIENT_INSTALL_HINTS: Dict[str, str] = {
+    "viewser": (
+        "views-pipeline-core 3.x requires it: pip install viewser. From 4.0 it is an "
+        'extra: pip install "views-pipeline-core[viewser]". Models fetched from '
+        "views-datafactory do not need it."
+    ),
+    "datafactory_query": (
+        'it ships in views-datafactory: pip install "views-datafactory>=1.9.0". Models '
+        "fetched from viewser do not need it."
+    ),
+}
 
 
 class ModelPathManager:
@@ -811,6 +830,19 @@ class ModelPathManager:
             ...     print(queryset.keys())
             dict_keys(['theme', 'table', 'operations'])
 
+        Raises:
+            Exception: whatever ``config_queryset.py`` raises while importing — a
+                ``SyntaxError``, an ``AttributeError``, an unrelated
+                ``ModuleNotFoundError`` — propagates as itself. One case is translated:
+                a ``ModuleNotFoundError`` for a data-source client
+                (``DATA_SOURCE_CLIENT_INSTALL_HINTS``) becomes an ``ImportError`` that
+                names the install command. Until 2026-09-17 every exception here was
+                swallowed into ``None``, so a missing dependency surfaced two calls later
+                as ``RuntimeError("Could not find queryset for <model>")`` — a message
+                about absence for a file that exists (register C-321). The sibling loader
+                (``managers/configuration/script_config.py``) had re-raised all along: a
+                config script that fails to import is a broken model, not a missing one.
+
         Note:
             - Returns None if queryset doesn't exist (e.g., ensembles)
             - Queryset must have generate() method
@@ -824,17 +856,19 @@ class ModelPathManager:
                 self._queryset = importlib.util.module_from_spec(spec)
                 sys.modules[self.queryset_path.stem] = self._queryset
                 spec.loader.exec_module(self._queryset)
-            except Exception as e:
-                logger.error(f"Error importing queryset: {e}")
-                self._queryset = None
-            else:
-                logger.debug(f"Queryset {self.queryset_path} imported successfully.")
-                if hasattr(self._queryset, "generate"):
-                    return self._queryset.generate()
-                else:
-                    logger.warning(
-                        f"Queryset {self.queryset_path} does not have a `generate` method. Continuing..."
-                    )
+            except ModuleNotFoundError as e:
+                hint = DATA_SOURCE_CLIENT_INSTALL_HINTS.get(e.name)
+                if hint is not None:
+                    raise ImportError(
+                        f"{self.queryset_path} imports {e.name}, which is not installed; {hint}"
+                    ) from e
+                raise
+            logger.debug(f"Queryset {self.queryset_path} imported successfully.")
+            if hasattr(self._queryset, "generate"):
+                return self._queryset.generate()
+            logger.warning(
+                f"Queryset {self.queryset_path} does not have a `generate` method. Continuing..."
+            )
         else:
             logger.warning(
                 f"Queryset {self.queryset_path} does not exist. Continuing..."

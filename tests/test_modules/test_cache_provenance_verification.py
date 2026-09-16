@@ -42,7 +42,6 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
-from viewser import Queryset
 
 from views_pipeline_core.data.cache_provenance import (
     PROVENANCE_VERSION,
@@ -60,6 +59,11 @@ from views_pipeline_core.modules.dataloaders.provenance_builder import (
     cache_matches_current_context,
     provenance_for,
 )
+
+# The viewser path under test needs the real class for `MagicMock(spec=Queryset)`. In an
+# environment without viewser (ADR-063: an extra from 4.0) this file skips at collection
+# instead of failing there.
+Queryset = pytest.importorskip("viewser").Queryset
 
 RECORD = CacheProvenance(
     queryset_digest="a" * 64,
