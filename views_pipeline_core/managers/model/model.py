@@ -581,7 +581,7 @@ class ForecastingModelManager(ModelManager):
 
         self._evaluation_stage = EvaluationStage(
             wandb_module=self._wandb_module,
-            io_manager=self._io,
+            io_manager=None,  # retired #512 — a live manager is refused (ADR-062); gone at 4.0
             wandb_notifications=self._wandb_notifications,
         )
 
@@ -1777,25 +1777,6 @@ class ForecastingModelManager(ModelManager):
             finally:
                 self._wandb_module.finish_run()
 
-
-    def _save_evaluations(
-        self,
-        df_step_wise_evaluation: pd.DataFrame,
-        df_time_series_wise_evaluation: pd.DataFrame,
-        df_month_wise_evaluation: pd.DataFrame,
-        path_generated: Union[str, Path],
-        target_identifier: str,
-    ) -> None:
-        """Delegate to PredictionIOManager."""
-        self._io.save_evaluations(
-            df_step_wise_evaluation,
-            df_time_series_wise_evaluation,
-            df_month_wise_evaluation,
-            path_generated,
-            target_identifier,
-            run_type=self.configs["run_type"],
-            timestamp=self.configs["timestamp"],
-        )
 
     def _save_predictions(
         self,

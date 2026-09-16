@@ -420,14 +420,13 @@ def _make_eval_stub(prediction_format: str) -> _ForecastStub:
     m._args = mock_args
 
     m._save_predictions = Mock()
-    m._save_evaluations = Mock()
     m._partition_dict = {"calibration": {"train": (121, 444), "test": (445, 492)}}
     m._eval_type = "calibration"
     m._io = MagicMock()
 
     from views_pipeline_core.managers.evaluation.stage import EvaluationStage
     m._evaluation_stage = EvaluationStage(
-        wandb_module=wm, io_manager=m._io,
+        wandb_module=wm, io_manager=None,  # retired #512
     )
 
     from views_pipeline_core.managers.forecasting.stage import ForecastingStage
@@ -629,14 +628,13 @@ def _make_sweep_stub(prediction_format: str) -> _ForecastStub:
     m._args = mock_args
 
     m._save_predictions = Mock()
-    m._save_evaluations = Mock()
     m._partition_dict = {"calibration": {"train": (121, 444), "test": (445, 492)}}
     m._eval_type = "calibration"
     m._io = MagicMock()
 
     from views_pipeline_core.managers.evaluation.stage import EvaluationStage
     m._evaluation_stage = EvaluationStage(
-        wandb_module=wm, io_manager=m._io,
+        wandb_module=wm, io_manager=None,  # retired #512
     )
 
     from views_pipeline_core.managers.forecasting.stage import ForecastingStage

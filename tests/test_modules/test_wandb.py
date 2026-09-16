@@ -121,6 +121,87 @@ class TestWandBModule:
             step_wise, time_series_wise, month_wise, "sb"
         )
 
+    # ── log_evaluation_tables (#512) ────────────────────────────────────────
+    # Real wandb.Table objects, only wandb.log patched: the shape of what reaches the
+    # dashboard is the thing under test, not that a constructor was called.
+
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.log')
+    def test_log_evaluation_tables_builds_one_table_per_schema_from_the_dict(self, mock_log, wandb_module):
+        schemas = {
+            "month": {"month445": {"MSE": 0.1}, "month446": {"MSE": 0.2}},
+            "time_series": {"ts00": {"MSE": 0.3}},
+            "step": {"step01": {"MSE": 0.4, "MAE": 0.5}},
+        }
+        wandb_module.log_evaluation_tables(schemas)
+
+        mock_log.assert_called_once()
+        tables = mock_log.call_args.args[0]
+        # The keys the dashboard panels have always been bound to — renaming empties them.
+        assert set(tables) == {"evaluation_metrics_month", "evaluation_metrics_ts", "evaluation_metrics_step"}
+        # Bound through the production module: another test file swaps `sys.modules["wandb"]`
+        # for a mock at collection time, so this file's own `wandb` name is not trustworthy.
+        from views_pipeline_core.modules.wandb import wandb as production_module
+
+        assert all(isinstance(t, production_module.wandb.Table) for t in tables.values())
+        assert tables["evaluation_metrics_month"].columns == ["group_id", "MSE"]
+        assert tables["evaluation_metrics_month"].data == [["month445", 0.1], ["month446", 0.2]]
+        assert tables["evaluation_metrics_step"].columns == ["group_id", "MSE", "MAE"]
+        assert tables["evaluation_metrics_step"].data == [["step01", 0.4, 0.5]]
+
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.log')
+    def test_log_evaluation_tables_columns_are_the_union_across_groups(self, mock_log, wandb_module):
+        """views-evaluation does not promise identical metric sets per group. The
+        asymmetry runs BOTH ways: `MAE` lives only in the second group and `Pearson` only
+        in the first, so reading any single group's keys — first (the obvious mutation) or
+        last (the one the guard audit found surviving, F24) — drops a column."""
+        schemas = {"step": {"step01": {"MSE": 0.1, "Pearson": 0.9}, "step02": {"MSE": 0.2, "MAE": 0.3}}}
+        wandb_module.log_evaluation_tables(schemas)
+
+        table = mock_log.call_args.args[0]["evaluation_metrics_step"]
+        assert table.columns == ["group_id", "MSE", "Pearson", "MAE"]
+        assert table.data == [["step01", 0.1, 0.9, None], ["step02", 0.2, None, 0.3]]
+
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.log')
+    def test_log_evaluation_tables_skips_absent_schemas_and_logs_empty_ones(self, mock_log, wandb_module):
+        wandb_module.log_evaluation_tables({"step": {}})
+
+        tables = mock_log.call_args.args[0]
+        assert list(tables) == ["evaluation_metrics_step"], "absent schemas must not invent tables"
+        assert tables["evaluation_metrics_step"].columns == ["group_id"]
+        assert tables["evaluation_metrics_step"].data == []
+
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.log')
+    def test_log_evaluation_tables_ignores_schemas_the_dashboard_has_no_key_for(self, mock_log, wandb_module):
+        """`EVALUATION_TABLE_KEYS` is the authority. Iterating `schemas.items()` with an
+        `evaluation_metrics_{schema}` fallback survived the guard audit (F26): an unknown
+        schema would invent a panel key nobody bound to."""
+        wandb_module.log_evaluation_tables({"bogus": {"g1": {"MSE": 0.1}}, "step": {}})
+
+        assert list(mock_log.call_args.args[0]) == ["evaluation_metrics_step"]
+
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.log')
+    def test_log_evaluation_tables_does_not_swallow_a_malformed_schema(self, mock_log, wandb_module):
+        """A contract breach from views-evaluation must surface, not be skipped (guard
+        audit, F8/F22: a try/except around table construction survived). Two shapes, because
+        they fail in different places: a non-dict group fails while collecting metric names,
+        BEFORE `wandb.Table`; a mixed-type column fails INSIDE `wandb.Table` (its default
+        `allow_mixed_types=False`) — the second is the one a swallow around construction hides.
+        No table reaches wandb.log in either case."""
+        with pytest.raises(TypeError):  # iterating a float for its metric names
+            wandb_module.log_evaluation_tables({"step": {"step01": 0.5}})
+        with pytest.raises(TypeError):  # wandb.Table refuses a str under a float column
+            wandb_module.log_evaluation_tables({"step": {"step01": {"MSE": 0.1}, "step02": {"MSE": "oops"}}})
+        mock_log.assert_not_called()
+
+    @patch('views_pipeline_core.modules.wandb.wandb.wandb.log', side_effect=RuntimeError("wandb down"))
+    def test_log_evaluation_tables_goes_through_the_module_log_swallow(self, mock_log, wandb_module):
+        """Pins the DOCUMENTED failure mode (EvaluationStage CIC §6): a `wandb.log` failure
+        for the tables is logged, not raised, because the call goes through
+        `WandBModule.log`. Calling `wandb.log` directly would bypass that and survived the
+        guard audit (F7). If the module's log is ever made loud, this test changes with it."""
+        wandb_module.log_evaluation_tables({"step": {"step01": {"MSE": 0.1}}})  # must not raise
+        mock_log.assert_called_once()
+
     @patch('views_pipeline_core.modules.wandb.wandb.wandb.alert')
     @patch('views_pipeline_core.modules.wandb.wandb.wandb.run', Mock())
     def test_send_alert(self, mock_alert):

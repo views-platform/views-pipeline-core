@@ -160,6 +160,8 @@ Internally: `{schema: {group: {metric: float}}}` — plain nested dicts, no data
 
 ### Consumer 2: File Saving (`managers/prediction/io.py:146-222`)
 
+> **Retired 2026-09-16 (#512).** `save_evaluations` and the `to_dataframe` calls that fed it are deleted; the tables are built from `to_dict()` by `WandBModule.log_evaluation_tables`. Kept below as the record of what the migration planned around.
+
 **Current contract:** `save_evaluations()` receives three `pd.DataFrame` objects. It calls `save_dataframe()` to write parquets and `wandb.Table(dataframe=df)` to log WandB tables.
 
 **Conclusion:** No change needed. `EvaluationReport.to_dataframe(schema)` returns a proper `pd.DataFrame`. The method already receives unpacked DataFrames, not the 2-tuple.

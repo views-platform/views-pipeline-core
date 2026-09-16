@@ -54,7 +54,6 @@ def get_test_manager():
                     }
                     manager._args = MagicMock()
                     manager._args.run_type = "calibration"
-                    manager._save_evaluations = MagicMock()
                     manager._generate_evaluation_table = MagicMock(return_value="table")
                     manager._wandb_module = MagicMock()
                     manager._wandb_notifications = False

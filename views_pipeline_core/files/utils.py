@@ -380,29 +380,6 @@ def generate_output_file_name(
     return "_".join(parts) + file_extension
     
 
-def generate_evaluation_file_name(
-    evaluation_type: str,
-    target_identifier: str,
-    run_type: str,
-    timestamp: str,
-    file_extension: str,
-) -> str:
-    """
-    Generates an evaluation file name based on the run type, evaluation type, and timestamp.
-
-    Args:
-        evaluation_type (str): The type of evaluation file (e.g., step, month, ts).
-        target_identifier (str): The target identifier (e.g., target name 'ged_sb_best').
-        run_type (str): The type of run (e.g., calibration, validation).
-        timestamp (str): The timestamp of the generated file.
-        file_extension (str): The file extension. Default is set in PipelineConfig().dataframe_format. E.g. .pkl, .csv, .xlsx, .parquet
-
-    Returns:
-        str: The generated prediction file name.
-    """
-    return f"eval_{run_type}_{target_identifier}_{evaluation_type}_{timestamp}{file_extension}"
-
-
 def generate_evaluation_report_name(
     run_type: str,
     target_identifier: str,
