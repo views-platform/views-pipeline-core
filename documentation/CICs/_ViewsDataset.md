@@ -27,7 +27,7 @@ Concrete subclasses (`_PGDataset`/`PGMDataset` for PRIO-grid, `_CDataset`/`CMDat
 - Does **not** fetch data from VIEWSER or any external data source. Data must arrive as a `pd.DataFrame`, file path, or `Path`.
 - Does **not** train models, run inference, or evaluate predictions.
 - Does **not** enforce naming conventions beyond the `pred_` prefix for prediction mode detection.
-- Does **not** perform data transformations (log, lag, spatial) -- that is the responsibility of `UpdateViewser` and the transformation library.
+- Does **not** perform data transformations (log, lag, spatial) -- those happen server-side in viewser, as declared by the model's queryset.
 - Does **not** persist data to disk or any store.
 - Does **not** own the `PredictionFrame` contract. `_ViewsDataset` operates on `pd.DataFrame`; conversion to/from `PredictionFrame` is handled by `PredictionFrameConverter`.
 

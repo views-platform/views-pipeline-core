@@ -4,16 +4,10 @@ Core Classes — **one per file since #431** (they were both in `dataloaders.py`
 
 | class | file |
 |---|---|
-| `ViewsDataLoader` (partition-aware end‑to‑end data fetch, caching, drift monitoring, optional updating) | `views_pipeline_core/modules/dataloaders/dataloaders.py` |
-| `UpdateViewser` (incremental GED / ACLED refresh + transformation replay) | `views_pipeline_core/modules/dataloaders/update_viewser.py` |
+| `ViewsDataLoader` (partition-aware end‑to‑end data fetch, caching, drift monitoring) | `views_pipeline_core/modules/dataloaders/dataloaders.py` |
 
-Both are still imported from the package, unchanged:
-`from views_pipeline_core.modules.dataloaders import ViewsDataLoader, UpdateViewser`.
+Imported from the package: `from views_pipeline_core.modules.dataloaders import ViewsDataLoader`.
 
-Ancillary Assets — all in `update_viewser.py`, where their only consumer lives:
-- `transformation_mapping` (name → callable registry)
-- `TRANSFORMATIONS_EXPECTING_DF` (transformations needing DataFrame input)
-- Lazy Ingester / transformation imports (avoid CI breakages without certificates)
 
 ---
 
@@ -49,10 +43,6 @@ This module standardizes data acquisition for forecasting pipelines in the VIEWS
           │ Fetch (viewser) │ ← drift detection (optional)
           └────────┬────────┘
                    │
-          _overwrite_viewser? (UpdateViewser)
-                   │
-          Transform replay (raw_* → derived)
-                   │
         Cache parquet + log file
                    │
              Validation (partition)
@@ -83,87 +73,6 @@ This module standardizes data acquisition for forecasting pipelines in the VIEWS
 | temporal.moving_average | `views2.moving_sum` (same primitive) | Rolling average |
 
 Special handling: `TRANSFORMATIONS_EXPECTING_DF = {"spatial.lag", "spatial.sptime_dist"}` forces DataFrame input.
-
----
-
-## Class: UpdateViewser
-
-*(`views_pipeline_core/modules/dataloaders/update_viewser.py` since #431.)*
-
-### Overview
-
-Incrementally refresh VIEWSER-derived DataFrame with most recent GED / ACLED raw values while preserving transformation fidelity. Designed for production monthly updates without full refetch cost.
-
-### Initialization
-
-```python
-updater = UpdateViewser(
-    queryset=queryset,
-    viewser_df=original_viewser_df,
-    data_path="updates/ged_acled_latest.parquet",
-    months_to_update=[528, 529, 530]
-)
-```
-
-Args:
-- `queryset (Queryset)`: Must include at least one renamed raw variable (`raw_*`).
-- `viewser_df (pd.DataFrame)`: Existing data (MultiIndex: `month_id`, entity id).
-- `data_path (str | Path)`: Parquet file containing updated raw columns.
-- `months_to_update (List[int])`: Month IDs to replace.
-
-Raises:
-- `ValueError` (no `raw_` variables or external data older than current viewser slice)
-- `FileNotFoundError` (missing update file)
-
-### Attributes
-
-| Attribute | Description |
-|-----------|-------------|
-| `base_variables` | Fully-qualified original source names (e.g. `country_month.ged_sb_best_sum_nokgi`) |
-| `var_names` | Final queryset output names (including `raw_` and derived) |
-| `transformation_list` | Ordered transformation dictionaries per variable |
-| `df_external` | Loaded update parquet (MultiIndex compatible) |
-| `result` | Cached final DataFrame (set after `run()`) |
-
-### Public Method: run()
-
-Executes complete refresh.
-
-Steps:
-1. Early return if cached.
-2. Preprocess update file → month slice + raw renaming.
-3. In-place `.update()` of matching raw columns.
-4. Sequential transformation replay (log, lags, spatial).
-5. Drops `raw_*` columns (only transformed outputs retained).
-6. Returns updated DataFrame.
-
-Returns:
-- Updated `pd.DataFrame` (cached on first execution)
-
-Idempotent: Subsequent calls reuse `self.result`.
-
-### Internal Methods
-
-| Method | Role |
-|--------|------|
-| `_extract_from_queryset()` | Parse operations into parallel lists |
-| `_preprocess_update_df()` | Column + month filtering + renaming |
-| `_apply_all_transformations(df_old)` | Replay transformations respecting order |
-| `_smart_cast(arg)` | Convert string arguments → Python literals (`ast.literal_eval`) |
-
-### Transformation Replay Notes
-
-- Skips non-GED/ACLED derived outputs (name filter).
-- Respects original order by reversing captured operations.
-- Handles index alignment warnings (reindex fallback).
-- Special-case: `spatial.countrylag` → forward fill per group.
-
-### Example
-
-```python
-updated_df = updater.run()
-assert "ln_ged_sb_tlag_1" in updated_df.columns
-```
 
 ---
 
@@ -228,7 +137,6 @@ Process:
    - Queryset resolution
    - Drift detection call (`fetch_with_drift_detection`)
    - Fallback on `KeyError` → `fetch()` without drift
-   - Optional overwrite via UpdateViewser
    - Convert numeric types (`ensure_float64`)
 5. Save file + create fetch log (`create_data_fetch_log_file`).
 6. Partition validation (`_validate_df_partition()`).
@@ -244,8 +152,6 @@ Raises:
 |--------|---------|
 | `_get_partition_dict(steps)` | Build default partition windows |
 | `_fetch_data_from_viewser(self_test)` | Queryset fetch + drift + update |
-| `_overwrite_viewser(df, queryset_base, args)` | Conditional GED/ACLED refresh |
-| `_get_viewser_update_config(queryset_base)` | Resolve `.env` config (months, path) |
 | `_get_month_range()` | Final month_first / month_last resolution |
 | `_validate_df_partition(df)` | Temporal alignment check |
 
@@ -329,7 +235,6 @@ Failure → log error + raise `RuntimeError`.
 | Goal | Recommendation |
 |------|----------------|
 | Reproducibility | Commit queryset configuration; store fetch logs |
-| Freshness | Use incremental update (UpdateViewser) monthly |
 | Partition integrity | Always keep `validate=True` in production |
 | Debugging | Temporarily disable drift (`drift_config_dict=None`) |
 | Memory | Drop unused intermediate columns after transformation |

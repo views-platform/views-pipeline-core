@@ -23,6 +23,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [Unreleased]
+
+### Removed
+
+- **`views-transformation-library` is no longer a dependency**, and `UpdateViewser` — the only
+  thing that used it — is retired. It was ADR-037's emergency fallback for the February 2025
+  ingester outage: patch a cached VIEWSER frame with hand-supplied GED/ACLED months by replaying
+  the queryset's transformation chain. Measured from git: live for six weeks, commented out on
+  2025-11-24 with no recorded reason, never configured on any machine, and its own ADR listed
+  "letting the fallback system become permanent" as a risk. Three READMEs still told operators
+  to pass `-u`.
+
+  What leaves the environment: `views-transformation-library` itself, plus `stepshift` and
+  `xarray`, which nothing else pulled. What does **not** change: the `pandas<2.0` lock, which
+  `viewser` holds regardless (#308).
+
+  **Nothing downstream depended on it arriving through this package.** Swept all 23 platform
+  repos: the only other importer, views-impact, declares it itself.
+
+  **Kept for one window, refusing:** `--update_viewser` still parses and raises at the data-fetch
+  step naming the retirement and ADR-037, and `views_pipeline_core.modules.dataloaders.UpdateViewser`
+  still resolves and raises on construction. A minor release must not delete declared public
+  surface out from under `<4.0.0` pins, and a silent no-op must not become a silent absence.
+  Both go at 4.0.
+
+  If the ingester fails again, the fallback must be rebuilt on the frames-native path; ADR-037's
+  closing note says why re-enabling this one was never a one-line change.
+
 ## [3.2.0] — 2026-09-08
 
 **A minor release that unblocks views-models' vocabulary migration.** Nothing here breaks a

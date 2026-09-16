@@ -270,7 +270,11 @@ class ForecastingModelArgs(ModelArgs):
             "-u",
             "--update_viewser",
             action="store_true",
-            help="Update the viewser dataframe for a set of months where viewser returns only zeros.",
+            help=(
+                "RETIRED 2026-09-16 — passing this refuses the run. It was the ADR-037 "
+                "emergency fallback for the 2025 ingester outage; kept for one window so an "
+                "operator following an old README is told, not ignored. Removed at 4.0."
+            ),
         )
 
         parser.add_argument(

@@ -198,7 +198,6 @@ Each stage receives an immutable frozen context object and is independently unit
 ## 6. Data Layer & Querysets
 
 - Querysets define feature/target extraction logic + transformation chains.
-- Incremental updates replace raw slices (GED / ACLED) and replay transformations (UpdateViewser).
 - MultiIndex structure: `(month_id, entity_id)` for time-spatial operations.
 - Data types normalized (`float64` for numeric integrity).
 - Partitions defined via month ranges (train/test or forecast horizon).
@@ -292,7 +291,6 @@ PackageManager:
 |--------------------|----------------------------------------------|
 | Run model          | `./run.sh --run_type calibration --train --evaluate --report --saved` |
 | Run ensemble       | `./run.sh --ensemble hybrid_lynx --forecast --report` |
-| Update raw data    | Use `--update_viewser`                       |
 | Generate report only | Use `--evaluate --report` or `--forecast --report` |
 
 Refer to `documentation/development_guidelines.md` for coding standards and `docstring_guidelines.md` for formatting.

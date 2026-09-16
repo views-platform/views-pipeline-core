@@ -4,7 +4,7 @@
 |---------------------|-------------------|
 | Subject             | Data Ingestion  |
 | ADR Number          | 037   |
-| Status              | proposed   |
+| Status              | Superseded — the fallback was retired 2026-09-16; see the closing note |
 | Author              | Sonja Haeffner   |
 | Date                | 22. July 2025     |
 
@@ -70,3 +70,33 @@ None
 Feel free to give feedback.
 
 ---
+
+
+## Closing note, 2026-09-16 — the fallback is retired
+
+This ADR proposed an emergency, short-term way to keep monthly forecasts running when the
+ingester failed and UCDP/ACLED months came back as zeros: patch the cached VIEWSER frame with
+hand-supplied files and replay the queryset's transformation chain (`UpdateViewser`, backed by
+`views-transformation-library`). It named *"letting the fallback system become permanent"* as a
+risk of its own design.
+
+**What happened to it, measured from git:** wired in on 2025-07-23; the flag and the call added
+2025-08-05; live for six weeks from 2025-10-09; commented out on 2025-11-24 (`69f2bc6`, message
+"changes", no reason recorded). Never configured — the three `.env` keys it reads
+(`month_to_update`, `cm_path`, `pgm_path`) exist on no checked-out machine, and the external
+tooling that would have produced those files is in no sibling repository. views-models'
+README told operators to pass `-u` and to "contact Sonja" for the update files, for ten months
+after the flag stopped doing anything.
+
+**Retired on 2026-09-16** together with the dependency: `UpdateViewser` deleted, the pin on
+`views-transformation-library` removed, the dead `_overwrite_viewser` path cut from
+`ViewsDataLoader`. `--update_viewser` and the public name `UpdateViewser` survive for one
+window and **refuse** — so an operator following an old README is told what happened rather
+than silently ignored — and go at 4.0.
+
+**If the ingester fails again:** this fallback does not exist to reach for, and re-enabling it
+was never a one-line change — its call path had been dead for ten months and its inputs had
+never been produced. A replacement has to be built on the frames-native input path (roadmap
+G5–G7), against `FeatureFrame` rather than a pandas cache. The lesson worth keeping from this
+ADR is the risk it named about itself, which came true: a fallback that is never exercised
+becomes documentation that is false.

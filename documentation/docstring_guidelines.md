@@ -945,7 +945,6 @@ queryset transformations, drift detection, and validation.
 
 Key Components:
     - ViewsDataLoader: Main data loading interface
-    - UpdateViewser: Update mechanism for latest GED/ACLED data
     - Validation utilities: Data quality checks
 
 Typical Usage:

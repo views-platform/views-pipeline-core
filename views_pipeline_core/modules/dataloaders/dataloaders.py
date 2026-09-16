@@ -5,18 +5,20 @@ One class, one concept. Until #431 this file also held `UpdateViewser`, which re
 GED/ACLED updates through a queryset's transformation chain — a different job, sharing no
 state and no reason to change with this one. The register called the result a dumping
 ground (C-164); at 1,746 lines, every change to the cache path scrolled past 560 lines of
-transformation-replay logic. `UpdateViewser` now lives in `update_viewser.py`, and this
-file is 1,147 lines of one thing.
+transformation-replay logic. #431 moved `UpdateViewser` to its own file; 2026-09-16 retired
+it. This file is one thing.
 
-`ViewsDataLoader` still constructs an `UpdateViewser` on the `_overwrite_viewser()` path,
-so the dependency runs this way and not the other.
+`UpdateViewser` was retired on 2026-09-16 together with the transformation library it
+existed to call (the dependency is gone from `pyproject.toml`). It was ADR-037's emergency fallback for the February 2025 ingester outage —
+briefly live, switched off on 2025-11-24 with no recorded reason, and never configured. The
+`--update_viewser` flag is kept for one window and refuses, in `ModelManager`, so an operator
+following an old README gets told rather than ignored.
 
 The neighbours carry the rest of the input side: `fetch_context` (run-scoped fetch
 parameters), `frame_cache` and `feature_frame_path` (the frames successor path, #289),
 `provenance_builder` and `data/provenance_sidecar` (cache identity, ADR-059),
 `datafactory_contract` (the datafactory descriptor seam), `synthetic`.
 """
-import os
 from typing import Any, Dict, Optional
 import pandas as pd
 import logging
@@ -50,7 +52,6 @@ from views_pipeline_core.modules.dataloaders.fetch_context import (
     resolve_month_range,
 )
 from views_pipeline_core.modules.dataloaders.frame_cache import frame_cache_path
-from views_pipeline_core.modules.dataloaders.update_viewser import UpdateViewser
 from views_pipeline_core.modules.dataloaders.feature_frame_path import (
     fetch_feature_frame,
 )
@@ -60,11 +61,7 @@ from views_pipeline_core.modules.dataloaders.datafactory_contract import (
     require_descriptor_keys,
 )
 
-from viewser import Queryset
 import traceback
-from dotenv import load_dotenv
-import ast
-import argparse
 
 logger = logging.getLogger(__name__)
 
@@ -349,146 +346,6 @@ class ViewsDataLoader:
         """
         return resolve_default_partition_dict(self.partition, steps)
 
-    def _get_viewser_update_config(self, queryset_base: Queryset) -> tuple[int, str]:
-        """
-        Extract VIEWSER update configuration from environment.
-
-        Loads .env file and retrieves months to update and update file path
-        based on queryset's level of analysis (LOA).
-
-        Internal Use:
-            Called by _overwrite_viewser() to get update parameters.
-
-        Args:
-            queryset_base: Queryset with LOA specification.
-                LOA must be 'priogrid_month' or 'country_month'
-
-        Returns:
-            Tuple of (months_to_update, update_file_path):
-                - months_to_update: List of month IDs to update (e.g., [528, 529])
-                - update_file_path: Path to update data file or None if LOA unknown
-
-        Environment Variables Required:
-            - month_to_update: List of month IDs as string (e.g., "[528, 529, 530]")
-            - pgm_path: Path to priogrid update file (if LOA is priogrid_month)
-            - cm_path: Path to country update file (if LOA is country_month)
-
-        Example:
-            >>> # .env file contains:
-            >>> # month_to_update=[528, 529, 530]
-            >>> # pgm_path=/data/updates/pgm_latest.parquet
-            >>> months, path = loader._get_viewser_update_config(queryset)
-            >>> print(months)
-            [528, 529, 530]
-            >>> print(path)
-            '/data/updates/pgm_latest.parquet'
-
-        Raises:
-            FileNotFoundError: If .env file not found in project root
-            RuntimeError: If .env file cannot be loaded
-            ValueError: If month_to_update not found or invalid in .env
-
-        Note:
-            - Searches for .env in project root (using find_project_root)
-            - Uses ast.literal_eval for safe parsing of month list
-            - Returns None for update_path if LOA is unknown
-        """
-        dotenv_path = self._model_path.find_project_root() / ".env"
-        logger.debug(f"Path to dotenv file: {dotenv_path}")
-
-        if not dotenv_path.exists():
-            raise FileNotFoundError(f"Required .env file not found: {dotenv_path}")
-
-        if not load_dotenv(dotenv_path=dotenv_path):
-            raise RuntimeError(
-                f".env file found but could not be loaded: {dotenv_path}"
-            )
-
-        # months_to_update = PipelineConfig.months_to_update #read from .env
-        months_to_update_str = os.getenv("month_to_update")
-        if not months_to_update_str or months_to_update_str == "":
-            raise ValueError("Could not find months to update in the .env file. Add the line: month_to_update=[123, 124, 125]")
-
-        months_to_update = ast.literal_eval(months_to_update_str)
-        logger.debug(f"Months to update: {months_to_update}")
-
-        loa_qs = queryset_base.model_dump()["loa"]
-        logger.debug(f"Level of Analysis: {loa_qs}")
-
-        if loa_qs == "priogrid_month":
-            update_path = os.getenv("pgm_path")
-        elif loa_qs == "country_month":
-            update_path = os.getenv("cm_path")
-        else:
-            logger.warning("Unknown LOA; no update path set")
-            update_path = None
-
-        logger.debug(f"Update path: {update_path}")
-        return months_to_update, update_path
-
-    def _overwrite_viewser(
-        self, df: pd.DataFrame, queryset_base: Queryset, args: argparse.Namespace
-    ) -> pd.DataFrame:
-        """
-        Update VIEWSER DataFrame with latest GED and ACLED values.
-
-        Applies external updates to raw variables and recomputes all
-        transformations if update_viewser flag is set in arguments.
-
-        Internal Use:
-            Called by _fetch_data_from_viewser() after initial data fetch.
-
-        Args:
-            df: VIEWSER DataFrame to potentially update.
-                Must have MultiIndex (month_id, entity_id)
-            queryset_base: Model queryset defining transformations.
-                Used to determine which variables to update
-            args: Command line arguments with update_viewser flag.
-                If False, returns df unchanged
-
-        Returns:
-            Updated DataFrame with:
-                - Raw variables updated for specified months
-                - All transformations recomputed
-                - NaN values handled according to queryset
-                Or original df if args.update_viewser=False
-
-        Example:
-            >>> args = parse_args()  # update_viewser=True
-            >>> df_updated = loader._overwrite_viewser(df, queryset, args)
-            INFO: Overwriting Viewser dataframe with new values...
-            INFO: Viewser dataframe updated
-            DEBUG: NaNs in df after transformations: 0
-            >>> print(df_updated.equals(df))
-            False  # df was updated
-
-        Note:
-            - Requires months_to_update and update path in .env
-            - Logs NaN count after transformations for debugging
-            - Updates applied in-place to df
-            - Original df returned if updates disabled
-        """
-        if args.update_viewser:
-            logger.info(
-                "Overwriting Viewser dataframe with new values from GED and ACLED"
-            )
-            months_to_update, update_path = self._get_viewser_update_config(
-                queryset_base
-            )
-            builder = UpdateViewser(
-                queryset_base,
-                viewser_df=df,
-                data_path=update_path,
-                months_to_update=months_to_update,
-            )
-            df = builder.run()
-            logger.info("Viewser dataframe updated")
-            logger.debug(f"NaNs in df after transformations: {df.isna().sum()}")
-        else:
-            logger.info("Viewser dataframe will not be overwritten")
-        return df
-
-
     def _fetch_data_from_viewser(self, self_test: bool) -> tuple[pd.DataFrame, list]:
         """
         Fetch data from VIEWSER with queryset filters and drift detection.
@@ -546,7 +403,6 @@ class ViewsDataLoader:
         else:
             logger.info(f"Found queryset for {self._model_name}")
 
-        # args = parse_args()
         df, alerts = None, None
 
         try:
@@ -568,7 +424,6 @@ class ViewsDataLoader:
                             )
                         }
                     )
-            # df = self._overwrite_viewser(df, queryset_base, args)
             # df = ensure_float64(df)
         except KeyError as e:
             logger.error(
@@ -586,7 +441,6 @@ class ViewsDataLoader:
             logger.error(traceback.format_exc())
             raise RuntimeError(f"Error fetching data from viewser: {e}") from e
         
-        # df = self._overwrite_viewser(df, queryset_base, args)
         df = ensure_float64(df)
         return df, alerts
 

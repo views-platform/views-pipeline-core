@@ -1242,8 +1242,28 @@ class ForecastingModelManager(ModelManager):
         Note:
             - Uses args.saved to skip download if data exists
             - Respects args.override_timestep for custom ranges
-            - Updates viewser if args.update_viewser=True
+            - Refuses `args.update_viewser=True` — see the check below
         """
+        # `--update_viewser` was ADR-037's emergency fallback for the February 2025 ingester
+        # outage: patch a cached VIEWSER frame with hand-supplied GED/ACLED months. It was
+        # briefly live, switched off on 2025-11-24 with no recorded reason, never configured
+        # on any machine, and retired on 2026-09-16 together with the dependency it existed
+        # to use (the transformation library). Three READMEs still told operators to pass
+        # it, so it is refused rather than deleted for one window: a silent no-op becoming a
+        # silent absence is the C-306 shape, and "unrecognised argument" tells nobody why.
+        # The flag itself goes at the next major.
+        # `is True`, not truthiness: the flag is a `store_true` bool, and a test that hands
+        # in a MagicMock for args would otherwise trip this on every attribute access.
+        if getattr(self._args, "update_viewser", False) is True:
+            raise DataFetchException(
+                "--update_viewser was retired on 2026-09-16 and does nothing. It was the "
+                "ADR-037 emergency fallback for the 2025 ingester outage (patching cached "
+                "VIEWSER data with hand-supplied GED/ACLED files); its call path had been "
+                "commented out since 2025-11-24 and it was never configured. If the ingester "
+                "fails again, the fallback must be rebuilt on the frames-native path — see "
+                "documentation/ADRs/037_ingester_emergency_solution.md. Drop the flag to run.",
+                wandb_module=self._wandb_module,
+            )
 
         # Explicit df-vs-ff dispatch (#290, epic #285): the model's queryset
         # descriptor declares its input shape; absent → dataframe, byte-identical

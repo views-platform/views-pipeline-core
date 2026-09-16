@@ -131,13 +131,6 @@ EXEMPT: dict[str, Exemption] = {
         "with the pandas tier (roadmap G5-G7).",
         "#313",
     ),
-    "transformation-library": Exemption(
-        "`views_transformation_library` is a pure function library — the shims in "
-        "modules/dataloaders/update_viewser.py import it lazily precisely because it "
-        "drags ingester3 and breaks CI without certificates. A conformance test would "
-        "need those certificates to mean anything.",
-        "#428",
-    ),
     "frames-reconcile": Exemption(
         "Reached only through the injected `Reconciler` port "
         "(domain/reconciliation_port.py, #217), which is the abstraction a conformance "
@@ -177,6 +170,15 @@ def _normalise(token: str) -> str:
     return token
 
 
+
+def _declared_dependency_names() -> set[str]:
+    """Dependency names under `[tool.poetry.dependencies]`, as written in the manifest."""
+    import tomllib
+
+    manifest = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    deps = manifest.get("tool", {}).get("poetry", {}).get("dependencies", {})
+    return {name for name in deps if name != "python"}
+
 def declared_neighbours() -> set[str]:
     """Every other repo or package this package names, derived from its own source.
 
@@ -187,10 +189,23 @@ def declared_neighbours() -> set[str]:
     2. **A `views-<name>` mention** anywhere in a Python source file, docstrings
        included. See the module docstring for why docstrings count here.
 
-    Scoped to `views_pipeline_core/`. `documentation/` and `reports/` are narrative and
-    ship to nobody, so a repo named there is not a claim this package makes.
+    3. **A declared dependency** in `pyproject.toml`. Added 2026-09-16, when retiring
+       `views-transformation-library` exposed the blind spot: `viewser` — a declared
+       dependency, called on every data fetch — was anchored in this derivation by ONE
+       type-hint import, inside a method that had been dead for ten months. Delete the dead
+       method and the guard concluded viewser was no longer a neighbour. The loader reaches
+       viewser duck-typed by design (`if hasattr(queryset, "publish")`), so no import will
+       ever name it; the manifest is the only honest source. A neighbour this package
+       ships a pin for is a neighbour whether or not any line imports it.
+
+    Scoped to `views_pipeline_core/` for the first two; `pyproject.toml` for the third.
+    `documentation/` and `reports/` are narrative and ship to nobody, so a repo named
+    there is not a claim this package makes.
     """
     found: set[str] = set()
+    for dep in _declared_dependency_names():
+        if dep.startswith("views"):
+            found.add(_normalise(dep))
     for path in sorted(PACKAGE.rglob("*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))

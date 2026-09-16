@@ -66,7 +66,7 @@ Frozen dataclass that captures, validates, and serializes CLI arguments for the 
 | `drift_self_test` | `bool` | `False` |
 | `eval_type` | `str` | `"standard"` |
 | `report` | `bool` | `False` |
-| `update_viewser` | `bool` | `False` |
+| `update_viewser` | `bool` | `False` | Retired 2026-09-16 — parses for one window and refuses at the data-fetch step; removed at 4.0 |
 | `wandb_notifications` | `bool` | `False` |
 | `monthly` | `bool` | `False` |
 

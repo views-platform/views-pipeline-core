@@ -252,10 +252,10 @@ df, alerts = loader.get_data(
 
 ## 11. Evolution Notes (Optional)
 
-- The `_overwrite_viewser()` path (GED/ACLED live updates via `UpdateViewser`, now in
-  `modules/dataloaders/update_viewser.py` — split out by #431) is currently commented
-  out in `_fetch_data_from_viewser()`. If re-enabled it will require
-  `args.update_viewser` and `.env` configuration.
+- The `_overwrite_viewser()` path — ADR-037's GED/ACLED emergency fallback via `UpdateViewser` — was
+  **retired on 2026-09-16** together with `views-transformation-library`. It had been commented
+  out since 2025-11-24. `--update_viewser` now refuses at `ModelManager._execute_data_fetching`
+  for one window; the flag and the stub class go at 4.0.
 - `month_first`/`month_last` mutation on the instance is fragile; a future revision
   may freeze these into an immutable context object, following the Stage pattern
   (ADR-045).
