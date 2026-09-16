@@ -945,7 +945,6 @@ queryset transformations, drift detection, and validation.
 
 Key Components:
     - ViewsDataLoader: Main data loading interface
-    - UpdateViewser: Update mechanism for latest GED/ACLED data
     - Validation utilities: Data quality checks
 
 Typical Usage:
@@ -956,16 +955,9 @@ Typical Usage:
 
 Dependencies:
     - viewser: For data fetching
-    - views_transformation_library: For transformations
     - pandas: Data manipulation
 
-Environment Variables:
-    - month_to_update: Months for viewser updates
-    - pgm_path: Path to priogrid update file
-    - cm_path: Path to country update file
-
 Notes:
-    - Requires .env file in project root
     - Drift detection only active for forecasting runs
     - All data cached in data/raw/ directory
 

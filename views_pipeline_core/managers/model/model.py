@@ -370,7 +370,7 @@ class ModelManager:
                 - saved (bool): Whether to use saved data
                 - eval_type (str): Evaluation type (standard/complete/live;
                   'long' retired #378)
-                - update_viewser (bool): Whether to update viewser data
+                - update_viewser (bool): retired 2026-09-16, refused at argument validation (ADR-062)
                 - prediction_store (bool): Whether to use prediction store
                 - wandb_notifications (bool): Whether to send WandB notifications
                 - override_timestep (Optional[int]): Override for current timestep
@@ -1242,7 +1242,7 @@ class ForecastingModelManager(ModelManager):
         Note:
             - Uses args.saved to skip download if data exists
             - Respects args.override_timestep for custom ranges
-            - Updates viewser if args.update_viewser=True
+            - `args.update_viewser` is refused at argument validation (C-318, C-319)
         """
 
         # Explicit df-vs-ff dispatch (#290, epic #285): the model's queryset

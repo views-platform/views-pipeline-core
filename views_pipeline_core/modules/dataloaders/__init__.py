@@ -3,8 +3,10 @@
 Re-exports are lazy (PEP 562, shared machinery in views_pipeline_core/_lazy.py)
 so import-light submodules (fetch_context, frame_cache, and the FeatureFrame
 path, #289) can be imported without paying for the heavy legacy loader stack
-(viewser, ingester3, transformation library) that ``dataloaders`` pulls in at
-module level (#286).
+that ``dataloaders`` pulls in at module level (#286). Note: since C-318 the loader
+imports neither viewser nor ingester3 at module scope — viewser is reached duck-typed
+through the queryset the model's own config builds — and
+``tests/test_modules/test_update_viewser_is_retired.py`` pins that.
 
 END-STATE (epic #285, condition 5): ``get_feature_frame`` is the SUCCESSOR of
 the pandas input path, not a sibling — ``get_data`` (and the pandas cache it
@@ -22,6 +24,8 @@ if TYPE_CHECKING:  # pragma: no cover — static-analysis convenience only
 #: name → defining submodule. Single source of truth for __all__/__getattr__/__dir__.
 _LAZY_EXPORTS = {
     "ViewsDataLoader": "dataloaders",
+    # Retired 2026-09-16; the name survives one window so a minor release does not delete a
+    # declared public symbol out from under `<4.0.0` pins. Constructing it raises.
     "UpdateViewser": "update_viewser",
 }
 _LAZY_SUBMODULES = {

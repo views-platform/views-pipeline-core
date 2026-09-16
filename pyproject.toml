@@ -29,7 +29,7 @@ classifiers = [
 # BUILD time, in the transitive chain rather than here:
 #
 #   ingester3 =2.1.1 -> levenshtein 0.20.9   cp311 is its last wheel; the sdist build fails
-#   viewser / v-t-l   -> pandas <2.0          pandas 1.5.3 ships no wheel past cp311
+#   viewser           -> pandas <2.0          pandas 1.5.3 ships no wheel past cp311
 #
 # Both upstreams declare a permissive `requires_python` they do not have wheels for, which
 # is why the resolver does not catch it. Narrowing our own ceiling would not fix the wall —
@@ -50,7 +50,6 @@ pyprojroot="^0.3.0"
 # — so 1.0.0 was already excluded, and the suite had drifted to a version the metadata
 # forbade. tests/test_declared_dependencies_match_reality.py now fails on that drift.
 views-evaluation = "^1.0.0"
-views-transformation-library = "^2.7.2"
 art = "^6.4"
 polars = ">=1.34.0,<2.0.0"
 views-frames = "^1.10.2"
