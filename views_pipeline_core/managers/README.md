@@ -313,7 +313,6 @@ flowchart TD
             direction TB
             E1[_validate_prediction_dataframe]:::action
             E2[_save_predictions]:::data
-            E3[_save_evaluations]:::data
             E4[_wandb_alert]:::wandb
             E5[create_log_file]:::data
         end

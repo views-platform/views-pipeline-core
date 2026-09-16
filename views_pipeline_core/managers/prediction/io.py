@@ -1,5 +1,5 @@
 # LEGACY DataFrame tier — pandas by design; retires with roadmap G5–G7 (#313/#307). See C-226.
-"""Prediction I/O — single-responsibility persistence for predictions and evaluations.
+"""Prediction I/O — single-responsibility persistence for predictions.
 
 Extracted from ForecastingModelManager to isolate I/O concerns from orchestration.
 Each method handles one persistence task: local files, WandB logging, or prediction store.
@@ -159,78 +159,6 @@ class PredictionIOManager:
                     getattr(result, "code", None),
                     getattr(result, "error", None),
                 )
-
-    def save_evaluations(
-        self,
-        df_step_wise_evaluation: pd.DataFrame,
-        df_time_series_wise_evaluation: pd.DataFrame,
-        df_month_wise_evaluation: pd.DataFrame,
-        path_generated: Union[str, Path],
-        target_identifier: str,
-        run_type: str,
-        timestamp: str,
-    ) -> None:
-        """Save evaluation metrics to disk and WandB.
-
-        Args:
-            df_step_wise_evaluation: Metrics per prediction step.
-            df_time_series_wise_evaluation: Metrics per time series.
-            df_month_wise_evaluation: Metrics per month.
-            path_generated: Directory for saving files.
-            target_identifier: Target identifier for filename.
-            run_type: Run type for filename.
-            timestamp: Timestamp string for filename.
-
-        Raises:
-            PipelineException: If save fails.
-        """
-        import wandb
-
-        try:
-            path_generated = Path(path_generated)
-            path_generated.mkdir(parents=True, exist_ok=True)
-
-            namer = PredictionFileNamer(
-                run_type, timestamp, PipelineConfig.dataframe_format,
-            )
-            eval_step_path = namer.evaluation_name("step", target_identifier)
-            eval_ts_path = namer.evaluation_name("ts", target_identifier)
-            eval_month_path = namer.evaluation_name("month", target_identifier)
-
-            save_dataframe(df_month_wise_evaluation, path_generated / eval_month_path)
-            save_dataframe(df_time_series_wise_evaluation, path_generated / eval_ts_path)
-            save_dataframe(df_step_wise_evaluation, path_generated / eval_step_path)
-
-            self._wandb_module.save(str(path_generated / eval_month_path))
-            self._wandb_module.save(str(path_generated / eval_ts_path))
-            self._wandb_module.save(str(path_generated / eval_step_path))
-
-            self._wandb_module.log(
-                {
-                    "evaluation_metrics_month": wandb.Table(
-                        dataframe=df_month_wise_evaluation
-                    ),
-                    "evaluation_metrics_ts": wandb.Table(
-                        dataframe=df_time_series_wise_evaluation
-                    ),
-                    "evaluation_metrics_step": wandb.Table(
-                        dataframe=df_step_wise_evaluation
-                    ),
-                }
-            )
-
-            self._wandb_module.send_alert(
-                title=f"{self._model_path.target.title()} Outputs Saved",
-                text=f"Evaluation metrics saved at {path_generated.relative_to(self._model_path.root)}.",
-                notifications_enabled=self._wandb_notifications,
-            )
-
-        except Exception as e:
-            logger.error(f"Error saving model outputs: {e}", exc_info=True)
-            raise PipelineException(
-                f"Error saving model outputs: {e}",
-                wandb_module=self._wandb_module,
-            )
 
     @staticmethod
     def generate_evaluation_table(metric_dict: Dict) -> str:

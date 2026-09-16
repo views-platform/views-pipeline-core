@@ -5,6 +5,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+#: `EvaluationReport.to_dict()["schemas"]` key -> the wandb Table key the dashboard has
+#: always shown it under. The keys predate #512: `save_evaluations` logged the same three
+#: tables from three DataFrames, and a renamed key would empty every existing panel.
+EVALUATION_TABLE_KEYS: tuple[tuple[str, str], ...] = (
+    ("month", "evaluation_metrics_month"),
+    ("time_series", "evaluation_metrics_ts"),
+    ("step", "evaluation_metrics_step"),
+)
+
 
 class WandBModule:
     """
@@ -172,6 +181,41 @@ class WandBModule:
             month_wise,
             target_identifier,
         )
+
+    def log_evaluation_tables(self, schemas: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
+        """Log one wandb Table per evaluation schema, built from the report's own dict.
+
+        The tabular dashboard view of per-group metrics. Until #512 these three tables
+        were built by `save_evaluations` from `report.to_dataframe(...)` — the only
+        reason pipeline-core needed views-evaluation's `[dataframe]` extra and, through it,
+        `pandas<2`. `report.to_dict()["schemas"]` carries the same numbers with no
+        dataclass mapping and no all-NaN-column drop, so the tables are a superset of
+        what the DataFrames showed.
+
+        Args:
+            schemas: `{"month": {"month445": {metric: value}}, "time_series": {"ts00": {...}},
+                "step": {"step01": {...}}}` — the value of `to_dict()["schemas"]`. A
+                schema absent from the dict is skipped; an empty schema logs an empty table.
+
+        Columns are the UNION of metric names across a schema's groups, in first-seen
+        order, with `None` where a group lacks a metric. views-evaluation does not
+        guarantee identical metric sets per group (`evaluation_report.py::to_metric_frame`
+        builds its own order incrementally for the same reason); hand-listing the first
+        group's keys would silently drop a metric only later groups carry.
+        """
+        tables = {}
+        for schema, key in EVALUATION_TABLE_KEYS:
+            if schema not in schemas:
+                continue
+            groups = schemas[schema]
+            metrics: list[str] = []
+            for row in groups.values():
+                metrics.extend(m for m in row if m not in metrics)
+            tables[key] = wandb.Table(
+                columns=["group_id", *metrics],
+                data=[[group_id, *[row.get(m) for m in metrics]] for group_id, row in groups.items()],
+            )
+        self.log(tables)
 
     def log_yearly_evaluation(self, evaluation_dict: dict, target: str) -> None:
         """Log calendar-year evaluation metrics to the run summary.

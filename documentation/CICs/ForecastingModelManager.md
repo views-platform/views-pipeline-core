@@ -262,8 +262,9 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
   never calls that method and views-impact overrides it, so the flag was silently ignored on
   both paths (C-319). Nothing in this class reads `args.update_viewser` any more.
 - `PredictionIOManager` was extracted from this class (commit `017c85a`) as
-  part of SOLID E1 refactoring. All `_save_predictions`, `_save_evaluations`,
-  and `_generate_evaluation_table` now delegate to `self._io`.
+  part of SOLID E1 refactoring. `_save_predictions` and `_generate_evaluation_table`
+  delegate to `self._io`; the `_save_evaluations` delegator was deleted in #512 with
+  the parquet egress it fronted (it had no caller).
 - The `prepare_actuals_df` hook was added for subclasses that manufacture
   derived targets (e.g., binary signals from raw counts).
 - `ReportingStage` was extracted (ADR-045 E3) from

@@ -3,7 +3,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-06-27 (epic #224 — MetricFrame evaluation-of-record)
+**Last reviewed:** 2026-09-16 (#512 — the pandas evaluation egress retired)
 **Related ADRs:** ADR-040 (Authority over Inference), ADR-045 (Stage Pattern, E2)
 
 ---
@@ -47,8 +47,10 @@ class.
 - Guarantees that step mappings are built by the stage itself via
   `_get_evaluation_step_mappings()`, fulfilling ADR-040 (orchestrator is sole authority
   on lead-times).
-- Guarantees that evaluation DataFrames are saved to disk (via `PredictionIOManager`)
-  unless `configs["sweep"]` is `True` or `io_manager` is `None`.
+- Guarantees that, unless `configs["sweep"]` is `True`, the three per-schema wandb
+  tables (`evaluation_metrics_month|ts|step`) are logged from `report.to_dict()["schemas"]`
+  via `WandBModule.log_evaluation_tables()` — no DataFrame is built anywhere on this path
+  (#512). No evaluation file other than the `MetricFrame` is written to disk.
 - Guarantees that a WandB summary alert is sent after all targets are processed.
 - Guarantees aggressive memory management: `EvaluationFrame` and raw prediction
   objects are deleted and `gc.collect()` is called after each target.
@@ -58,10 +60,14 @@ class.
 ## 4. Inputs and Assumptions
 
 - `wandb_module` -- `WandBModule` instance for metrics logging and alerts.
-- `io_manager` -- `PredictionIOManager` instance or `None`. When `None`, evaluation
-  file saves are skipped (expected for PredictionFrame ensembles, which have no
-  parquet IO). The summary alert still fires — `generate_evaluation_table` is called
-  as a `@staticmethod` via the class, not the instance.
+- `io_manager` -- **retired (#512); must be `None`.** It carried the legacy parquet
+  egress; the stage keeps no reference to it. It stays in the signature only because the
+  public-surface snapshot records it as required, so removing it is a 4.0 change —
+  `tests/test_managers/test_evaluation_stage.py::test_the_ignored_io_manager_parameter_is_gone_by_the_next_major`
+  fails at that major and names every site (ADR-062 clause 4). Per ADR-062 clause 2 a
+  non-`None` value raises `ValueError` naming the retirement, rather than being ignored.
+  The summary alert calls `PredictionIOManager.generate_evaluation_table` as a
+  `@staticmethod` via the class, not through this argument.
 - `wandb_notifications: bool` -- gate for WandB alerts.
 - `evaluate()` arguments:
   - `df_predictions` -- one of:
@@ -94,10 +100,13 @@ class.
     WandB run) + `data_version` (`data_loader.month_last`). The save path is a **locked
     cross-repo contract** with `MetricFrameFileSource._frame_dir` (register C-202).
     Capability-skipped (loud-but-soft) if `to_metric_frame` is unavailable.
-  - Saves step-wise, time-series-wise, and month-wise evaluation DataFrames to
-    `data_generated/` via `PredictionIOManager.save_evaluations()` (legacy parquet, kept
-    until reporting fully migrates; skipped when `io_manager` is `None`; an info log is
-    emitted instead).
+    **Disk only: nothing uploads the MetricFrame to WandB.** (Until #512 the legacy
+    parquets were `wandb.save()`d; that upload went with them.)
+  - Logs three wandb tables (`evaluation_metrics_month|ts|step`) built from
+    `report.to_dict()["schemas"]` via `WandBModule.log_evaluation_tables()` — the
+    dashboard's tabular view. Skipped for sweeps. Replaces the retired
+    `report.to_dataframe(...)` → `PredictionIOManager.save_evaluations()` egress, which also
+    wrote three `eval_*.parquet` files nothing read and sent an "Outputs Saved" alert (#512).
   - Sends a WandB summary alert with the evaluation table (via
     `PredictionIOManager.generate_evaluation_table` as a `@staticmethod` — does not
     require an `io_manager` instance).
@@ -117,9 +126,12 @@ class.
 - Missing `pred_{target}` columns in the DF path are logged as warnings and skipped.
 - If no targets are defined (`regression_targets` and `classification_targets` both
   empty), `_load_actuals()` returns `None` and `evaluate()` returns early.
-- When `io_manager` is `None` and `sweep` is not set, `save_evaluations()` is skipped
-  and an info message is logged. Metrics are still logged to WandB and the summary
-  alert still fires. This is expected for PredictionFrame ensembles.
+- `report.to_dataframe` is never called. The stage's own tests give every mock report a
+  `to_dataframe` that raises, so a reintroduced DataFrame egress fails behaviourally.
+- A failure inside `wandb.log` for the evaluation tables is logged at error level and not
+  raised — `WandBModule.log`'s behaviour, pre-existing and unchanged by #512 (the retired
+  `save_evaluations` logged its tables through the same method). A `wandb.Table`
+  construction error propagates.
 
 ---
 
@@ -136,8 +148,8 @@ class.
   - `ForecastingModelManager` or any model manager.
   - `CoreDataSniffer`, `CorePredictionSniffer`, or `CoreConfigSniffer`.
   - Appwrite or any external storage.
-- **Injected collaborators:** `wandb_module` and `io_manager` are injected at
-  construction, not imported at class level.
+- **Injected collaborators:** `wandb_module` is injected at construction, not imported
+  at class level. `io_manager` is kept for signature stability only and must be `None` (§4).
 
 ---
 
@@ -210,7 +222,10 @@ stage.evaluate(
 - **Regression tests:** `tests/test_falsification_pf_ensemble_integration.py` —
   `TestP3EvaluationStageNoneIO` verifies construction with `io_manager=None` and
   that `generate_evaluation_table` is callable as a `@staticmethod` without an
-  instance (C-95 regression coverage).
+  instance (C-95 regression coverage). `tests/test_managers/test_evaluation_stage.py` —
+  `test_evaluate_logs_tables_from_the_dict` / `test_sweep_does_not_log_tables` /
+  `test_a_live_io_manager_is_refused_and_none_is_accepted` pin the #512 shape; `tests/test_modules/test_wandb.py`
+  pins the table contents (union-of-metrics columns, `None` fill, key names).
 
 ---
 

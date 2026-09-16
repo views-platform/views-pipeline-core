@@ -24,23 +24,6 @@ class TestPredictionName:
         assert result == "predictions_calibration_20260407.pkl"
 
 
-class TestEvaluationName:
-    def test_step_evaluation(self):
-        namer = PredictionFileNamer("calibration", "20260407", ".parquet")
-        result = namer.evaluation_name("step", "ged_sb_best")
-        assert result == "eval_calibration_ged_sb_best_step_20260407.parquet"
-
-    def test_month_evaluation(self):
-        namer = PredictionFileNamer("validation", "20260401", ".parquet")
-        result = namer.evaluation_name("month", "lr_sb")
-        assert result == "eval_validation_lr_sb_month_20260401.parquet"
-
-    def test_ts_evaluation(self):
-        namer = PredictionFileNamer("calibration", "20260407", ".parquet")
-        result = namer.evaluation_name("ts", "ged_sb_best")
-        assert result == "eval_calibration_ged_sb_best_ts_20260407.parquet"
-
-
 class TestPredictionNameWithTarget:
     def test_with_target_no_seq(self):
         namer = PredictionFileNamer("forecasting", "20260407", ".parquet")

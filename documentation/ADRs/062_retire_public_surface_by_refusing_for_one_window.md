@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-09-16
 **Deciders:** Simon, VIEWS platform team
-**Concerns:** C-318, C-319 · **Instances:** #378 (`--eval_type long`), #510 (`--update_viewser`, `UpdateViewser`)
+**Concerns:** C-318, C-319 · **Instances:** #378 (`--eval_type long`), #510 (`--update_viewser`, `UpdateViewser`), #512 (`EvaluationStage(io_manager=...)`)
 
 ---
 
@@ -81,3 +81,12 @@ step is where it should have been caught.
   message that names the issue into a generic "should be one of". Clause 4 applies to
   surface that is *going*, which `long`'s parent flag is not. #510's flag and stub satisfy
   all four after its review.
+- **A constructor parameter whose collaborator lost its role is surface too (#512,
+  `EvaluationStage(wandb_module, io_manager, ...)`).** The snapshot records `io_manager`
+  as required, so it stays in the signature; the stage never reads it. The first version
+  *accepted and ignored* it while two internal call sites still passed a live
+  `PredictionIOManager` — quieter than the code it replaced, which either wrote the files
+  or logged that it was skipping them. Review caught it three days after this ADR was written (C-319, second instance).
+  The rule is the same as clause 2: a non-`None` value **raises** naming the retirement;
+  the call sites pass `None` with a comment; clause 4's trigger test names the parameter
+  and its three sites. Ignoring is not a fourth option.

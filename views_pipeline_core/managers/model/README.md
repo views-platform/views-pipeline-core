@@ -125,7 +125,6 @@ This class is not directly instantiated; extend it to implement concrete trainin
 | `_execute_forecast_reporting()` | Build forecast HTML report using templates. |
 | `_execute_evaluation_reporting()` | Build evaluation HTML report using metrics from latest WandB run. |
 | `_evaluate_prediction_dataframe(df_predictions, eval_type, ensemble)` | Compute metrics (step / month / time-series). |
-| `_save_evaluations(...)` | Save metric parquet files and log them. |
 | `_save_predictions(...)` | Save predictions locally + optionally to prediction store. |
 | `_save_model_artifact(run_type)` | Publish latest artifact to WandB. |
 

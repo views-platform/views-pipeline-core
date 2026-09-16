@@ -4,7 +4,8 @@ Tests for EvaluationStage — first implementation of ADR-045 Stage pattern.
 These tests verify that EvaluationStage:
 1. Receives an explicit EvaluationContext (not self)
 2. Delegates to NativeEvaluator via EvaluationAdapter
-3. Publishes results to WandB and disk via PredictionIOManager
+3. Publishes results to WandB (scalars + tables from the report's dict) and persists
+   the MetricFrame to disk — the legacy parquet egress is gone (#512)
 4. Handles edge cases (empty targets, missing columns)
 """
 import sys
@@ -79,7 +80,7 @@ def _make_stage():
     """Build an EvaluationStage with mocked collaborators."""
     return EvaluationStage(
         wandb_module=MagicMock(),
-        io_manager=MagicMock(),
+        io_manager=None,
     )
 
 
@@ -90,7 +91,11 @@ def _make_mock_report():
         "target": "lr_sb", "task": "regression", "pred_type": "point",
         "schemas": {"step": {}, "time_series": {}, "month": {}},
     }
-    report.to_dataframe.return_value = pd.DataFrame()
+    # #512: the pandas egress is retired. Any path that still reaches for a DataFrame
+    # trips this, so the retirement is pinned behaviourally rather than by grep.
+    report.to_dataframe.side_effect = AssertionError(
+        "report.to_dataframe was called — the pandas evaluation egress was retired in #512"
+    )
     return report
 
 
@@ -165,8 +170,13 @@ class TestEvaluationStageContract:
         stage._wandb_module.log_evaluation_results.assert_called_once()
 
     @patch("views_pipeline_core.files.utils.read_dataframe")
-    def test_evaluate_saves_to_disk(self, mock_read):
-        """Stage must save evaluation DataFrames via io_manager when not sweeping."""
+    def test_evaluate_logs_tables_from_the_dict(self, mock_read):
+        """When not sweeping, the stage logs the wandb tables from `to_dict()["schemas"]`.
+
+        The same `schemas` object the scalars came from, passed through unchanged — the
+        mock report's `to_dataframe` raises, so this also proves the full `evaluate` path
+        never reaches for a DataFrame (#512).
+        """
         stage = _make_stage()
         ctx = _make_context()
         ctx.model_path._get_raw_data_file_paths.return_value = [Path("raw.parquet")]
@@ -175,7 +185,8 @@ class TestEvaluationStageContract:
             index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "e"]),
         )
         eval_mod = sys.modules["views_evaluation"]
-        eval_mod.NativeEvaluator.return_value.evaluate.return_value = _make_mock_report()
+        report = _make_mock_report()
+        eval_mod.NativeEvaluator.return_value.evaluate.return_value = report
 
         df_pred = pd.DataFrame(
             {"pred_lr_sb": [0.5]},
@@ -184,7 +195,92 @@ class TestEvaluationStageContract:
 
         stage.evaluate([df_pred], ctx)
 
-        stage._io.save_evaluations.assert_called_once()
+        stage._wandb_module.log_evaluation_tables.assert_called_once_with(
+            report.to_dict.return_value["schemas"]
+        )
+        report.to_dataframe.assert_not_called()
+
+    def test_sweep_does_not_log_tables(self, tmp_path):
+        """The control for the test above: a sweep run logs scalars only."""
+        stage = _make_stage()
+        ctx = _make_context(configs={**_make_context().configs, "sweep": True})
+        report = _make_mock_report()
+
+        stage._publish_results(report, "lr_sb", ctx)
+
+        stage._wandb_module.log_evaluation_results.assert_called_once()
+        stage._wandb_module.log_evaluation_tables.assert_not_called()
+        report.to_metric_frame.assert_not_called()
+
+    def test_an_absent_sweep_key_means_not_a_sweep(self, tmp_path):
+        """Every fixture in this file sets `sweep`, so `.get("sweep", True)` and
+        `configs["sweep"]` both survived the guard audit. Ensemble contexts and older
+        configs omit the key; absent must mean "not a sweep", i.e. tables ARE logged."""
+        stage = _make_stage()
+        configs = {k: v for k, v in _make_context().configs.items() if k != "sweep"}
+        ctx = _make_context(configs=configs)
+
+        stage._publish_results(_make_mock_report(), "lr_sb", ctx)
+
+        stage._wandb_module.log_evaluation_tables.assert_called_once()
+
+    def test_a_failing_table_log_propagates(self, tmp_path):
+        """`_publish_results` must not wrap the table call in a swallow (guard audit,
+        mutation A8): whatever `log_evaluation_tables` raises reaches the caller."""
+        stage = _make_stage()
+        stage._wandb_module.log_evaluation_tables.side_effect = RuntimeError("wandb down")
+
+        with pytest.raises(RuntimeError, match="wandb down"):
+            stage._publish_results(_make_mock_report(), "lr_sb", _make_context())
+
+    def test_a_live_io_manager_is_refused_and_none_is_accepted(self):
+        """`io_manager` stays in the signature (recorded required in the surface snapshot)
+        and, per ADR-062, refuses rather than ignores: the first version of #512 accepted
+        a live `PredictionIOManager` and silently dropped it while two call sites still
+        passed one (C-319, second instance)."""
+        with pytest.raises(ValueError, match="retired in #512"):
+            EvaluationStage(wandb_module=MagicMock(), io_manager=MagicMock())
+
+        # A manager that is falsy (e.g. defines __len__) is still a manager: the check is
+        # `is not None`, not truthiness (guard audit, mutation C2).
+        falsy_manager = MagicMock()
+        falsy_manager.__bool__.return_value = False
+        with pytest.raises(ValueError, match="retired in #512"):
+            EvaluationStage(wandb_module=MagicMock(), io_manager=falsy_manager)
+
+        stage = EvaluationStage(wandb_module=MagicMock(), io_manager=None)
+        assert not hasattr(stage, "_io"), "the stage must not even keep a reference"
+
+    def test_the_stage_keeps_no_reference_to_the_retired_argument_under_any_name(self):
+        """`not hasattr(stage, "_io")` only guards one attribute name; `self._io_manager =
+        io_manager` survived the guard audit (mutation C5). Refusal means the value never
+        lands on the instance at all — checked by identity across every attribute."""
+        sentinel = object()
+        with pytest.raises(ValueError):
+            EvaluationStage(wandb_module=MagicMock(), io_manager=sentinel)
+        stage = EvaluationStage(wandb_module=MagicMock(), io_manager=None)
+        assert all(v is not sentinel for v in vars(stage).values())
+        assert "_io" not in vars(stage) and "_io_manager" not in vars(stage)
+
+    def test_the_ignored_io_manager_parameter_is_gone_by_the_next_major(self):
+        """ADR-062 clause 4: the 4.0 removal has an executable trigger.
+
+        When `pyproject.toml` reads a major >= 4, this fails and names what to delete.
+        """
+        import re
+
+        text = (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text()
+        major = int(re.search(r'^version = "(\d+)\.', text, re.M).group(1))
+
+        assert major < 4, (
+            "major is >= 4: drop the ignored `io_manager` parameter from "
+            "`EvaluationStage.__init__` (managers/evaluation/stage.py) and stop passing it at "
+            "its three call sites — managers/model/model.py, managers/ensemble/dataframe_ensemble.py, "
+            "managers/ensemble/prediction_frame_ensemble.py (grep `EvaluationStage(`) — update "
+            "documentation/CICs/EvaluationStage.md, delete this test and "
+            "`test_a_live_io_manager_is_refused_and_none_is_accepted`, THEN refresh the surface snapshot, "
+            "not before (ADR-062)."
+        )
 
     def test_evaluate_with_empty_targets_is_noop(self):
         """Empty target lists should complete without error."""
@@ -537,8 +633,8 @@ class TestMetricFrameEmit:
             stage._save_metric_frame(report, "lr_sb", ctx)
 
     def test_metric_frame_emitted_even_when_io_none(self, tmp_path):
-        # PFE ensembles run with io_manager=None: legacy parquet is skipped but the
-        # eval-of-record MetricFrame must still be persisted.
+        # PFE ensembles run with io_manager=None; the eval-of-record MetricFrame must
+        # still be persisted (None is the only accepted io_manager since #512).
         stage = EvaluationStage(wandb_module=MagicMock(), io_manager=None)
         ctx = self._ctx(tmp_path)
         report = _make_mock_report()
@@ -555,9 +651,6 @@ class TestMetricFrameEmit:
         class _OldReport:  # lacks to_metric_frame
             def to_dict(self):
                 return {"schemas": {"step": {}, "time_series": {}, "month": {}}}
-
-            def to_dataframe(self, _schema):
-                return pd.DataFrame()
 
         stage._save_metric_frame(_OldReport(), "lr_sb", ctx)  # must not raise
         assert not any(tmp_path.iterdir())  # nothing written
@@ -645,7 +738,7 @@ class TestFrameNativeActuals:
 
         tripwire.assert_not_called()
         stage._wandb_module.log_evaluation_results.assert_called_once()
-        stage._io.save_evaluations.assert_not_called()  # legacy egress gated off
+        stage._wandb_module.log_evaluation_tables.assert_called_once()
 
     def test_frame_requires_prediction_frame_format(self, tmp_path, make_provenance):
         cache = self._cache_frame(tmp_path, make_provenance)

@@ -52,6 +52,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   template still lists the three keys. Filed as views-models#472; until it lands, an
   operator following that README gets the refusal above, which names the ADR.
 
+- **The pandas evaluation egress is gone (#512).** `EvaluationStage` no longer calls
+  `report.to_dataframe(...)`, so the three `eval_{run_type}_{target}_{step|ts|month}_{timestamp}.parquet`
+  files per target are no longer written to `data/generated/`, no longer `wandb.save()`d,
+  and the "Outputs Saved" alert no longer fires. **No reader of those files or that alert
+  exists anywhere on the platform**: the 18 other `views-*` checkouts were grepped for the
+  filenames, the method names, the wandb table keys and the alert text, and views-reporting
+  renders from the `MetricFrame` (`metricframe_<target>/`) and never read the parquets — its
+  ADR-018 rejects them as a source of truth. The `MetricFrame` and the per-scalar wandb
+  logging are the evaluation record, as they have been since #226.
+
+  Deleted with it, all callerless: `PredictionIOManager.save_evaluations`,
+  `ForecastingModelManager._save_evaluations`, `PredictionFileNamer.evaluation_name`,
+  `views_pipeline_core.files.generate_evaluation_file_name`. None is in the public-surface
+  snapshot (it records constructor shapes of exported names) and no sibling repo imports
+  them. Not a major.
+
+  One `to_dataframe` caller remains in this repo, deliberately:
+  `tests/test_evaluation_integration.py:64` exercises views-evaluation's *own* surface as a
+  regression guard. It is the test that goes red when views-evaluation 2.0 removes the
+  method — which is when the `^2.0.0` pin lands.
+
+  Why this now: this call site was the only reason pipeline-core needed views-evaluation's
+  `[dataframe]` extra, which is one of the things holding `pandas<2` on every consumer
+  (#308). views-evaluation#63 — deprecating then removing `to_dataframe` — was blocked on
+  it. Epic #300 named this egress as one of its two remaining pandas surfaces.
+
+### Changed
+
+- **The three evaluation wandb tables (`evaluation_metrics_month|ts|step`) are still
+  logged**, now by `WandBModule.log_evaluation_tables()` straight from
+  `report.to_dict()["schemas"]` — same keys, so existing dashboard panels keep working;
+  columns are the union of metric names across groups (no all-NaN-column drop, no legacy
+  dataclass mapping), so they show a superset of what the DataFrames did. Skipped for sweeps,
+  as before.
+- **`EvaluationStage(wandb_module, io_manager, ...)` refuses a non-`None` `io_manager`.**
+  The stage no longer reads it; it stays in the signature because the surface snapshot
+  records it as required, and per ADR-062 a retired surface raises rather than ignores.
+  The three internal constructors pass `None`. A test fails the build at major ≥ 4 naming
+  the parameter and its three call sites.
+- Table columns are now in first-seen order across groups rather than the legacy
+  dataclass field order. Panels bind to column *names*, which are unchanged.
+- Table-logging failures are logged, not raised — inherited from `WandBModule.log`,
+  pre-existing and unchanged by this release; a `wandb.Table` construction error propagates.
+
 ## [3.2.0] — 2026-09-08
 
 **A minor release that unblocks views-models' vocabulary migration.** Nothing here breaks a

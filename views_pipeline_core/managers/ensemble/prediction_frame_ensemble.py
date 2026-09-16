@@ -268,7 +268,7 @@ class PredictionFrameEnsembleManager:
 
         self._evaluation_stage = EvaluationStage(
             wandb_module=self._wandb_module,
-            io_manager=None,
+            io_manager=None,  # retired #512 — was already None here; gone at 4.0
             wandb_notifications=wandb_notifications,
         )
 
