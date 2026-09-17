@@ -54,6 +54,20 @@ SUPPORTED_PF_AGGREGATION_METHODS = frozenset({"concat", "arithmetic_mean"})
 # Pure aggregation function
 # ---------------------------------------------------------------------------
 
+#: How many distinct identifier values a mismatch refusal lists before "and N more".
+IDENTIFIER_MISMATCH_MAX_LISTED = 25
+
+
+def _describe_values(values: np.ndarray) -> str:
+    """`N value(s) [a, b, …]`, sorted and capped — the part of a mismatch an operator acts on."""
+    distinct = np.unique(values)
+    if distinct.size == 0:
+        return "0 values"
+    listed = ", ".join(str(v) for v in distinct[:IDENTIFIER_MISMATCH_MAX_LISTED])
+    more = distinct.size - IDENTIFIER_MISMATCH_MAX_LISTED
+    return f"{distinct.size} value(s) [{listed}{f', and {more} more' if more > 0 else ''}]"
+
+
 def _aggregate_prediction_frames(
     frames: List[PredictionFrame],
     method: str,
@@ -111,9 +125,18 @@ def _aggregate_prediction_frames(
                     f"All PredictionFrames must have matching identifiers."
                 )
             if not np.array_equal(reference.identifiers[key], pf.identifiers[key]):
+                # Name the values, not only the fact (#509): the set difference is what
+                # tells an operator that one engine forecasts entities the other dropped.
+                only_ref = np.setdiff1d(reference.identifiers[key], pf.identifiers[key])
+                only_this = np.setdiff1d(pf.identifiers[key], reference.identifiers[key])
                 raise ValueError(
                     f"Identifier '{key}' values differ between frame[0] and frame[{i}]. "
-                    f"All PredictionFrames must have matching identifiers."
+                    f"Only in frame[0]: {_describe_values(only_ref)}; "
+                    f"only in frame[{i}]: {_describe_values(only_this)}"
+                    f"{'; same set, different order or multiplicity' if only_ref.size == 0 and only_this.size == 0 else ''}. "
+                    f"All PredictionFrames must have matching identifiers — every "
+                    f"constituent forecasts the entities present at the last observed "
+                    f"month (ADR-064)."
                 )
 
     if method == "concat":

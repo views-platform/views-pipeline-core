@@ -90,7 +90,7 @@ The workflow is: `add_model()` one or more models, then call `aggregate()` to pr
 | Condition | Exception | Message pattern |
 |---|---|---|
 | Weight >= 1.0 | `ValueError` | "Weight must be less than 1.0, got {weight}" |
-| Index mismatch between models | `ValueError` | "Index mismatch for model '{name}'" |
+| Index mismatch between models | `ValueError` | "Index mismatch for model '{name}' against '{first}' … Missing in '{name}': N rows: k country_id value(s) [ids] over month_id a–b. Extra in '{name}': …" — names the rows, capped at `INDEX_MISMATCH_MAX_LISTED` (ADR-064, #509) |
 | Prediction type mismatch | `ValueError` | "Model '{name}' has prediction type '{type}', but existing models use '{type}'" |
 | Sample size mismatch (distributions) | `ValueError` | "Model '{name}' has sample size {n}, but existing models use {m}" |
 | Mixed point/distribution columns | `ValueError` | "Target columns contain a mixture of point and probabilistic predictions" |

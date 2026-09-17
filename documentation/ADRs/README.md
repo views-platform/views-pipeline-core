@@ -73,6 +73,7 @@ Domain decisions specific to `views-pipeline-core`.
 | [054](054_visualization_and_reporting_extraction.md) | Visualization and Reporting Extraction | Implemented |
 | [062](062_retire_public_surface_by_refusing_for_one_window.md) | Retire public surface by refusing for one window | Accepted |
 | [063](063_data_source_clients_are_extras.md) | Data-source clients become extras at the next major; pandas and pyarrow declared | Accepted |
+| [064](064_forecast_entity_set_is_the_last_observed_months.md) | A forecast's entity set is the entity set of the last observed month | Accepted |
 
 ---
 
