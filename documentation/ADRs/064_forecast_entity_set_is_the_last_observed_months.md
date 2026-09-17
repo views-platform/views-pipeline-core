@@ -127,13 +127,15 @@ and re-drawn per target — so every pooled column was a patchwork: Nigeria's dr
 A sample 17, Mali's from model B sample 3, with no cross-entity or cross-target dependence
 left. Sonja's PR #270 (2026-07-06, two approvals, discussed with Mike) hoists the draw:
 **one `(model, sample)` pick per output column, shared across every row and every target.**
-That is the contract; PR-B lands it (C-325). The accepted trade-off, stated: per-unit
-engines such as r2darts2 produce their samples independently per entity, so pooling them
-jointly imposes a cross-unit dependence they never had; the team chose to preserve the joint
-models' structure over the per-unit models' independence. The PredictionFrame path
+That is the contract; landed 2026-09-17 with Sonja's hunk (C-325, resolved). The accepted trade-off, stated: per-unit
+engines such as r2darts2 produce their samples independently per entity; sharing the
+sample index across entities changes nothing for them, but sharing the *model* choice does —
+every entity in a pooled column comes from the same constituent, so where constituents
+differ in level the pool gains a cross-entity dependence through that shared choice. The
+team chose to preserve the joint models' structure over that cost. The PredictionFrame path
 (`_aggregate_prediction_frames`'s `np.concatenate(axis=1)`) already preserved joint draws by
 construction. C-198 (`aligned-draws` reconciliation pairs draw *s* across levels) presumes
-exactly this contract and is false on the DataFrame path until PR-B lands.
+exactly this contract, which the DataFrame path now honours.
 
 ## What would show this decision to be wrong
 

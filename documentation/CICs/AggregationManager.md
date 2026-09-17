@@ -39,6 +39,7 @@ The workflow is: `add_model()` one or more models, then call `aggregate()` to pr
 - **`aggregate(method, use_weights)`**:
   - Dispatches to `_aggregate_distributions` or `_aggregate_point_predictions` based on `self.prediction_type`.
   - **Distribution methods**: `"concat"` (linear pooling with resampling, default), `"vincentization"` (quantile-weighted average).
+  - **`concat` keeps draws joint (ADR-064, #63)**: one `(model, sample)` pick per output column, drawn once with `p=weights` and reused for every row and every target — a constituent's sample column is one scenario across all entities and stays one in the pool. Until 2026-09-17 the pick was per `(row, column)` cell and re-drawn per target (C-325). Pinned by `test_concat_picks_one_model_and_sample_per_column_for_every_row_and_target`.
   - **Point methods**: `"mean"` (default), `"median"`, `"min"`, `"max"`.
   - Weights are only supported with `method="mean"` for point predictions. Raises `ValueError` if weights are used with other point methods.
   - Returns a `pl.DataFrame` with index columns and aggregated target columns.
