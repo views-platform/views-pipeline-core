@@ -3,7 +3,7 @@
 | ADR Info | Details |
 |---------|---------|
 | **Subject** | Governance protocol for point & probabilistic predictions |
-| **ADR Number** | 029 |
+| **ADR Number** | 065 |
 | **Status** | Proposed |
 | **Author** | [Sonja, Simon, Håvard] |
 | **Date** | [25.11.2025] |
