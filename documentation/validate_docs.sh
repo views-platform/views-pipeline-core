@@ -79,6 +79,22 @@ while IFS= read -r ref; do
     done
 done < <(grep -rnE 'ADR-0[0-9][0-9]' --include='*.md' . 2>/dev/null || true)
 
+# 3a-bis. Every ADR number is used by exactly one file, and every ADR file is in the index.
+#         Two files claimed 029 for a day in 2026-09 (PR #52 landed 029_model_governance_*
+#         beside 029_log_files_*); check 3a only asks "does at least one file match", so
+#         it passed. A duplicate makes every "ADR-029" citation ambiguous.
+echo "--- Checking ADR numbers are unique and every ADR is indexed ---"
+for adr_num in $(ls ADRs | grep -oE '^[0-9]{3}' | sort | uniq -d); do
+    echo "  ERROR: ADR number ${adr_num} is used by more than one file: $(ls ADRs | grep -E "^${adr_num}_" | tr '\n' ' ')"
+    errors=$((errors + 1))
+done
+for adr_file in $(ls ADRs | grep -E '^[0-9]{3}_.*\.md$'); do
+    if ! grep -q "(${adr_file})" ADRs/README.md; then
+        echo "  ERROR: ADRs/${adr_file} is not listed in ADRs/README.md"
+        errors=$((errors + 1))
+    fi
+done
+
 # 3b. Verify ADR file path references (e.g., ADRs/042_foo.md) resolve to real files
 #     Scans both documentation/ and repo root (for READMEs in source tree)
 echo "--- Checking ADR file path references ---"

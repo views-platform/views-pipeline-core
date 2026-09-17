@@ -3,7 +3,7 @@
 | ADR Info | Details |
 |---------|---------|
 | **Subject** | Protocol for Including Models in Shadow Ensembles |
-| **ADR Number** | 031 |
+| **ADR Number** | 066 |
 | **Status** | Proposed |
 | **Author** | [Sonja, Simon, Håvard] |
 | **Date** | [25.11.2025] |
