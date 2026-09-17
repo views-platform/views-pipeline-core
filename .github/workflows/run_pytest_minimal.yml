@@ -46,3 +46,71 @@ jobs:
       run: |
         set -e
         poetry run pytest tests/ -v --tb=short -k "not test_falsification"
+
+  # The job the blocked-import probes cannot replace (#511 map, trap 11; ADR-063).
+  # `tests/test_import_purity.py` blocks `import viewser` in-process, but a dependency
+  # that arrives through viewser's own chain (pyarrow and tqdm did, until 3.3.0 declared
+  # them) is installed either way, so an in-process probe cannot see a module that would
+  # fail to import in an environment where viewser was never RESOLVED. Nor can
+  # "install, then pip uninstall viewser": pip does not remove a package's orphaned
+  # dependencies, so pyarrow stayed on disk and the import kept working — the first
+  # version of this job was exactly that and would not have caught the bug it was written
+  # for. This job builds the environment honestly: the install set is DERIVED from
+  # pyproject.toml with viewser left out (the same constraint converter the manifest guard
+  # uses), the package goes in with --no-deps, and every module is imported from
+  # site-packages, not from the checkout. At 4.0, when viewser is the `[viewser]` extra,
+  # a plain `pip install .` produces the same state and the derivation collapses to that.
+  test-without-viewser:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Resolve the manifest WITHOUT viewser, then install the package with --no-deps
+      run: |
+        set -e
+        python -m venv /tmp/no-viewser
+        /tmp/no-viewser/bin/pip install --upgrade pip pytest packaging
+        SPECS=$(/tmp/no-viewser/bin/python - <<'PY'
+        import sys, tomllib
+        sys.path.insert(0, ".")
+        from tests.test_declared_dependencies_match_reality import _poetry_constraint_to_specifier
+        deps = tomllib.load(open("pyproject.toml", "rb"))["tool"]["poetry"]["dependencies"]
+        specs = []
+        for name, spec in deps.items():
+            if name in ("python", "viewser"):
+                continue
+            if isinstance(spec, dict):
+                if spec.get("optional"):
+                    continue
+                spec = spec["version"]
+            specs.append(f"{name}{_poetry_constraint_to_specifier(spec)}")
+        print(" ".join(f'"{s}"' for s in specs))
+        PY
+        )
+        echo "resolving: $SPECS"
+        eval /tmp/no-viewser/bin/pip install $SPECS
+        /tmp/no-viewser/bin/pip install --no-deps .
+        /tmp/no-viewser/bin/pip show viewser && exit 1 || echo "viewser was never resolved"
+
+    - name: Every module imports from site-packages, and the loader names the install command
+      run: |
+        set -e
+        cd /tmp
+        # The wheel, not the checkout: from /tmp the checkout is not on sys.path.
+        /tmp/no-viewser/bin/python -c "import views_pipeline_core as p; assert 'site-packages' in p.__file__, p.__file__"
+        # The module walk itself lives in tests/test_import_purity.py (derived from the
+        # filesystem — walk_packages skips the namespace package `modules/`); running it
+        # from /tmp with importlib import mode means it, too, imports the installed
+        # package, and its subprocess probes inherit /tmp as cwd.
+        /tmp/no-viewser/bin/pytest \
+          "$GITHUB_WORKSPACE/tests/test_import_purity.py" \
+          "$GITHUB_WORKSPACE/tests/test_managers/test_model_path.py" \
+          "$GITHUB_WORKSPACE/tests/test_viewser_is_optional_by_the_next_major.py" \
+          --rootdir "$GITHUB_WORKSPACE" --import-mode=importlib -q --tb=short

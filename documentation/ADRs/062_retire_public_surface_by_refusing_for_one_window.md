@@ -90,3 +90,8 @@ step is where it should have been caught.
   The rule is the same as clause 2: a non-`None` value **raises** naming the retirement;
   the call sites pass `None` with a comment; clause 4's trigger test names the parameter
   and its three sites. Ignoring is not a fourth option.
+- **A dependency cannot refuse** — it is resolved or it is not — so ADR-063 carries this
+  ADR's clause 4 to the dependency closure with clauses 1–3 replaced by "declared as
+  required, loud refusal in the loader, flip at the major". The 4.0 triggers are now three:
+  the `--update_viewser` shim, `EvaluationStage(io_manager)`, and viewser becoming the
+  `[viewser]` extra (`tests/test_viewser_is_optional_by_the_next_major.py`).

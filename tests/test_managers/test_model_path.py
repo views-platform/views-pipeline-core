@@ -365,6 +365,120 @@ def generate():
         assert queryset is None
         assert "does not exist" in caplog.text
 
+    # ── The loader no longer swallows (#511 map, trap 1; register C-321) ──────────
+    #
+    # Until 2026-09-17 `get_queryset` caught EVERY exception from the model's own
+    # config_queryset.py and returned None, so a missing dependency surfaced two calls
+    # later as "Could not find queryset for <model>" — the wrong diagnosis. The sibling
+    # loader (`managers/configuration/script_config.py`) had always re-raised.
+
+    def test_a_missing_viewser_names_the_install_command(self, mock_project_root):
+        """The one ModuleNotFoundError the loader recognises: the data-source client."""
+        import sys
+
+        manager = ModelPathManager("purple_alien", validate=True)
+        manager.queryset_path.write_text(
+            "from viewser import Queryset, Column\n\ndef generate():\n    return Queryset()\n"
+        )
+        # `None` in sys.modules makes `import viewser` raise ModuleNotFoundError even
+        # though viewser is installed here — the honest simulation of its absence.
+        with patch.dict(sys.modules, {"viewser": None}):
+            with pytest.raises(ImportError) as info:
+                manager.get_queryset()
+
+        message = str(info.value)
+        assert "pip install viewser" in message, message
+        assert 'views-pipeline-core[viewser]' in message, "must name the 4.0 extra"
+        assert "views-datafactory" in message, "must say who does NOT need it"
+        # Which file and which module — the half of the message an operator acts on first
+        # (guard audit, mutation M8: a message of only the hint survived).
+        assert str(manager.queryset_path) in message and "imports viewser" in message, message
+        assert isinstance(info.value.__cause__, ModuleNotFoundError)
+        assert info.value.__cause__.name == "viewser"
+
+    def test_an_installed_but_changed_viewser_is_not_called_missing(self, mock_project_root):
+        """`from viewser import DoesNotExist` with viewser INSTALLED raises an ImportError
+        whose `.name` is also "viewser". Catching `ImportError` instead of
+        `ModuleNotFoundError` — or keying the table on the first dotted component — would
+        hand that operator "pip install viewser" for a package they have (guard audit,
+        mutations M2 and M3). The loader must key on the exact ModuleNotFoundError."""
+        pytest.importorskip("viewser")
+        manager = ModelPathManager("purple_alien", validate=True)
+
+        manager.queryset_path.write_text("from viewser import DefinitelyNotAThing\n")
+        with pytest.raises(ImportError) as info:
+            manager.get_queryset()
+        assert not isinstance(info.value, ModuleNotFoundError)
+        assert "not installed" not in str(info.value) and "pip install" not in str(info.value)
+
+        manager.queryset_path.write_text("import viewser.no_such_submodule_xyz\n")
+        with pytest.raises(ModuleNotFoundError) as info:
+            manager.get_queryset()
+        assert info.value.name == "viewser.no_such_submodule_xyz"
+        assert "pip install" not in str(info.value)
+
+    def test_a_missing_datafactory_client_names_its_install_command(self, mock_project_root):
+        """The other client. 23 of the 106 views-models sources import `datafactory_query`
+        at module scope; it ships in views-datafactory, which is not in this package's
+        required set. Review of the first version found the hint covered viewser only —
+        so the first failure views-models' catalogs job would hit was a datafactory
+        model with a bare ModuleNotFoundError."""
+        import sys
+
+        manager = ModelPathManager("purple_alien", validate=True)
+        manager.queryset_path.write_text(
+            "from datafactory_query import load_dataset\n\ndef generate():\n    return {}\n"
+        )
+        with patch.dict(sys.modules, {"datafactory_query": None}):
+            with pytest.raises(ImportError) as info:
+                manager.get_queryset()
+
+        message = str(info.value)
+        assert 'pip install "views-datafactory>=1.9.0"' in message, message
+        assert "viewser do not need it" in message
+        assert info.value.__cause__.name == "datafactory_query"
+
+    def test_the_hint_table_covers_both_clients_the_platform_uses(self):
+        """The floor under the two tests above: a table that lost an entry would make one
+        of them fail loudly, but a table that lost BOTH would make the loader honest and
+        unhelpful at once. The platform has exactly two data-source clients."""
+        from views_pipeline_core.data.model_path import DATA_SOURCE_CLIENT_INSTALL_HINTS
+
+        assert set(DATA_SOURCE_CLIENT_INSTALL_HINTS) == {"viewser", "datafactory_query"}
+        assert all("pip install" in hint for hint in DATA_SOURCE_CLIENT_INSTALL_HINTS.values())
+
+    @pytest.mark.parametrize(
+        "source, expected",
+        [
+            ("raise AttributeError('typo in the queryset')\n", AttributeError),
+            ("this_name_is_not_defined\n", NameError),
+            ("def generate(:\n", SyntaxError),
+            ("{}['missing']\n", KeyError),
+        ],
+        ids=["AttributeError", "NameError", "SyntaxError", "KeyError"],
+    )
+    def test_a_broken_queryset_is_not_reported_as_absent(self, mock_project_root, source, expected):
+        """The mutation that separates the fix from the swallow: any OTHER failure inside
+        config_queryset.py propagates as itself. Restoring `except Exception: return None`
+        turns this into a silent None — and so would a partial swallow of one type, which is
+        why this runs over four (guard audit, mutation M27b)."""
+        manager = ModelPathManager("purple_alien", validate=True)
+        manager.queryset_path.write_text(source)
+
+        with pytest.raises(expected):
+            manager.get_queryset()
+
+    def test_some_other_missing_module_is_not_blamed_on_viewser(self, mock_project_root):
+        """Only `viewser` gets the install hint; an unrelated missing import keeps its own
+        ModuleNotFoundError — a hint that names the wrong package is worse than none."""
+        manager = ModelPathManager("purple_alien", validate=True)
+        manager.queryset_path.write_text("import definitely_not_installed_xyz\n")
+
+        with pytest.raises(ModuleNotFoundError) as info:
+            manager.get_queryset()
+        assert info.value.name == "definitely_not_installed_xyz"
+        assert "viewser" not in str(info.value)
+
 
 # ============================================================================
 # Test Artifact Methods

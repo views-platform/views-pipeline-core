@@ -30,6 +30,7 @@ classifiers = [
 #
 #   ingester3 =2.1.1 -> levenshtein 0.20.9   cp311 is its last wheel; the sdist build fails
 #   viewser           -> pandas <2.0          pandas 1.5.3 ships no wheel past cp311
+#                        (our own pandas floor is 1.5.3 for the same reason)
 #
 # Both upstreams declare a permissive `requires_python` they do not have wheels for, which
 # is why the resolver does not catch it. Narrowing our own ceiling would not fix the wall —
@@ -37,7 +38,39 @@ classifiers = [
 # from — and a build error is loud, not silent. The fix is upstream. See register C-112
 # (the pandas <2.0 ecosystem lock across eight views-* packages, tracked as #308).
 python = ">=3.11,<3.15"
+# viewser is REQUIRED through 3.x and becomes the `[viewser]` extra at 4.0 (ADR-063; the
+# major-gated test in tests/test_viewser_is_optional_by_the_next_major.py names the sites).
+# It is the only data-source client the package needs at runtime, and it is reached
+# duck-typed — no module in views_pipeline_core imports it; the MODEL's config_queryset.py
+# does. It carries pandas<2, numpy<2, toolz<0.12 and (via views-storage) pyarrow<17 into
+# every consumer's environment; 29 of the 106 views-models sources and all 13 ensembles
+# never call it. NOT declared as an extra yet, deliberately: poetry-core marks any
+# dependency named in [tool.poetry.extras] with `; extra == "..."` in the wheel even when
+# it is not `optional = true` — a "declared, still required" extra would silently ship
+# the 4.0 flip inside a 3.x wheel (probed 2026-09-17, poetry 2.x).
 viewser = "^6.6.4"
+# pandas and pyarrow were UNDECLARED until 3.3.0. Fourteen modules import pandas at module
+# scope (two more only under TYPE_CHECKING) and three import pyarrow at module scope (managers/prediction/{savers,io,
+# prediction_frame_converter}.py). Measured in a fresh venv with viewser's chain removed
+# (2026-09-17): pyarrow arrives ONLY through viewser -> views-storage, so a viewser-free
+# install of 3.2.0 fails at IMPORT, not at fetch; pandas also arrives through ingester3,
+# but with a floor only (>1.2.3), so the same install would have resolved an untested
+# pandas 3. Register C-295 (#478) lists the undeclared set; these two are the ones viewser
+# was hiding. The ranges intersect viewser's own caps today, so the resolved versions do
+# not move: pandas <3 because pandas-1 pickles in model caches (files/utils.py
+# read_pickle) are untested against pandas 3 and the 2026-05-27 "1385/1386 tests on pandas
+# 3.0.3" evidence predates half the current suite; pyarrow <17 because that is what
+# views-storage 1.1.7 resolves to and nothing here is tested beyond it — and now that the
+# ceiling is declared HERE, lifting it is a two-step: #280 (upstream) AND this line, with
+# the ADR-013 fixture re-baseline #280 owns. Widening either is non-breaking and is the
+# 4.0 train's job, with a pandas-3 matrix behind it.
+pandas = ">=1.5.3,<3.0"
+pyarrow = ">=14.0.0,<17.0.0"
+# tqdm: imported at module scope by all three ensemble managers; on this platform it
+# arrived only through viewser (`pip show tqdm` -> Required-by: viewser, plus engine-side
+# torch stacks that the core does not declare). Found by resolving the manifest WITHOUT
+# viewser and importing every module — `managers.ensemble` was the one that failed.
+tqdm = ">=4.66,<5.0"
 ingester3 = "=2.1.1"
 wandb = "^0.18.7"
 pyprojroot="^0.3.0"
