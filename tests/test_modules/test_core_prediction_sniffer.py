@@ -253,3 +253,190 @@ class TestStrictLevel:
         """level='cm' must reject a priogrid_gid MultiIndex."""
         with pytest.raises(ValueError, match="do not match expected layout"):
             CorePredictionSniffer(level="cm").sniff_predictions(pgm_multiindex_df, "ged_sb")
+
+
+# ---------------------------------------------------------------------------
+# Entity coverage (ADR-064, #509): a forecast's entity set is the input's at its
+# last observed month. An engine that forecasts a dissolved state is refused, by name.
+# ---------------------------------------------------------------------------
+
+def _cm_predictions(rows):
+    """rows: iterable of (country_id, month_id). One target, arbitrary values."""
+    rows = list(rows)
+    return pd.DataFrame(
+        {"pred_ged_sb": [0.1] * len(rows)},
+        index=pd.MultiIndex.from_tuples(rows, names=["country_id", "month_id"]),
+    )
+
+
+#: The synthetic panel behind the tests below: entity 3 dissolves after month 3,
+#: entity 4 is born at month 4. At the last observed month (5) the reference is {1, 2, 4}.
+REFERENCE_AT_LAST_MONTH = frozenset({1, 2, 4})
+
+
+class TestEntityCoverage:
+    def test_a_dissolved_entity_is_refused_by_name_and_month(self):
+        """The #509 shape: entity 3 ceased to exist, an engine forecast it anyway."""
+        df = _cm_predictions([(e, m) for e in (1, 2, 3, 4) for m in (6, 7)])
+
+        with pytest.raises(ValueError) as info:
+            CorePredictionSniffer(level="cm").sniff_predictions(
+                df, "ged_sb", reference_entities=REFERENCE_AT_LAST_MONTH
+            )
+        message = str(info.value)
+        assert "[3]" in message, message  # the entity, not only a count
+        assert "months 6–7" in message and "2 rows" in message, message
+        assert "no longer exist" not in message, "structural check, structural wording (ADR-040)"
+        assert "ADR-064" in message and "#509" in message
+        assert "1 country_id value(s)" in message
+
+    def test_one_phantom_row_reads_as_one_row_one_month(self):
+        """Grammar is part of the message: '1 row', 'month 6' — not '1 rows', 'months 6–6'."""
+        df = _cm_predictions([(3, 6), (1, 6)])
+        with pytest.raises(ValueError) as info:
+            CorePredictionSniffer(level="cm").sniff_predictions(
+                df, "ged_sb", reference_entities=REFERENCE_AT_LAST_MONTH
+            )
+        message = str(info.value)
+        assert "forecast for month 6 (1 row)" in message, message
+
+    def test_entities_inside_the_reference_pass(self):
+        df = _cm_predictions([(e, m) for e in (1, 2, 4) for m in (6, 7)])
+        CorePredictionSniffer(level="cm").sniff_predictions(
+            df, "ged_sb", reference_entities=REFERENCE_AT_LAST_MONTH
+        )
+
+    def test_a_newborn_entity_is_not_a_phantom(self):
+        """Entity 4 has no history before month 4 — the pre-birth zero-fill every engine
+        does is NOT the problem, and a reference taken at the last month contains it."""
+        df = _cm_predictions([(4, 6), (4, 7)])
+        CorePredictionSniffer(level="cm").sniff_predictions(
+            df, "ged_sb", reference_entities=REFERENCE_AT_LAST_MONTH
+        )
+
+    def test_a_subset_of_the_reference_passes(self):
+        """The rule is ⊆, not =: an engine may forecast fewer entities than exist."""
+        df = _cm_predictions([(1, 6)])
+        CorePredictionSniffer(level="cm").sniff_predictions(
+            df, "ged_sb", reference_entities=REFERENCE_AT_LAST_MONTH
+        )
+
+    def test_no_reference_skips_the_check_and_says_so(self, caplog):
+        """A caller that cannot supply the reference is loud about it, not silently
+        unguarded — and the other checks still run."""
+        df = _cm_predictions([(3, 6)])  # would be refused with a reference
+        with caplog.at_level("INFO"):
+            CorePredictionSniffer(level="cm").sniff_predictions(df, "ged_sb")
+        assert "entity coverage NOT checked" in caplog.text
+
+    def test_the_list_is_capped_and_the_rest_counted(self):
+        from views_pipeline_core.modules.validation.core_prediction_sniffer import (
+            ENTITY_COVERAGE_MAX_LISTED,
+        )
+
+        phantoms = range(100, 100 + ENTITY_COVERAGE_MAX_LISTED + 5)
+        df = _cm_predictions([(e, 6) for e in phantoms])
+        with pytest.raises(ValueError) as info:
+            CorePredictionSniffer(level="cm").sniff_predictions(
+                df, "ged_sb", reference_entities=frozenset({1})
+            )
+        message = str(info.value)
+        assert f"{ENTITY_COVERAGE_MAX_LISTED + 5} country_id value(s)" in message
+        assert ", and 5 more" in message
+        assert str(100 + ENTITY_COVERAGE_MAX_LISTED) not in message  # the 26th is not listed
+
+    def test_an_empty_reference_refuses_everything_and_is_not_treated_as_absent(self):
+        """`None` means "not supplied"; `frozenset()` means "no entity existed at the last
+        observed month" — impossible for real data, so refusing every row is the loud
+        outcome. `if not reference_entities` would silently conflate the two (guard audit, S03)."""
+        df = _cm_predictions([(1, 6)])
+        with pytest.raises(ValueError, match=r"\[1\]"):
+            CorePredictionSniffer(level="cm").sniff_predictions(
+                df, "ged_sb", reference_entities=frozenset()
+            )
+
+    def test_the_months_named_are_the_phantoms_months_only(self):
+        """Not the whole frame's range (guard audit, S17)."""
+        df = _cm_predictions([(1, 6), (1, 7), (1, 8), (3, 7)])
+        with pytest.raises(ValueError) as info:
+            CorePredictionSniffer(level="cm").sniff_predictions(
+                df, "ged_sb", reference_entities=REFERENCE_AT_LAST_MONTH
+            )
+        assert "forecast for month 7 (1 row)" in str(info.value), str(info.value)
+
+    def test_the_listing_is_sorted_and_the_reference_size_is_stated(self):
+        df = _cm_predictions([(30, 6), (10, 6), (20, 6)])
+        with pytest.raises(ValueError) as info:
+            CorePredictionSniffer(level="cm").sniff_predictions(
+                df, "ged_sb", reference_entities=frozenset({1, 2, 4})
+            )
+        message = str(info.value)
+        assert "[10, 20, 30]" in message and "reference set has 3 entities" in message, message
+
+    def test_pgm_legacy_grid_name_resolves(self):
+        """The transitional `priogrid_gid` spelling is the same entity level."""
+        df = pd.DataFrame(
+            {"pred_ged_sb": [0.1, 0.2]},
+            index=pd.MultiIndex.from_tuples(
+                [(100, 480), (999, 480)], names=["priogrid_gid", "month_id"]
+            ),
+        )
+        with pytest.raises(ValueError, match=r"\[999\]"):
+            CorePredictionSniffer(level="pgm").sniff_predictions(
+                df, "ged_sb", reference_entities=frozenset({100})
+            )
+
+
+class TestReferenceEntitiesFromRaw:
+    """`reference_entities_from_raw` reads two columns of a raw cache at one month."""
+
+    @pytest.fixture
+    def raw_cache(self, tmp_path):
+        # Sparse panel: 3 dissolves after month 3, 4 is born at month 4.
+        rows = [(m, e) for m in range(1, 6) for e in (1, 2, 3, 4)
+                if not (e == 3 and m > 3) and not (e == 4 and m < 4)]
+        df = pd.DataFrame(rows, columns=["month_id", "country_id"])
+        df["ged_sb"] = 0.0
+        path = tmp_path / "calibration_viewser_df.parquet"
+        df.set_index(["month_id", "country_id"]).to_parquet(path)
+        return path
+
+    def test_reads_the_entity_set_at_the_given_month(self, raw_cache):
+        from views_pipeline_core.modules.validation.core_prediction_sniffer import (
+            reference_entities_from_raw,
+        )
+
+        assert reference_entities_from_raw(raw_cache, "cm", at_month=5) == REFERENCE_AT_LAST_MONTH
+        assert reference_entities_from_raw(raw_cache, "cm", at_month=2) == frozenset({1, 2, 3})
+
+    def test_a_month_the_cache_does_not_cover_is_refused(self, raw_cache):
+        """A reference taken where there is no data would make every prediction a phantom."""
+        from views_pipeline_core.modules.validation.core_prediction_sniffer import (
+            reference_entities_from_raw,
+        )
+
+        with pytest.raises(ValueError, match="no rows for month 99"):
+            reference_entities_from_raw(raw_cache, "cm", at_month=99)
+
+    def test_a_legacy_priogrid_gid_cache_resolves_the_same_level(self, tmp_path):
+        """Old on-disk caches spell the grid entity `priogrid_gid`; the reader resolves it
+        through the same alias as the DataFrame side (guard audit, R10)."""
+        from views_pipeline_core.modules.validation.core_prediction_sniffer import (
+            reference_entities_from_raw,
+        )
+
+        df = pd.DataFrame([(1, 100), (1, 101), (2, 100)], columns=["month_id", "priogrid_gid"])
+        df["x"] = 0.0
+        path = tmp_path / "old.parquet"
+        df.set_index(["month_id", "priogrid_gid"]).to_parquet(path)
+        assert reference_entities_from_raw(path, "pgm", at_month=2) == frozenset({100})
+
+    def test_a_cache_without_the_index_columns_is_refused(self, tmp_path):
+        from views_pipeline_core.modules.validation.core_prediction_sniffer import (
+            reference_entities_from_raw,
+        )
+
+        path = tmp_path / "odd.parquet"
+        pd.DataFrame({"x": [1]}).to_parquet(path)
+        with pytest.raises(ValueError, match="no 'month_id'/'country_id' columns"):
+            reference_entities_from_raw(path, "cm", at_month=1)

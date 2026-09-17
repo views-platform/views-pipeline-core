@@ -10,6 +10,10 @@ from views_pipeline_core.data.handlers import CMDataset, PGMDataset, _ViewsDatas
 
 logger = logging.getLogger(__name__)
 
+#: How many distinct entity ids an index-mismatch refusal lists before "and N more".
+#: The 22 dissolved states of #509 fit; a page of ids would not be read.
+INDEX_MISMATCH_MAX_LISTED = 25
+
 
 def _arrow_series_to_numpy(series: pl.Series, n: int, s: int) -> np.ndarray:
     """
@@ -71,6 +75,8 @@ class AggregationModule:
         self.sample_size: Optional[int] = None  # for distributions only
 
         self._index_signature: Optional[pl.DataFrame] = None
+        #: Which model set the canonical index — named in every mismatch refusal.
+        self._index_signature_model: Optional[str] = None
 
     @property
     def n_models(self) -> int:
@@ -644,24 +650,54 @@ class AggregationModule:
         # First model → set signature
         if self._index_signature is None:
             self._index_signature = current_sig
+            self._index_signature_model = model_name
             return
 
         # Exact content check
         if not current_sig.equals(self._index_signature):
-            # optional: detailed diff again
             missing = self._index_signature.join(
                 current_sig, on=self.index_cols, how="anti"
             )
             extra = current_sig.join(
                 self._index_signature, on=self.index_cols, how="anti"
             )
+            # Name the rows, not only their counts. #509: the count alone ("extra rows in
+            # new model: 792") sent the operator to reconstruct by hand that one engine
+            # forecasts 22 dissolved states the other drops. The tables were already here.
             raise ValueError(
-                f"Index mismatch for model '{model_name}'.\n"
+                f"Index mismatch for model '{model_name}' against "
+                f"'{self._index_signature_model}' (the first model added).\n"
                 f"Expected {self._index_signature.height} unique index rows, "
                 f"got {current_sig.height}.\n"
-                f"Missing rows in new model: {missing.height}, "
-                f"extra rows in new model: {extra.height}."
+                f"Missing in '{model_name}': {self._describe_rows(missing)}.\n"
+                f"Extra in '{model_name}': {self._describe_rows(extra)}.\n"
+                f"Every constituent must forecast the same (time, entity) rows — the "
+                f"entities present at the last observed month (ADR-064)."
             )
+
+    def _describe_rows(self, rows: pl.DataFrame) -> str:
+        """`N rows: entities [a, b, …] over months x–y` — the shape an operator can act on.
+
+        Entities are listed distinct and sorted, capped at INDEX_MISMATCH_MAX_LISTED; the
+        month range says whether the difference is a dissolved state (present to the end)
+        or a gap. Same message shape as the sniffer's entity refusal and the PF path's
+        identifier refusal — extracted on the fourth site, not before (WET before DRY).
+        """
+        if rows.height == 0:
+            return "0 rows"
+        # By name, not position: `index_cols` is taken from the first constituent's index
+        # order, and the platform's canonical tuple is entity-first (EXPECTED_INDEX_NAMES)
+        # while `_ViewsDataset` writes time-first — positional labels would swap silently.
+        time_col = next((c for c in self.index_cols if c == "month_id"), self.index_cols[0])
+        entity_col = next(c for c in self.index_cols if c != time_col)
+        entities = sorted(rows[entity_col].unique().to_list())
+        listed = ", ".join(str(e) for e in entities[:INDEX_MISMATCH_MAX_LISTED])
+        more = len(entities) - INDEX_MISMATCH_MAX_LISTED
+        tail = f", and {more} more" if more > 0 else ""
+        return (
+            f"{rows.height} rows: {len(entities)} {entity_col} value(s) [{listed}{tail}] "
+            f"over {time_col} {rows[time_col].min()}–{rows[time_col].max()}"
+        )
 
     #### ----- Utility Functions for Aggregation ----- ####
 

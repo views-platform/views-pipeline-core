@@ -6,7 +6,7 @@
 # Tripwire: tests/test_import_purity.py.
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Union, Optional, List, Dict
+from typing import TYPE_CHECKING, Callable, Union, Optional, List, Dict, FrozenSet
 import logging
 from abc import abstractmethod
 from datetime import datetime
@@ -1500,6 +1500,7 @@ class ForecastingModelManager(ModelManager):
                     self._assert_predictions_in_step_window(raw_preds)
                     # Validate (sniff) and save each prediction DataFrame.
                     n_sequences = len(raw_preds)
+                    reference_entities = self._reference_entities(self.args.run_type)
 
                     def validate_and_save(
                         df, idx, configs, model_path, save_predictions_func
@@ -1508,7 +1509,9 @@ class ForecastingModelManager(ModelManager):
                             f"Validating evaluation dataframe of sequence {idx+1}/{n_sequences}"
                         )
                         CorePredictionSniffer(level=configs["level"]).sniff_predictions(
-                            df, targets=combined_targets(configs)
+                            df,
+                            targets=combined_targets(configs),
+                            reference_entities=reference_entities,
                         )
                         save_predictions_func(df, model_path.data_generated, idx, send_alert=False)
 
@@ -1634,6 +1637,13 @@ class ForecastingModelManager(ModelManager):
                     model_path=self._model_path,
                     run_type=self.args.run_type,
                     prediction_format=self._prediction_format,
+                    # Only the DataFrame path sniffs (ADR-042); a PF forecast must not pay
+                    # for — or fail on — a reference it will never consult.
+                    reference_entities=(
+                        None
+                        if self._prediction_format == "prediction_frame"
+                        else self._reference_entities(self.args.run_type)
+                    ),
                 )
                 self._forecasting_stage.process_and_save_forecast(predictions, context)
             except Exception as e:
@@ -1717,6 +1727,7 @@ class ForecastingModelManager(ModelManager):
                 # ADR-042: PF path skips CorePredictionSniffer (PF is self-validating
                 # at construction). The DF path validates each sequence as before.
                 if self._prediction_format != "prediction_frame":
+                    reference_entities = self._reference_entities(self.args.run_type)
                     for i, df in enumerate(raw_preds_sweep):
                         logger.info(
                             f"Validating evaluation dataframe of sequence {i+1}/{len(raw_preds_sweep)}"
@@ -1726,7 +1737,9 @@ class ForecastingModelManager(ModelManager):
                         )
 
                         CorePredictionSniffer(level=self.configs["level"]).sniff_predictions(
-                            df, targets=combined_targets(self.configs)
+                            df,
+                            targets=combined_targets(self.configs),
+                            reference_entities=reference_entities,
                         )
 
                 has_metrics = self._has_evaluation_metrics()
@@ -1844,6 +1857,44 @@ class ForecastingModelManager(ModelManager):
             frame_cache_path=getattr(self, "_cached_frame_path", None),
         )
         self._evaluation_stage.evaluate(df_predictions, context, ensemble=ensemble)
+
+    def _reference_entities(self, run_type: str) -> Optional[FrozenSet[int]]:
+        """The entity ids the model's input carried at its last observed month (ADR-064).
+
+        The set `CorePredictionSniffer` refuses predictions outside of: an entity absent at
+        the last observed month has ceased to exist and has no forecast to make (#509). The
+        month is the same origin `_get_evaluation_step_mappings` resolves — `month_last`
+        for forecasting, `test[0] - 1` otherwise — and the entities are read from the newest
+        raw cache for the run type (two index columns, one filter; no re-fetch).
+
+        Returns None, and says why at INFO, when there is no raw cache to read: the sniffer
+        then skips the check loudly rather than the caller guessing a reference.
+        """
+        from views_pipeline_core.modules.validation.core_prediction_sniffer import (
+            reference_entities_from_raw,
+        )
+
+        raw_paths = [
+            p for p in (self._model_path._get_raw_data_file_paths(run_type) or [])
+            if isinstance(p, Path) and p.is_file()
+        ]
+        if not raw_paths:
+            logger.info(
+                "Entity coverage reference unavailable: no raw data cache on disk for "
+                f"run_type '{run_type}' under {self._model_path.data_raw}."
+            )
+            return None
+        if run_type == "forecasting":
+            at_month = getattr(getattr(self, "_data_loader", None), "month_last", None)
+        else:
+            at_month = self._partition_dict[run_type]["test"][0] - 1
+        if at_month is None:
+            logger.info(
+                "Entity coverage reference unavailable: the last observed month is not "
+                f"resolved for run_type '{run_type}' (no data loader / month_last)."
+            )
+            return None
+        return reference_entities_from_raw(raw_paths[0], self.configs["level"], at_month)
 
     def _get_evaluation_step_mappings(self, n_sequences: int) -> List[Dict[int, int]]:
         """

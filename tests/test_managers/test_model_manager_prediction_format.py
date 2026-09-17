@@ -1381,3 +1381,193 @@ class TestOOMMitigation:
                             manager._execute_model_evaluation()
 
         mock_eval_df.assert_not_called()
+
+
+# ============================================================================
+# Entity coverage reference reaches the sniffer (ADR-064, #509)
+# ============================================================================
+
+
+def _raw_cache_with_a_dissolving_entity(tmp_path, months=range(440, 446), last_month=444,
+                                        name="calibration_viewser_df.parquet"):
+    """A sparse pgm raw cache whose entity set DIFFERS at every month a wrong origin could
+    pick: entity 3 is present through `last_month - 1` and gone from `last_month`; entity 4
+    is born the month AFTER `last_month`. So at `last_month` the reference is {1, 2}; one
+    month earlier it is {1, 2, 3}; one month later (the cache max) it is {1, 2, 4}. The
+    guard audit's first fixture had the same set at 444 and 445, and `test[0]`, `train[1]`
+    and the cache max all survived (mutations M01/M02/M04)."""
+    rows = [(m, e) for m in months for e in (1, 2, 3, 4)
+            if not (e == 3 and m >= last_month) and not (e == 4 and m <= last_month)]
+    df = pd.DataFrame(rows, columns=["month_id", "priogrid_id"])
+    df["lr_sb"] = 0.0
+    (tmp_path / "raw").mkdir(exist_ok=True)
+    path = tmp_path / "raw" / name
+    df.set_index(["month_id", "priogrid_id"]).to_parquet(path)
+    return path
+
+
+class TestEntityCoverageReference:
+    def test_eval_path_passes_the_last_observed_months_entities(self, tmp_path):
+        """The reference is read from the raw cache at test[0] - 1 — the same origin
+        `_get_evaluation_step_mappings` resolves — and handed to every sniff call.
+
+        The partition has a GAP (train ends 443, test starts 445) so that test[0] - 1 = 444
+        differs from train[1] = 443 and from the cache max 445, and the fixture's entity set
+        differs at all three: {1,2} / {1,2,3} / {1,2,4}. Only the right origin yields {1,2}.
+        """
+        path = _raw_cache_with_a_dissolving_entity(tmp_path)
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0]]},
+            index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "priogrid_gid"]),
+        )
+        manager = _make_eval_stub("dataframe")
+        manager._partition_dict = {"calibration": {"train": (121, 443), "test": (445, 492)}}
+        manager._model_path._get_raw_data_file_paths.return_value = [path]
+
+        MockSniffer = _run_execute_eval(manager, [df])
+
+        kwargs = MockSniffer.return_value.sniff_predictions.call_args.kwargs
+        assert kwargs["reference_entities"] == frozenset({1, 2}), kwargs["reference_entities"]
+        manager._model_path._get_raw_data_file_paths.assert_called_with("calibration")
+
+    def test_sweep_path_passes_the_reference_too(self, tmp_path):
+        """No dedicated sweep test existed; the guard audit dropped the kwarg on that path
+        and stayed green (M20/M21)."""
+        path = _raw_cache_with_a_dissolving_entity(tmp_path)
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0]]},
+            index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "priogrid_gid"]),
+        )
+        manager = _make_sweep_stub("dataframe")
+        manager._partition_dict = {"calibration": {"train": (121, 443), "test": (445, 492)}}
+        manager._model_path._get_raw_data_file_paths.return_value = [path]
+
+        MockSniffer = _run_execute_sweep(manager, [df])
+
+        kwargs = MockSniffer.return_value.sniff_predictions.call_args.kwargs
+        assert kwargs["reference_entities"] == frozenset({1, 2})
+
+    def test_a_reader_failure_propagates_it_does_not_become_not_checked(self, tmp_path):
+        """A raw cache that lacks the origin month is a broken cache, not a missing one: the
+        ValueError must reach the caller (wrapped by the evaluation facade), never be
+        swallowed into "coverage NOT checked" (guard audit, M17)."""
+        path = _raw_cache_with_a_dissolving_entity(tmp_path, months=range(300, 306), last_month=304)
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0]]},
+            index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "priogrid_gid"]),
+        )
+        manager = _make_eval_stub("dataframe")
+        manager._model_path._get_raw_data_file_paths.return_value = [path]  # no month 444
+
+        with pytest.raises(Exception) as info:
+            _run_execute_eval(manager, [df])
+        assert "no rows for month 444" in str(info.value), str(info.value)
+
+    def test_the_newest_cache_is_read_not_the_oldest(self, tmp_path):
+        """`_get_raw_data_file_paths` returns newest first; the reference comes from index 0
+        (guard audit, M09: `[-1]` survived because every test supplied one path)."""
+        newest = _raw_cache_with_a_dissolving_entity(tmp_path, name="calibration_viewser_df_new.parquet")
+        older = _raw_cache_with_a_dissolving_entity(
+            tmp_path, months=range(440, 446), last_month=442, name="calibration_viewser_df_old.parquet"
+        )  # at 444 the OLD cache has {1, 2, 4}
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0]]},
+            index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "priogrid_gid"]),
+        )
+        manager = _make_eval_stub("dataframe")
+        manager._partition_dict = {"calibration": {"train": (121, 443), "test": (445, 492)}}
+        manager._model_path._get_raw_data_file_paths.return_value = [newest, older]
+
+        MockSniffer = _run_execute_eval(manager, [df])
+
+        assert MockSniffer.return_value.sniff_predictions.call_args.kwargs["reference_entities"] == frozenset({1, 2})
+
+    def test_no_data_loader_at_all_means_no_reference(self):
+        """The docstring's "no data loader" case, built (guard audit, M07)."""
+        manager = _make_stub("dataframe")
+        manager._args.run_type = "forecasting"
+        manager._model_path._get_raw_data_file_paths.return_value = [Path(__file__)]  # a real file
+        if hasattr(manager, "_data_loader"):
+            del manager._data_loader
+
+        assert manager._reference_entities("forecasting") is None
+
+    def test_forecasting_context_defaults_to_no_reference(self):
+        """An empty-set default would make the real sniffer refuse every prediction; the
+        default must be None — "not supplied" (guard audit, ST03)."""
+        from views_pipeline_core.managers.forecasting.stage import ForecastingContext
+
+        ctx = ForecastingContext(
+            configs={}, model_path=Mock(), run_type="forecasting", prediction_format="dataframe"
+        )
+        assert ctx.reference_entities is None
+
+    def test_no_raw_cache_means_no_reference_not_a_crash(self, tmp_path, caplog):
+        df = pd.DataFrame(
+            {"pred_lr_sb": [[1.0, 2.0]]},
+            index=pd.MultiIndex.from_tuples([(445, 1)], names=["month_id", "priogrid_gid"]),
+        )
+        manager = _make_eval_stub("dataframe")
+        manager._model_path._get_raw_data_file_paths.return_value = []
+
+        with caplog.at_level("INFO"):
+            MockSniffer = _run_execute_eval(manager, [df])
+
+        assert MockSniffer.return_value.sniff_predictions.call_args.kwargs["reference_entities"] is None
+        assert "Entity coverage reference unavailable" in caplog.text
+
+    def test_a_pf_forecast_does_not_read_a_reference_it_never_uses(self, tmp_path):
+        """ADR-042: the PF path skips the sniffer, so the facade must not resolve — or be
+        able to fail on — a reference for it (review of the first draft: unconditional)."""
+        manager = _make_stub("prediction_frame")
+        manager._test_return = {"lr_sb": Mock()}
+        manager._args.run_type = "forecasting"
+        manager._model_path._get_raw_data_file_paths.side_effect = AssertionError("must not be read")
+
+        with patch("views_pipeline_core.managers.model.model.save_pf"), \
+             patch("views_pipeline_core.files.utils.handle_single_log_creation"), \
+             patch.object(manager._forecasting_stage, "process_and_save_forecast"):
+            manager._execute_model_forecasting()  # would raise the AssertionError otherwise
+
+    def test_an_unresolved_month_last_means_no_reference_not_a_crash(self, tmp_path, caplog):
+        """A forecasting run whose loader never resolved month_last (or has no loader) cannot
+        take a reference; it says so instead of filtering the cache to zero rows."""
+        path = _raw_cache_with_a_dissolving_entity(tmp_path)
+        df = pd.DataFrame(
+            {"pred_lr_sb": [1.0]},
+            index=pd.MultiIndex.from_tuples([(446, 1)], names=["month_id", "priogrid_gid"]),
+        )
+        manager = _make_stub("dataframe")
+        manager._test_return = df
+        manager._args.run_type = "forecasting"
+        manager._model_path._get_raw_data_file_paths.return_value = [path]
+        manager._data_loader = Mock(month_last=None)
+
+        with caplog.at_level("INFO"):
+            MockSniffer = _run_execute_forecast(manager, mock_df_result=df)
+
+        assert MockSniffer.return_value.sniff_predictions.call_args.kwargs["reference_entities"] is None
+        assert "last observed month is not resolved" in caplog.text
+
+    def test_forecast_path_uses_month_last_and_the_stage_forwards_it(self, tmp_path):
+        """Forecasting has no test partition; the origin is the loader's month_last, and
+        the reference travels to the stage inside ForecastingContext."""
+        fpath = _raw_cache_with_a_dissolving_entity(
+            tmp_path, months=range(440, 447), last_month=445, name="forecasting_viewser_df.parquet"
+        )
+        df = pd.DataFrame(
+            {"pred_lr_sb": [1.0]},
+            index=pd.MultiIndex.from_tuples([(446, 1)], names=["month_id", "priogrid_gid"]),
+        )
+        manager = _make_stub("dataframe")
+        manager._test_return = df
+        manager._args.run_type = "forecasting"
+        manager._model_path._get_raw_data_file_paths.return_value = [fpath]
+        manager._data_loader = Mock(month_last=445)
+        manager._partition_dict = {}
+
+        MockSniffer = _run_execute_forecast(manager, mock_df_result=df)
+
+        kwargs = MockSniffer.return_value.sniff_predictions.call_args.kwargs
+        assert kwargs["reference_entities"] == frozenset({1, 2}), kwargs["reference_entities"]
+        manager._model_path._get_raw_data_file_paths.assert_called_with("forecasting")

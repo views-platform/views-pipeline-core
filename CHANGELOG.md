@@ -27,6 +27,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ### Added
 
+- **A forecast may not cover entities absent from the last observed month of its input**
+  (ADR-064; #509). `CorePredictionSniffer` now refuses, by name, a prediction for a
+  dissolved state — the reference entity set is read from the model's raw cache at the same
+  origin the step mappings use (`month_last` for forecasting, `test[0] - 1` otherwise) and
+  reaches the sniffer on the evaluation, sweep and forecasting paths; no raw cache means the
+  check is skipped with an INFO line, not silently. The rule was already implemented by
+  stepshifter, baseline and pipeline-core's own dataset, and written nowhere; views-r2darts2's
+  zarr rewrite (≥0.2.0, 2026-08-11) broke it — projected from the calibration cache, it
+  forecasts 22 country ids absent at the last observed month (the USSR, Yugoslavia and their
+  kin) on all-zero inputs. **What this catches that nothing did before, traced through the
+  code rather than observed:** an all-darts ensemble on 0.2.x would pool those phantoms with
+  no guard, evaluation would drop them uncounted, the store upload would publish them, and the
+  choropleth would draw the dead Sudan/Indonesia/Serbia/Tanzania over the living one. No
+  ensemble combines "all-darts" with "≥0.2.0" on any branch today; it is the next release of
+  either that would. r2darts2 ≥0.2.0 models are refused here until r2darts2 forecasts the
+  entities present at the last observed month (its unmerged `entity_fix` branch looks like
+  that fix).
+
+### Changed
+
+- **The two ensemble row-set refusals name the rows** (`AggregationModule._check_index_consistency`,
+  `_aggregate_prediction_frames`): which entities, over which months, in which model — capped
+  at 25 — instead of "extra rows in new model: 792". The tables were already computed; only
+  their sizes were printed (C-324).
+
 - **pandas, pyarrow and tqdm are declared dependencies** (`pandas>=1.5.3,<3.0`,
   `pyarrow>=14,<17`, `tqdm>=4.66,<5`). All three were undeclared and arrived only through
   viewser's dependency chain (pandas also through ingester3, floor-only). Measured, not

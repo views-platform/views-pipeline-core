@@ -44,6 +44,12 @@ layout is canonical, and the DataFrame is non-empty.
 - Guarantees the DataFrame has a valid `pd.MultiIndex` matching **exactly** the
   layout declared for `level` (`pgm`: `(priogrid_gid, month_id)` or `cm`:
   `(country_id, month_id)`).
+- **Guarantees entity coverage (ADR-064, #509)** when `reference_entities` is supplied:
+  every entity in the prediction index is in the reference set — the entities present in
+  the model's input at its last observed month (`reference_entities_from_raw`). A forecast
+  for a dissolved state is refused **by name** (up to `ENTITY_COVERAGE_MAX_LISTED` ids,
+  their month range, row count). When `reference_entities` is `None` the check is skipped
+  and an INFO line says so — skipped loudly, never quietly.
 
 ---
 
@@ -73,6 +79,11 @@ layout is canonical, and the DataFrame is non-empty.
 - `NotImplementedError` — `level` is not in `EXPECTED_INDEX_NAMES`.
 - Legacy index name `priogrid_id` raises `ValueError` — `priogrid_gid` is the
   canonical name.
+- `ValueError` — a predicted entity is absent from `reference_entities` (ADR-064); the
+  message lists the entities, the months, the row count and the reference size.
+- `ValueError` from `reference_entities_from_raw` — the raw cache lacks the two index
+  columns, or has no rows at the requested month (a reference taken where there is no data
+  would make every prediction a phantom).
 
 ---
 
@@ -123,6 +134,14 @@ CorePredictionSniffer().sniff_predictions(df, targets="ged_sb")
 - `TestMultiIndexStructure` — flat-index rejection, wrong index names, missing
   level values.
 - `TestStrictLevel` — pgm-level rejects cm index; cm-level rejects pgm index.
+- `TestEntityCoverage` — a dissolved entity is refused by name and month; entities inside
+  the reference pass; a newborn entity is not a phantom; a subset passes; no reference
+  skips loudly; the listing is capped; the legacy grid name resolves.
+- `TestReferenceEntitiesFromRaw` — the reference is read at the given month; a month the
+  cache does not cover, or a cache without the index columns, is refused.
+- `tests/test_managers/test_model_manager_prediction_format.py::TestEntityCoverageReference`
+  — the reference reaches the sniffer on the evaluation and forecasting paths at the right
+  month (`test[0] - 1`, `month_last`); no raw cache means `None`, not a crash.
 
 ---
 
