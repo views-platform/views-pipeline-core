@@ -47,6 +47,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ### Changed
 
+- **Pooled ensemble draws are joint across entities and targets** (`AggregationModule`,
+  method `concat`; ADR-064 "The pooling contract"; #63 / PR #270 by Sonja). One
+  `(model, sample)` pick per output column, drawn once with the model weights and reused for
+  every row and every target — so a constituent's sample column, which is one scenario across
+  all countries, stays one scenario in the pool. Until now the pick was made per
+  `(row, column)` cell and re-drawn per target: every pooled column was a patchwork with no
+  cross-country or cross-target dependence left, on the DataFrame path every monthly ensemble
+  uses (C-325; the fix sat approved and unmerged since July). The accepted trade-off: for
+  an engine that samples independently per entity, sharing the sample index across
+  entities changes nothing, but sharing the *model* choice does — every entity in a column
+  comes from the same constituent, so where constituents differ in level the pool gains a
+  cross-entity dependence through that shared choice. The fixed seed is unchanged; pooled values differ from earlier
+  runs because the draw pattern does.
 - **The two ensemble row-set refusals name the rows** (`AggregationModule._check_index_consistency`,
   `_aggregate_prediction_frames`): which entities, over which months, in which model — capped
   at 25 — instead of "extra rows in new model: 792". The tables were already computed; only

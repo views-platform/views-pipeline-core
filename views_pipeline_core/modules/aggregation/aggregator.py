@@ -372,11 +372,25 @@ class AggregationModule:
         self, df: pl.DataFrame, weights: Optional[List[float]] = None
     ) -> pl.DataFrame:
         """
-        Perform linear pooling with resampling to combine distributions
+        Perform linear pooling with resampling to combine distributions.
+
+        The contract (ADR-064, "The pooling contract"; #63, PR #270 by Sonja): column ``k``
+        of the pool is column ``chosen_samples[k]`` of model ``chosen_models[k]`` for
+        EVERY row and EVERY target. A constituent's sample column is one scenario across
+        all entities — one draw of the world — and pooling keeps it one: the ``(model,
+        sample)`` pick is made once per output column, before the target loop, and reused
+        everywhere. Until 2026-09-17 the pick was made per ``(row, column)`` cell and
+        re-drawn per target, so every pooled column was a patchwork with no cross-entity or
+        cross-target dependence left (register C-325). The accepted trade-off: for an
+        engine that samples independently per entity, sharing the sample index across
+        entities changes nothing — but sharing the MODEL choice does: every entity in a
+        column comes from the same constituent, so if constituents differ in level the pool
+        gains a cross-entity dependence through that shared choice.
 
         Parameters:
             df: Polars DataFrame with target columns containing distribution samples
-            weights: list of floats (default: equal weights)
+            weights: list of floats (default: equal weights); the model pick is drawn
+                with ``p=weights``
 
         Returns:
             Polars DataFrame with pooled distributions
@@ -395,7 +409,11 @@ class AggregationModule:
         n_samples = self.sample_size
 
         pooled_cols = []
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(42)  # fixed seed: pre-existing, reproducible pools
+
+        # One (model, sample) pick per output column, shared across all rows and targets.
+        chosen_models = rng.choice(self.n_models, size=n_samples, p=weights)
+        chosen_samples = rng.integers(n_samples, size=n_samples)
 
         for target_column in self.target_cols:
 
@@ -422,18 +440,11 @@ class AggregationModule:
 
             n_rows, n_models, n_samples_check = model_stack.shape
             assert n_samples_check == n_samples
+            assert n_models == self.n_models, (n_models, self.n_models)
 
-            # Draw model indices and sample indices for ALL rows at once
-            # model_idx: (n_rows, n_samples) with values in [0, n_models)
-            model_idx = rng.choice(n_models, size=(n_rows, n_samples), p=weights)
-            # sample_idx: (n_rows, n_samples) with values in [0, n_samples)
-            sample_idx = rng.integers(n_samples, size=(n_rows, n_samples))
-
-            # row indices broadcasted to (n_rows, n_samples)
-            row_idx = np.arange(n_rows)[:, None]
-
-            # Advanced indexing: result shape (n_rows, n_samples)
-            pooled_array = model_stack[row_idx, model_idx, sample_idx]
+            # Advanced indexing: result shape (n_rows, n_samples). The same column picks
+            # for every row (and, since they are drawn above the loop, every target).
+            pooled_array = model_stack[:, chosen_models, chosen_samples]
 
             # Convert each row to a list
             pooled_lists = pooled_array.tolist()
