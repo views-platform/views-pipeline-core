@@ -72,7 +72,22 @@ pyarrow = ">=14.0.0,<17.0.0"
 # viewser and importing every module — `managers.ensemble` was the one that failed.
 tqdm = ">=4.66,<5.0"
 ingester3 = "=2.1.1"
-wandb = "^0.18.7"
+# wandb: the caret (`^0.18.7` = `<0.19`) stood from 2.3.0 to 3.2.0 and excluded every
+# views-r2darts2 0.2.x (`wandb>=0.28.2`) — no environment could hold both (#508, #519).
+# Widened 2026-09-18 after MEASURING, not reading: the full suite and an offline end-to-end
+# WandBModule run (init, define_metric, scalars, tables, save, image, summary._as_dict,
+# alert, artifact, finish) pass on 0.18.7 (the conda dev env) and on 0.30.0 (fresh venv). The
+# `get_latest_run` project-not-found text (C-179) is unchanged between the two (read from
+# the SDK source, not a live call). A sweep cannot run offline, so that path is covered only
+# by the guard: tests/test_wandb_names_exist_on_the_installed_wandb.py derives from the
+# source every `wandb.*` name the package evaluates and every call on one, resolves the
+# names on the installed wandb and binds the calls against its signatures — the next wandb
+# that moves a name or drops a keyword fails there, by call site, not in a model run
+# (ADR-067). `<1.0` is the next major, the conventional place to stop. The only other
+# views-* caps are views-impact's
+# own `<0.19` (on pipeline-core 2.x, so it never shares an env with this range) and
+# views-faoapi's `==0.18.7` (does not depend on us); r2darts2 floors at 0.28.2.
+wandb = ">=0.18.7,<1.0"
 pyprojroot="^0.3.0"
 # views-evaluation 1.0.0 is an API-STABILITY declaration, not a rewrite: the diff from
 # v0.5.0 touches zero lines under `views_evaluation/` — only tests, CI, ADR-022 and the
