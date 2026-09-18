@@ -43,7 +43,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   ensemble combines "all-darts" with "≥0.2.0" on any branch today; it is the next release of
   either that would. r2darts2 ≥0.2.0 models are refused here until r2darts2 forecasts the
   entities present at the last observed month (its unmerged `entity_fix` branch looks like
-  that fix).
+  that fix). Register C-323 (the reach), C-324 (the refusals that printed counts).
 
 ### Changed
 
@@ -76,12 +76,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   views-storage, so #280 lifts both. ADR-063; register C-295.
 - **A `test-without-viewser` CI job** resolves the manifest with viewser left out (the
   install set is derived from `pyproject.toml`, not listed), installs the package with
-  `--no-deps`, and imports every module from the installed wheel. Its first draft
-  installed then `pip uninstall`ed viewser — which leaves viewser's orphaned dependencies
-  on disk and would not have caught pyarrow; review caught that. The module walk is
+  `--no-deps`, and imports every module from the installed wheel. The module walk is
   derived from the filesystem because `pkgutil.walk_packages` does not descend into the
-  namespace package `views_pipeline_core/modules/` — the first draft silently walked half
-  the package.
+  namespace package `views_pipeline_core/modules/`.
 - **The wandb ceiling is `<1.0`, not `<0.19`** (`wandb = ">=0.18.7,<1.0"`; #519, #508;
   register C-326). Poetry's caret on `^0.18.7` bounds a 0.x at the next minor, and every
   published pipeline-core since 2.3.0 carried that cap — so no environment could hold this
@@ -114,9 +111,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   behavioural, not renames, and the suite is the measurement for those. **For operators:**
   every engine repo that pins views-frames itself still says `<2` (baseline, hydranet,
   reporting, r2darts2, postprocessing), so for them nothing resolves differently until they
-  widen their own line — postprocessing's stated intent. The environments that will see
-  2.0.0 first are the views-models ensembles, which pin nothing and run entirely on this
-  package's manager path — the code the suite passed on 2.0.0.
+  widen their own line — postprocessing's stated intent; and views-evaluation's `[frames]`
+  extra caps it `<2` too (see the views-evaluation entry below). The environments that
+  will see 2.0.0 first are the views-models ensembles, which pin nothing, install no
+  views-reporting, and run entirely on this package's manager path — the code the suite
+  passed on 2.0.0.
 - **views-evaluation floor raised to 2.0.0** (`views-evaluation = ">=2.0.0,<3.0.0"`; #515).
   2.0.0 (2026-09-18) removes `to_dataframe()` and the `dataframe` extra — the surface #512
   stopped using — and `import views_evaluation` no longer loads pandas or scikit-learn;
@@ -130,6 +129,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   dtype through and their kernel accepts integer, boolean and float kinds alike; no
   views-models config requests MTD. **For operators:** an environment must move
   views-evaluation and this package together; views-reporting already admits `<3.0.0`.
+  **And one more thing the views-frames entry above cannot deliver on its own:**
+  views-evaluation 2.0.0's `[frames]` extra declares `views-frames<2.0.0`, and
+  views-reporting requests that extra — so in any environment holding views-reporting,
+  views-frames stays below 2.0.0 whatever this package's ceiling says, until
+  views-evaluation lifts its extra's cap (asked of them; register C-330).
+
+- **The three evaluation wandb tables (`evaluation_metrics_month|ts|step`) are still
+  logged**, by `WandBModule.log_evaluation_tables()` from `report.to_dict()["schemas"]` —
+  the replacement for the retired `to_dataframe` egress (#512; see Removed below). Same
+  keys; columns are the union of metric names across groups. Skipped for sweeps, as before.
+- **`EvaluationStage(wandb_module, io_manager, ...)` refuses a non-`None` `io_manager`.**
+  The stage no longer reads it; it stays in the signature because the surface snapshot
+  records it as required, and per ADR-062 a retired surface raises rather than ignores.
+  The three internal constructors pass `None`. A test fails the build at major ≥ 4 naming
+  the parameter and its three call sites.
+- Table columns are now in first-seen order across groups rather than the legacy
+  dataclass field order. Panels bind to column *names*, which are unchanged.
+- Table-logging failures are logged, not raised — inherited from `WandBModule.log`,
+  pre-existing and unchanged by this release; a `wandb.Table` construction error propagates.
 
 ### Fixed
 
@@ -239,33 +257,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   snapshot (it records constructor shapes of exported names) and no sibling repo imports
   them. Not a major.
 
-  One `to_dataframe` caller remains in this repo, deliberately:
-  `tests/test_evaluation_integration.py:64` exercises views-evaluation's *own* surface as a
-  regression guard. It is the test that goes red when views-evaluation 2.0 removes the
-  method — which is when the `^2.0.0` pin lands.
+  One `to_dataframe` caller remained in this repo, deliberately, until the `>=2.0.0` pin
+  landed: `tests/test_evaluation_integration.py` exercised views-evaluation's *own* surface
+  as a regression guard, went red when views-evaluation 2.0.0 removed the method, and was
+  deleted (#515; see Changed above).
 
-  Why this now: this call site was the only reason pipeline-core needed views-evaluation's
-  `[dataframe]` extra, which is one of the things holding `pandas<2` on every consumer
-  (#308). views-evaluation#63 — deprecating then removing `to_dataframe` — was blocked on
-  it. Epic #300 named this egress as one of its two remaining pandas surfaces.
-
-### Changed
-
-- **The three evaluation wandb tables (`evaluation_metrics_month|ts|step`) are still
-  logged**, now by `WandBModule.log_evaluation_tables()` straight from
-  `report.to_dict()["schemas"]` — same keys, so existing dashboard panels keep working;
-  columns are the union of metric names across groups (no all-NaN-column drop, no legacy
-  dataclass mapping), so they show a superset of what the DataFrames did. Skipped for sweeps,
-  as before.
-- **`EvaluationStage(wandb_module, io_manager, ...)` refuses a non-`None` `io_manager`.**
-  The stage no longer reads it; it stays in the signature because the surface snapshot
-  records it as required, and per ADR-062 a retired surface raises rather than ignores.
-  The three internal constructors pass `None`. A test fails the build at major ≥ 4 naming
-  the parameter and its three call sites.
-- Table columns are now in first-seen order across groups rather than the legacy
-  dataclass field order. Panels bind to column *names*, which are unchanged.
-- Table-logging failures are logged, not raised — inherited from `WandBModule.log`,
-  pre-existing and unchanged by this release; a `wandb.Table` construction error propagates.
+  Why this now: this call site was the last caller of views-evaluation's `to_dataframe()`
+  in this repo, and the reason views-evaluation could not retire it (their #63) — the
+  pandas surface that retirement removes is one of the things holding `pandas<2` on every
+  consumer (#308). Epic #300 named this egress as one of its two remaining pandas surfaces.
 
 ## [3.2.0] — 2026-09-08
 

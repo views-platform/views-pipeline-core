@@ -366,7 +366,7 @@ class ViewsDataLoader:
             2. Fetch data via queryset.publish().fetch_with_drift_detection()
             3. Log any drift detection alerts
             4. On KeyError: Retry without drift detection
-            6. Convert to float64 for numerical stability
+        5. Convert to float64 for numerical stability
 
         Example:
             >>> df, alerts = loader._fetch_data_from_viewser(self_test=False)
