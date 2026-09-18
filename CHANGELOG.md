@@ -120,6 +120,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ### Fixed
 
+- **Baseline and constituent rows are back in ensemble evaluation reports** (#485;
+  register C-328, Tier 1). The reporting stage built one `MetricFrameFileSource` rooted at
+  the *subject's* `data/generated`, but `EvaluationStage` writes every model's MetricFrame
+  under *that model's own* `data/generated` — so every comparison model the template asked
+  for by name was probed at `<subject>/data/generated/<other>/…`, a directory nothing
+  writes, and reported absent. No error: the port's contract treats a missing directory as
+  "no evaluation exists", and the report degrades-and-announces. No fixture on either side
+  put a comparison model under a root different from the subject's — this repo's stage test
+  mocked the file source outright, views-reporting's file-source test wrote a single model,
+  and its template tests drove an in-memory source double with no root at all — so nothing
+  that gates a run exercised the shape production has. Now `PerModelMetricFrameSource` (new,
+  `managers/reporting/metric_frame_source.py`) implements views-reporting's
+  `EvaluationSource` by composing one file source per model, each rooted at that model's
+  own directory (`ModelPathManager(name, validate=False).data_generated`, the ensemble
+  managers' own constituent lookup); the subject's root is supplied because an ensemble is
+  not resolvable by name. The locked on-disk layout (C-202) is unchanged — only the root
+  moved — and an absent frame is now logged with the root probed. **views-reporting:** your
+  seam test pins the stage's `MetricFrameFileSource(root=…data_generated)` construction by
+  AST; it now needs to find `PerModelMetricFrameSource` instead (your #287). Not confirmed
+  against a re-rendered production report; verified at the source boundary with production's
+  layout.
 - **A config_queryset.py that fails to import now raises, with the install command when
   the missing module is a data-source client** — `viewser` (77 views-models sources) or
   `datafactory_query` (23; it ships in views-datafactory). `ModelPathManager.get_queryset`

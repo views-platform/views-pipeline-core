@@ -240,7 +240,8 @@ class ReportingStage:
         """Generate HTML evaluation report(s) from the persisted MetricFrame(s).
 
         Renders from the typed evaluation-of-record MetricFrame via an injected
-        ``MetricFrameFileSource`` (ADR-018 / C-108) — **not** a render-time WandB scrape
+        ``EvaluationSource`` (ADR-018 / C-108) — ``PerModelMetricFrameSource``, which looks
+        each model up under its own ``data/generated`` (#485) — **not** a render-time WandB scrape
         (``get_latest_run``), which was the C-48/C-110 wrong-run failure class. One report
         per target; a target with no persisted frame is skipped (its eval may have been
         capability-skipped or not run).
@@ -252,9 +253,11 @@ class ReportingStage:
             Path to the last generated HTML report, or None if nothing was rendered.
         """
         _require_evaluation_source_consumer()
-        from views_reporting.sources import MetricFrameFileSource
         from views_reporting.templates.reports.evaluation import (
             EvaluationReportTemplate,
+        )
+        from views_pipeline_core.managers.reporting.metric_frame_source import (
+            PerModelMetricFrameSource,
         )
 
         targets = combined_targets(context.configs)
@@ -265,14 +268,16 @@ class ReportingStage:
         model_name = context.model_path.model_name
         report_path = None
         for target in targets:
-            # LOCKED cross-repo path contract (C-202): root=<data_generated> matches the
-            # producer's <data_generated>/<model>/<run_type>/metricframe_<target> layout
+            # LOCKED cross-repo path contract (C-202): every model's frame sits at
+            # <that model's data_generated>/<model>/<run_type>/metricframe_<target>
             # (EvaluationStage._save_metric_frame ↔ MetricFrameFileSource._frame_dir).
-            source = MetricFrameFileSource(
-                root=context.model_path.data_generated,
+            # One MetricFrameFileSource rooted at the SUBJECT's data_generated found the
+            # subject and no one else — every constituent/baseline row went absent (#485).
+            source = PerModelMetricFrameSource(
+                primary_model=model_name,
+                primary_root=context.model_path.data_generated,
                 run_type=context.run_type,
                 target=target,
-                primary_model=model_name,
             )
             if source.metric_frame(model_name) is None:
                 logger.warning(
