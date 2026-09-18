@@ -98,7 +98,10 @@ class.
     C-108) — emitted **independent of `io_manager`** (PFE ensembles have `io_manager=None`
     but still get a frame). Provenance: model/run_type/partition/level + `run_id` (active
     WandB run) + `data_version` (`data_loader.month_last`). The save path is a **locked
-    cross-repo contract** with `MetricFrameFileSource._frame_dir` (register C-202).
+    cross-repo contract** with `MetricFrameFileSource._frame_dir` (register C-202) — and the
+    root is **this model's own** `data_generated`; the reader (`PerModelMetricFrameSource`,
+    reporting stage) resolves each model to its own root, since one root for all models
+    found only the subject (#485, C-328).
     Capability-skipped (loud-but-soft) if `to_metric_frame` is unavailable.
     **Disk only: nothing uploads the MetricFrame to WandB.** (Until #512 the legacy
     parquets were `wandb.save()`d; that upload went with them.)

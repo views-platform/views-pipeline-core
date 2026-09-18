@@ -380,10 +380,12 @@ class EvaluationStage:
 
         **Locked cross-repo path contract** with views-reporting's `MetricFrameFileSource`
         (`_frame_dir = root / model / run_type / metricframe_<target>`): the frame is saved
-        under ``<data_generated> / <model> / <run_type> / metricframe_<target>``, and the
-        reporting stage (S5/#229) constructs ``MetricFrameFileSource(root=<data_generated>)``
-        to read it. The two repos MUST agree on this layout — a mismatch is a silent
-        "frame not found" (registered as a Tier-2 cross-repo path-drift risk).
+        under ``<THIS model's data_generated> / <model> / <run_type> / metricframe_<target>``,
+        and the reporting stage (S5/#229) reads it back through ``PerModelMetricFrameSource``,
+        one ``MetricFrameFileSource`` per model rooted at that model's own ``data_generated``
+        (#485: one source rooted at the subject's found the subject and nothing else). The
+        two repos MUST agree on this layout — a mismatch is a silent "frame not found"
+        (registered as a Tier-2 cross-repo path-drift risk, C-202).
 
         Provenance is intentionally partial here (model/run_type/partition/level);
         ``run_id``/``data_version`` are plumbed in S4 (#228), closing C-110.
