@@ -100,7 +100,15 @@ pyprojroot="^0.3.0"
 views-evaluation = "^1.0.0"
 art = "^6.4"
 polars = ">=1.34.0,<2.0.0"
-views-frames = "^1.10.2"
+# views-frames: `^1.10.2` meant `<2.0.0`, and 2.0.0 has been on PyPI since 2026-08-18 with
+# views-postprocessing waiting behind this line (#488). What 2.0.0 changed (their ADR-028):
+# a frame's `index` must be a SpatioTemporalIndex (TypeError otherwise), `.values` is a
+# read-only view, and `map_estimate` refuses inf/NaN by name. Measured 2026-09-18, not
+# read: the full suite on 1.10.2 (conda dev env) and on 2.0.0 (fresh venv, wandb 0.30.0) —
+# one test failed on 2.0.0, an `is` identity assertion on `.values` in
+# tests/test_modules/test_feature_frame_path.py, now `np.shares_memory`; nothing in the
+# package mutates a frame's buffer or passes a non-index as an index. `<3` per ADR-067.
+views-frames = ">=1.10.2,<3.0.0"
 
 # OPTIONAL (#345, register C-253). Appwrite is the SECONDARY EXTERNAL destination under
 # ADR-047 — local disk is authoritative and views-forecasts is the primary external
