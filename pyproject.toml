@@ -89,15 +89,23 @@ ingester3 = "=2.1.1"
 # views-faoapi's `==0.18.7` (does not depend on us); r2darts2 floors at 0.28.2.
 wandb = ">=0.18.7,<1.0"
 pyprojroot="^0.3.0"
-# views-evaluation 1.0.0 is an API-STABILITY declaration, not a rewrite: the diff from
-# v0.5.0 touches zero lines under `views_evaluation/` — only tests, CI, ADR-022 and the
-# version. So `^1.0.0` (= >=1.0.0,<2.0.0) buys the guarantee without changing behaviour;
-# the full suite was run against 1.0.0 before this floor was raised (1707 passed).
+# views-evaluation 2.0.0 (2026-09-18) is the pandas-free release: `to_dataframe()` and the
+# `dataframe` extra are gone; `to_dict()`, `get_schema_results()` and `to_metric_frame()`
+# are unchanged, and those three are all this package calls since #512 retired the pandas
+# evaluation egress. Floor raised on measurement (#515): the full suite on 2.0.0 in a fresh
+# venv and in the conda dev env, and the deliberate `to_dataframe` tripwire test that was
+# waiting for exactly this removal deleted with it. Two behaviour changes that arrived in
+# 1.1.0 and ride along: AP on a group with no positive truth is `nan` (their ADR-015 R9),
+# which this package's WandB averaging now skips instead of propagating; and AP/MTD refuse
+# non-real dtypes, string dtypes and `power=True` — none of which this package sends:
+# the adapter passes the source column's dtype through, and their kernel accepts integer,
+# boolean and float kinds alike; no views-models config requests MTD or a power.
+# `<3.0.0`: the next major, ADR-067's shape; views-reporting already admits `<3.0.0`.
 #
-# The previous `^0.5.0` capped at <0.6.0 — Poetry's caret bounds a 0.x at the next MINOR
-# — so 1.0.0 was already excluded, and the suite had drifted to a version the metadata
-# forbade. tests/test_declared_dependencies_match_reality.py now fails on that drift.
-views-evaluation = "^1.0.0"
+# History: `^0.5.0` capped at <0.6.0 (Poetry's caret bounds a 0.x at the next MINOR) and
+# excluded 1.0.0 while the suite ran on it; tests/test_declared_dependencies_match_reality.py
+# fails on that drift now.
+views-evaluation = ">=2.0.0,<3.0.0"
 art = "^6.4"
 polars = ">=1.34.0,<2.0.0"
 # views-frames: `^1.10.2` meant `<2.0.0`, and 2.0.0 has been on PyPI since 2026-08-18 with

@@ -488,7 +488,6 @@ def _run_evaluate_prediction_df(
         "target": "lr_sb", "task": "regression", "pred_type": "point",
         "schemas": {"step": {}, "time_series": {}, "month": {}},
     }
-    mock_report.to_dataframe.return_value = pd.DataFrame()
 
     with patch("views_pipeline_core.files.utils.read_dataframe", return_value=actuals_df):
         with patch.object(
@@ -913,7 +912,6 @@ def _run_pf_eval_clean_path(manager: _ForecastStub, list_predictions: dict) -> t
         "target": "lr_sb", "task": "regression", "pred_type": "point",
         "schemas": {"step": {}, "time_series": {}, "month": {}},
     }
-    mock_report.to_dataframe.return_value = pd.DataFrame()
 
     # Distinct sentinels so we can tell which EF object reached evaluate()
     mock_ef_pf     = MagicMock(name="ef_from_prediction_frames")
@@ -1059,7 +1057,6 @@ def _run_df_eval_clean_path(manager: _ForecastStub, list_predictions: list) -> t
         "target": "lr_sb", "task": "regression", "pred_type": "point",
         "schemas": {"step": {}, "time_series": {}, "month": {}},
     }
-    mock_report.to_dataframe.return_value = pd.DataFrame()
 
     with patch("views_pipeline_core.files.utils.read_dataframe", return_value=actuals_df):
         with patch.object(

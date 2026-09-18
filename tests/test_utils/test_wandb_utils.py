@@ -147,6 +147,35 @@ class TestCalculateMeanEvaluationMetrics:
         result = calculate_mean_evaluation_metrics({})
         assert result == {}
 
+    def test_skips_nan_the_way_nanmean_would(self):
+        """views-evaluation returns nan for a metric undefined on a group's data (AP on a
+        month with no positive truth since 1.1.0, ADR-015 R9; Pearson on a constant
+        series). One such group must not turn the dashboard's mean into nan."""
+        import math
+        eval_dict = {
+            'step01': {'AP': 1.0, 'pearson': float('nan')},
+            'step02': {'AP': float('nan'), 'pearson': 0.5},
+            'step03': {'AP': 0.5, 'pearson': 0.7},
+        }
+        result = calculate_mean_evaluation_metrics(eval_dict)
+        assert result['AP'] == pytest.approx(0.75)
+        assert result['pearson'] == pytest.approx(0.6)
+        assert not any(math.isnan(v) for v in result.values())
+
+    def test_a_metric_that_is_nan_in_every_group_is_omitted_not_nan(self):
+        result = calculate_mean_evaluation_metrics({'step01': {'AP': float('nan'), 'mse': 0.1}})
+        assert result == {'mse': pytest.approx(0.1)}
+
+    def test_inf_is_a_number_and_averages_as_one(self):
+        """MCR with predicted conflict and none observed is inf by contract (ADR-015 R1)."""
+        result = calculate_mean_evaluation_metrics({'step01': {'MCR': float('inf')}, 'step02': {'MCR': 1.0}})
+        assert result['MCR'] == float('inf')
+
+    def test_numpy_nan_is_nan_too(self):
+        import numpy as np
+        result = calculate_mean_evaluation_metrics({'step01': {'AP': np.nan}, 'step02': {'AP': np.float64(0.5)}})
+        assert result['AP'] == pytest.approx(0.5)
+
 
 class TestLogWandbLogDict:
     @patch('views_pipeline_core.modules.wandb.utils._safe_wandb_log')
