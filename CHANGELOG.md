@@ -101,6 +101,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   0.2.x and this package; the pandas wall (darts 0.46.1 needs pandas ≥2.2; viewser holds
   pandas <2) stands — see ADR-063. r2darts2 0.2.2 shipped with `>=0.28.2` although its
   `development` has `>=0.18.7`; a 0.2.3 is theirs to cut.
+- **The views-frames ceiling is `<3.0.0`, not `<2.0.0`** (`views-frames = ">=1.10.2,<3.0.0"`;
+  #488; register C-327). 2.0.0 has been on PyPI since 2026-08-18 — its one breaking change
+  is that a frame's `index` must be a `SpatioTemporalIndex` and `.values` is a read-only
+  view (their ADR-028) — and views-postprocessing, which measured 2.0.0 as byte-identical
+  for its wire contract, has been blocked behind this pin since. Measured here, not taken
+  from them: the full suite on 1.10.2 and on 2.0.0 in a fresh venv; one test failed on
+  2.0.0, an `is` identity assertion on `.values` (now `np.shares_memory`, which is the
+  property it meant). Every frame this package builds is given a `SpatioTemporalIndex`
+  (six sites, read) and nothing writes into a frame's buffer. Same shape as the wandb
+  widening above (ADR-067); no surface guard this time — views-frames' 2.0.0 changes were
+  behavioural, not renames, and the suite is the measurement for those. **For operators:**
+  every engine repo that pins views-frames itself still says `<2` (baseline, hydranet,
+  reporting, r2darts2, postprocessing), so for them nothing resolves differently until they
+  widen their own line — postprocessing's stated intent. The environments that will see
+  2.0.0 first are the views-models ensembles, which pin nothing and run entirely on this
+  package's manager path — the code the suite passed on 2.0.0.
 
 ### Fixed
 
