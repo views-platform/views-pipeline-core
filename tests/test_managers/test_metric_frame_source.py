@@ -18,15 +18,18 @@ from unittest.mock import patch
 
 import pytest
 
-from views_pipeline_core.managers.evaluation.stage import METRICFRAME_DIR_PREFIX
-from views_pipeline_core.managers.reporting.metric_frame_source import (
-    PerModelMetricFrameSource,
-    model_data_generated,
-)
-
+# views-reporting is optional and absent in the `test-core-only` CI job; `find_spec` on a
+# dotted name raises when the parent package is missing, so skip on the package first.
+pytest.importorskip("views_reporting")
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("views_reporting.sources") is None,
     reason="views-reporting lacks the EvaluationSource consumer (#173)",
+)
+
+from views_pipeline_core.managers.evaluation.stage import METRICFRAME_DIR_PREFIX  # noqa: E402
+from views_pipeline_core.managers.reporting.metric_frame_source import (  # noqa: E402
+    PerModelMetricFrameSource,
+    model_data_generated,
 )
 
 RUN_TYPE = "calibration"
