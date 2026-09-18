@@ -117,9 +117,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   widen their own line — postprocessing's stated intent. The environments that will see
   2.0.0 first are the views-models ensembles, which pin nothing and run entirely on this
   package's manager path — the code the suite passed on 2.0.0.
+- **views-evaluation floor raised to 2.0.0** (`views-evaluation = ">=2.0.0,<3.0.0"`; #515).
+  2.0.0 (2026-09-18) removes `to_dataframe()` and the `dataframe` extra — the surface #512
+  stopped using — and `import views_evaluation` no longer loads pandas or scikit-learn;
+  `to_dict()`, `get_schema_results()` and `to_metric_frame()`, the three calls this package
+  makes, are unchanged. Measured: the full suite on 2.0.0 in a fresh venv and in the dev env.
+  The deliberate `to_dataframe` tripwire test from #512 went red on cue and is deleted, with
+  the stale `to_dataframe.return_value` lines on six mock reports. Two 1.1.0 behaviour
+  changes ride along: AP on a group with no positive truth is now `nan` (their ADR-015 R9;
+  see Fixed below for what that did here), and AP/MTD refuse non-real and string dtypes and
+  `power=True` — nothing this package sends: the adapter passes the source column's
+  dtype through and their kernel accepts integer, boolean and float kinds alike; no
+  views-models config requests MTD. **For operators:** an environment must move
+  views-evaluation and this package together; views-reporting already admits `<3.0.0`.
 
 ### Fixed
 
+- **One undefined group no longer turns a WandB mean metric into `nan`**
+  (`calculate_mean_evaluation_metrics`; #515, register C-329). views-evaluation returns
+  `nan` for a metric that is undefined on a group's data — Pearson on a constant series,
+  MCR with nothing observed, and since 1.1.0 AP on a month with no positive truth (ADR-015
+  R9) — and this package's step/month/time-series means skipped `None` but not `nan`, so
+  the dashboard's `AP_mean` (or `pearson_mean`) became `nan` the moment one such group
+  existed. Reproduced on 2.0.0: two steps, one with no positive truth → `AP_mean = nan`.
+  The mean now leaves `nan` out the way `numpy.nanmean` does and views-evaluation's own
+  `mean` row does; `inf` (MCR by contract) still averages as a number; a metric undefined
+  in every group is omitted rather than reported as `nan`. The evaluation-of-record
+  (`MetricFrame`) was never affected — only the WandB scalars.
 - **Baseline and constituent rows are back in ensemble evaluation reports** (#485;
   register C-328, Tier 1). The reporting stage built one `MetricFrameFileSource` rooted at
   the *subject's* `data/generated`, but `EvaluationStage` writes every model's MetricFrame

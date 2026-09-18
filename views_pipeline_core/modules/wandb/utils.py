@@ -1,4 +1,5 @@
 from typing import Union
+import math
 from statistics import mean
 import re
 from dataclasses import asdict
@@ -137,9 +138,26 @@ def generate_wandb_time_series_wise_log_dict(
     return log_dict
 
 
+def _is_nan(value) -> bool:
+    """True for float nan (and numpy's); False for anything that is not a real number."""
+    try:
+        return math.isnan(value)
+    except TypeError:
+        return False
+
+
 def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
     """
     Calculate the mean evaluation metrics for a dictionary of evaluation metrics.
+
+    A group's value may be ``None`` (metric not computed) or ``nan`` — views-evaluation's
+    documented sentinel for a metric that is undefined on that group's data: Pearson on a
+    constant series, MCR with nothing observed, and since 1.1.0 AP on a group with no
+    positive truth (their ADR-015 R1/R2/R9). Both are left out of the mean, as
+    ``numpy.nanmean`` would leave them out and as views-evaluation's own ``mean`` row does;
+    a plain ``mean`` would let one empty month turn ``AP_mean`` into ``nan`` on the
+    dashboard. ``inf`` (MCR with predicted conflict where none occurred) is a number and
+    is averaged as one. A metric with no finite-or-inf value in any group is omitted.
 
     Args:
         evaluation_dict (dict): A dictionary of evaluation metrics,
@@ -157,7 +175,7 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
     for item in evaluation_dict.values():
         metric_names.update(item.keys() if isinstance(item, dict) else vars(item).keys())
 
-    # Compute the mean for each metric, skipping metrics with None values
+    # Compute the mean for each metric, skipping None and nan (see the docstring)
     for key in metric_names:
         valid_values = [
             value
@@ -165,7 +183,7 @@ def calculate_mean_evaluation_metrics(evaluation_dict: dict) -> dict:
                 (item.get(key) if isinstance(item, dict) else vars(item).get(key))
                 for item in evaluation_dict.values()
             )
-            if value is not None
+            if value is not None and not _is_nan(value)
         ]
         if valid_values:
             mean_dict[key] = mean(valid_values)

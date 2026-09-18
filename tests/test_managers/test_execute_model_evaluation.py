@@ -153,7 +153,6 @@ def _make_mock_report():
         "target": "mock", "task": "regression", "pred_type": "point",
         "schemas": {"step": {}, "time_series": {}, "month": {}},
     }
-    report.to_dataframe.return_value = pd.DataFrame()
     return report
 
 
