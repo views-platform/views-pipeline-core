@@ -82,6 +82,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   derived from the filesystem because `pkgutil.walk_packages` does not descend into the
   namespace package `views_pipeline_core/modules/` — the first draft silently walked half
   the package.
+- **The wandb ceiling is `<1.0`, not `<0.19`** (`wandb = ">=0.18.7,<1.0"`; #519, #508;
+  register C-326). Poetry's caret on `^0.18.7` bounds a 0.x at the next minor, and every
+  published pipeline-core since 2.3.0 carried that cap — so no environment could hold this
+  package and views-r2darts2 0.2.x (`wandb>=0.28.2`) at once, and every views-* package
+  that declares no wandb of its own (hydranet, baseline, stepshifter, models, reporting,
+  postprocessing) inherited the ceiling. Widened on measurement: the full suite and an
+  offline end-to-end `WandBModule` run (init, metrics, tables, save, image,
+  `summary._as_dict`, alert, artifact, finish) pass on 0.18.7 and on 0.30.0 in a fresh
+  venv; the project-not-found message `get_latest_run` matches on (C-179) is the same text
+  at both ends (read from the SDK source, not a live call). Not measured, because it cannot
+  run offline: a sweep (`wandb.sweep`/`wandb.agent`). New guard, ADR-067:
+  `tests/test_wandb_names_exist_on_the_installed_wandb.py` derives from the source every
+  `wandb.*` name the package evaluates and every call it makes on one, resolves each name on
+  the installed wandb and binds each call against the installed signature — so the next
+  wandb that moves a name or drops a keyword fails there, by chain and call site (the sweep
+  path included). **For operators:** this removes one of the two walls between r2darts2
+  0.2.x and this package; the pandas wall (darts 0.46.1 needs pandas ≥2.2; viewser holds
+  pandas <2) stands — see ADR-063. r2darts2 0.2.2 shipped with `>=0.28.2` although its
+  `development` has `>=0.18.7`; a 0.2.3 is theirs to cut.
 
 ### Fixed
 

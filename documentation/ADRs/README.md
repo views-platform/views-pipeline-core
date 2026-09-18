@@ -83,6 +83,7 @@ Domain decisions specific to `views-pipeline-core`.
 | [064](064_forecast_entity_set_is_the_last_observed_months.md) | A forecast's entity set is the entity set of the last observed month | Accepted |
 | [065](065_model_governance_point_probabilistic_predictions.md) | Model governance protocol — point and probabilistic predictions | Proposed |
 | [066](066_including_models_in_ensembles.md) | Ensemble governance protocol — including models in shadow ensembles | Proposed |
+| [067](067_third_party_sdk_ceilings_move_on_measurement.md) | A third-party SDK ceiling moves on measurement; the surface the package uses is derived, not listed | Accepted |
 
 ---
 
