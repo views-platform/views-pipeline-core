@@ -100,7 +100,7 @@ All failures are loud -- no silent fallbacks, no boolean returns from validators
 
 - **Subclasses**: `_PGDataset` (PRIO-grid), `_CDataset` (country), and their public wrappers `PGMDataset`, `CMDataset`. Subclasses override `validate_indices()` to enforce specific entity index names (`priogrid_id`, `country_id`).
 - **`ModelPathManager`**: Used in `__init__` to check if `source` is a path (via `_is_path`).
-- **`AggregationManager`**: Wraps `_ViewsDataset` internally via `CMDataset`/`PGMDataset` in `_load_to_polars()`.
+- **`AggregationModule`**: Wraps `_ViewsDataset` internally via `CMDataset`/`PGMDataset` in `_load_to_polars()`.
 
 **Extracted dependencies** (now in `views_reporting`, no longer imported by handlers.py):
 - `PosteriorDistributionAnalyzer`, `PlotDistribution`, `ForecastReconciler`, `joblib`, `torch`, `matplotlib`, `viewser (Queryset, Column)`, `tqdm`

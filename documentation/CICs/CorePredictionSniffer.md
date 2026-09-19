@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-03-02
+**Last reviewed:** 2026-09-19 (3.3.0 docs pass: §3 entity-coverage guarantee and `reference_entities` read against `core_prediction_sniffer.py`; content unchanged)
 **Related ADRs:** ADR-003 (Authority of Declarations), ADR-008 (Observability), ADR-009 (Boundary Contracts), ADR-041 (Sniffer Pattern)
 
 ---

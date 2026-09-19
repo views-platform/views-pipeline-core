@@ -50,48 +50,66 @@ Each CIC has 12 sections:
 
 ## Active Contracts
 
+Every `.md` in this directory except this index and the template is listed here — a file on
+disk that is not in this list is a defect (#506 found thirteen, 2026-09-19).
+
 ### Orchestrators
 - `ForecastingModelManager.md` — Central pipeline orchestrator (train/evaluate/forecast/report)
-- `EnsembleManager.md` — Multi-model ensemble orchestration with reconciliation
+- `EnsembleManager.md` — Multi-model ensemble orchestration (DataFrame path, template default)
+- `DataFrameEnsembleManager.md` — Composition-based DataFrame ensemble manager
+- `PredictionFrameEnsembleManager.md` — PredictionFrame-native ensemble manager
+
+### Stages
+- `EvaluationStage.md` — Build EvaluationFrame, score, persist the MetricFrame, log to WandB
+- `ForecastingStage.md` — Predict, sniff, save on the forecasting path
 
 ### Path Managers
-- `ModelPathManager.md` — Centralized path resolution for model artifacts
+- `ModelPathManager.md` — Centralized path resolution for model artifacts; queryset loader
 
 ### Configuration
 - `ConfigurationManager.md` — 5-source priority config merge
 - `PipelineConfig.md` — Global singleton (format, version, org name)
+- `ForecastingModelArgs.md` — Validated CLI argument dataclass
 
-### Data Representations
-- `PredictionFrame.md` — Self-validating canonical prediction container
+### Data Representations and Loading
+- `PredictionFrame.md` — The views-frames leaf type, re-exported
 - `_ViewsDataset.md` — MultiIndex DataFrame with tensor conversion
+- `ViewsDataLoader.md` — Fetch, cache and validate a model's input
+- `IDataSource.md` — Protocol between framework and engine data sources
 
 ### Validators (Sniffers)
 - `CoreConfigSniffer.md` — Config contract enforcement
 - `CoreDataSniffer.md` — Data structural auditing
-- `CorePredictionSniffer.md` — Prediction output validation
+- `CoreFrameSniffer.md` — FeatureFrame structural auditing
+- `CorePredictionSniffer.md` — Prediction output validation, incl. entity coverage (ADR-064)
 
 ### Adapters
 - `EvaluationAdapter.md` — DataFrame/PF to EvaluationFrame bridge
 - `PredictionFrameConverter.md` — PF to DataFrame/Arrow conversion
 
-### Persistence
+### Persistence and External Services
 - `PredictionIOManager.md` — Prediction persistence orchestration
 - `DatastoreModule.md` — Appwrite file storage interface
+- `AppWriteFileModule.md` — Appwrite file operations
+- `AppwriteProvisioner.md` — Appwrite collection provisioning
+- `WandBModule.md` — Weights & Biases runs, metrics, tables, alerts, artifacts
 
-### Aggregation
-- `AggregationManager.md` — Ensemble prediction pooling
-- `ReconciliationModule.md` — Hierarchical PGM-CM forecast reconciliation
-
-### Analysis
-- `PosteriorDistributionAnalyzer.md` — MAP and HDI computation
-
-### Transformations
-
-### CLI
-- `ForecastingModelArgs.md` — Validated CLI argument dataclass
+### Aggregation and Reconciliation
+- `AggregationModule.md` — Ensemble prediction pooling; the joint-draw contract (ADR-064)
+- `ReconcileFrames.md` — Cross-level reconciliation through the `Reconciler` port
 
 ### Reporting
-- `ReportModule.md` — HTML report builder with Tailwind CSS
+- `PerModelMetricFrameSource.md` — Evaluation-of-record source, one root per model (#485)
+
+## Retired Contracts
+
+Kept for history; the class no longer exists in this repository. Each file's header says
+where it went.
+
+- `AggregationManager.md` — replaced by AggregationModule (2026-09-19, #506)
+- `ReconciliationModule.md` — the class is `views_frames_reconcile.ReconciliationModule` (ADR-054)
+- `PosteriorDistributionAnalyzer.md` — removed with `ForecastReconciler`; summaries live in `views_frames_summarize`
+- `ReportModule.md` — lives in views-reporting (ADR-054)
 
 ---
 

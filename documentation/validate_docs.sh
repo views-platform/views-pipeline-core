@@ -49,6 +49,17 @@ if [ -f "CICs/README.md" ]; then
             errors=$((errors + 1))
         fi
     done < <(grep -E '^- `[^`]+\.md`' CICs/README.md 2>/dev/null | grep -v '>' || true)
+    # The other direction — every contract on disk is in the index. #506 found thirteen
+    # files the list never named (one of them a week old); the check above could not see
+    # them because it only walks the list. Derived from the directory, not the list.
+    for f in CICs/*.md; do
+        name=$(basename "$f")
+        case "$name" in README.md|cic_template.md) continue ;; esac
+        if ! grep -qE "^- \`$name\`" CICs/README.md; then
+            echo "  ERROR: CIC on disk but not in the index: CICs/$name"
+            errors=$((errors + 1))
+        fi
+    done
 fi
 
 # 3a. Cross-ADR reference integrity — verify ALL ADR-NNN text references resolve to files

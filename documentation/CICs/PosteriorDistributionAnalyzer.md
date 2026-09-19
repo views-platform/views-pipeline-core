@@ -1,11 +1,13 @@
 # Class Intent Contract: PosteriorDistributionAnalyzer
 
-**Status:** Active
+**Status:** Retired
 **Owner:** Project maintainers
 **Last reviewed:** 2026-04-01
 **Related ADRs:** ADR-001 (Ontology of the Repository)
 
 ---
+
+> **Retired 2026-09-19 (#506).** The class this contract describes does not exist in this repository: `views_pipeline_core.modules.statistics` was removed with the `ForecastReconciler` it served (this file's own §11/§12 record the deletion). MAP/HDI summaries live in `views_frames_summarize`. The body below is kept for history and is not maintained.
 
 ## 1. Purpose
 

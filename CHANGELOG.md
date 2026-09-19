@@ -79,6 +79,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   `--no-deps`, and imports every module from the installed wheel. The module walk is
   derived from the filesystem because `pkgutil.walk_packages` does not descend into the
   namespace package `views_pipeline_core/modules/`.
+- **Four Class Intent Contracts for classes that no longer exist here are Retired**
+  (`AggregationManager`, `ReconciliationModule`, `PosteriorDistributionAnalyzer`,
+  `ReportModule` — each file's header says where the class went); `AggregationModule`,
+  which carries this release's pooling changes, has its contract; the CIC index lists every
+  file on disk, and `validate_docs.sh` now refuses a contract that is on disk but not in
+  the index (it had only checked the other direction) — #506.
 - **The wandb ceiling is `<1.0`, not `<0.19`** (`wandb = ">=0.18.7,<1.0"`; #519, #508;
   register C-326). Poetry's caret on `^0.18.7` bounds a 0.x at the next minor, and every
   published pipeline-core since 2.3.0 carried that cap — so no environment could hold this

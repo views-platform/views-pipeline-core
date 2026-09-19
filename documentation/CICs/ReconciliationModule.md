@@ -1,11 +1,13 @@
 # Class Intent Contract: ReconciliationModule
 
-**Status:** Active
+**Status:** Retired
 **Owner:** Project maintainers
 **Last reviewed:** 2026-04-01
 **Related ADRs:** ADR-001 (Ontology), ADR-036 (Ensemble Reconciliation)
 
 ---
+
+> **Retired 2026-09-19 (#506).** The class this contract describes no longer lives in this repository. Reconciliation is `views_frames_reconcile.ReconciliationModule` (the leaf), reached through the `Reconciler` port in `views_pipeline_core/domain/reconciliation_port.py` and the `reconcile_frames` function (`documentation/CICs/ReconcileFrames.md`, ADR-054, PR #217). The body below is the contract as it stood when the class was here; it is kept for history and is not maintained.
 
 ## 1. Purpose
 

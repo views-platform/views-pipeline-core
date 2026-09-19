@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-06-05
+**Last reviewed:** 2026-09-19 (3.3.0 docs pass: `get_queryset` re-raise and install hints read against `data/model_path.py`; content unchanged)
 **File:** `views_pipeline_core/data/model_path.py` (canonical); re-exported from `managers/model/model.py` for backward compatibility
 **Related ADRs:** ADR-001 (Ontology), ADR-002 (Topology), ADR-009 (Boundary Contracts), ADR-045 (Pipeline Stage Architecture, E6)
 
