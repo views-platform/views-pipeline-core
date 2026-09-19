@@ -421,7 +421,10 @@ def _make_eval_stub(prediction_format: str) -> _ForecastStub:
 
     m._save_predictions = Mock()
     m._partition_dict = {"calibration": {"train": (121, 444), "test": (445, 492)}}
-    m._eval_type = "calibration"
+    # An EVAL-type value ("standard"/"complete"/"live"), not a run-type one: with
+    # "calibration" here, a wiring slip that passed `_eval_type` where `run_type` belongs
+    # still found the raw cache and every test stayed green (cold read of #525).
+    m._eval_type = "standard"
     m._io = MagicMock()
 
     from views_pipeline_core.managers.evaluation.stage import EvaluationStage
@@ -628,7 +631,10 @@ def _make_sweep_stub(prediction_format: str) -> _ForecastStub:
 
     m._save_predictions = Mock()
     m._partition_dict = {"calibration": {"train": (121, 444), "test": (445, 492)}}
-    m._eval_type = "calibration"
+    # An EVAL-type value ("standard"/"complete"/"live"), not a run-type one: with
+    # "calibration" here, a wiring slip that passed `_eval_type` where `run_type` belongs
+    # still found the raw cache and every test stayed green (cold read of #525).
+    m._eval_type = "standard"
     m._io = MagicMock()
 
     from views_pipeline_core.managers.evaluation.stage import EvaluationStage

@@ -36,7 +36,7 @@ As a starting point there should be 3 shadow ensembles. Once the production ense
 
 Out of practicality, there should be an upper limit to the number of models an ensemble can contain. However, to introduce variance in shadow ensembles, different shadow ensembles can have different upper limits.
 
-While different projects and stakeholders could potentially receive their own forecasts, there should only be one production ensemble as a starting point. For both point and probabilistic predictions the metrics and criteria to consider for promotion/demotion are defined in ADR 029.
+While different projects and stakeholders could potentially receive their own forecasts, there should only be one production ensemble as a starting point. For both point and probabilistic predictions the metrics and criteria to consider for promotion/demotion are defined in ADR-065.
 
 ### **Rules**: 
 
@@ -58,7 +58,7 @@ Once, a production ensemble is replaced, it will become a shadow ensemble itself
 HH - review and adjust thresholds. 
 All shadow models start out with the current production ensemble. When the current production ensemble is replaced by a shadow ensemble this process starts anew. Old shadow and production ensembles are retained as shadow models for 12 months for observation.
 
-In the suggested ensembles below the term **metrics** refers to both the metrics in the **Performance Comparison** and the **Diversity Requirement** for point and probablistic predictions. See ADR 029 for further information.
+In the suggested ensembles below the term **metrics** refers to both the metrics in the **Performance Comparison** and the **Diversity Requirement** for point and probablistic predictions. See ADR-065 for further information.
 
 1. **Shadow Ensemble A – Non-conservative / exploratory**
    - Thresholds: $\tau_m = 0$ for all **metrics** (no deterioration allowed, but no strict improvement required).
