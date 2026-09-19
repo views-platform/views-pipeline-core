@@ -10,6 +10,5 @@ from .utils import (
     read_dataframe as read_dataframe,
     generate_model_file_name as generate_model_file_name,
     generate_output_file_name as generate_output_file_name,
-    generate_evaluation_file_name as generate_evaluation_file_name,
     generate_evaluation_report_name as generate_evaluation_report_name,
 )

@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-06-05
+**Last reviewed:** 2026-09-19 (3.3.0 docs pass: `get_queryset` re-raise and install hints read against `data/model_path.py`; content unchanged)
 **File:** `views_pipeline_core/data/model_path.py` (canonical); re-exported from `managers/model/model.py` for backward compatibility
 **Related ADRs:** ADR-001 (Ontology), ADR-002 (Topology), ADR-009 (Boundary Contracts), ADR-045 (Pipeline Stage Architecture, E6)
 
@@ -109,7 +109,8 @@ directory tree to find a `.gitignore` marker. Serves as the base class for
 | No artifacts found for `run_type` | `FileNotFoundError` from `get_latest_model_artifact_path()` |
 | Path contains zero or multiple valid parent dirs | `get_model_name_from_path()` returns `None` (logged at DEBUG) |
 | Subdirectory missing (`validate=True`) | `logger.warning`, attribute set to `None` |
-| Queryset import fails | `logger.error`, returns `None` |
+| `config_queryset.py` fails to import | Raises as itself (any exception); a missing data-source client (`viewser`, `datafactory_query` — `DATA_SOURCE_CLIENT_INSTALL_HINTS`) becomes `ImportError` naming its install command. Until 2026-09-17 this was `logger.error`, returns `None` (C-321) |
+| `config_queryset.py` absent | `logger.warning`, returns `None` (ensembles) |
 
 ---
 
@@ -224,9 +225,11 @@ ModelPathManager._root  # -> None (not yet initialized)
   parent directory will be mistaken for the project root. This fails in
   monorepo setups where multiple `.gitignore` files exist at different levels.
   `pyprojroot.here()` is used as the fallback but has the same fragility.
-- **`get_queryset()` swallows import errors:** If the queryset module fails
-  to import, the error is logged but `None` is returned. This can mask
-  configuration errors in model setup.
+- ~~**`get_queryset()` swallows import errors**~~ **Fixed 2026-09-17 (ADR-063, register
+  C-321).** The loader now re-raises any failure inside `config_queryset.py`; when the
+  missing module is a data-source client the `ImportError` names its install command. Only a missing
+  *file* still returns `None` (ensembles). Pinned in `tests/test_managers/test_model_path.py`
+  and end-to-end under a blocked `viewser` in `tests/test_import_purity.py`.
 
 ---
 

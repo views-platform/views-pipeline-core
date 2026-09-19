@@ -140,7 +140,7 @@ class ForecastingModelArgs(ModelArgs):
         drift_self_test (bool): Enable drift detection self-test
         eval_type (str): Type of evaluation
         report (bool): Whether to generate report
-        update_viewser (bool): Whether to update viewser dataframe
+        update_viewser (bool): RETIRED 2026-09-16 — refused in `_validate` (ADR-062)
         wandb_notifications (bool): Whether to enable W&B notifications
         monthly (bool): Shorthand for monthly production runs
     """
@@ -270,7 +270,10 @@ class ForecastingModelArgs(ModelArgs):
             "-u",
             "--update_viewser",
             action="store_true",
-            help="Update the viewser dataframe for a set of months where viewser returns only zeros.",
+            help=(
+                "RETIRED 2026-09-16 — passing this refuses the run at argument validation. "
+                "See ADR-037's closing note. The flag is removed at 4.0."
+            ),
         )
 
         parser.add_argument(
@@ -412,6 +415,24 @@ class ForecastingModelArgs(ModelArgs):
             self._exit_with_error(
                 "Error: if --train or --sweep is not set, you should only use --saved flag.",
                 "To fix: Add --train or --sweep or --saved flag."
+            )
+
+        # `--update_viewser` retired 2026-09-16 (C-318). Rejected HERE, not in a stage method,
+        # for the same reason as `long` below: every entry point — model, sweep, ensemble
+        # parent, child subprocess — passes through `_validate`, while a stage method is
+        # reached by one of them. The first version of this refusal sat in
+        # `_execute_data_fetching` and an ensemble run with cached members ignored the flag
+        # and finished green (C-319). Identity on `is True` because the field is a
+        # `store_true` bool and a test-supplied MagicMock is truthy on every attribute.
+        if self.update_viewser is True:
+            self._exit_with_error(
+                "Error: --update_viewser has been retired. It was ADR-037's emergency "
+                "fallback for the 2025 ingester outage (patching cached VIEWSER data with "
+                "hand-supplied GED/ACLED files); its call path had been commented out "
+                "since 2025-11-24. The fallback and its dependency are gone; if the "
+                "ingester fails again it must be rebuilt on the frames-native path. See "
+                "documentation/ADRs/037_ingester_emergency_solution.md, closing note.",
+                "To fix: drop the flag."
             )
 
         # 'long' retired 2026-08-02 (#378): it requested 37 rolling-origin sequences,

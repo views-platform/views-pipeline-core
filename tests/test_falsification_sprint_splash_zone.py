@@ -156,14 +156,15 @@ def test_p6_io_except_exception_count():
     """
     P6 (SOFT FALSIFICATION): Sprint plan documents 1 except-Exception block
     in io.py (the _upload_to_prediction_store catch at line ~140). Original
-    count was 3; C-166 narrowed the line ~140 block, leaving 2:
-      - Line ~103: save_predictions outer catch (re-raises as PipelineException)
-      - Line ~210: save_evaluations outer catch (re-raises as PipelineException)
+    count was 3; C-166 narrowed the line ~140 block, leaving 2; #512 deleted
+    `save_evaluations` with its outer catch, leaving exactly 1:
+      - save_predictions outer catch (re-raises as PipelineException)
 
-    These 2 re-raise as PipelineException so they don't swallow errors,
-    but they ARE still overly broad catches.
+    It re-raises as PipelineException so it does not swallow errors, but it IS
+    still an overly broad catch.
 
-    This test documents the actual count for future sprint planners.
+    This test documents the actual count for future sprint planners. Exact, not a
+    floor: a newly added broad catch should trip it as surely as a narrowed one.
     """
     io_path = (
         Path(__file__).resolve().parents[1]
@@ -182,8 +183,8 @@ def test_p6_io_except_exception_count():
                 if isinstance(node.type, ast.Name) and node.type.id == "Exception":
                     except_exception_count += 1
 
-    assert except_exception_count >= 2, (
-        f"Expected at least 2 except-Exception blocks in io.py, "
-        f"found {except_exception_count}. If blocks were narrowed, "
+    assert except_exception_count == 1, (
+        f"Expected exactly 1 except-Exception block in io.py (save_predictions), "
+        f"found {except_exception_count}. If a block was narrowed or added, "
         f"update this test and the sprint documentation."
     )

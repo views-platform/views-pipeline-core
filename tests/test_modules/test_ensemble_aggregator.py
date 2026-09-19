@@ -885,3 +885,177 @@ class TestAddModelParquetDispatch:
         # mean of 1.0 and 3.0 samples = 2.0
         first_cell = out["pred_sb"][0]
         assert all(abs(v - 2.0) < 1e-4 for v in first_cell)
+
+
+# ---------- index mismatch names the rows (#509) ----------
+
+
+def _dist_frame(name: str, months, entities):
+    """A distribution frame over a (month × entity) product, one sample per row."""
+    rows = [(m, e) for m in months for e in entities]
+    return pl.DataFrame(
+        {
+            "month_id": [m for m, _ in rows],
+            "country_id": [e for _, e in rows],
+            f"y_{name}": [[float(e)] for _, e in rows],
+        }
+    )
+
+
+def test_index_mismatch_names_the_entities_and_both_models():
+    """The #509 shape at the pool: model B forecasts two entities model A dropped
+    (dissolved states). The refusal must name them, their months, and both models —
+    the first version printed only 'extra rows in new model: 792'. Driven at
+    `_check_index_consistency`, which is what `add_model` calls after loading."""
+    mgr = AggregationModule(target_cols=["y"])
+    mgr._check_index_consistency(
+        _dist_frame("a", months=[1, 2, 3], entities=[10, 11]), model_name="stepshifter_a"
+    )
+
+    with pytest.raises(ValueError) as info:
+        mgr._check_index_consistency(
+            _dist_frame("b", months=[1, 2, 3], entities=[10, 11, 189, 188]), model_name="darts_b"
+        )
+    message = str(info.value)
+    assert "'darts_b' against 'stepshifter_a'" in message
+    assert "Extra in 'darts_b': 6 rows: 2 country_id value(s) [188, 189] over month_id 1–3" in message
+    assert "Missing in 'darts_b': 0 rows" in message
+    assert "ADR-064" in message
+
+
+def test_index_mismatch_names_missing_rows_too():
+    mgr = AggregationModule(target_cols=["y"])
+    mgr._check_index_consistency(_dist_frame("a", months=[1, 2], entities=[10, 11, 12]), model_name="a")
+
+    with pytest.raises(ValueError) as info:
+        mgr._check_index_consistency(_dist_frame("b", months=[1, 2], entities=[10, 11]), model_name="b")
+    assert "Missing in 'b': 2 rows: 1 country_id value(s) [12] over month_id 1–2" in str(info.value)
+
+
+def test_index_mismatch_labels_follow_names_not_positions():
+    """`index_cols` comes from the first constituent's index ORDER; the platform's
+    canonical tuple is entity-first. With entity-first columns the labels must still read
+    'country_id value(s) [...] over month_id ...' (guard audit of the first draft: positional
+    labels swapped)."""
+    mgr = AggregationModule(index_cols=["country_id", "month_id"], target_cols=["y"])
+    a = _dist_frame("a", months=[1, 2], entities=[10]).select(["country_id", "month_id", "y_a"])
+    b = _dist_frame("b", months=[1, 2], entities=[10, 99]).select(["country_id", "month_id", "y_b"])
+    mgr._check_index_consistency(a, model_name="a")
+    with pytest.raises(ValueError) as info:
+        mgr._check_index_consistency(b, model_name="b")
+    assert "1 country_id value(s) [99] over month_id 1–2" in str(info.value), str(info.value)
+
+
+def test_same_row_count_different_entities_is_still_a_mismatch():
+    """Equal heights, different contents: comparing sizes would let two constituents that
+    each forecast 191 entities — 190 shared, one different — pool silently (guard audit,
+    A01: a heights-only comparison survived every test)."""
+    mgr = AggregationModule(target_cols=["y"])
+    mgr._check_index_consistency(_dist_frame("a", months=[1], entities=[10, 11, 12]), model_name="a")
+    with pytest.raises(ValueError) as info:
+        mgr._check_index_consistency(_dist_frame("b", months=[1], entities=[10, 11, 99]), model_name="b")
+    message = str(info.value)
+    assert "Missing in 'b': 1 rows: 1 country_id value(s) [12]" in message, message
+    assert "Extra in 'b': 1 rows: 1 country_id value(s) [99]" in message, message
+
+
+def test_a_month_only_mismatch_is_named_by_month():
+    """Same entities, one month missing in B — the diff is on the time axis and the message
+    must say so (guard audit, A19: an entity-only anti-join reported 0 rows while refusing)."""
+    mgr = AggregationModule(target_cols=["y"])
+    mgr._check_index_consistency(_dist_frame("a", months=[1, 2, 3], entities=[10, 11]), model_name="a")
+    with pytest.raises(ValueError) as info:
+        mgr._check_index_consistency(_dist_frame("b", months=[1, 2], entities=[10, 11]), model_name="b")
+    assert "Missing in 'b': 2 rows: 2 country_id value(s) [10, 11] over month_id 3–3" in str(info.value), str(info.value)
+
+
+def test_index_mismatch_listing_is_capped():
+    from views_pipeline_core.modules.aggregation.aggregator import INDEX_MISMATCH_MAX_LISTED
+
+    mgr = AggregationModule(target_cols=["y"])
+    mgr._check_index_consistency(_dist_frame("a", months=[1], entities=[1]), model_name="a")
+    extras = list(range(100, 100 + INDEX_MISMATCH_MAX_LISTED + 3))
+    with pytest.raises(ValueError) as info:
+        mgr._check_index_consistency(_dist_frame("b", months=[1], entities=[1, *extras]), model_name="b")
+    message = str(info.value)
+    assert f"{INDEX_MISMATCH_MAX_LISTED + 3} country_id value(s)" in message
+    assert ", and 3 more" in message
+    assert str(100 + INDEX_MISMATCH_MAX_LISTED) not in message, "the 26th must not be listed"
+
+
+# ---------- joint draws (#63, PR #270 by Sonja; ADR-064 "The pooling contract") ----------
+
+
+def _encoded(model: int, row: int, n_samples: int):
+    """Sample k of model m at row r encodes to m*10000 + r*100 + k, so any pooled cell
+    can be decoded back to the (model, sample) it came from."""
+    return [float(model * 10000 + row * 100 + k) for k in range(n_samples)]
+
+
+def _decode(v: float):
+    v = int(v)
+    return v // 10000, v % 100  # (model, sample)
+
+
+def test_concat_picks_one_model_and_sample_per_column_for_every_row_and_target():
+    """Column k of the pool is column chosen_samples[k] of model chosen_models[k] for EVERY
+    row and EVERY target. Under the old per-(row, column) draw — re-drawn per target — the
+    decoded (model, sample) differed between rows for almost every column; with S=4 and
+    the fixed seed this test failed deterministically against that code (verified by
+    mutation). It is the test PR #270 did not carry."""
+    n_samples, n_rows = 4, 2
+    mgr = AggregationModule(target_cols=["y", "z"])
+    mgr.models = [
+        _ModelSpec(name="m1", df=None, weight=None),
+        _ModelSpec(name="m2", df=None, weight=None),
+    ]
+    mgr.prediction_type = "distribution"
+    mgr.sample_size = n_samples
+    joined = pl.DataFrame(
+        {
+            "month_id": [1, 2],
+            "country_id": [10, 11],
+            "y_m1": [_encoded(1, r, n_samples) for r in range(n_rows)],
+            "y_m2": [_encoded(2, r, n_samples) for r in range(n_rows)],
+            "z_m1": [_encoded(1, r, n_samples) for r in range(n_rows)],
+            "z_m2": [_encoded(2, r, n_samples) for r in range(n_rows)],
+        }
+    )
+
+    pooled = mgr._concatenate_aggregation(joined, weights=None)
+
+    picks_by_target = {}
+    for target in ("y", "z"):
+        rows = pooled[target].to_list()
+        picks_per_row = [[_decode(v) for v in row] for row in rows]
+        # every row decodes to the SAME (model, sample) sequence across columns
+        assert all(p == picks_per_row[0] for p in picks_per_row), picks_per_row
+        picks_by_target[target] = picks_per_row[0]
+    # and the sequence is the same for every target
+    assert picks_by_target["y"] == picks_by_target["z"], picks_by_target
+    # and it is a real mix, not one model (S=4 over 2 models with the fixed seed)
+    assert {m for m, _ in picks_by_target["y"]} == {1, 2}
+
+
+def test_concat_weights_still_steer_the_column_picks():
+    """The hoist keeps ``p=weights``: a model with weight 0 never supplies a column."""
+    n_samples = 32
+    mgr = AggregationModule(target_cols=["y"])
+    mgr.models = [
+        _ModelSpec(name="m1", df=None, weight=1.0),
+        _ModelSpec(name="m2", df=None, weight=0.0),
+    ]
+    mgr.prediction_type = "distribution"
+    mgr.sample_size = n_samples
+    joined = pl.DataFrame(
+        {
+            "month_id": [1],
+            "country_id": [10],
+            "y_m1": [_encoded(1, 0, n_samples)],
+            "y_m2": [_encoded(2, 0, n_samples)],
+        }
+    )
+
+    pooled = mgr._concatenate_aggregation(joined, weights=[1.0, 0.0])
+
+    assert {_decode(v)[0] for v in pooled["y"].to_list()[0]} == {1}

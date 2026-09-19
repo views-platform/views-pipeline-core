@@ -19,6 +19,7 @@ Responsibilities:
 """
 import logging
 from dataclasses import dataclass
+from typing import FrozenSet, Optional
 
 from views_pipeline_core.types import BaseStageContext
 
@@ -34,6 +35,9 @@ class ForecastingContext(BaseStageContext):
     forecasting-specific fields.
     """
     prediction_format: str  # "dataframe" or "prediction_frame"
+    #: The input's entity set at the last observed month (ADR-064), resolved by the
+    #: facade from the raw cache; None means "no cache to read" and the sniffer says so.
+    reference_entities: Optional[FrozenSet[int]] = None
 
 
 class ForecastingStage:
@@ -170,7 +174,9 @@ class ForecastingStage:
             )
 
         CorePredictionSniffer(level=context.configs["level"]).sniff_predictions(
-            predictions, targets=combined_targets(context.configs),
+            predictions,
+            targets=combined_targets(context.configs),
+            reference_entities=context.reference_entities,
         )
 
         self._io.save_predictions(

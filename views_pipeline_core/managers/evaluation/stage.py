@@ -9,7 +9,7 @@ Responsibilities:
   - Load actuals from raw viewser data
   - Build EvaluationFrame via EvaluationAdapter (PF or DF path)
   - Compute metrics via NativeEvaluator
-  - Publish results to WandB and disk via PredictionIOManager
+  - Publish results: scalars and per-schema tables to WandB, the MetricFrame to disk
 """
 import gc
 import logging
@@ -49,7 +49,7 @@ class EvaluationContext(BaseStageContext):
     prepare_actuals_df: Callable  # (pd.DataFrame) -> pd.DataFrame
     #: Input-shape of the evaluated model (#302, epic #300): dataframe (legacy,
     #: default — ensemble contexts never set it) or feature_frame (actuals come
-    #: from the frame cache; legacy pandas egress is skipped).
+    #: from the frame cache).
     data_format: str = DATA_FORMAT_DATAFRAME
     #: The model's FeatureFrame cache directory (loader-assembled — C-59: never
     #: rebuilt here). Required when data_format == feature_frame.
@@ -64,12 +64,21 @@ class EvaluationStage:
 
     Collaborators (injected at construction):
       - wandb_module: WandBModule — metrics logging and alerts
-      - io_manager: PredictionIOManager — DataFrame persistence
+      - io_manager: RETIRED (#512). It carried the legacy parquet egress; the stage no
+        longer reads it. It stays in the signature because the public-surface snapshot
+        records it as required and dropping it is a 4.0 change — and, per ADR-062, a
+        retired surface refuses rather than ignores: pass `None`; a live manager raises.
+        `test_evaluation_stage.py` carries the major-gated trigger that names it.
     """
 
     def __init__(self, wandb_module, io_manager, wandb_notifications: bool = False):
+        if io_manager is not None:
+            raise ValueError(
+                "EvaluationStage no longer uses io_manager — the parquet evaluation egress "
+                "it served was retired in #512 (ADR-062). Pass io_manager=None. The "
+                "parameter is deleted at 4.0."
+            )
         self._wandb_module = wandb_module
-        self._io = io_manager
         self._wandb_notifications = wandb_notifications
 
     def evaluate(
@@ -359,44 +368,24 @@ class EvaluationStage:
 
         if not context.configs.get("sweep", False):
             # Evaluation-of-record: persist a typed MetricFrame per target (#226, epic #224).
-            # Deliberately OUTSIDE the `self._io is not None` branch — PFE ensembles run with
-            # _io=None (skipping the legacy parquet save) but still need the frame, and
-            # MetricFrame.save() writes directly, not through the IO manager.
+            # Disk only — nothing uploads it to wandb. MetricFrame.save() writes directly.
             self._save_metric_frame(report, target_identifier, context)
-            if context.data_format == DATA_FORMAT_FEATURE_FRAME:
-                # Frame-native run (#302): the MetricFrame + dict-based wandb logging
-                # above ARE the record; the legacy pandas eval files are skipped.
-                logger.info(
-                    "Skipping legacy evaluation dataframes for '%s' — frame-native run.",
-                    target_identifier,
-                )
-            elif self._io is not None:
-                # to_dataframe is computed only where it is consumed (pandas egress).
-                df_step = report.to_dataframe("step")
-                df_ts = report.to_dataframe("time_series")
-                df_month = report.to_dataframe("month")
-                self._io.save_evaluations(
-                    df_step, df_ts, df_month,
-                    context.model_path.data_generated,
-                    target_identifier,
-                    context.configs.get("run_type", ""),
-                    context.configs.get("timestamp", ""),
-                )
-            else:
-                logger.info(
-                    "Skipping evaluation file save — no io_manager configured "
-                    "(expected for PredictionFrame ensembles)."
-                )
+            # The dashboard's tabular view, from the same dict the scalars came from.
+            # Until #512 this was `report.to_dataframe(...)` -> `save_evaluations`, which
+            # also wrote three parquets nothing read — the last pandas on this path.
+            self._wandb_module.log_evaluation_tables(schemas)
 
     def _save_metric_frame(self, report, target_identifier, context):
         """Persist the typed MetricFrame for one target — the evaluation-of-record (#226).
 
         **Locked cross-repo path contract** with views-reporting's `MetricFrameFileSource`
         (`_frame_dir = root / model / run_type / metricframe_<target>`): the frame is saved
-        under ``<data_generated> / <model> / <run_type> / metricframe_<target>``, and the
-        reporting stage (S5/#229) constructs ``MetricFrameFileSource(root=<data_generated>)``
-        to read it. The two repos MUST agree on this layout — a mismatch is a silent
-        "frame not found" (registered as a Tier-2 cross-repo path-drift risk).
+        under ``<THIS model's data_generated> / <model> / <run_type> / metricframe_<target>``,
+        and the reporting stage (S5/#229) reads it back through ``PerModelMetricFrameSource``,
+        one ``MetricFrameFileSource`` per model rooted at that model's own ``data_generated``
+        (#485: one source rooted at the subject's found the subject and nothing else). The
+        two repos MUST agree on this layout — a mismatch is a silent "frame not found"
+        (registered as a Tier-2 cross-repo path-drift risk, C-202).
 
         Provenance is intentionally partial here (model/run_type/partition/level);
         ``run_id``/``data_version`` are plumbed in S4 (#228), closing C-110.

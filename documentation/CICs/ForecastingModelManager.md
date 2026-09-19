@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-04-08
+**Last reviewed:** 2026-09-19 (3.3.0 docs pass: stage wiring, `io_manager=None`, `_save_evaluations` deletion read against `managers/model/model.py`; content unchanged)
 **Related ADRs:** ADR-001 (Ontology), ADR-004 (Evolution), ADR-006 (Intent Contracts), ADR-008 (Observability), ADR-040 (Authority), ADR-041 (Sniffer Pattern)
 
 ---
@@ -257,9 +257,14 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
 - The `_evaluate_model_artifact_streaming` method was added for memory-bounded
   evaluation of PredictionFrame models. Subclasses that override it emit one
   origin at a time without accumulating all origins in memory.
+- `--update_viewser` (C-318) is refused at `ForecastingModelArgs._validate`, NOT in this
+  class. A first version placed the refusal in `_execute_data_fetching`; the ensemble parent
+  never calls that method and views-impact overrides it, so the flag was silently ignored on
+  both paths (C-319). Nothing in this class reads `args.update_viewser` any more.
 - `PredictionIOManager` was extracted from this class (commit `017c85a`) as
-  part of SOLID E1 refactoring. All `_save_predictions`, `_save_evaluations`,
-  and `_generate_evaluation_table` now delegate to `self._io`.
+  part of SOLID E1 refactoring. `_save_predictions` and `_generate_evaluation_table`
+  delegate to `self._io`; the `_save_evaluations` delegator was deleted in #512 with
+  the parquet egress it fronted (it had no caller).
 - The `prepare_actuals_df` hook was added for subclasses that manufacture
   derived targets (e.g., binary signals from raw counts).
 - `ReportingStage` was extracted (ADR-045 E3) from

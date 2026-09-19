@@ -27,7 +27,7 @@ Concrete subclasses (`_PGDataset`/`PGMDataset` for PRIO-grid, `_CDataset`/`CMDat
 - Does **not** fetch data from VIEWSER or any external data source. Data must arrive as a `pd.DataFrame`, file path, or `Path`.
 - Does **not** train models, run inference, or evaluate predictions.
 - Does **not** enforce naming conventions beyond the `pred_` prefix for prediction mode detection.
-- Does **not** perform data transformations (log, lag, spatial) -- that is the responsibility of `UpdateViewser` and the transformation library.
+- Does **not** perform data transformations (log, lag, spatial). For the viewser source those happen server-side, as the model's queryset declares; for datafactory and synthetic sources no transformation chain exists at this layer (ADR-038: transformations belong in the model repos).
 - Does **not** persist data to disk or any store.
 - Does **not** own the `PredictionFrame` contract. `_ViewsDataset` operates on `pd.DataFrame`; conversion to/from `PredictionFrame` is handled by `PredictionFrameConverter`.
 
@@ -42,7 +42,7 @@ Concrete subclasses (`_PGDataset`/`PGMDataset` for PRIO-grid, `_CDataset`/`CMDat
 - **Consistent sample sizes**: In prediction mode, all prediction columns must have the same array length per cell. Raises `ValueError` on mismatch.
 - **Tensor shape**: `to_tensor()` always returns a 4D array `(time, entity, samples, vars)`. Prediction tensors use `_prediction_to_tensor`; feature tensors use `_features_to_tensor`.
 - **Tensor caching**: `to_tensor()` caches the result in `_prediction_tensor_cache` or `_features_tensor_cache`. `split_data()` caches results in `_split_tensor_cache` (bounded to `_max_tensor_cache_size=128`).
-- **Preprocessing on init**: `_preprocess_dataframe` fills missing `(time, entity)` combinations with zeros, using the entity set from the last time step as the canonical set.
+- **Preprocessing on init**: `_preprocess_dataframe` fills missing `(time, entity)` combinations with zeros, using the entity set from the last time step as the canonical set. That canonical set is the platform rule since ADR-064 (a forecast's entity set is the last observed month's), checked at the prediction boundary by `CorePredictionSniffer`.
 - **`_BASE_YEAR = 1980`**: Class-level constant used for time-to-date conversions by subclasses.
 
 **Extracted guarantees** (now in `views_reporting.statistics`): statistics functions raise `ValueError` if the dataset is not in prediction mode.
@@ -100,7 +100,7 @@ All failures are loud -- no silent fallbacks, no boolean returns from validators
 
 - **Subclasses**: `_PGDataset` (PRIO-grid), `_CDataset` (country), and their public wrappers `PGMDataset`, `CMDataset`. Subclasses override `validate_indices()` to enforce specific entity index names (`priogrid_id`, `country_id`).
 - **`ModelPathManager`**: Used in `__init__` to check if `source` is a path (via `_is_path`).
-- **`AggregationManager`**: Wraps `_ViewsDataset` internally via `CMDataset`/`PGMDataset` in `_load_to_polars()`.
+- **`AggregationModule`**: Wraps `_ViewsDataset` internally via `CMDataset`/`PGMDataset` in `_load_to_polars()`.
 
 **Extracted dependencies** (now in `views_reporting`, no longer imported by handlers.py):
 - `PosteriorDistributionAnalyzer`, `PlotDistribution`, `ForecastReconciler`, `joblib`, `torch`, `matplotlib`, `viewser (Queryset, Column)`, `tqdm`

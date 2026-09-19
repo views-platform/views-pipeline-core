@@ -4,7 +4,7 @@
 |---------------------|-------------------|
 | Subject             | Data Ingestion  |
 | ADR Number          | 037   |
-| Status              | proposed   |
+| Status              | Deprecated — no longer applicable; the fallback was retired 2026-09-16 (closing note below) |
 | Author              | Sonja Haeffner   |
 | Date                | 22. July 2025     |
 
@@ -70,3 +70,54 @@ None
 Feel free to give feedback.
 
 ---
+
+
+## Closing note, 2026-09-16 — the fallback is retired
+
+**This note is the one canonical account of what happened to the fallback.** Every other
+place that mentions the retirement — the CHANGELOG, the register, the stub, the flag's
+refusal — points here rather than restating it, because the first version restated it in
+fourteen places and the copies disagreed (C-320).
+
+This ADR proposed an emergency, short-term way to keep monthly forecasts running when the
+ingester failed: patch the cached VIEWSER frame with hand-supplied files and replay the
+queryset's transformation chain (`UpdateViewser`, backed by `views-transformation-library`).
+Its own body records that this **was used** — the update files were produced, "forecast
+generation was quickly restored", and outputs were compared for January and February 2025.
+It also named *"letting the fallback system become permanent"* as a risk of its design.
+
+**What git shows, and only what git shows:**
+
+| date | commit | event |
+|---|---|---|
+| 2025-07-23 | `0f64247` | `UpdateViewser` added; the update ran unconditionally on every fetch, months hard-coded |
+| 2025-08-05 | `bc0485a` | `--update_viewser` flag and `_overwrite_viewser()` added; the call is live, flag-gated |
+| 2025-10-01 | `4728b99` | the class and the call deleted outright ("i tried", −616 lines) |
+| 2025-10-09 | `aa9ef74` | restored, live again |
+| 2025-11-24 | `69f2bc6` | the last live call commented out ("changes"; no reason recorded) |
+| 2026-08-10 | `ee3344b` | moved to its own file, unchanged (#431) |
+| 2026-09-16 | this note | retired |
+
+So the flag-gated path was live for roughly 103 days across two windows, with a full
+deletion and restoration between them, and has been dead for about ten months.
+
+**What is not known, and is not claimed:** whether it was configured or run on any machine
+other than the one this was investigated from. The `.env` it read is gitignored in both
+repositories, so git carries no evidence either way. On this machine the three keys it needs
+(`month_to_update`, `cm_path`, `pgm_path`) are set nowhere.
+
+**Retired on 2026-09-16** together with the dependency: `UpdateViewser` deleted, the pin on
+`views-transformation-library` removed, the dead path cut from `ViewsDataLoader`. The flag
+`--update_viewser` and the public name `UpdateViewser` survive for one window and **refuse**
+— the flag at argument validation, the class on construction — so an operator following an
+older README is told what happened rather than handed `unrecognized arguments`. Both are
+removed at 4.0; `tests/test_modules/test_update_viewser_is_retired.py` fails the build at
+major ≥ 4 so that is not left to memory. This one-window-refusal pattern is the same one
+#378 used for `--eval_type long` and is recorded as a rule in ADR-062.
+
+**If the ingester fails again:** this fallback is not there to reach for, and re-enabling it
+was never a one-line change — its call path had been dead for ten months and its inputs are
+produced by tooling that lives in no repository on the platform. A replacement has to be
+built on the frames-native input path (roadmap G5–G7), against `FeatureFrame` rather than a
+pandas cache. The lesson this ADR named about itself came true: a fallback that is never
+exercised becomes documentation that is false.

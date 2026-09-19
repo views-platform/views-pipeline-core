@@ -21,7 +21,6 @@ def _make_mock_report():
         "target": "mock", "task": "regression", "pred_type": "point",
         "schemas": {"step": {}, "time_series": {}, "month": {}},
     }
-    report.to_dataframe.return_value = pd.DataFrame()
     return report
 
 from views_pipeline_core.managers.model.model import ForecastingModelManager  # noqa: E402
@@ -62,7 +61,6 @@ def test_scalar_gate_distribution_no_crash(mock_read, mock_splash, mock_cfg, moc
     manager._partition_dict = {
         'calibration': {'train': (1, 100), 'test': (101, 120)}
     }
-    manager._save_evaluations = MagicMock()
     manager._generate_evaluation_table = MagicMock(return_value="table")
     manager._wandb_module = MagicMock()
     manager._wandb_notifications = False
@@ -113,7 +111,6 @@ def test_scalar_gate_point_estimate_pass(mock_read, mock_splash, mock_cfg, mock_
     manager._partition_dict = {
         'calibration': {'train': (1, 100), 'test': (101, 120)}
     }
-    manager._save_evaluations = MagicMock()
     manager._generate_evaluation_table = MagicMock(return_value="table")
     manager._wandb_module = MagicMock()
     manager._wandb_notifications = False
@@ -163,7 +160,6 @@ def test_scalar_gate_distribution_with_sample_metrics(mock_read, mock_splash, mo
     manager._partition_dict = {
         'calibration': {'train': (1, 100), 'test': (101, 120)}
     }
-    manager._save_evaluations = MagicMock()
     manager._generate_evaluation_table = MagicMock(return_value="table")
     manager._wandb_module = MagicMock()
     manager._wandb_notifications = False

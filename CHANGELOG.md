@@ -23,7 +23,259 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.2.0] — unreleased
+## [3.3.0] — unreleased
+
+### Added
+
+- **A forecast may not cover entities absent from the last observed month of its input**
+  (ADR-064; #509). `CorePredictionSniffer` now refuses, by name, a prediction for a
+  dissolved state — the reference entity set is read from the model's raw cache at the same
+  origin the step mappings use (`month_last` for forecasting, `test[0] - 1` otherwise) and
+  reaches the sniffer on the evaluation, sweep and forecasting paths; no raw cache means the
+  check is skipped with an INFO line, not silently. The rule was already implemented by
+  stepshifter, baseline and pipeline-core's own dataset, and written nowhere; views-r2darts2's
+  zarr rewrite (≥0.2.0, 2026-08-11) broke it — projected from the calibration cache, it
+  forecasts 22 country ids absent at the last observed month (the USSR, Yugoslavia and their
+  kin) on all-zero inputs. **What this catches that nothing did before, traced through the
+  code rather than observed:** an all-darts ensemble on 0.2.x would pool those phantoms with
+  no guard, evaluation would drop them uncounted, the store upload would publish them, and the
+  choropleth would draw the dead Sudan/Indonesia/Serbia/Tanzania over the living one. No
+  ensemble combines "all-darts" with "≥0.2.0" on any branch today; it is the next release of
+  either that would. r2darts2 ≥0.2.0 models on the DataFrame prediction path are refused here
+  (the PredictionFrame path is not sniffed — ADR-042 — and r2darts2's own sweep override calls
+  the sniffer without a reference; both stated in ADR-064) until r2darts2 forecasts the
+  entities present at the last observed month (its unmerged `entity_fix` branch looks like
+  that fix). Register C-323 (the reach), C-324 (the refusals that printed counts).
+
+### Changed
+
+- **Pooled ensemble draws are joint across entities and targets** (`AggregationModule`,
+  method `concat`; ADR-064 "The pooling contract"; #63 / PR #270 by Sonja). One
+  `(model, sample)` pick per output column, drawn once with the model weights and reused for
+  every row and every target — so a constituent's sample column, which is one scenario across
+  all countries, stays one scenario in the pool. Until now the pick was made per
+  `(row, column)` cell and re-drawn per target: every pooled column was a patchwork with no
+  cross-country or cross-target dependence left, on the DataFrame path every monthly ensemble
+  uses (C-325; the fix sat approved and unmerged since July). The accepted trade-off: for
+  an engine that samples independently per entity, sharing the sample index across
+  entities changes nothing, but sharing the *model* choice does — every entity in a column
+  comes from the same constituent, so where constituents differ in level the pool gains a
+  cross-entity dependence through that shared choice. The fixed seed is unchanged; pooled values differ from earlier
+  runs because the draw pattern does.
+- **The two ensemble row-set refusals name the rows** (`AggregationModule._check_index_consistency`,
+  `_aggregate_prediction_frames`): which entities, over which months, in which model — capped
+  at 25 — instead of "extra rows in new model: 792". The tables were already computed; only
+  their sizes were printed (C-324).
+
+- **pandas, pyarrow and tqdm are declared dependencies** (`pandas>=1.5.3,<3.0`,
+  `pyarrow>=14,<17`, `tqdm>=4.66,<5`). All three were undeclared and arrived only through
+  viewser's dependency chain (pandas also through ingester3, floor-only). Measured, not
+  inferred, by resolving this manifest *without* viewser into a fresh venv and importing
+  every module: `managers.prediction.savers` fails on pyarrow and `managers.ensemble` on
+  tqdm; and with pandas reachable only through ingester3's `>1.2.3`, the post-#510 tree
+  resolves to an untested pandas 3. The ranges intersect viewser's own caps, so nothing
+  resolves differently today; the pyarrow `<17` ceiling now lives here as well as in
+  views-storage, so #280 lifts both. ADR-063; register C-295.
+- **A `test-without-viewser` CI job** resolves the manifest with viewser left out (the
+  install set is derived from `pyproject.toml`, not listed), installs the package with
+  `--no-deps`, and imports every module from the installed wheel. The module walk is
+  derived from the filesystem because `pkgutil.walk_packages` does not descend into the
+  namespace package `views_pipeline_core/modules/`.
+- **Four Class Intent Contracts for classes that no longer exist here are Retired**
+  (`AggregationManager`, `ReconciliationModule`, `PosteriorDistributionAnalyzer`,
+  `ReportModule` — each file's header says where the class went); `AggregationModule`,
+  which carries this release's pooling changes, has its contract; the CIC index lists every
+  file on disk, and `validate_docs.sh` now refuses a contract that is on disk but not in
+  the index (it had only checked the other direction) — #506.
+- **The wandb ceiling is `<1.0`, not `<0.19`** (`wandb = ">=0.18.7,<1.0"`; #519, #508;
+  register C-326). Poetry's caret on `^0.18.7` bounds a 0.x at the next minor, and every
+  published pipeline-core since 2.3.0 carried that cap — so no environment could hold this
+  package and views-r2darts2 0.2.x (`wandb>=0.28.2`) at once, and every views-* package
+  that declares no wandb of its own (hydranet, baseline, stepshifter, models, reporting,
+  postprocessing) inherited the ceiling. Widened on measurement: the full suite and an
+  offline end-to-end `WandBModule` run (init, metrics, tables, save, image,
+  `summary._as_dict`, alert, artifact, finish) pass on 0.18.7 and on 0.30.0 in a fresh
+  venv; the project-not-found message `get_latest_run` matches on (C-179) is the same text
+  at both ends (read from the SDK source, not a live call). Not measured, because it cannot
+  run offline: a sweep (`wandb.sweep`/`wandb.agent`). New guard, ADR-067:
+  `tests/test_wandb_names_exist_on_the_installed_wandb.py` derives from the source every
+  `wandb.*` name the package evaluates and every call it makes on one, resolves each name on
+  the installed wandb and binds each call against the installed signature — so the next
+  wandb that moves a name or drops a keyword fails there, by chain and call site (the sweep
+  path included). **For operators:** this removes one of the two walls between r2darts2
+  0.2.x and this package; the pandas wall (darts 0.46.1 needs pandas ≥2.2; viewser holds
+  pandas <2) stands — see ADR-063. r2darts2 0.2.2 shipped with `>=0.28.2` although its
+  `development` has `>=0.18.7`; a 0.2.3 is theirs to cut.
+- **The views-frames ceiling is `<3.0.0`, not `<2.0.0`** (`views-frames = ">=1.10.2,<3.0.0"`;
+  #488; register C-327). 2.0.0 has been on PyPI since 2026-08-18 — its one breaking change
+  is that a frame's `index` must be a `SpatioTemporalIndex` and `.values` is a read-only
+  view (their ADR-028) — and views-postprocessing, which measured 2.0.0 as byte-identical
+  for its wire contract, has been blocked behind this pin since. Measured here, not taken
+  from them: the full suite on 1.10.2 and on 2.0.0 in a fresh venv; one test failed on
+  2.0.0, an `is` identity assertion on `.values` (now `np.shares_memory`, which is the
+  property it meant). Every frame this package builds is given a `SpatioTemporalIndex`
+  (six sites, read) and nothing writes into a frame's buffer. Same shape as the wandb
+  widening above (ADR-067); no surface guard this time — views-frames' 2.0.0 changes were
+  behavioural, not renames, and the suite is the measurement for those. **For operators:**
+  every engine repo that pins views-frames itself still says `<2` (baseline, hydranet,
+  reporting, r2darts2, postprocessing), so for them nothing resolves differently until they
+  widen their own line — postprocessing's stated intent; and views-evaluation's `[frames]`
+  extra caps it `<2` too (see the views-evaluation entry below). The environments that
+  will see 2.0.0 first are the views-models ensembles, which pin nothing, install no
+  views-reporting, and run entirely on this package's manager path — the code the suite
+  passed on 2.0.0.
+- **views-evaluation floor raised to 2.0.0** (`views-evaluation = ">=2.0.0,<3.0.0"`; #515).
+  2.0.0 (2026-09-18) removes `to_dataframe()` and the `dataframe` extra — the surface #512
+  stopped using — and `import views_evaluation` no longer loads pandas or scikit-learn;
+  `to_dict()`, `get_schema_results()` and `to_metric_frame()`, the three calls this package
+  makes, are unchanged. Measured: the full suite on 2.0.0 in a fresh venv and in the dev env.
+  The deliberate `to_dataframe` tripwire test from #512 went red on cue and is deleted, with
+  the stale `to_dataframe.return_value` lines on six mock reports. Two 1.1.0 behaviour
+  changes ride along: AP on a group with no positive truth is now `nan` (their ADR-015 R9;
+  see Fixed below for what that did here), and AP/MTD refuse non-real and string dtypes and
+  `power=True` — nothing this package sends: the adapter passes the source column's
+  dtype through and their kernel accepts integer, boolean and float kinds alike; no
+  views-models config requests MTD. **For operators:** an environment must move
+  views-evaluation and this package together; views-reporting already admits `<3.0.0`.
+  **And one more thing the views-frames entry above cannot deliver on its own:**
+  views-evaluation 2.0.0's `[frames]` extra declares `views-frames<2.0.0`, and
+  views-reporting requests that extra — so in any environment holding views-reporting,
+  views-frames stays below 2.0.0 whatever this package's ceiling says, until
+  views-evaluation lifts its extra's cap (asked of them; register C-330).
+
+- **The three evaluation wandb tables (`evaluation_metrics_month|ts|step`) are still
+  logged**, by `WandBModule.log_evaluation_tables()` from `report.to_dict()["schemas"]` —
+  the replacement for the retired `to_dataframe` egress (#512; see Removed below). Same
+  keys; columns are the union of metric names across groups. Skipped for sweeps, as before.
+- **`EvaluationStage(wandb_module, io_manager, ...)` refuses a non-`None` `io_manager`.**
+  The stage no longer reads it; it stays in the signature because the surface snapshot
+  records it as required, and per ADR-062 a retired surface raises rather than ignores.
+  The three internal constructors pass `None`. A test fails the build at major ≥ 4 naming
+  the parameter and its three call sites.
+- Table columns are now in first-seen order across groups rather than the legacy
+  dataclass field order. Panels bind to column *names*, which are unchanged.
+- Table-logging failures are logged, not raised — inherited from `WandBModule.log`,
+  pre-existing and unchanged by this release; a `wandb.Table` construction error propagates.
+
+### Fixed
+
+- **One undefined group no longer turns a WandB mean metric into `nan`**
+  (`calculate_mean_evaluation_metrics`; #515, register C-329). views-evaluation returns
+  `nan` for a metric that is undefined on a group's data — Pearson on a constant series,
+  MCR with nothing observed, and since 1.1.0 AP on a month with no positive truth (ADR-015
+  R9) — and this package's step/month/time-series means skipped `None` but not `nan`, so
+  the dashboard's `AP_mean` (or `pearson_mean`) became `nan` the moment one such group
+  existed. Reproduced on 2.0.0: two steps, one with no positive truth → `AP_mean = nan`.
+  The mean now leaves `nan` out the way `numpy.nanmean` does and views-evaluation's own
+  `mean` row does; `inf` (MCR by contract) still averages as a number; a metric undefined
+  in every group is omitted rather than reported as `nan`. The evaluation-of-record
+  (`MetricFrame`) was never affected — only the WandB scalars.
+- **Baseline and constituent rows are back in ensemble evaluation reports** (#485;
+  register C-328, Tier 1). The reporting stage built one `MetricFrameFileSource` rooted at
+  the *subject's* `data/generated`, but `EvaluationStage` writes every model's MetricFrame
+  under *that model's own* `data/generated` — so every comparison model the template asked
+  for by name was probed at `<subject>/data/generated/<other>/…`, a directory nothing
+  writes, and reported absent. No error: the port's contract treats a missing directory as
+  "no evaluation exists", and the report degrades-and-announces. No fixture on either side
+  put a comparison model under a root different from the subject's — this repo's stage test
+  mocked the file source outright, views-reporting's file-source test wrote a single model,
+  and its template tests drove an in-memory source double with no root at all — so nothing
+  that gates a run exercised the shape production has. Now `PerModelMetricFrameSource` (new,
+  `managers/reporting/metric_frame_source.py`) implements views-reporting's
+  `EvaluationSource` by composing one file source per model, each rooted at that model's
+  own directory (`ModelPathManager(name, validate=False).data_generated`, the ensemble
+  managers' own constituent lookup); the subject's root is supplied because an ensemble is
+  not resolvable by name. The locked on-disk layout (C-202) is unchanged — only the root
+  moved — and an absent frame is now logged with the root probed. **views-reporting:** your
+  seam test pins the stage's `MetricFrameFileSource(root=…data_generated)` construction by
+  AST; it now needs to find `PerModelMetricFrameSource` instead (your #287). Not confirmed
+  against a re-rendered production report; verified at the source boundary with production's
+  layout.
+- **A config_queryset.py that fails to import now raises, with the install command when
+  the missing module is a data-source client** — `viewser` (77 views-models sources) or
+  `datafactory_query` (23; it ships in views-datafactory). `ModelPathManager.get_queryset`
+  had swallowed every exception into `None`, so a missing client surfaced two calls later
+  as `RuntimeError: Could not find queryset for <model>` — a message about absence for a
+  file that exists (register C-321; the CIC had documented the pitfall since 2026-04). The
+  sibling config loader had always re-raised. Two consequences, stated so nobody meets them
+  cold: the first `get_queryset()` read in `_execute_data_fetching` runs *before* the wandb
+  run opens (by design — config faults fail crisp, without a spurious fetch alert), so a
+  missing client is now a clean `ImportError` with no wandb alert rather than a wandb-alerted
+  `DataFetchException` with the wrong text; and views-models' catalogs job, which calls this
+  for 94 of its 106 models (fixtures and baselines are skipped) with no per-model isolation
+  and commits the result, will abort the whole run on the first broken queryset instead of
+  writing "No description provided" — once it moves off its `views_pipeline_core==3.0.1`
+  pin. Also fixes `import importlib` → `import importlib.util` in the same module, which
+  only worked because another module imported it first.
+
+### Deprecated
+
+- **viewser becomes the `[viewser]` extra at 4.0** (ADR-063). Through 3.x it stays
+  required and is *not* named in extras — poetry-core would mark it `; extra == "viewser"`
+  in the wheel and stop installing it, which is the 4.0 change shipped early. A test fails
+  the build at major ≥ 4 until the flip is done and names the two consumers that must move
+  to `views-pipeline-core[viewser]` first (views-baseline; views-models' catalogs job).
+  What the flip will and will not do, so nobody plans on the wrong thing: it frees
+  hydranet, views-baseline's non-viewser models, postprocessing, reporting and the 13
+  ensembles from `pandas<2`/`pyarrow<17`; it does **not** reach the 56 viewser models on
+  pipeline-core 2.x (views-stepshifter, views-r2darts2 0.1.x), does **not** lift
+  `numpy<2` (views-evaluation holds it), and does **not** let the 18 viewser-fetching
+  darts models install darts 0.46 — those need datafactory querysets. Supersedes #511.
+
+### Removed
+
+- **`views-transformation-library` is no longer a dependency**, and `UpdateViewser` — the
+  only thing that used it — is retired. It was ADR-037's emergency fallback for the
+  February 2025 ingester outage. **The full account — what it was, when it was live, why it
+  is gone — is ADR-037's closing note, and is not restated here.** The flag-gated path was
+  dead from 2025-11-24 to retirement.
+
+  What leaves the declared dependency closure: the library, `stepshift` and `xarray`. The
+  package's undeclared runtime import of `views_forecasts` (C-216) still pulls the latter
+  two on paths that use it, and the `pandas<2.0` lock does not move — `viewser` holds it
+  (#308).
+
+  **Nothing downstream depended on it arriving through this package.** Swept all 23 platform
+  repos: the only other importer, views-impact, declares it itself.
+
+  **Kept for one window, refusing (ADR-062):** `--update_viewser` still parses and is
+  rejected at argument validation naming ADR-037, and
+  `views_pipeline_core.modules.dataloaders.UpdateViewser` still resolves, with its recorded
+  signature, and raises on construction. A test fails the build at major ≥ 4 naming what to
+  delete. Refusing at the args boundary rather than in a stage method is what makes it reach
+  the ensemble path (C-319).
+
+  **views-models' README still documents the flag** (`README.md:417-424`) and its `.env`
+  template still lists the three keys. Filed as views-models#472; until it lands, an
+  operator following that README gets the refusal above, which names the ADR.
+
+- **The pandas evaluation egress is gone (#512).** `EvaluationStage` no longer calls
+  `report.to_dataframe(...)`, so the three `eval_{run_type}_{target}_{step|ts|month}_{timestamp}.parquet`
+  files per target are no longer written to `data/generated/`, no longer `wandb.save()`d,
+  and the "Outputs Saved" alert no longer fires. **No reader of those files or that alert
+  exists anywhere on the platform**: the 18 other `views-*` checkouts were grepped for the
+  filenames, the method names, the wandb table keys and the alert text, and views-reporting
+  renders from the `MetricFrame` (`metricframe_<target>/`) and never read the parquets — its
+  ADR-018 rejects them as a source of truth. The `MetricFrame` and the per-scalar wandb
+  logging are the evaluation record, as they have been since #226.
+
+  Deleted with it, all callerless: `PredictionIOManager.save_evaluations`,
+  `ForecastingModelManager._save_evaluations`, `PredictionFileNamer.evaluation_name`,
+  `views_pipeline_core.files.generate_evaluation_file_name`. None is in the public-surface
+  snapshot (it records constructor shapes of exported names) and no sibling repo imports
+  them. Not a major.
+
+  One `to_dataframe` caller remained in this repo, deliberately, until the `>=2.0.0` pin
+  landed: `tests/test_evaluation_integration.py` exercised views-evaluation's *own* surface
+  as a regression guard, went red when views-evaluation 2.0.0 removed the method, and was
+  deleted (#515; see Changed above).
+
+  Why this now: this call site was the last caller of views-evaluation's `to_dataframe()`
+  in this repo, and the reason views-evaluation could not retire it (their #63) — the
+  pandas surface that retirement removes is one of the things holding `pandas<2` on every
+  consumer (#308). Epic #300 named this egress as one of its two remaining pandas surfaces.
+
+## [3.2.0] — 2026-09-08
 
 **A minor release that unblocks views-models' vocabulary migration.** Nothing here breaks a
 3.1.x consumer: the additions are new files, and the fixes make code work that previously

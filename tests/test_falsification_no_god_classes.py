@@ -121,8 +121,8 @@ def test_P5_god_classes_tracked_in_risk_register():
 # guard nobody on this epic wrote. That is the useful part: the pattern is about how
 # guards get written, not about who wrote these.
 #
-# Refactoring thirteen classes is Phase-4-scale work and is NOT attempted here. What this
-# does is stop the population growing: the current thirteen are frozen by name, and a
+# Refactoring twelve classes is Phase-4-scale work and is NOT attempted here. What this
+# does is stop the population growing: the current twelve are frozen by name, and a
 # fourteenth fails. Adding one is then a deliberate edit that shows up in a diff.
 # ===========================================================================
 
@@ -136,7 +136,6 @@ KNOWN_GOD_CLASSES = {
     "views_pipeline_core/managers/model/model.py::ForecastingModelManager",  # 1630 loc
     "views_pipeline_core/modules/aggregation/aggregator.py::AggregationModule",  # 867 loc
     "views_pipeline_core/modules/appwrite/file.py::AppWriteFileModule",  # 1534 loc
-    "views_pipeline_core/modules/dataloaders/update_viewser.py::UpdateViewser",  # 556 loc, split out by #431
     "views_pipeline_core/modules/dataloaders/dataloaders.py::ViewsDataLoader",  # 913 loc
     "views_pipeline_core/modules/datastore/datastore.py::DatastoreModule",  # 560 loc
     "views_pipeline_core/modules/validation/adapter.py::EvaluationAdapter",  # 517 loc
@@ -161,10 +160,10 @@ def _classes_over_threshold():
 
 
 def test_no_new_god_class_appears():
-    """A ratchet on the population, not a demand that the thirteen be fixed.
+    """A ratchet on the population, not a demand that the twelve be fixed.
 
     Fails on a class that grows past the threshold or is written past it. Does NOT fail
-    on the known thirteen — that is a separate, much larger piece of work (C-35, C-36 and
+    on the known twelve (thirteen until `UpdateViewser` was retired, C-318) — that is a separate, much larger piece of work (C-35, C-36 and
     the Phase 4 decomposition).
     """
     current = _classes_over_threshold()

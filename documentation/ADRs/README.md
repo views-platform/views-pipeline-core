@@ -53,7 +53,7 @@ Domain decisions specific to `views-pipeline-core`.
 | [034](034_log_level_standards.md) | Log Level Standards | Proposed |
 | [035](035_log_files_for_input_data.md) | Log Files for Input Data | Proposed |
 | [036](036_ensemble_reconciliation.md) | Ensemble Reconciliation | Proposed |
-| [037](037_ingester_emergency_solution.md) | Ingester Emergency Solution | Proposed |
+| [037](037_ingester_emergency_solution.md) | Ingester Emergency Solution | Deprecated — fallback retired 2026-09-16 |
 | [038](038_model_actuals_preparation_hook.md) | Model Actuals Preparation Hook | Accepted |
 | [039](039_orchestrator_led_alignment.md) | Orchestrator-Led Alignment | Accepted |
 | [040](040_authority_over_inference.md) | Authority Over Inference | Accepted |
@@ -71,6 +71,19 @@ Domain decisions specific to `views-pipeline-core`.
 | [052](052_artifact_prediction_timestamp_contract.md) | Artifact Prediction Timestamp Contract | Accepted |
 | [053](053_eval_path_track_b_retirement.md) | Eval Path Track B Retirement | Accepted |
 | [054](054_visualization_and_reporting_extraction.md) | Visualization and Reporting Extraction | Implemented |
+| [055](055_raw_space_model_io_contract.md) | Raw-Space Model I/O Contract | Proposed |
+| [056](056_generated_scaffolding_must_not_suppress_signal.md) | Generated scaffolding must not suppress a signal it did not consider | Implemented |
+| [057](057_maturity_vocabulary_transition_window.md) | Accept both the maturity and deployment-status vocabularies for one window | Implemented |
+| [058](058_ensemble_member_maturity_rules.md) | Which member maturities an ensemble may contain | Implemented |
+| [059](059_cache_provenance.md) | What a cache records, and what happens when it cannot be verified | Implemented |
+| [060](060_evaluation_sequencing_schemes.md) | A config declares how its evaluation is sequenced, and gets that scheme's contract | Implemented |
+| [061](061_least_privilege_container_provisioning.md) | Lock partner storage by default, and make anyone who opens it say so | Implemented |
+| [062](062_retire_public_surface_by_refusing_for_one_window.md) | Retire public surface by refusing for one window | Accepted |
+| [063](063_data_source_clients_are_extras.md) | Data-source clients become extras at the next major; pandas and pyarrow declared | Accepted |
+| [064](064_forecast_entity_set_is_the_last_observed_months.md) | A forecast's entity set is the entity set of the last observed month | Accepted |
+| [065](065_model_governance_point_probabilistic_predictions.md) | Model governance protocol — point and probabilistic predictions | Proposed |
+| [066](066_including_models_in_ensembles.md) | Ensemble governance protocol — including models in shadow ensembles | Proposed |
+| [067](067_third_party_sdk_ceilings_move_on_measurement.md) | A third-party SDK ceiling moves on measurement; the surface the package uses is derived, not listed | Accepted |
 
 ---
 

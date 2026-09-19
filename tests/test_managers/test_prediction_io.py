@@ -75,14 +75,6 @@ def sample_df():
     )
 
 
-@pytest.fixture
-def sample_eval_dfs():
-    step = pd.DataFrame({"metric": ["MSE"], "value": [0.1]})
-    ts = pd.DataFrame({"metric": ["MSE"], "value": [0.2]})
-    month = pd.DataFrame({"metric": ["MSE"], "value": [0.3]})
-    return step, ts, month
-
-
 # ── generate_evaluation_table (static, pure) ────────────────────────────────
 
 
@@ -180,33 +172,6 @@ class TestSavePredictions:
                 send_alert=False,
             )
         io_manager._wandb_module.send_alert.assert_not_called()
-
-
-# ── save_evaluations ────────────────────────────────────────────────────────
-
-
-class TestSaveEvaluations:
-    def test_saves_three_parquet_files(self, io_manager, sample_eval_dfs, output_dir):
-        step, ts, month = sample_eval_dfs
-        with patch(
-            "views_pipeline_core.managers.prediction.io.save_dataframe"
-        ) as mock_save:
-            io_manager.save_evaluations(
-                step, ts, month, output_dir,
-                target_identifier="sb",
-                run_type="calibration", timestamp="20260317_100000",
-            )
-            assert mock_save.call_count == 3
-
-    def test_sends_alert_on_success(self, io_manager, sample_eval_dfs, output_dir):
-        step, ts, month = sample_eval_dfs
-        with patch("views_pipeline_core.managers.prediction.io.save_dataframe"):
-            io_manager.save_evaluations(
-                step, ts, month, output_dir,
-                target_identifier="sb",
-                run_type="calibration", timestamp="20260317_100000",
-            )
-        io_manager._wandb_module.send_alert.assert_called_once()
 
 
 # ── Safety net: roundtrip, cross-module contract, graceful degradation ──────

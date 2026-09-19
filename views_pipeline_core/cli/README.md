@@ -86,7 +86,7 @@ class SimpleArgs(ModelArgs):
 ## ForecastingModelArgs
 
 ### Purpose
-Concrete argument set for the end‑to‑end forecasting pipeline: training, evaluation, forecasting, reporting, and optional operational features (prediction store, drift test, viewser update, monthly shortcut).
+Concrete argument set for the end‑to‑end forecasting pipeline: training, evaluation, forecasting, reporting, and optional operational features (prediction store, drift test, monthly shortcut).
 
 ### Fields
 | Field | Type | Default | Description |
@@ -103,7 +103,7 @@ Concrete argument set for the end‑to‑end forecasting pipeline: training, eva
 | `drift_self_test` | bool | False | Trigger drift detection internal self-test during data fetch. |
 | `eval_type` | str | "standard" | Evaluation horizon type: standard, complete, live. (`long` retired in #378; `complete` raises NotImplementedError; `live` is currently identical to `standard`.) |
 | `report` | bool | False | Generate evaluation or forecast HTML report (requires evaluate or forecast). |
-| `update_viewser` | bool | False | Perform incremental raw data update on zero-only months. |
+| `update_viewser` | bool | False | **Retired 2026-09-16** — parses, then refused at argument validation (ADR-062); removed at 4.0. |
 | `wandb_notifications` | bool | False | Enable WandB alerts (run lifecycle + errors). |
 | `monthly` | bool | False | Shorthand for production monthly run (sets multiple flags automatically). |
 

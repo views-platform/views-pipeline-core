@@ -2,19 +2,21 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-04-08
+**Last reviewed:** 2026-09-16 (#512 — `save_evaluations` retired)
 **Related ADRs:** ADR-001 (Ontology), ADR-004 (Evolution), ADR-008 (Observability), ADR-048 (PredictionSaver Protocol)
 
 ---
 
 ## 1. Purpose
 
-`PredictionIOManager` is the single-responsibility persistence layer for predictions and evaluations. It was extracted from `ForecastingModelManager` to separate I/O concerns from orchestration logic.
+`PredictionIOManager` is the single-responsibility persistence layer for predictions. It was extracted from `ForecastingModelManager` to separate I/O concerns from orchestration logic.
 
 It handles three persistence targets:
 1. **Local disk** (parquet files via `save_dataframe` or `pyarrow.parquet.write_table`).
 2. **Prediction store** (views-forecasts store + Appwrite datastore).
-3. **WandB** (evaluation metrics logging, artifact saving, and alert notifications).
+3. **WandB** (alert notifications on save).
+
+Evaluation persistence left this class in #512: the `MetricFrame` is written by `EvaluationStage._save_metric_frame` and the evaluation wandb tables by `WandBModule.log_evaluation_tables`. The three `eval_*.parquet` files `save_evaluations` wrote had no reader anywhere on the platform.
 
 The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHEN. This class owns HOW.
 
@@ -38,13 +40,6 @@ The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHE
   - Dispatches to `pyarrow.parquet.write_table` for `pa.Table` inputs or `save_dataframe` for `pd.DataFrame` inputs.
   - Optionally uploads to the prediction store (if `use_prediction_store=True`).
   - Sends a WandB alert on success (unless `send_alert=False`).
-  - Wraps all errors in `PipelineException`.
-
-- **`save_evaluations(df_step, df_ts, df_month, path_generated, target_id, run_type, timestamp)`**:
-  - Saves three evaluation DataFrames (step-wise, time-series-wise, month-wise) to disk.
-  - Saves all three files as WandB artifacts via `wandb_module.save()`.
-  - Logs all three as `wandb.Table` objects via `wandb_module.log()`.
-  - Sends a WandB alert on success.
   - Wraps all errors in `PipelineException`.
 
 - **`generate_evaluation_table(metric_dict)`** (static):
@@ -84,7 +79,7 @@ The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHE
 - **Disk**: Creates parquet files in `path_generated` directory.
 - **Prediction store**: Uploads via `df_predictions.forecasts.to_store()` (DataFrame path only; Arrow Tables raise `NotImplementedError`).
 - **Appwrite**: Uploads via `datastore.upload_data()` if configured.
-- **WandB**: Logs evaluation tables, saves artifact files, sends alert notifications.
+- **WandB**: Sends alert notifications.
 - **Logging**: Uses `logger.info` for successful Appwrite uploads, `logger.error` for failures.
 
 ---
@@ -94,7 +89,6 @@ The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHE
 | Condition | Exception | Message pattern |
 |---|---|---|
 | Any error in `save_predictions` | `PipelineException` | "Error saving predictions: {e}" |
-| Any error in `save_evaluations` | `PipelineException` | "Error saving model outputs: {e}" |
 | Arrow Table upload to prediction store | `NotImplementedError` | "Prediction store upload is not yet supported for Arrow Tables" |
 | Appwrite network/API failure (`ConnectionError`, `TimeoutError`, `OSError`, `AppwriteException`) | Logged, not raised | `logger.error("Error uploading predictions to datastore: {e}")` |
 | Appwrite programming error (`TypeError`, `AttributeError`, etc.) | Propagates | Not caught — "Fail Loud and Proud" applies to programming bugs |
@@ -105,12 +99,12 @@ The orchestration layer (`ForecastingModelManager`) owns WHAT to persist and WHE
 
 ## 7. Boundaries and Interactions
 
-- **Upstream**: Called by `ForecastingModelManager` (the orchestrator) and `ForecastingStage` after predictions or evaluations are computed.
-- **`PredictionFileNamer`**: Generates canonical filenames for predictions and evaluations. Extracted from this class in Phase 6 Task 1.
+- **Upstream**: Called by `ForecastingModelManager` (the orchestrator) and `ForecastingStage` after predictions are computed. `EvaluationStage` no longer calls it (#512); its `io_manager` parameter survives for signature stability only and refuses a non-`None` value.
+- **`PredictionFileNamer`**: Generates canonical filenames for predictions. Extracted from this class in Phase 6 Task 1; its `evaluation_name` left with `save_evaluations` (#512).
 - **`PredictionFrameConverter`**: Produces the `pd.DataFrame` or `pa.Table` that this manager persists.
 - **`PipelineConfig`**: Provides `dataframe_format` for filename generation.
 - **`save_dataframe`**: Utility function from `files/utils.py` that handles format-specific DataFrame serialisation.
-- **WandB**: External dependency injected as `wandb_module`. The `wandb` package is also imported directly inside `save_evaluations` for `wandb.Table`.
+- **WandB**: External dependency injected as `wandb_module`.
 
 ### PredictionSaver Protocol (Phase 6, ADR-048)
 
@@ -154,17 +148,6 @@ io.save_predictions(
     sequence_number=3,
 )
 
-# Save evaluations
-io.save_evaluations(
-    df_step_wise_evaluation=step_df,
-    df_time_series_wise_evaluation=ts_df,
-    df_month_wise_evaluation=month_df,
-    path_generated=eval_dir,
-    target_identifier="ln_sb_best",
-    run_type="calibration",
-    timestamp="20260401_120000",
-)
-
 # Format metrics for display
 table_str = PredictionIOManager.generate_evaluation_table(wandb.run.summary)
 ```
@@ -181,9 +164,6 @@ io.save_predictions(arrow_table, ...)  # raises NotImplementedError
 # WRONG: calling save_predictions without initializing wandb_module
 io = PredictionIOManager(model_path=mp, wandb_module=None, ...)
 io.save_predictions(df, ...)  # will fail on wandb_module.send_alert()
-
-# WRONG: expecting save_evaluations to compute metrics (it only persists them)
-io.save_evaluations(raw_predictions, ...)  # expects pre-computed metric DataFrames
 ```
 
 ---
@@ -197,7 +177,6 @@ Tests live in `tests/test_managers/test_prediction_io.py`.
 | `io_manager` fixture | Basic construction without prediction store |
 | `io_manager_with_store` fixture | Construction with prediction store enabled |
 | `save_predictions` tests | DataFrame saving, directory creation, filename generation, WandB alert |
-| `save_evaluations` tests | Three-file save, WandB table logging, WandB artifact save |
 | `generate_evaluation_table` | Markdown table formatting, key filtering |
 
 Key gap: No integration test for the Arrow Table (`pa.Table`) path through `save_predictions`. The `NotImplementedError` for prediction store + Arrow is tested implicitly.
@@ -221,7 +200,6 @@ Key gap: No integration test for the Arrow Table (`pa.Table`) path through `save
 ## 12. Known Deviations
 
 - **Tight coupling to ForecastingModelManager internals**: The constructor receives `model_path` (a `ModelPathManager`), `wandb_module`, and several configuration flags as separate parameters rather than a structured command/config object. This makes the interface wide and fragile to orchestrator changes.
-- **Direct `wandb` import in `save_evaluations`**: The `wandb` package is imported inside the method body (`import wandb`) rather than being fully injected, creating a hard dependency that complicates testing.
 - **Appwrite network failure is silent**: `_upload_to_prediction_store` catches network/API errors (`ConnectionError`, `TimeoutError`, `OSError`, `AppwriteException`) with `logger.error` but does not re-raise. This is intentional -- Appwrite is a secondary target and should not block the pipeline. Programming errors (`TypeError`, `AttributeError`, etc.) propagate per "Fail Loud and Proud" (C-166 fix, 2026-06-06).
 
 ---

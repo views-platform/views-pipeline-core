@@ -10,13 +10,17 @@ import logging
 import pytest
 from unittest.mock import MagicMock, patch
 
-from viewser import Queryset
 import pandas as pd
 import numpy as np
 
 from views_pipeline_core.modules.dataloaders import ViewsDataLoader
 from views_pipeline_core.data.model_path import ModelPathManager
 from views_pipeline_core.files.utils import handle_single_log_creation
+
+# The viewser path under test needs the real class for `MagicMock(spec=Queryset)`. In an
+# environment without viewser (ADR-063: an extra from 4.0) this file skips at collection
+# instead of failing there.
+Queryset = pytest.importorskip("viewser").Queryset
 
 
 @pytest.fixture

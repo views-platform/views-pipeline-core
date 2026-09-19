@@ -340,10 +340,11 @@ def test_no_constructor_loads_a_dotenv():
     *"pipeline-core no longer auto-loads a .env from the working directory"* while one
     constructor still did.
 
-    Loading is fine where it is honest — `dataloaders.py`'s
-    `_get_viewser_update_config` loads a declared path inside the function that needs
-    the credentials, and fails loud twice if it cannot. That is the shape to copy, and
-    this check does not object to it.
+    Loading is fine where it is honest — inside the operation that needs the
+    credentials, from a declared path, failing loud if it is absent.
+    `PredictionStoreConfig.from_environment` is the live example; the one this docstring
+    used to cite, `dataloaders._get_viewser_update_config`, was deleted with the feature it
+    served (C-318), and the package now contains no `load_dotenv()` call at all.
     """
     import ast
     import pathlib
@@ -371,7 +372,7 @@ def test_no_constructor_loads_a_dotenv():
         "a constructor loads a .env, mutating os.environ process-wide as a side effect "
         "of building an object: "
         f"{offenders}. Load credentials in the operation that needs them and fail loud "
-        "if they are absent — see `dataloaders._get_viewser_update_config`. Callers that "
+        "if they are absent. Callers that "
         "need the environment populated should do it in their entry point; "
         "`PredictionStoreConfig.from_environment` already fails with an actionable list "
         "of the missing variables."

@@ -59,10 +59,9 @@ def test_native_evaluator_import_and_basic_call():
     assert result["pred_type"] == "point"
     for schema in ("step", "month", "time_series"):
         assert schema in result["schemas"]
-
-    # Verify to_dataframe() produces a DataFrame with expected metric columns
-    df = report.to_dataframe("step")
-    assert "MSE" in df.columns
+    assert "MSE" in result["schemas"]["step"]["step01"]
+    # `report.to_dataframe("step")` stood here as a deliberate tripwire from #512 until
+    # views-evaluation 2.0.0 removed the method (#515) — it went red on cue and was deleted.
 
 
 def test_evaluation_report_native_dict_format():

@@ -291,6 +291,54 @@ class TestPredictionFrameAggregation:
         with pytest.raises(ValueError, match="n_rows"):
             _aggregate_prediction_frames([pf1, pf2], method="concat")
 
+    def test_mismatched_identifiers_names_the_values(self):
+        """#509 at the PF pool: the refusal names which identifier values are only in
+        one frame, not merely that they differ."""
+        pf1 = _make_pf(n_rows=4, n_samples=8, seed=1)  # units 1000..1003
+        pf2 = PredictionFrame(
+            np.ones((4, 8), dtype=np.float32),
+            SpatioTemporalIndex(
+                time=np.arange(4, dtype=np.int64),
+                unit=np.array([1000, 1001, 1002, 1999], dtype=np.int64),
+                level=SpatialLevel.PGM,
+            ),
+        )
+
+        with pytest.raises(ValueError) as info:
+            _aggregate_prediction_frames([pf1, pf2], method="concat")
+        message = str(info.value)
+        assert "Only in frame[0]: 1 value(s) [1003]" in message, message
+        assert "only in frame[1]: 1 value(s) [1999]" in message, message
+        assert "ADR-064" in message
+
+    def test_same_identifier_set_in_a_different_order_is_named_as_such(self):
+        """A set comparison would pass this; the frames' rows do not line up, and the message
+        says exactly that (guard audit, P08/P09)."""
+        pf1 = _make_pf(n_rows=3, n_samples=4, seed=1)  # units 1000, 1001, 1002
+        pf2 = PredictionFrame(
+            np.ones((3, 4), dtype=np.float32),
+            SpatioTemporalIndex(
+                time=np.arange(3, dtype=np.int64),
+                unit=np.array([1002, 1000, 1001], dtype=np.int64),
+                level=SpatialLevel.PGM,
+            ),
+        )
+        with pytest.raises(ValueError) as info:
+            _aggregate_prediction_frames([pf1, pf2], method="concat")
+        assert "same set, different order or multiplicity" in str(info.value)
+
+    def test_identifier_listing_is_sorted_and_capped(self):
+        from views_pipeline_core.managers.ensemble.prediction_frame_ensemble import (
+            IDENTIFIER_MISMATCH_MAX_LISTED,
+            _describe_values,
+        )
+
+        values = np.array(list(range(IDENTIFIER_MISMATCH_MAX_LISTED + 2, 0, -1)))  # descending
+        text = _describe_values(values)
+        assert text.startswith(f"{IDENTIFIER_MISMATCH_MAX_LISTED + 2} value(s) [1, 2, 3")
+        assert text.endswith(", and 2 more]")
+        assert _describe_values(np.array([])) == "0 values"
+
     def test_mismatched_identifiers_raises(self):
         pf1 = _make_pf(n_rows=100, n_samples=64, seed=1)
         pf2 = PredictionFrame(

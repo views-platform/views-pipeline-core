@@ -1,11 +1,13 @@
 # Class Intent Contract: AggregationManager
 
-**Status:** Active
+**Status:** Retired
 **Owner:** Project maintainers
 **Last reviewed:** 2026-04-01
 **Related ADRs:** ADR-001 (Ontology), ADR-003 (Authority of Declarations)
 
 ---
+
+> **Retired 2026-09-19 (#506).** No class of this name exists in this repository; the ensemble pooling class is `AggregationModule` (`views_pipeline_core/modules/aggregation/aggregator.py`), whose contract is `AggregationModule.md`. This file described a Polars-only, no-disk-I/O class that was never the one the ensemble managers construct. Kept for history; not maintained.
 
 ## 1. Purpose
 
@@ -39,6 +41,7 @@ The workflow is: `add_model()` one or more models, then call `aggregate()` to pr
 - **`aggregate(method, use_weights)`**:
   - Dispatches to `_aggregate_distributions` or `_aggregate_point_predictions` based on `self.prediction_type`.
   - **Distribution methods**: `"concat"` (linear pooling with resampling, default), `"vincentization"` (quantile-weighted average).
+  - **`concat` keeps draws joint (ADR-064, #63)**: one `(model, sample)` pick per output column, drawn once with `p=weights` and reused for every row and every target — a constituent's sample column is one scenario across all entities and stays one in the pool. Until 2026-09-17 the pick was per `(row, column)` cell and re-drawn per target (C-325). Pinned by `test_concat_picks_one_model_and_sample_per_column_for_every_row_and_target`.
   - **Point methods**: `"mean"` (default), `"median"`, `"min"`, `"max"`.
   - Weights are only supported with `method="mean"` for point predictions. Raises `ValueError` if weights are used with other point methods.
   - Returns a `pl.DataFrame` with index columns and aggregated target columns.
@@ -90,7 +93,7 @@ The workflow is: `add_model()` one or more models, then call `aggregate()` to pr
 | Condition | Exception | Message pattern |
 |---|---|---|
 | Weight >= 1.0 | `ValueError` | "Weight must be less than 1.0, got {weight}" |
-| Index mismatch between models | `ValueError` | "Index mismatch for model '{name}'" |
+| Index mismatch between models | `ValueError` | "Index mismatch for model '{name}' against '{first}' … Missing in '{name}': N rows: k country_id value(s) [ids] over month_id a–b. Extra in '{name}': …" — names the rows, capped at `INDEX_MISMATCH_MAX_LISTED` (ADR-064, #509) |
 | Prediction type mismatch | `ValueError` | "Model '{name}' has prediction type '{type}', but existing models use '{type}'" |
 | Sample size mismatch (distributions) | `ValueError` | "Model '{name}' has sample size {n}, but existing models use {m}" |
 | Mixed point/distribution columns | `ValueError` | "Target columns contain a mixture of point and probabilistic predictions" |

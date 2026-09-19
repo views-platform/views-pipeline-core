@@ -71,7 +71,9 @@ def test_rename_features_maps_and_passes_through(canon_frame):
         canon_frame, {"ged_sb_best": "lr_sb_best"}, model_name="m"
     )
     assert list(renamed.feature_names) == ["lr_sb_best", "acled_fatalities"]
-    assert renamed.values is canon_frame.values  # no data copy
+    # No data copy. views-frames 2.0.0 hands out a read-only VIEW of the buffer, so object
+    # identity no longer holds; shared memory is the property this test is about.
+    assert np.shares_memory(renamed.values, canon_frame.values)
     same = rename_features(canon_frame, {}, model_name="m")
     assert same is canon_frame  # no-op returns the same object
 

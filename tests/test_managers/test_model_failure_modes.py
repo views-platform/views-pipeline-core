@@ -83,7 +83,6 @@ def _make_manager():
         "calibration": {"train": (121, 444), "test": (445, 492)},
     }
     mgr._eval_type = "calibration"
-    mgr._save_evaluations = MagicMock()
     mgr._generate_evaluation_table = MagicMock(return_value="")
     mgr._project = "test_model_calibration"
     mgr._model_path = mock_path

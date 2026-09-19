@@ -24,7 +24,7 @@ A class requires a CIC if it meets any of these criteria:
 - Orchestrates other components (e.g., `ForecastingModelManager`, `EnsembleManager`)
 - Owns state (e.g., `ConfigurationManager`, `AggregationManager`)
 - Enforces invariants (e.g., `CoreConfigSniffer`, `CoreDataSniffer`)
-- Modifies semantics or transformation (e.g., `UpdateViewser`)
+- Modifies semantics or transformation (e.g., `AggregationModule`)
 
 ### CIC Structure (11 Sections + Known Deviations)
 

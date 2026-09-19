@@ -3,7 +3,7 @@
 
 **Status:** Active
 **Owner:** Orchestration Core
-**Last reviewed:** 2026-04-08
+**Last reviewed:** 2026-09-18 (ADR-067: SDK range and surface guard)
 **Related ADRs:** ADR-008 (Observability)
 
 ---
@@ -97,8 +97,12 @@ between the pipeline and the WandB observability backend.
 ## 7. Boundaries and Interactions
 
 - **Depends on:**
-  - `wandb` SDK (`wandb.init`, `wandb.log`, `wandb.alert`, `wandb.Artifact`,
-    `wandb.save`, `wandb.finish`, `wandb.login`, `wandb.define_metric`).
+  - `wandb` SDK, `>=0.18.7,<1.0` (ADR-067). Every `wandb.*` name this package evaluates
+    and every call it makes on one — this class's `init`, `log`, `Table`, `alert`,
+    `Artifact`, `run.log_artifact`, `save`, `finish`, `login`, `define_metric`, `summary`
+    included — is derived from the source and checked against the installed SDK by
+    `tests/test_wandb_names_exist_on_the_installed_wandb.py`; this list is descriptive,
+    that test is the guard.
   - `views_pipeline_core.modules.wandb.log_wandb_log_dict` -- helper for
     structured evaluation result logging (called by `log_evaluation_results()`).
 - **Does not depend on:**
@@ -172,6 +176,14 @@ WandBModule.send_alert(
 - **Red tests:** Tests should verify that `log_artifact()` propagates exceptions,
   that `log_metrics()` swallows them, and that `send_alert()` is a no-op when
   `notifications_enabled=False`.
+- **Means over groups:** `calculate_mean_evaluation_metrics` (this package's `utils`) leaves
+  `None` and `nan` out of a metric's mean — `nan` is views-evaluation's sentinel for a metric
+  undefined on a group's data (their ADR-015) — and averages `inf` as a number; pinned by
+  four tests in `tests/test_utils/test_wandb_utils.py` (C-329).
+- **SDK surface:** `tests/test_wandb_names_exist_on_the_installed_wandb.py` resolves
+  every wandb name this class (and the rest of the package) evaluates on the installed
+  wandb and binds every call against its signature — the check that runs when the
+  wandb ceiling moves (ADR-067, C-326).
 
 ---
 

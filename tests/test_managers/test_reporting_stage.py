@@ -378,8 +378,13 @@ class TestEvaluationReport:
     def test_renders_from_source_at_locked_path_per_target(
         self, mock_source_cls, mock_template_cls,
     ):
-        """One source + template per target; the source is built at the locked
-        cross-repo path (root=<data_generated>, primary_model=<model>)."""
+        """One source + template per target; the source handed to the template is the
+        per-model one (#485), and the SUBJECT is looked up at the locked cross-repo path
+        rooted at its own <data_generated> (primary_model=<model>)."""
+        from views_pipeline_core.managers.reporting.metric_frame_source import (
+            PerModelMetricFrameSource,
+        )
+
         stage = _make_stage()
         ctx = _make_context(
             configs={"name": "test", "regression_targets": ["lr_sb", "lr_ns"], "run_type": "calibration"},
@@ -390,6 +395,7 @@ class TestEvaluationReport:
 
         stage.generate_evaluation_report(ctx)
 
+        # The subject's presence check builds the subject's file source at its own root.
         assert mock_source_cls.call_count == 2
         mock_source_cls.assert_any_call(
             root=Path("/tmp/dg"),
@@ -398,9 +404,53 @@ class TestEvaluationReport:
             primary_model="test_model",
         )
         assert mock_template_cls.call_count == 2
+        source = mock_template_cls.return_value.generate.call_args.kwargs["source"]
+        assert isinstance(source, PerModelMetricFrameSource)
+        assert source.root_for("test_model") == Path("/tmp/dg")
         mock_template_cls.return_value.generate.assert_called_with(
-            source=mock_source_cls.return_value, target="lr_ns",
+            source=source, target="lr_ns",
         )
+
+    @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
+    def test_a_constituent_row_resolves_under_the_constituents_own_directory(
+        self, mock_template_cls, tmp_path,
+    ):
+        """#485 end to end through the stage: the subject is an ensemble whose frame sits
+        under ensembles/<e>/data/generated; a constituent's frame sits under
+        models/<m>/data/generated. The source the template receives must find BOTH.
+        Before the fix the constituent probe was <ensemble root>/<constituent>/... — a
+        directory nothing writes — and the row went absent with no error."""
+        from views_pipeline_core.managers.evaluation.stage import METRICFRAME_DIR_PREFIX
+
+        ensemble_root = tmp_path / "ensembles" / "big_chungus" / "data" / "generated"
+        model_root = tmp_path / "models" / "black_ranger" / "data" / "generated"
+        for root, model in ((ensemble_root, "big_chungus"), (model_root, "black_ranger")):
+            (root / model / "calibration" / f"{METRICFRAME_DIR_PREFIX}lr_sb").mkdir(parents=True)
+
+        stage = _make_stage()
+        ctx = _make_context(configs={"name": "big_chungus", "regression_targets": ["lr_sb"], "run_type": "calibration", "models": ["black_ranger"]})
+        ctx.model_path.model_name = "big_chungus"
+        ctx.model_path.data_generated = ensemble_root
+        seen = {}
+
+        def render(source, target):
+            # What the real template does: ask the source for the subject and each constituent.
+            seen["subject"] = source.metric_frame("big_chungus")
+            seen["constituent"] = source.metric_frame("black_ranger")
+            return Path("/tmp/eval_report.html")
+
+        mock_template_cls.return_value.generate.side_effect = render
+        with patch(
+            "views_pipeline_core.managers.reporting.metric_frame_source.model_data_generated",
+            side_effect=lambda name: {"black_ranger": model_root}[name],
+        ), patch(
+            "views_reporting.sources.metric_frame_file_source.MetricFrame.load",
+            side_effect=lambda d: ("frame", Path(d)),
+        ):
+            stage.generate_evaluation_report(ctx)
+
+        assert seen["subject"] == ("frame", ensemble_root / "big_chungus" / "calibration" / f"{METRICFRAME_DIR_PREFIX}lr_sb")
+        assert seen["constituent"] == ("frame", model_root / "black_ranger" / "calibration" / f"{METRICFRAME_DIR_PREFIX}lr_sb")
 
     @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
     @patch("views_reporting.sources.MetricFrameFileSource")

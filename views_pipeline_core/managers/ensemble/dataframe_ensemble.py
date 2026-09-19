@@ -158,7 +158,7 @@ class DataFrameEnsembleManager:
 
         self._evaluation_stage = EvaluationStage(
             wandb_module=self._wandb_module,
-            io_manager=self._io,
+            io_manager=None,  # retired #512 — a live manager is refused (ADR-062); gone at 4.0
             wandb_notifications=wandb_notifications,
         )
 

@@ -226,7 +226,7 @@ class TestP2TimestampFromArtifact:
 class TestP3EvaluationStageNoneIO:
     """EvaluationStage must not crash when io_manager=None. The summary
     alert uses PredictionIOManager.generate_evaluation_table as a static
-    method, and save_evaluations is guarded."""
+    method; io_manager must be None since #512 (a live one is refused)."""
 
     def test_evaluation_stage_constructed_with_none_io(self):
         """EvaluationStage accepts io_manager=None without error."""
@@ -237,7 +237,8 @@ class TestP3EvaluationStageNoneIO:
             io_manager=None,
             wandb_notifications=False,
         )
-        assert stage._io is None
+        # #512: None is the only accepted value; the stage keeps no reference.
+        assert not hasattr(stage, "_io")
 
     def test_generate_evaluation_table_callable_without_instance(self):
         """generate_evaluation_table is a @staticmethod — callable via class."""
