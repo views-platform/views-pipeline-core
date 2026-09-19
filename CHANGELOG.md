@@ -41,7 +41,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   no guard, evaluation would drop them uncounted, the store upload would publish them, and the
   choropleth would draw the dead Sudan/Indonesia/Serbia/Tanzania over the living one. No
   ensemble combines "all-darts" with "≥0.2.0" on any branch today; it is the next release of
-  either that would. r2darts2 ≥0.2.0 models are refused here until r2darts2 forecasts the
+  either that would. r2darts2 ≥0.2.0 models on the DataFrame prediction path are refused here
+  (the PredictionFrame path is not sniffed — ADR-042 — and r2darts2's own sweep override calls
+  the sniffer without a reference; both stated in ADR-064) until r2darts2 forecasts the
   entities present at the last observed month (its unmerged `entity_fix` branch looks like
   that fix). Register C-323 (the reach), C-324 (the refusals that printed counts).
 
