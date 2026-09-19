@@ -1,8 +1,90 @@
 # Technical Risk Register
 
-**Last updated:** 2026-09-19 (C-330, C-331, C-332 — the 3.3.0 range review: views-evaluation's `[frames]` extra caps views-frames `<2` in every reporting env; no on-disk evaluate→report test; the wandb tables are keyed per schema, not per target. C-05, C-323, C-324 annotated). Previously 2026-09-19 (C-329 — one undefined group turned a WandB mean metric into `nan`; the mean now skips `nan` like nanmean; views-evaluation floor raised to 2.0.0, #515). Previously 2026-09-18 (C-328 — every ensemble evaluation report lost its baseline and constituent rows: the reader looked under the subject's directory, the producer writes per model; Tier 1, fixed with a per-model source; C-202 annotated). Previously 2026-09-18 (C-327 — the views-frames ceiling `<2.0.0` held views-postprocessing behind a release a month old; widened to `<3.0.0` on measurement). Previously 2026-09-18 (C-326 — the wandb ceiling `<0.19` excluded every views-r2darts2 0.2.x from every environment; widened to `<1.0` after measuring on 0.30.0, with a source-derived name check; C-179 annotated). Previously 2026-09-17 (C-323, C-324, C-325 — forecasts for dissolved states reached publication with no guard, fixed at the prediction boundary; the pool refusal printed counts, now names rows; pooled draws were a per-row patchwork, Sonja's #270 fix in flight). Previously 2026-09-17 (C-321, C-322 — the queryset loader swallowed a missing dependency into "missing queryset", fixed; pandas-1 pickles untested on pandas 3, bounded). Previously 2026-09-16 (C-319, C-320 — a retirement refusal placed where two run paths never reach it; and its record overclaimed in six places, two of them error strings an operator reads). Previously 2026-09-16 (C-318 — a flag-exposed, README-documented feature that could not execute for ten months was the only reason for a heavy dependency; both retired). Previously 2026-09-08 (C-317 — the sniffer recommended a reconciliation type the DataFrame path silently dropped; found by a DOCUMENTATION audit, because correcting a CIC created readers for advice the code could not honour). Previously 2026-09-08 (C-313 to C-316 — a full release audit found nine defects and every one was in the written record or in a guard, not in shipped behaviour; three more guards were wrong about their own scope and one was inverted). Previously 2026-09-08 (C-311, C-312 — a guard's exclusion excluded nothing while its docstring said otherwise; and ADR-057's documented both-files warning cannot fire because the resolver makes that state impossible). Previously 2026-09-07 (C-308, C-309 — a blank config value made the run log unparseable and the failure was reported against the wrong model; and a documented import-weight property was a comment away from being lost with nothing to say so). Previously 2026-09-07 (C-307 — three consecutive fixes for one defect, each scoped from the previous failure's stack trace; a crash report lists the places a defect is loud, and the loud sites are downstream by construction). Previously 2026-09-07 (C-306 — the third call site was the one the issue did not name, and it was the quiet one; an issue filed from a crash lists only the noisy instances of its own defect). Previously 2026-09-07 (C-305 — ADR-057's transition window closed from in front by a check that ran before it; a unit test of a guard cannot see an ordering defect in its caller). Previously 2026-08-24 (C-304 — four consecutive audits found their defects in the written record and none in the shipped behaviour; a peer's 'ADRs that describe code rot' diagnosis tested here and found to be one case of a wider rule)
+**Last updated:** 2026-09-19 (version bumped to 3.3.0; the 3.3.0 gate block opened with C-318–C-332 under it. Same day: C-330, C-331, C-332 — the 3.3.0 range review: views-evaluation's `[frames]` extra caps views-frames `<2` in every reporting env; no on-disk evaluate→report test; the wandb tables are keyed per schema, not per target. C-05, C-323, C-324 annotated). Previously 2026-09-19 (C-329 — one undefined group turned a WandB mean metric into `nan`; the mean now skips `nan` like nanmean; views-evaluation floor raised to 2.0.0, #515). Previously 2026-09-18 (C-328 — every ensemble evaluation report lost its baseline and constituent rows: the reader looked under the subject's directory, the producer writes per model; Tier 1, fixed with a per-model source; C-202 annotated). Previously 2026-09-18 (C-327 — the views-frames ceiling `<2.0.0` held views-postprocessing behind a release a month old; widened to `<3.0.0` on measurement). Previously 2026-09-18 (C-326 — the wandb ceiling `<0.19` excluded every views-r2darts2 0.2.x from every environment; widened to `<1.0` after measuring on 0.30.0, with a source-derived name check; C-179 annotated). Previously 2026-09-17 (C-323, C-324, C-325 — forecasts for dissolved states reached publication with no guard, fixed at the prediction boundary; the pool refusal printed counts, now names rows; pooled draws were a per-row patchwork, Sonja's #270 fix in flight). Previously 2026-09-17 (C-321, C-322 — the queryset loader swallowed a missing dependency into "missing queryset", fixed; pandas-1 pickles untested on pandas 3, bounded). Previously 2026-09-16 (C-319, C-320 — a retirement refusal placed where two run paths never reach it; and its record overclaimed in six places, two of them error strings an operator reads). Previously 2026-09-16 (C-318 — a flag-exposed, README-documented feature that could not execute for ten months was the only reason for a heavy dependency; both retired). Previously 2026-09-08 (C-317 — the sniffer recommended a reconciliation type the DataFrame path silently dropped; found by a DOCUMENTATION audit, because correcting a CIC created readers for advice the code could not honour). Previously 2026-09-08 (C-313 to C-316 — a full release audit found nine defects and every one was in the written record or in a guard, not in shipped behaviour; three more guards were wrong about their own scope and one was inverted). Previously 2026-09-08 (C-311, C-312 — a guard's exclusion excluded nothing while its docstring said otherwise; and ADR-057's documented both-files warning cannot fire because the resolver makes that state impossible). Previously 2026-09-07 (C-308, C-309 — a blank config value made the run log unparseable and the failure was reported against the wrong model; and a documented import-weight property was a comment away from being lost with nothing to say so). Previously 2026-09-07 (C-307 — three consecutive fixes for one defect, each scoped from the previous failure's stack trace; a crash report lists the places a defect is loud, and the loud sites are downstream by construction). Previously 2026-09-07 (C-306 — the third call site was the one the issue did not name, and it was the quiet one; an issue filed from a crash lists only the noisy instances of its own defect). Previously 2026-09-07 (C-305 — ADR-057's transition window closed from in front by a check that ran before it; a unit test of a guard cannot see an ordering defect in its caller). Previously 2026-08-24 (C-304 — four consecutive audits found their defects in the written record and none in the shipped behaviour; a peer's 'ADRs that describe code rot' diagnosis tested here and found to be one case of a wider rule)
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 332 concerns (204 resolved) + 41 disagreements — 5 relocated to views-reporting
+
+> **Release gate — pipeline-core 3.3.0 — OPEN.** Prepared 2026-09-16, the day the train
+> started (#512); closed at the bump, 2026-09-19.
+> A dependency-and-defect release, not a migration one. It retires two surfaces the platform
+> had stopped reading (the `--update_viewser` flag and the pandas evaluation egress), declares
+> what it had always relied on (pandas, pyarrow, tqdm), moves three SDK ceilings that had
+> each grown a wall behind them (wandb, views-frames, views-evaluation — measured at both
+> ends, ADR-067), and fixes two silent wrong-output defects in evaluation and reporting
+> (forecasts for dissolved states, C-323; comparison rows vanishing from every ensemble
+> report, C-328) plus a pooling defect that had sat approved since July (C-325).
+>
+> **The through-line:** every SDK ceiling in this manifest was a caret nobody had re-read,
+> and every one of them was found by a *neighbour* being unable to install — r2darts2, then
+> postprocessing, then views-evaluation. The fix each time was the same shape: measure at
+> both ends, derive what can be derived, widen to the next major, and say in the CHANGELOG
+> what the widening does *not* deliver. C-330 is the one it does not: views-evaluation's
+> own `[frames]` extra still caps views-frames `<2` in every reporting environment.
+>
+> Disposition (every concern whose Source is dated on or after 2026-09-16; each bullet is
+> the entry's own account, moved here from the 3.2.0 block where the guard held them until
+> the version bumped):
+>
+> - **C-319, C-320 — closed, found reviewing #510.** The retirement refusal was on a method the ensemble
+>   path never reaches; moved to the args boundary per #378. And the record of what was retired
+>   overclaimed six ways, twice in operator-facing strings — corrected to what git shows.
+> - **C-318 — closed, and it postdates the wheel.** Found 2026-09-16, eight days after 3.2.0
+>   shipped; held in the 3.2.0 block by the gate guard until the version bumped, then moved here. A
+>   README-documented flag that could not execute for ten months, and the heavy dependency
+>   that existed only for it — both retired. 3.2.0 carries the dead flag and the dependency;
+>   neither does any harm there, since the flag did nothing and nothing downstream imports
+>   the library through us. Ships in the next release.
+> - **C-321 — closed; C-322 — consciously accepted, both found mapping #511 (2026-09-16/17),**
+>   after 3.2.0 shipped; held in the 3.2.0 block by the gate guard until the version bumped, then moved here.
+>   C-321 is the queryset loader swallowing a missing dependency into "Could not find queryset";
+>   fixed, and 3.2.0 carries the swallow harmlessly since viewser is required there. C-322 is the
+>   pandas-3 pickle hazard: 3.3.0 bounds pandas `<3` so it cannot be reached; widening is the 4.0
+>   train's job with a matrix behind it (ADR-063).
+> - **C-323, C-324 — closed in pipeline-core; C-325 — closed by PR-B; all found investigating #509
+>   (2026-09-17), after 3.2.0 shipped.** C-323 is forecasts for dissolved states reaching publication and the
+>   map with no guard anywhere — a r2darts2 ≥0.2.0 regression that 3.2.0 could not catch and 3.3.0 refuses at the
+>   prediction boundary (ADR-064); nothing in 3.2.0 makes it worse, the phantoms come from the engine. C-324 is
+>   the pool refusal that printed counts. C-325 is the per-row pooling draw (#63, Sonja's PR #270) — a
+>   correctness defect in every DataFrame-pooled ensemble since the aggregator existed; carried one
+>   PR longer; PR-B landed Sonja's hoist the same day.
+> - **C-326 — closed, found after 3.2.0 shipped (#519, 2026-09-18).** The `wandb ^0.18.7` caret
+>   (= `<0.19`) that every published pipeline-core carries made `views-r2darts2 0.2.x` (`wandb>=0.28.2`)
+>   uninstallable beside any package that depends on us; 3.2.0 has it, 3.3.0 widens it to `<1.0` on
+>   measurement (suite and an offline end-to-end run on 0.30.0) and a test derived from the source
+>   that resolves every wandb name the package evaluates and binds every call against the installed
+>   signature (ADR-067). One of two walls between r2darts2 0.2.x
+>   and this package; the other (pandas, via viewser) is ADR-063's and is not moved by this.
+> - **C-327 — closed, found in the pre-3.3.0 issue sweep (#488, 2026-09-18).** `views-frames ^1.10.2`
+>   (= `<2.0.0`) while 2.0.0 has been published since 2026-08-18; views-postprocessing measured it
+>   byte-identical for the wire contract and waited a month on this line. 3.3.0 widens to `<3.0.0`
+>   after running the suite on 2.0.0 here (one identity assertion in a test, fixed; no production change).
+> - **C-328 — closed, pre-release for 3.3.0 (#485, filed 2026-08-17, fixed 2026-09-18).** Tier 1 and
+>   shipped in 3.2.0: every ensemble evaluation report rendered without its baseline and constituent
+>   rows, no error. The reporting stage rooted its one `MetricFrameFileSource` at the subject's
+>   `data/generated`; the evaluation stage writes each model's frame under that model's own. The
+>   comparison rows were probed at a path nothing writes and came back "absent", which the port's
+>   contract treats as legitimate. No fixture on either side put a comparison model under a root
+>   different from the subject's — most mocked or faked the source entirely — so no guard exercised
+>   the shape production has. 3.3.0 reads per model (`PerModelMetricFrameSource`);
+>   the locked layout is untouched. views-reporting's seam test must follow (their #287). Simon's call
+>   that it ships in this release, not the next.
+> - **C-329 — closed, found assessing views-evaluation 2.0.0 as the consumer (#515, 2026-09-19).**
+>   The WandB step/month/time-series means skipped `None` but not `nan`; views-evaluation's `nan`
+>   sentinel (Pearson, MCR, and since 1.1.0 AP on a month with no positive truth) turned the whole
+>   mean into `nan`. Pre-existing for Pearson; AP made it routine. 3.3.0 skips `nan` like nanmean.
+>   The MetricFrame was never wrong — the dashboard scalar was. Floor to views-evaluation 2.0.0 in the same PR.
+> - **C-330, C-331, C-332 — open, found by the 3.3.0 range review (2026-09-19); none blocks 3.3.0, all three
+>   are stated in the CHANGELOG or a CIC.** C-330: views-evaluation 2.0.0's `[frames]` extra caps views-frames
+>   `<2`, and views-reporting requests it, so #488's widening is inert in every reporting environment until
+>   they lift it — theirs, asked; the CHANGELOG says so. C-331: no test writes a MetricFrame and reads it
+>   back through the report path on disk — the class of blindness C-328 was; carried, with the trigger named.
+>   C-332: the three wandb tables are keyed per schema, so a second target's table overwrites the first's —
+>   pre-existing since the tables existed; carried.
+>
+> **Carried into 3.3.0 knowingly:** C-322 (pandas-3 pickles, bounded not tested), C-330
+> (theirs), C-331 (one test, not a design change), C-332 (a dashboard-visible key change
+> belongs with its own release note). Nothing open is a wrong-output defect in this release's
+> code; C-323's ensemble-pool gap is the documented ADR-064 shape.
 
 > **Release gate — pipeline-core 3.2.0 — ~~OPEN~~ SHIPPED 2026-09-08.** Prepared 2026-09-08.
 > A migration-unblocking release. views-models attempted their ADR-017 vocabulary migration
@@ -56,61 +138,6 @@
 >   unchanged from the 3.1.2 gate. None is a maturity-vocabulary defect and none is affected
 >   by this release.
 >
-> - **C-319, C-320 — closed, found reviewing #510.** The retirement refusal was on a method the ensemble
->   path never reaches; moved to the args boundary per #378. And the record of what was retired
->   overclaimed six ways, twice in operator-facing strings — corrected to what git shows.
-> - **C-318 — closed, and it postdates the wheel.** Found 2026-09-16, eight days after 3.2.0
->   shipped; listed because the guard polices this block until the version bumps. A
->   README-documented flag that could not execute for ten months, and the heavy dependency
->   that existed only for it — both retired. 3.2.0 carries the dead flag and the dependency;
->   neither does any harm there, since the flag did nothing and nothing downstream imports
->   the library through us. Ships in the next release.
-> - **C-321 — closed; C-322 — consciously accepted, both found mapping #511 (2026-09-16/17),**
->   after 3.2.0 shipped; listed because the guard polices this block until the version bumps.
->   C-321 is the queryset loader swallowing a missing dependency into "Could not find queryset";
->   fixed, and 3.2.0 carries the swallow harmlessly since viewser is required there. C-322 is the
->   pandas-3 pickle hazard: 3.3.0 bounds pandas `<3` so it cannot be reached; widening is the 4.0
->   train's job with a matrix behind it (ADR-063).
-> - **C-323, C-324 — closed in pipeline-core; C-325 — closed by PR-B; all found investigating #509
->   (2026-09-17), after 3.2.0 shipped.** C-323 is forecasts for dissolved states reaching publication and the
->   map with no guard anywhere — a r2darts2 ≥0.2.0 regression that 3.2.0 could not catch and 3.3.0 refuses at the
->   prediction boundary (ADR-064); nothing in 3.2.0 makes it worse, the phantoms come from the engine. C-324 is
->   the pool refusal that printed counts. C-325 is the per-row pooling draw (#63, Sonja's PR #270) — a
->   correctness defect in every DataFrame-pooled ensemble since the aggregator existed; carried one
->   PR longer; PR-B landed Sonja's hoist the same day.
-> - **C-326 — closed, found after 3.2.0 shipped (#519, 2026-09-18).** The `wandb ^0.18.7` caret
->   (= `<0.19`) that every published pipeline-core carries made `views-r2darts2 0.2.x` (`wandb>=0.28.2`)
->   uninstallable beside any package that depends on us; 3.2.0 has it, 3.3.0 widens it to `<1.0` on
->   measurement (suite and an offline end-to-end run on 0.30.0) and a test derived from the source
->   that resolves every wandb name the package evaluates and binds every call against the installed
->   signature (ADR-067). One of two walls between r2darts2 0.2.x
->   and this package; the other (pandas, via viewser) is ADR-063's and is not moved by this.
-> - **C-327 — closed, found in the pre-3.3.0 issue sweep (#488, 2026-09-18).** `views-frames ^1.10.2`
->   (= `<2.0.0`) while 2.0.0 has been published since 2026-08-18; views-postprocessing measured it
->   byte-identical for the wire contract and waited a month on this line. 3.3.0 widens to `<3.0.0`
->   after running the suite on 2.0.0 here (one identity assertion in a test, fixed; no production change).
-> - **C-328 — closed, pre-release for 3.3.0 (#485, filed 2026-08-17, fixed 2026-09-18).** Tier 1 and
->   shipped in 3.2.0: every ensemble evaluation report rendered without its baseline and constituent
->   rows, no error. The reporting stage rooted its one `MetricFrameFileSource` at the subject's
->   `data/generated`; the evaluation stage writes each model's frame under that model's own. The
->   comparison rows were probed at a path nothing writes and came back "absent", which the port's
->   contract treats as legitimate. No fixture on either side put a comparison model under a root
->   different from the subject's — most mocked or faked the source entirely — so no guard exercised
->   the shape production has. 3.3.0 reads per model (`PerModelMetricFrameSource`);
->   the locked layout is untouched. views-reporting's seam test must follow (their #287). Simon's call
->   that it ships in this release, not the next.
-> - **C-329 — closed, found assessing views-evaluation 2.0.0 as the consumer (#515, 2026-09-19).**
->   The WandB step/month/time-series means skipped `None` but not `nan`; views-evaluation's `nan`
->   sentinel (Pearson, MCR, and since 1.1.0 AP on a month with no positive truth) turned the whole
->   mean into `nan`. Pre-existing for Pearson; AP made it routine. 3.3.0 skips `nan` like nanmean.
->   The MetricFrame was never wrong — the dashboard scalar was. Floor to views-evaluation 2.0.0 in the same PR.
-> - **C-330, C-331, C-332 — open, found by the 3.3.0 range review (2026-09-19); none blocks 3.3.0, all three
->   are stated in the CHANGELOG or a CIC.** C-330: views-evaluation 2.0.0's `[frames]` extra caps views-frames
->   `<2`, and views-reporting requests it, so #488's widening is inert in every reporting environment until
->   they lift it — theirs, asked; the CHANGELOG says so. C-331: no test writes a MetricFrame and reads it
->   back through the report path on disk — the class of blindness C-328 was; carried, with the trigger named.
->   C-332: the three wandb tables are keyed per schema, so a second target's table overwrites the first's —
->   pre-existing since the tables existed; carried.
 > - **C-317 — closed, and it is the exception that proves the rule.** Six audits running, every
 >   finding in the written record — and then the documentation pass found the one shipped-behaviour
 >   defect of the release, because a CIC correction had just created readers for advice the
