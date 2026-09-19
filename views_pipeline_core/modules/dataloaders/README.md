@@ -54,7 +54,7 @@ This module standardizes data acquisition for forecasting pipelines in the VIEWS
 
 ### Overview
 
-Primary orchestration class for partition-aware model data ingestion. Integrates queryset resolution, partition slicing, drift detection, , caching, and validation.
+Primary orchestration class for partition-aware model data ingestion. Integrates queryset resolution, partition slicing, drift detection, caching, and validation.
 
 ### Initialization
 

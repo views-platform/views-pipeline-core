@@ -13,7 +13,7 @@ Orchestrates ensemble forecasting by coordinating N sub-models as a single
 pipeline unit. Extends `ForecastingModelManager` to provide ensemble-specific
 training, evaluation, forecasting, and reconciliation. Each sub-model is
 executed as a separate shell subprocess; predictions are pooled via
-`AggregationManager` and optionally reconciled via `ReconciliationModule` for
+`AggregationModule` and optionally reconciled via `ReconciliationModule` for
 hierarchical PGM-CM consistency.
 
 ---
@@ -22,7 +22,7 @@ hierarchical PGM-CM consistency.
 
 - Does **not** implement model-specific training or inference logic. Sub-models
   are invoked via their own `main.py` as shell subprocesses.
-- Does **not** own aggregation logic. That is `AggregationManager`'s
+- Does **not** own aggregation logic. That is `AggregationModule`'s
   responsibility.
 - Does **not** own reconciliation logic. That is `ReconciliationModule`'s
   responsibility.
@@ -41,7 +41,7 @@ hierarchical PGM-CM consistency.
 
 - Guarantees that all sub-models listed in `configs["models"]` are trained,
   evaluated, or forecasted (depending on the requested stages).
-- Guarantees that `AggregationManager` is used to pool sub-model predictions
+- Guarantees that `AggregationModule` is used to pool sub-model predictions
   using the aggregation method declared in `configs["aggregation"]`.
 - Guarantees that all sub-models return the same number of evaluation outputs;
   raises `ValueError` if any model returns fewer outputs than expected.
@@ -126,7 +126,7 @@ EnsembleManager (extends ForecastingModelManager)
     |-- ModelPathManager           (path resolution for each sub-model)
     |-- ForecastingModelArgs       (CLI args, converted to shell commands)
     |-- subprocess.run()           (sub-model execution)
-    |-- AggregationManager         (prediction pooling)
+    |-- AggregationModule         (prediction pooling)
     |-- ReconciliationModule       (PGM-CM hierarchical reconciliation)
     |-- _PGDataset / _CDataset     (dataset wrappers for reconciliation)
     |-- WandBModule                (inherited: alerts, run lifecycle)

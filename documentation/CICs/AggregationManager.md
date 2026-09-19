@@ -1,11 +1,13 @@
 # Class Intent Contract: AggregationManager
 
-**Status:** Active
+**Status:** Retired
 **Owner:** Project maintainers
 **Last reviewed:** 2026-04-01
 **Related ADRs:** ADR-001 (Ontology), ADR-003 (Authority of Declarations)
 
 ---
+
+> **Retired 2026-09-19 (#506).** No class of this name exists in this repository; the ensemble pooling class is `AggregationModule` (`views_pipeline_core/modules/aggregation/aggregator.py`), whose contract is `AggregationModule.md`. This file described a Polars-only, no-disk-I/O class that was never the one the ensemble managers construct. Kept for history; not maintained.
 
 ## 1. Purpose
 

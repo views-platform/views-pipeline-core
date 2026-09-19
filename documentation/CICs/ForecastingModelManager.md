@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Owner:** Project maintainers
-**Last reviewed:** 2026-04-08
+**Last reviewed:** 2026-09-19 (3.3.0 docs pass: stage wiring, `io_manager=None`, `_save_evaluations` deletion read against `managers/model/model.py`; content unchanged)
 **Related ADRs:** ADR-001 (Ontology), ADR-004 (Evolution), ADR-006 (Intent Contracts), ADR-008 (Observability), ADR-040 (Authority), ADR-041 (Sniffer Pattern)
 
 ---

@@ -31,7 +31,7 @@ metadata, and resolver dry-runs) found the mechanism right and the claim wrong:
   their querysets to views-datafactory (views-models work), not this ADR.
 - Model environments are **shared per engine** (views-models C-116): one viewser tenant
   re-caps pandas for every co-tenant in the prefix.
-- `numpy<2` **survives** the flip: views-evaluation 1.0.0 (ours) holds it non-optionally.
+- `numpy<2` **survives** the flip: views-evaluation (ours; 1.0.0 then, 2.0.0 since 3.3.0's floor) holds it non-optionally.
 - r2darts2 0.2.1 has two further conflicts that viewser never touched: wandb `>=0.28.2`
   vs our `<0.19` (already relaxed to `>=0.18.7` on their unreleased HEAD), and xarray
   `>=2026.7` vs views-datafactory's `<2026`.

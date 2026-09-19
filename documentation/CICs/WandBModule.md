@@ -176,6 +176,10 @@ WandBModule.send_alert(
 - **Red tests:** Tests should verify that `log_artifact()` propagates exceptions,
   that `log_metrics()` swallows them, and that `send_alert()` is a no-op when
   `notifications_enabled=False`.
+- **Means over groups:** `calculate_mean_evaluation_metrics` (this package's `utils`) leaves
+  `None` and `nan` out of a metric's mean — `nan` is views-evaluation's sentinel for a metric
+  undefined on a group's data (their ADR-015) — and averages `inf` as a number; pinned by
+  four tests in `tests/test_utils/test_wandb_utils.py` (C-329).
 - **SDK surface:** `tests/test_wandb_names_exist_on_the_installed_wandb.py` resolves
   every wandb name this class (and the rest of the package) evaluates on the installed
   wandb and binds every call against its signature — the check that runs when the

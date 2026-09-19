@@ -1,11 +1,13 @@
 # Class Intent Contract: ReportModule
 
-**Status:** Active
+**Status:** Retired
 **Owner:** Project maintainers
 **Last reviewed:** 2026-04-01
 **Related ADRs:** ADR-001 (Ontology of the Repository)
 
 ---
+
+> **Retired 2026-09-19 (#506).** The class this contract describes lives in views-reporting (`views_reporting.report.ReportModule`), not here; views-pipeline-core consumes it through `ReportingStage` (`views_pipeline_core/managers/reporting/stage.py`). The body below is the contract as written before the extraction (ADR-054) and is not maintained here.
 
 ## 1. Purpose
 
