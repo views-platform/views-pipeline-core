@@ -25,6 +25,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ## [3.3.0] — 2026-09-19
 
+> **Measured after publishing (2026-09-19).** A fresh `pip install views-pipeline-core==3.3.0`
+> resolves **views-evaluation 2.0.0 and views-frames 2.0.0 together** — two majors in one
+> install — plus wandb 0.30.0. That pair passed this suite, views-models' full suite (7257),
+> and one real ensemble run there (`synthetic_chant`, calibration, `-e --saved`: three
+> constituents read from disk, aggregated, scored, logged offline). Two things that run did
+> not reach: `--report` raises this package's own "installed views-reporting lacks the
+> MetricFrame consumer" refusal, because views-reporting on PyPI is still 0.3.3 (predates
+> `MetricFrameFileSource`; its sdist does not build beside 3.3.0) — so the comparison-row fix
+> below (C-328) is verified at the source boundary only until views-reporting releases; and
+> a sweep or forecasting run. Separately, **views-r2darts2 0.2.3 is on PyPI and resolves
+> beside 3.3.0 and viewser**: they pinned `darts==0.40.0` (pandas `<2`) rather than lifting
+> pandas, so the pandas wall ADR-063 describes closed from their side, and with the wandb
+> widening below the two packages share an environment again. Their sweep override still
+> sniffs without an entity reference (ADR-064, stated).
+
 ### Added
 
 - **A forecast may not cover entities absent from the last observed month of its input**
