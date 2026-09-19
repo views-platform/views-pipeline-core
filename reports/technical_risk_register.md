@@ -4,8 +4,9 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 332 concerns (204 resolved) + 41 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.3.0 — OPEN.** Prepared 2026-09-16, the day the train
-> started (#512); closed at the bump, 2026-09-19.
+> **Release gate — pipeline-core 3.3.0 — ~~OPEN~~ SHIPPED 2026-09-19.** Prepared 2026-09-16, the day the
+> train started (#512); version bumped and published 2026-09-19 (`1e25a1e`; PyPI verified from a fresh
+> 3.11 venv the same hour: wandb 0.30.0, views-frames 2.0.0, views-evaluation 2.0.0 resolved beside it).
 > A dependency-and-defect release, not a migration one. It retires two surfaces the platform
 > had stopped reading (the `--update_viewser` flag and the pandas evaluation egress), declares
 > what it had always relied on (pandas, pyarrow, tqdm), moves three SDK ceilings that had
