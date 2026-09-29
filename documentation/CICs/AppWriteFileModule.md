@@ -38,9 +38,23 @@ until usage patterns stabilize.
 
 - Guarantees that authentication is verified at construction; if credentials are
   invalid, `__init__` raises `ValueError`.
+- Guarantees that an upload is treated as a duplicate only when the stored **name**
+  matches as well as the hash. A hash match under a different name is a different
+  artefact that happens to have identical bytes: skipping it reported success for a
+  name that was never written, which broke an FAO delivery (#551, register C-335).
+  A record with **no** stored name is not a match either — on a partner-visible store
+  "cannot tell" resolves to uploading, since a redundant copy is recoverable and a
+  manifest naming an absent file is not.
+- Guarantees that `check_file_exists_by_hash(..., filename=...)` returns the document
+  for **that** name rather than an arbitrary hash match. A hash is **not unique** in
+  this collection by construction: a run-independent artefact has the same bytes every
+  delivery, so matches accumulate one per run. Selection is filtered in Python because
+  no index is declared on `filename`. A truncated page logs and reports absence rather
+  than claiming a match it did not read. Called without `filename`, the original
+  existence-only contract is unchanged.
 - Guarantees that `upload_file_with_metadata()` computes a SHA-256 hash before
   upload and checks for duplicates in both the metadata database and storage.
-  When `allow_metadata_only_updates=True` and the hash matches, only metadata is
+  When `allow_metadata_only_updates=True` and the hash **and name** match, only metadata is
   updated (no redundant upload).
 - Guarantees that `_calculate_file_hash()` uses SHA-256 with 4 KB chunked reads
   for file-path inputs.
