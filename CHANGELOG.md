@@ -23,7 +23,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.3.1] — unreleased
+## [3.3.2] — unreleased
+
+### Fixed
+
+- **The sampled-forecast publish no longer offers the partner-visible store a target the
+  wire cannot name** (`managers/ensemble/prediction_frame_ensemble.py::_forecast_ensemble`;
+  #536). Since PR #422 (register C-132) `ctx.targets` has been `combined_targets()` —
+  regression **and** classification — so a `rusty_bucket` forecast with
+  `--prediction_store` published three `(run, target)` legs and then raised
+  `ValueError: No wire-name mapping for internal target 'by_sb_best'`, **with those three
+  already committed and nothing rolled back** (ADR-013 §3.2 is manifest-last, not
+  two-phase). Reproduced before the fix against the in-memory datastore: three shards and
+  three manifests committed, then the raise. Every target is still pooled, saved locally
+  and returned; only publishing is filtered, and the withheld set is named at INFO.
+
+  **Why the filter is on names and not on count.** views-faoapi resolves a served name by
+  tokenising (`series_of`), so `pred_lr_ged_sb` and `pred_cls_ged_sb` both resolve to the
+  stem `sb` and **neither raises**. A positional `[:3]` would be correct only by luck of
+  ordering, and one upstream reorder would publish classification values to the UN under
+  the fatality column names, silently. The publishable set is therefore **derived** from
+  `INTERNAL_TO_WIRE_TARGET`, which is §7a's declared vocabulary — not restated as a
+  prefix or a copied list. A `startswith("lr_")` filter passed every other test in the
+  publisher suite, so `test_a_target_outside_the_wire_vocabulary_is_never_offered_to_the_store`
+  now carries an `lr_`-prefixed unmapped target as the discriminator.
+
+  **This does not narrow what FAO receives.** ADR-025's served schema is 6 identity +
+  3 series × 10 columns, with no column a probability channel could occupy, and
+  `views-models/deliveries/un_fao.py` independently declares the same three. Adding a
+  target to the wire remains §7a's deliberate procedure — one mapping entry plus
+  views-postprocessing's expected-target-set — not a config edit.
+
+  **Withholding some targets is the point; withholding all of them is refused.** The
+  wire vocabulary is keyed on *internal* target names, and those are not fixed forever —
+  views-datafactory serves `ged_sb_best` / `ged_ns_best` / `ged_os_best`, with no `lr_`
+  prefix. A roster that moves to those names while the mapping still reads `lr_*_best`
+  would match nothing, and the first draft of this fix let such a run **complete green
+  having delivered nothing to the UN** — views-models#320's shape, reintroduced by the
+  remedy. Publishing zero targets under `--prediction_store` now raises, naming the
+  targets found, the vocabulary known, and §7a's extension procedure. Renaming remains a
+  mapping edit and no code change: the publishable set is derived, so a mapped
+  non-`lr_` target publishes and an unmapped `lr_`-shaped one does not. Both directions
+  are pinned by tests.
+
+  **Reviewed, and two of the guards written for it were found decorative.** The
+  six-target test was ordered regression-first, so the positional `[:3]` mutant its own
+  docstring ruled out kept it green; and the vocabulary test asserted on substrings
+  `wire_target` can never produce, so under its own mutation it failed on an unexpected
+  exception with a shard already committed. Both now assert the committed set **by name**.
+  A mutant that dropped the local save for withheld targets had survived all 2935 tests
+  because the harness stubbed `save_pf`; the stub is gone. Wire-name injectivity is pinned
+  too — a set comparison could not see a colliding fourth entry. Standing rules recorded
+  in **ADR-068**; register **C-334**.
+
+  **The test gap that let it ship:** every test in
+  `tests/test_managers/test_sampled_forecast_publisher.py` published ONE `(run, target)`;
+  the loop over `ctx.targets` was covered nowhere.
+
+## [3.3.1] — 2026-09-29
 
 ### Fixed
 
@@ -35,9 +92,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   every exception inside a worker — the `CorePredictionSniffer` refusal and the
   `save_predictions` failure alike — stayed in its Future and was dropped. Control then
   fell through to `send_alert("Evaluation Predictions Saved", ...)` and the run exited 0.
-  The futures are now read, so **the first worker failure re-raises** where the method's
-  own handler turns it into a `ModelEvaluationException` carrying that worker's traceback,
-  and the success alert is unreachable **when a worker raises**.
+  The futures are now read, so **a worker failure re-raises** where the method's own
+  handler turns it into a `ModelEvaluationException` carrying that worker's traceback, and
+  the success alert is unreachable **when a worker raises**. *(Corrected in 3.3.2: this
+  entry originally said "the first worker failure". Which failure surfaces is not
+  determined — the drain yields on completion order, not sequence index. Deferred as
+  #543.)*
 
   Two limits of that sentence, stated because the first draft of this entry overstated
   both (#537). *First*, only the first failure is reported: the `as_completed` loop is

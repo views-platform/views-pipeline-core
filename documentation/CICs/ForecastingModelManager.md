@@ -125,7 +125,7 @@ configuration to `ConfigurationManager`.
 | Return type mismatches `prediction_format` | `ValueError` (ADR-042 fail-loud guard) |
 | Prediction temporal coverage outside step window | `ValueError` from `_assert_predictions_in_step_window()` with diagnostic hints |
 | Wrong number of evaluation sequences | `ValueError` from `_assert_predictions_in_step_window()` |
-| A validate-and-save worker raises (DF path) | The **first** such failure re-raises as `ModelEvaluationException`; the "Evaluation Predictions Saved" alert is not sent (#529, C-333). Two limits, tracked as #537: later failures in the same run are not reported, and a **zero-sequence** run still alerts success — `_assert_predictions_in_step_window()` returns early on an empty list and skips the count check above |
+| A validate-and-save worker raises (DF path) | **One** such failure re-raises as `ModelEvaluationException` and the "Evaluation Predictions Saved" alert is not sent (#529, C-333). **Which one is not determined**: the drain yields on completion order, which derives from Future identity hashes and not from sequence index — measured, with two failing sequences, to surface the same one on every run but not the earlier one. Making it the lowest-index sequence is a behaviour change, deferred to **#543**. Two further limits, tracked as **#537**: failures after the one surfaced are not reported at all, and a **zero-sequence** run still alerts success — `_assert_predictions_in_step_window()` returns early on an empty list and skips the count check above |
 
 All failures are loud. No silent fallbacks, no boolean returns from validators.
 
