@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.3.3] — unreleased
+## [3.3.3] — 2026-09-29
 
 **Identical in content to 3.3.2. Released only because 3.3.2 could not be completed on PyPI.**
 
