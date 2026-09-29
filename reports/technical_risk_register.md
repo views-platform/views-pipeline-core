@@ -4,7 +4,7 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 333 concerns (205 resolved) + 41 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.3.1 — OPEN.** Prepared 2026-09-29. **A single-defect
+> **Release gate — pipeline-core 3.3.1 — ~~OPEN~~ SHIPPED 2026-09-29.** Prepared 2026-09-29. **A single-defect
 > patch release, deliberately.** It carries C-333 and nothing else — not the ADR-064/C-323
 > corrections owed to views-r2darts2, not the ensemble tier guard, not the swallowed
 > Appwrite upload — so that if anything moves after it lands, attribution is unambiguous.
