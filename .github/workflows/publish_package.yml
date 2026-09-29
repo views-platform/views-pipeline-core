@@ -35,4 +35,10 @@ jobs:
         python -c "from packaging.version import parse; assert parse('$new_version') > parse('$latest_version'), 'Version must be higher than $latest_version'"
   
     - name: Publish to PyPI
-      run: poetry publish --build --username __token__ --password ${{ secrets.PYPI_TOKEN }}
+      # --skip-existing: PyPI dropped the connection mid-upload on 3.3.2
+      # ("Error connecting to repository" after both artefacts reached 100%). The sdist
+      # had committed; the wheel had not, leaving a source-only release. Without this
+      # flag a re-run dies on "file already exists" for the sdist before it ever reaches
+      # the wheel — and a PyPI filename can never be reused, so the only other recovery
+      # is to burn a version number. With it, a re-run uploads exactly what is missing.
+      run: poetry publish --build --skip-existing --username __token__ --password ${{ secrets.PYPI_TOKEN }}
