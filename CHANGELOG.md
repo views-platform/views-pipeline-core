@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [Unreleased]
+## [3.3.2] — unreleased
 
 ### Fixed
 
@@ -80,7 +80,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   `tests/test_managers/test_sampled_forecast_publisher.py` published ONE `(run, target)`;
   the loop over `ctx.targets` was covered nowhere.
 
-## [3.3.1] — unreleased
+## [3.3.1] — 2026-09-29
 
 ### Fixed
 
@@ -92,9 +92,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   every exception inside a worker — the `CorePredictionSniffer` refusal and the
   `save_predictions` failure alike — stayed in its Future and was dropped. Control then
   fell through to `send_alert("Evaluation Predictions Saved", ...)` and the run exited 0.
-  The futures are now read, so **the first worker failure re-raises** where the method's
-  own handler turns it into a `ModelEvaluationException` carrying that worker's traceback,
-  and the success alert is unreachable **when a worker raises**.
+  The futures are now read, so **a worker failure re-raises** where the method's own
+  handler turns it into a `ModelEvaluationException` carrying that worker's traceback, and
+  the success alert is unreachable **when a worker raises**. *(Corrected in 3.3.2: this
+  entry originally said "the first worker failure". Which failure surfaces is not
+  determined — the drain yields on completion order, not sequence index. Deferred as
+  #543.)*
 
   Two limits of that sentence, stated because the first draft of this entry overstated
   both (#537). *First*, only the first failure is reported: the `as_completed` loop is
