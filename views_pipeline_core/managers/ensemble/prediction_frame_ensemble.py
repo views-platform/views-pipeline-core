@@ -681,6 +681,29 @@ class PredictionFrameEnsembleManager:
             )
             publishable = frozenset(ctx.targets) & frozenset(INTERNAL_TO_WIRE_TARGET)
             withheld = sorted(set(ctx.targets) - publishable)
+            if not publishable:
+                # Withholding SOME targets is the point of this filter; withholding
+                # ALL of them is never right. A run told to publish that publishes
+                # nothing is the views-models#320 shape — a partner receives silence
+                # while the pipeline reports success — so it fails here instead.
+                #
+                # The live case this guards: the wire vocabulary is keyed on internal
+                # target names, and those are not fixed forever. views-datafactory
+                # serves `ged_sb_best` / `ged_ns_best` / `ged_os_best`, with no `lr_`
+                # prefix. A roster that moves to those names while this mapping still
+                # reads `lr_*_best` matches nothing — and would otherwise complete
+                # green having delivered nothing to the UN.
+                raise ValueError(
+                    f"Prediction store is enabled but NONE of this ensemble's targets "
+                    f"{sorted(ctx.targets)} is in the ADR-013 §7a wire vocabulary "
+                    f"{sorted(INTERNAL_TO_WIRE_TARGET)}. Publishing nothing to a "
+                    f"partner-visible store is not a valid outcome. If these targets "
+                    f"were renamed (e.g. the datafactory's `ged_*_best` in place of "
+                    f"`lr_*_best`), add the mapping entries — §7a Amendment A1: one "
+                    f"entry here plus views-postprocessing's expected-target-set. If "
+                    f"this ensemble is genuinely not for the wire, run it without "
+                    f"--prediction_store."
+                )
             if withheld:
                 logger.info(
                     "Prediction store: publishing %d of %d target(s) — %s. Withheld: "

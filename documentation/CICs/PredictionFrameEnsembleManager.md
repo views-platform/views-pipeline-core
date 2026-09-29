@@ -147,6 +147,10 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   fourth, leaving three manifests committed with no rollback (§3.2 is manifest-last, not
   two-phase). Adding a target to the wire is §7a's deliberate, FAO-facing procedure: one
   entry in the mapping plus views-postprocessing's expected-target-set — not a config edit.
+  **Publishing zero targets under the flag raises**: withholding some is the filter's
+  purpose, withholding all is a silent non-delivery. The vocabulary is keyed on internal
+  names, so a roster renamed to the datafactory's `ged_*_best` would otherwise complete
+  green having delivered nothing (views-models#320's shape).
 
 ---
 

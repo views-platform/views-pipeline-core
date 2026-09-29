@@ -484,3 +484,49 @@ def test_a_target_outside_the_wire_vocabulary_is_never_offered_to_the_store(
     assert uploaded, "the mapped target should still have published"
     assert not any("wildcard" in name for name in uploaded), uploaded
     assert not any("future" in name for name in uploaded), uploaded
+
+
+def test_publishing_is_refused_when_the_vocabulary_maps_none_of_the_targets(
+    tmp_path, monkeypatch,
+):
+    """Withholding SOME targets is the filter's purpose; withholding ALL is a silence.
+
+    The live case: the wire vocabulary is keyed on INTERNAL target names, and those are
+    not fixed forever — views-datafactory serves `ged_sb_best`/`ged_ns_best`/`ged_os_best`
+    with no `lr_` prefix. A roster that moves to those names while the mapping still
+    reads `lr_*_best` matches nothing. Without this guard the run completes green having
+    delivered nothing to the UN, which is views-models#320's shape exactly (a partner
+    received silence for 145 days while the pipeline reported fine).
+    """
+    m, ctx = _forecast_manager(
+        tmp_path, ["ged_sb_best", "ged_ns_best", "ged_os_best"], monkeypatch
+    )
+
+    with pytest.raises(ValueError, match="NONE of this ensemble's targets"):
+        m._forecast_ensemble(ctx)
+
+    assert m._datastore.uploads == [], "nothing may reach the store on this path"
+
+
+def test_the_filter_follows_the_mapping_when_targets_are_renamed(tmp_path, monkeypatch):
+    """Rename-readiness: the publishable set is DERIVED from the vocabulary, so moving
+    off the `lr_` prefix is one mapping entry and no code change.
+
+    This is the converse of the `lr_future_best` discriminator above: there, an
+    `lr_`-shaped name that is NOT mapped must be withheld; here, a name that does not
+    look like the current three but IS mapped must publish.
+    """
+    import views_pipeline_core.managers.ensemble.sampled_forecast_publisher as sfp
+
+    monkeypatch.setattr(
+        sfp, "INTERNAL_TO_WIRE_TARGET", {"ged_sb_best": "lr_ged_sb"}
+    )
+    m, ctx = _forecast_manager(
+        tmp_path, ["ged_sb_best", "by_sb_best"], monkeypatch
+    )
+
+    m._forecast_ensemble(ctx)
+
+    committed = _manifests_committed(m._datastore)
+    assert len(committed) == 1, committed
+    assert "__lr_ged_sb__manifest.json" in committed[0], committed

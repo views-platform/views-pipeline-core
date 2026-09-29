@@ -54,6 +54,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   target to the wire remains §7a's deliberate procedure — one mapping entry plus
   views-postprocessing's expected-target-set — not a config edit.
 
+  **Withholding some targets is the point; withholding all of them is refused.** The
+  wire vocabulary is keyed on *internal* target names, and those are not fixed forever —
+  views-datafactory serves `ged_sb_best` / `ged_ns_best` / `ged_os_best`, with no `lr_`
+  prefix. A roster that moves to those names while the mapping still reads `lr_*_best`
+  would match nothing, and the first draft of this fix let such a run **complete green
+  having delivered nothing to the UN** — views-models#320's shape, reintroduced by the
+  remedy. Publishing zero targets under `--prediction_store` now raises, naming the
+  targets found, the vocabulary known, and §7a's extension procedure. Renaming remains a
+  mapping edit and no code change: the publishable set is derived, so a mapped
+  non-`lr_` target publishes and an unmapped `lr_`-shaped one does not. Both directions
+  are pinned by tests.
+
   **The test gap that let it ship:** every test in
   `tests/test_managers/test_sampled_forecast_publisher.py` published ONE `(run, target)`;
   the loop over `ctx.targets` was covered nowhere.
