@@ -13,7 +13,7 @@ import subprocess
 import time
 import traceback
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, FrozenSet, List, Optional, Union
 
 import numpy as np
 import tqdm
@@ -656,6 +656,40 @@ class PredictionFrameEnsembleManager:
             ctx.expected_samples_per_model,
         )
 
+        # #536: which targets may be OFFERED to the partner-visible store. Every
+        # target is still aggregated, saved and returned — this filter is on
+        # publishing alone.
+        #
+        # Since PR #422 (C-132) `ctx.targets` is `combined_targets()`: regression AND
+        # classification. The FAO wire vocabulary (ADR-013 §7a) maps only the three
+        # regression targets, so a six-target ensemble published three (run, target)
+        # legs and then raised on the fourth — with three manifests already COMMITTED
+        # and nothing rolled back, by design (§3.2 is manifest-last, not two-phase).
+        #
+        # Filter on the declared NAMES, never on count or position. views-faoapi
+        # resolves a served name by tokenising (`series_of`, its schema.py), so
+        # `pred_lr_ged_sb` and `pred_cls_ged_sb` BOTH resolve to the stem `sb` and
+        # neither raises. A positional `[:3]` would be right only by luck of ordering;
+        # one upstream reorder would publish classification values to the UN under the
+        # fatality column names, silently. `INTERNAL_TO_WIRE_TARGET`'s keys ARE the
+        # declared vocabulary, so deriving from them keeps this in step with §7a's
+        # extension procedure instead of restating it.
+        publishable: FrozenSet[str] = frozenset()
+        if self._use_prediction_store:
+            from views_pipeline_core.managers.ensemble.sampled_forecast_publisher import (
+                INTERNAL_TO_WIRE_TARGET,
+            )
+            publishable = frozenset(ctx.targets) & frozenset(INTERNAL_TO_WIRE_TARGET)
+            withheld = sorted(set(ctx.targets) - publishable)
+            if withheld:
+                logger.info(
+                    "Prediction store: publishing %d of %d target(s) — %s. Withheld: "
+                    "%s, which the ADR-013 §7a wire vocabulary does not map. They are "
+                    "still aggregated and saved locally; adding one to the wire is a "
+                    "deliberate, FAO-facing change (§7a Amendment A1), not a config edit.",
+                    len(publishable), len(ctx.targets), sorted(publishable), withheld,
+                )
+
         forecasts: Dict[str, PredictionFrame] = {}
         for target in ctx.targets:
             frames = []
@@ -680,10 +714,11 @@ class PredictionFrameEnsembleManager:
             )
             save_pf(agg_pf, save_dir)
             forecasts[target] = agg_pf
-            if self._use_prediction_store:
+            if target in publishable:
                 # #269 / ADR-013 §3: the Hop-A publish leg — Track A archives +
-                # manifest-last, per (run, target). Runs only under the flag; child
-                # runs never reach here with it set (prediction_store=False forcing).
+                # manifest-last, per (run, target). `publishable` is empty unless
+                # `_use_prediction_store`, so this is still flag-gated; child runs
+                # never reach here with it set (prediction_store=False forcing).
                 self._publish_sampled_forecast(agg_pf, target, ctx)
 
         return forecasts

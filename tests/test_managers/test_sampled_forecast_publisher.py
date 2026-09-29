@@ -383,3 +383,104 @@ class TestProvenanceVersionAuthority:
             module, "distributions_metadata", _absent, raising=True
         )
         assert module._pipeline_core_version() == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# #536 — the multi-target publish loop. Every test above publishes ONE
+# (run, target); the loop over `ctx.targets` was covered nowhere, which is how a
+# six-target ensemble came to commit three manifests to the partner-visible store
+# and then raise on the fourth.
+# ---------------------------------------------------------------------------
+
+#: `rusty_bucket`'s declared set since PR #422 made `ctx.targets` = combined_targets:
+#: three regression targets the FAO wire knows, three classification targets it does not.
+_SIX_TARGETS = [
+    "lr_sb_best", "lr_ns_best", "lr_os_best",
+    "by_sb_best", "by_ns_best", "by_os_best",
+]
+
+
+def _forecast_manager(tmp_path, targets, monkeypatch):
+    """A PFE manager wired to run `_forecast_ensemble` against an in-memory store."""
+    import views_pipeline_core.managers.ensemble.prediction_frame_ensemble as pfe
+
+    m = object.__new__(PredictionFrameEnsembleManager)
+    m._use_prediction_store = True
+    m._datastore = _FakeDatastore()
+    m._ensemble_path = SimpleNamespace(data_generated=tmp_path / "generated")
+    m._build_datastore = lambda: m._datastore
+    m._forecast_model_artifact = lambda ctx, model_name: {
+        t: _pf(times=[543]) for t in targets
+    }
+    monkeypatch.setattr(pfe, "save_pf", lambda *a, **k: None)
+
+    ctx = SimpleNamespace(
+        configs={"name": "rusty_bucket", "level": "pgm"},
+        models=["purple_alien"],
+        targets=list(targets),
+        aggregation="concat",
+        reconciliation=None,
+        run_type="forecasting",
+        timestamp="20260715_000000",
+        expected_samples_per_model=None,
+    )
+    return m, ctx
+
+
+def _manifests_committed(store):
+    return [u["filename"] for u in store.uploads if u["filename"].endswith("manifest.json")]
+
+
+def test_six_target_forecast_publishes_only_the_three_wire_targets(tmp_path, monkeypatch):
+    """#536. The publish loop must offer the store only targets the wire vocabulary maps.
+
+    Before the fix this raised `ValueError: No wire-name mapping for internal target
+    'by_sb_best'` with three manifests ALREADY committed to the partner-visible store —
+    nothing is rolled back, by design (ADR-013 §3.2 manifest-last).
+
+    The fix must filter on the three regression NAMES, never on count or position: FAO
+    resolves a served name by tokenising, so `pred_lr_ged_sb` and `pred_cls_ged_sb` both
+    resolve to the stem `sb` with no error raised anywhere. A positional `[:3]` would be
+    correct only by luck of ordering, and an upstream reorder would publish
+    classification values to the UN under the fatality column names, silently.
+    """
+    m, ctx = _forecast_manager(tmp_path, _SIX_TARGETS, monkeypatch)
+
+    forecasts = m._forecast_ensemble(ctx)
+
+    # All six are still aggregated and returned — the filter is on PUBLISHING only.
+    assert sorted(forecasts) == sorted(_SIX_TARGETS)
+
+    committed = _manifests_committed(m._datastore)
+    assert len(committed) == 3, committed
+    assert all("__lr_ged_" in name for name in committed), committed
+    assert not any("by_" in name or "cls" in name for name in committed), committed
+
+
+def test_a_target_outside_the_wire_vocabulary_is_never_offered_to_the_store(
+    tmp_path, monkeypatch,
+):
+    """The filter must be DERIVED from the wire vocabulary, not restated as a shape.
+
+    `lr_future_best` is the discriminator. It carries the same `lr_` prefix as all three
+    mapped targets and is not in the mapping, so it is withheld by a filter derived from
+    `INTERNAL_TO_WIRE_TARGET` and PUBLISHED by any filter that restates the vocabulary as
+    a pattern — `startswith("lr_")`, a hand-copied list of three names, a regex. That
+    mutation passes every other test in this file, which is why this one exists.
+
+    It matters beyond tidiness: §7a's extension procedure adds a target to the wire by
+    adding one entry to the mapping. A filter keyed on shape would publish a future
+    `lr_*` target the wire does not map — the very failure #536 is, one release later.
+    """
+    m, ctx = _forecast_manager(
+        tmp_path,
+        ["lr_sb_best", "lr_future_best", "wildcard_target_best"],
+        monkeypatch,
+    )
+
+    m._forecast_ensemble(ctx)
+
+    uploaded = [u["filename"] for u in m._datastore.uploads]
+    assert uploaded, "the mapped target should still have published"
+    assert not any("wildcard" in name for name in uploaded), uploaded
+    assert not any("future" in name for name in uploaded), uploaded

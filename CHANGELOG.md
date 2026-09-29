@@ -23,6 +23,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **The sampled-forecast publish no longer offers the partner-visible store a target the
+  wire cannot name** (`managers/ensemble/prediction_frame_ensemble.py::_forecast_ensemble`;
+  #536). Since PR #422 (register C-132) `ctx.targets` has been `combined_targets()` —
+  regression **and** classification — so a `rusty_bucket` forecast with
+  `--prediction_store` published three `(run, target)` legs and then raised
+  `ValueError: No wire-name mapping for internal target 'by_sb_best'`, **with those three
+  already committed and nothing rolled back** (ADR-013 §3.2 is manifest-last, not
+  two-phase). Reproduced before the fix against the in-memory datastore: three shards and
+  three manifests committed, then the raise. Every target is still pooled, saved locally
+  and returned; only publishing is filtered, and the withheld set is named at INFO.
+
+  **Why the filter is on names and not on count.** views-faoapi resolves a served name by
+  tokenising (`series_of`), so `pred_lr_ged_sb` and `pred_cls_ged_sb` both resolve to the
+  stem `sb` and **neither raises**. A positional `[:3]` would be correct only by luck of
+  ordering, and one upstream reorder would publish classification values to the UN under
+  the fatality column names, silently. The publishable set is therefore **derived** from
+  `INTERNAL_TO_WIRE_TARGET`, which is §7a's declared vocabulary — not restated as a
+  prefix or a copied list. A `startswith("lr_")` filter passed every other test in the
+  publisher suite, so `test_a_target_outside_the_wire_vocabulary_is_never_offered_to_the_store`
+  now carries an `lr_`-prefixed unmapped target as the discriminator.
+
+  **This does not narrow what FAO receives.** ADR-025's served schema is 6 identity +
+  3 series × 10 columns, with no column a probability channel could occupy, and
+  `views-models/deliveries/un_fao.py` independently declares the same three. Adding a
+  target to the wire remains §7a's deliberate procedure — one mapping entry plus
+  views-postprocessing's expected-target-set — not a config edit.
+
+  **The test gap that let it ship:** every test in
+  `tests/test_managers/test_sampled_forecast_publisher.py` published ONE `(run, target)`;
+  the loop over `ctx.targets` was covered nowhere.
+
 ## [3.3.1] — unreleased
 
 ### Fixed

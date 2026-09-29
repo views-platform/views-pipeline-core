@@ -138,6 +138,15 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
   `generate_evaluation_report()`.
 - Uses `mmap=True` when loading sub-model PFs during evaluation (memory-bounded
   sequential access).
+- **Publishes to the partner-visible prediction store only the targets the ADR-013 §7a
+  wire vocabulary maps** (`INTERNAL_TO_WIRE_TARGET`), under `use_prediction_store`. Every
+  target is still pooled, saved locally and returned; the filter is on publishing alone,
+  and the withheld set is named at INFO. The set is **derived** from the mapping, never
+  restated as a prefix, a count or a copied list — `#536`, where the six-target pool that
+  C-132/#422 introduced published three `(run, target)` legs and then raised on the
+  fourth, leaving three manifests committed with no rollback (§3.2 is manifest-last, not
+  two-phase). Adding a target to the wire is §7a's deliberate, FAO-facing procedure: one
+  entry in the mapping plus views-postprocessing's expected-target-set — not a config edit.
 
 ---
 
