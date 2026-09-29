@@ -23,6 +23,78 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.3.1] — unreleased
+
+### Fixed
+
+- **Evaluation no longer discards its workers' exceptions — a refusal that fires is no
+  longer thrown away** (`managers/model/model.py`, `_execute_model_evaluation`; #529).
+  The per-sequence validate-and-save step runs in a `ThreadPoolExecutor`, and the pool
+  was drained with `concurrent.futures.wait(futures)`. `wait()` returns when futures are
+  *done*, and **done includes raised**: nothing read `.result()` or `.exception()`, so
+  every exception inside a worker — the `CorePredictionSniffer` refusal and the
+  `save_predictions` failure alike — stayed in its Future and was dropped. Control then
+  fell through to `send_alert("Evaluation Predictions Saved", ...)` and the run exited 0.
+  The futures are now read, so **the first worker failure re-raises** where the method's
+  own handler turns it into a `ModelEvaluationException` carrying that worker's traceback,
+  and the success alert is unreachable **when a worker raises**.
+
+  Two limits of that sentence, stated because the first draft of this entry overstated
+  both (#537). *First*, only the first failure is reported: the `as_completed` loop is
+  abandoned on the first raise, so a run in which two sequences fail for different reasons
+  surfaces whichever thread finished first and discards the other — a narrower version of
+  the same discard. *Second*, "a save did not happen" is broader than what is guarded: a
+  run with **zero** sequences still reaches both success alerts, because
+  `_assert_predictions_in_step_window` returns early on an empty list and skips the
+  sequence-count check that would otherwise refuse it. That hole is on the PredictionFrame
+  path too, so it is not bounded by the scope note below.
+
+  **Measured, not inferred** (views-models `b2cd4a07`, fimbulthul 2026-09-22): `dark_river`
+  had all thirteen evaluation sequences refused —
+  `MultiIndex names ('month_id', 'country_id') do not match expected layout for level='pgm'`
+  — logged the thirteen "Validating…" lines within **11 ms**, wrote **zero** prediction
+  files, and was recorded `PASS` by the integration runner. Days of GPU produced metric
+  frames and no predictions.
+
+  **The severity is not "predictions are lost".** It is that this disabled every guard
+  downstream of it on the evaluation path: the sniffer's refusal was correct and was
+  discarded. A guard whose refusal is thrown away is worse than no guard, because its
+  existence is what makes an operator trust the run. Register C-333.
+
+  **Scope.** `prediction_format: "dataframe"` only — 80 of the 117 views-models models
+  (42 views-r2darts2, 38 views-stepshifter). The `prediction_frame` path writes on the
+  main thread and always raised; a disk-full `OSError` there failed a run loudly on
+  2026-09-20, which is the control case. The pool sits inside `_execute_model_evaluation`,
+  so **forecasting is untouched** — `-f` never reached it.
+
+  **Correction to this entry's first draft, which claimed this was the only such site on
+  the platform.** It is not, and the claim was reached by hand-listing repositories to
+  grep rather than deriving the set — this register's most-repeated lesson, committed
+  inside the entry that cites it. What is actually true, re-checked:
+  **`views-impact/views_impact/manager/model.py` carries a verbatim copy of the same
+  `validate_and_save` + `ThreadPoolExecutor` block ending in `concurrent.futures.wait(futures)`,
+  falling through to a success alert — the same defect, still unfixed.** It pins
+  `views-pipeline-core >=2.2.0,<3.0.0`, so it is its own fork of the pre-3.0 method and is
+  not reached by this release; fixing it is theirs, and is not filed here. Separately,
+  **views-hydranet declares no executor at all**, so naming it as verified asserted
+  something about code that does not exist. views-stepshifter and views-r2darts2 were
+  checked and do call `.result()`.
+
+  **For operators: expect runs that were green to go red.** Anything that has been failing
+  silently on this path now says so. That is the fix working.
+
+  **Not fixed here, and filed rather than described** — this release deliberately carries
+  one fix, so that if anything moves after it lands the cause is unambiguous:
+  **#532** (an Appwrite upload failure is logged and swallowed, so a `--prediction_store`
+  run can still fail to publish and report success — this change removed only the outer
+  layer), **#533** (nothing refuses a constituent whose `prediction_format` its ensemble
+  manager cannot read), **#534** (ADR-064 and C-323 are stale about views-r2darts2's
+  shipped entity fix; 0.2.3 is the only installable floor), and **#535** (make
+  `reference_entities` structurally hard to omit — the same defect class as this one).
+  **#537** (the two limits named above — only the first failure is reported, and a
+  zero-sequence run still alerts success). Note also that this change catches only
+  failures that *raise*; a save writing nothing without raising would still pass.
+
 ## [3.3.0] — 2026-09-19
 
 > **Measured after publishing (2026-09-19).** A fresh `pip install views-pipeline-core==3.3.0`
