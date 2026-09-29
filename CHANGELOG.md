@@ -66,6 +66,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   non-`lr_` target publishes and an unmapped `lr_`-shaped one does not. Both directions
   are pinned by tests.
 
+  **Reviewed, and two of the guards written for it were found decorative.** The
+  six-target test was ordered regression-first, so the positional `[:3]` mutant its own
+  docstring ruled out kept it green; and the vocabulary test asserted on substrings
+  `wire_target` can never produce, so under its own mutation it failed on an unexpected
+  exception with a shard already committed. Both now assert the committed set **by name**.
+  A mutant that dropped the local save for withheld targets had survived all 2935 tests
+  because the harness stubbed `save_pf`; the stub is gone. Wire-name injectivity is pinned
+  too — a set comparison could not see a colliding fourth entry. Standing rules recorded
+  in **ADR-068**; register **C-334**.
+
   **The test gap that let it ship:** every test in
   `tests/test_managers/test_sampled_forecast_publisher.py` published ONE `(run, target)`;
   the loop over `ctx.targets` was covered nowhere.

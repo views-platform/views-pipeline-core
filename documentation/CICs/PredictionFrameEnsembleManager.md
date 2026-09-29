@@ -171,6 +171,7 @@ data format: `PredictionFrame` numpy arrays instead of `pd.DataFrame`.
 | Unsupported aggregation method | `ValueError` listing supported methods |
 | Sub-model did not produce forecast for target | `ValueError` in `_forecast_ensemble()` |
 | Training/evaluation/forecasting exception | `PipelineException` with traceback and WandB alert |
+| `use_prediction_store` and the roster supplies no target for a served wire column | `ValueError` from `_forecast_ensemble` **before any constituent is forecast**, naming the missing wire columns, the roster, and where the mapping lives. A short delivery to a partner-visible store is refused, not published (#536). Targets outside the wire vocabulary are withheld from publishing at INFO — they are still pooled, saved and returned |
 
 All failures are loud. No silent fallbacks.
 
@@ -263,8 +264,14 @@ manager._evaluate_ensemble(ctx)
 
 ## 10. Test Alignment
 
-- `tests/test_managers/test_prediction_frame_ensemble_manager.py` -- 48
-  characterization tests across 9 test classes:
+- `tests/test_managers/test_sampled_forecast_publisher.py` -- 24 tests for the ADR-013
+  §3 Hop-A publish leg: emission, golden-string names, byte-pinned header, injectable
+  provenance, round-trip, manifest-last commit, torn-run abort, wire-name injectivity,
+  and (#536) the multi-target publish loop — which of `ctx.targets` is offered to the
+  partner-visible store, that the flag gates it, that a short delivery refuses, and that
+  the filter follows the mapping rather than a name shape.
+- `tests/test_managers/test_prediction_frame_ensemble_manager.py` -- 62
+  characterization tests across 13 test classes, the largest of which are:
   - `TestPredictionFrameAggregation` (9 tests) -- verifies concat stacks samples
     axis, arithmetic mean averages correctly, identifiers are preserved, mismatches
     raise, empty list raises, unsupported method raises.
@@ -304,9 +311,12 @@ manager._evaluate_ensemble(ctx)
   may be extracted.
 - The dependency on `ForecastingModelManager._resolve_evaluation_sequence_number()`
   is a static method call. It may be relocated to a utility module.
-- Future work: `prediction_store` support for numpy format (blocked on views-forecasts
-  package numpy API). When available, `_create_model_args` can pass
-  `prediction_store=True`.
+- ~~Future work: `prediction_store` support for numpy format (blocked on views-forecasts
+  package numpy API).~~ **Shipped in #269** as the ADR-013 §3 Hop-A leg
+  (`managers/ensemble/sampled_forecast_publisher.py`): Track A archives plus a
+  manifest-last commit, per (run, target), under `--prediction_store`. Since #536 the
+  publish set is filtered to the served wire vocabulary, and a roster that cannot supply
+  every served column refuses the run before any constituent is forecast — §5 and §6.
 - Sub-model numpy directory discovery relies on explicit path construction from the
   model artifact timestamp. The utility method `_get_generated_pf_prediction_paths()`
   on `ModelPathManager` provides an alternative lookup mechanism.

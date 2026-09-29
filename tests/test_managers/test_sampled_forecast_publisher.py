@@ -104,6 +104,27 @@ def test_wire_target_mapping():
     assert set(INTERNAL_TO_WIRE_TARGET.values()) == {"lr_ged_sb", "lr_ged_ns", "lr_ged_os"}
 
 
+def test_wire_names_are_unique_so_two_targets_cannot_collide_on_one_column():
+    """The mapping's VALUES must stay injective, and a set comparison cannot see that.
+
+    `test_wire_target_mapping`'s `set(...values()) == {three}` stays GREEN if a fourth
+    entry duplicates an existing wire name — a set collapses the duplicate. Since #536
+    the keys are also the publish allowlist, so a colliding fourth entry (a copy-paste
+    typo, or `{"cls_sb_best": "lr_ged_sb"}`) admits BOTH internal targets and uploads two
+    shards and two manifests under byte-identical names: classification probabilities on
+    the wire under the fatality target's name, which is the outcome #536's reasoning
+    assumes deriving from the mapping prevents.
+
+    The §7a extension procedure is exactly where this typo happens, and the run-time
+    error message steers an operator toward it, so it is pinned here rather than trusted.
+    """
+    values = list(INTERNAL_TO_WIRE_TARGET.values())
+    assert len(values) == len(set(values)), (
+        f"two internal targets map to the same wire name: {sorted(values)} — they would "
+        f"publish over each other under identical filenames"
+    )
+
+
 def test_wire_target_unmapped_fails_loud():
     with pytest.raises(ValueError, match="wire-name mapping"):
         wire_target("synth_target")
@@ -393,26 +414,38 @@ class TestProvenanceVersionAuthority:
 # ---------------------------------------------------------------------------
 
 #: `rusty_bucket`'s declared set since PR #422 made `ctx.targets` = combined_targets:
-#: three regression targets the FAO wire knows, three classification targets it does not.
+#: three regression targets the wire serves, three classification targets it does not.
+#: Deliberately classification-FIRST. With the regression names at the front, a
+#: positional `[:3]` mutant publishes exactly the right three and every count-based
+#: assertion here stays green — the "luck of ordering" the fix exists to rule out.
 _SIX_TARGETS = [
-    "lr_sb_best", "lr_ns_best", "lr_os_best",
     "by_sb_best", "by_ns_best", "by_os_best",
+    "lr_sb_best", "lr_ns_best", "lr_os_best",
 ]
 
+_WIRE_MANIFESTS = {
+    "rusty_bucket_forecasting_20260715_000000__lr_ged_sb__manifest.json",
+    "rusty_bucket_forecasting_20260715_000000__lr_ged_ns__manifest.json",
+    "rusty_bucket_forecasting_20260715_000000__lr_ged_os__manifest.json",
+}
 
-def _forecast_manager(tmp_path, targets, monkeypatch):
-    """A PFE manager wired to run `_forecast_ensemble` against an in-memory store."""
-    import views_pipeline_core.managers.ensemble.prediction_frame_ensemble as pfe
 
+def _forecast_manager(tmp_path, targets, monkeypatch, use_store=True):
+    """A PFE manager wired to run `_forecast_ensemble` against an in-memory store.
+
+    `save_pf` is REAL: the fix's central mitigation is that withheld targets are still
+    saved locally, and stubbing the saver left that claim with no guard anywhere (a
+    mutant that skipped `save_pf` for withheld targets passed all 2935 tests).
+    `_forecast_model_artifact` keeps the real `(model_name, ctx)` parameter order, and
+    `_build_datastore` is left alone so the tests still see regressions in it.
+    """
     m = object.__new__(PredictionFrameEnsembleManager)
-    m._use_prediction_store = True
+    m._use_prediction_store = use_store
     m._datastore = _FakeDatastore()
     m._ensemble_path = SimpleNamespace(data_generated=tmp_path / "generated")
-    m._build_datastore = lambda: m._datastore
-    m._forecast_model_artifact = lambda ctx, model_name: {
+    m._forecast_model_artifact = lambda model_name, ctx: {
         t: _pf(times=[543]) for t in targets
     }
-    monkeypatch.setattr(pfe, "save_pf", lambda *a, **k: None)
 
     ctx = SimpleNamespace(
         configs={"name": "rusty_bucket", "level": "pgm"},
@@ -428,105 +461,134 @@ def _forecast_manager(tmp_path, targets, monkeypatch):
 
 
 def _manifests_committed(store):
-    return [u["filename"] for u in store.uploads if u["filename"].endswith("manifest.json")]
+    return {u["filename"] for u in store.uploads if u["filename"].endswith("manifest.json")}
+
+
+def _saved_target_dirs(tmp_path):
+    root = tmp_path / "generated" / "predictions_forecasting_20260715_000000"
+    return {d.name for d in root.iterdir()} if root.exists() else set()
 
 
 def test_six_target_forecast_publishes_only_the_three_wire_targets(tmp_path, monkeypatch):
-    """#536. The publish loop must offer the store only targets the wire vocabulary maps.
+    """#536. The store is offered only the targets the wire serves — BY NAME.
 
-    Before the fix this raised `ValueError: No wire-name mapping for internal target
-    'by_sb_best'` with three manifests ALREADY committed to the partner-visible store —
-    nothing is rolled back, by design (ADR-013 §3.2 manifest-last).
+    Before the fix this raised `No wire-name mapping for internal target 'by_sb_best'`
+    with three manifests ALREADY committed to the partner-visible store; nothing is
+    rolled back, by design (ADR-013 §3.2 is manifest-last, not two-phase).
 
-    The fix must filter on the three regression NAMES, never on count or position: FAO
-    resolves a served name by tokenising, so `pred_lr_ged_sb` and `pred_cls_ged_sb` both
-    resolve to the stem `sb` with no error raised anywhere. A positional `[:3]` would be
-    correct only by luck of ordering, and an upstream reorder would publish
-    classification values to the UN under the fatality column names, silently.
+    Asserted by name and never by count: FAO resolves a served name by tokenising, so
+    `pred_lr_ged_sb` and `pred_cls_ged_sb` both resolve to the stem `sb` with nothing
+    raising. A count assertion over a classification-first roster passes while a
+    positional filter publishes the wrong three.
     """
     m, ctx = _forecast_manager(tmp_path, _SIX_TARGETS, monkeypatch)
 
     forecasts = m._forecast_ensemble(ctx)
 
-    # All six are still aggregated and returned — the filter is on PUBLISHING only.
+    # The filter is on PUBLISHING: everything is still aggregated, returned and saved.
     assert sorted(forecasts) == sorted(_SIX_TARGETS)
+    assert _saved_target_dirs(tmp_path) == set(_SIX_TARGETS)
 
-    committed = _manifests_committed(m._datastore)
-    assert len(committed) == 3, committed
-    assert all("__lr_ged_" in name for name in committed), committed
-    assert not any("by_" in name or "cls" in name for name in committed), committed
+    assert _manifests_committed(m._datastore) == _WIRE_MANIFESTS
+
+
+def test_nothing_is_published_when_the_flag_is_off(tmp_path, monkeypatch):
+    """The `--prediction_store` gate, asserted at the irreversible act.
+
+    Every other test here runs with the flag ON, so nothing pinned that a plain forecast
+    publishes nothing — and the only thing catching a hoisted `publishable` computation
+    was an accident of another module's fixture using an unmapped target name.
+    """
+    m, ctx = _forecast_manager(tmp_path, _SIX_TARGETS, monkeypatch, use_store=False)
+
+    m._forecast_ensemble(ctx)
+
+    assert m._datastore.uploads == []
+    assert _saved_target_dirs(tmp_path) == set(_SIX_TARGETS)
 
 
 def test_a_target_outside_the_wire_vocabulary_is_never_offered_to_the_store(
     tmp_path, monkeypatch,
 ):
-    """The filter must be DERIVED from the wire vocabulary, not restated as a shape.
+    """The filter must be DERIVED from the vocabulary, not restated as a shape.
 
-    `lr_future_best` is the discriminator. It carries the same `lr_` prefix as all three
-    mapped targets and is not in the mapping, so it is withheld by a filter derived from
-    `INTERNAL_TO_WIRE_TARGET` and PUBLISHED by any filter that restates the vocabulary as
-    a pattern — `startswith("lr_")`, a hand-copied list of three names, a regex. That
-    mutation passes every other test in this file, which is why this one exists.
+    `lr_future_best` is the discriminator: same `lr_` prefix as the three served
+    targets, not in the mapping. A derived filter withholds it; `startswith("lr_")`, a
+    hand-copied list or a regex publishes it. That matters beyond tidiness — a wire
+    target is added by adding a mapping entry, so a shape-keyed filter would publish a
+    future `lr_*` target the wire does not serve: #536 again, one release later.
 
-    It matters beyond tidiness: §7a's extension procedure adds a target to the wire by
-    adding one entry to the mapping. A filter keyed on shape would publish a future
-    `lr_*` target the wire does not map — the very failure #536 is, one release later.
+    Asserted as "the committed set is exactly the wire set", not as "no filename
+    contains 'future'". Filenames are built from `wire_target()`, which can only return
+    a served name or raise — so a substring assertion can never fire, and under the
+    mutation it is written for the run raises inside `wire_target` with `lr_sb_best`
+    already committed, never reaching the assertion at all.
     """
     m, ctx = _forecast_manager(
-        tmp_path,
-        ["lr_sb_best", "lr_future_best", "wildcard_target_best"],
-        monkeypatch,
+        tmp_path, _SIX_TARGETS + ["lr_future_best", "wildcard_target_best"], monkeypatch
     )
 
     m._forecast_ensemble(ctx)
 
-    uploaded = [u["filename"] for u in m._datastore.uploads]
-    assert uploaded, "the mapped target should still have published"
-    assert not any("wildcard" in name for name in uploaded), uploaded
-    assert not any("future" in name for name in uploaded), uploaded
+    assert _manifests_committed(m._datastore) == _WIRE_MANIFESTS
 
 
-def test_publishing_is_refused_when_the_vocabulary_maps_none_of_the_targets(
-    tmp_path, monkeypatch,
-):
-    """Withholding SOME targets is the filter's purpose; withholding ALL is a silence.
+def test_publishing_is_refused_when_a_served_column_has_no_target(tmp_path, monkeypatch):
+    """A SHORT delivery is refused, not just an empty one — and nothing reaches the store.
 
-    The live case: the wire vocabulary is keyed on INTERNAL target names, and those are
-    not fixed forever — views-datafactory serves `ged_sb_best`/`ged_ns_best`/`ged_os_best`
-    with no `lr_` prefix. A roster that moves to those names while the mapping still
-    reads `lr_*_best` matches nothing. Without this guard the run completes green having
-    delivered nothing to the UN, which is views-models#320's shape exactly (a partner
-    received silence for 145 days while the pipeline reported fine).
+    Checking only "publishable is empty" caught the all-miss case and let the realistic
+    migration shape through: a roster part way through a rename supplies two of three,
+    publishes a short set and exits 0. views-models#320 in partial dress.
+
+    The live case: the mapping is keyed on INTERNAL names, and views-datafactory serves
+    `ged_sb_best`/`ged_ns_best`/`ged_os_best` with no `lr_` prefix.
     """
     m, ctx = _forecast_manager(
-        tmp_path, ["ged_sb_best", "ged_ns_best", "ged_os_best"], monkeypatch
+        tmp_path, ["ged_sb_best", "lr_ns_best", "lr_os_best"], monkeypatch
     )
 
-    with pytest.raises(ValueError, match="NONE of this ensemble's targets"):
+    with pytest.raises(ValueError, match=r"supplies no target for 1 of the 3"):
         m._forecast_ensemble(ctx)
 
     assert m._datastore.uploads == [], "nothing may reach the store on this path"
 
 
-def test_the_filter_follows_the_mapping_when_targets_are_renamed(tmp_path, monkeypatch):
-    """Rename-readiness: the publishable set is DERIVED from the vocabulary, so moving
-    off the `lr_` prefix is one mapping entry and no code change.
+def test_publishing_is_refused_when_the_vocabulary_maps_none_of_the_targets(
+    tmp_path, monkeypatch,
+):
+    """The all-miss case — a roster fully renamed while the mapping has not moved."""
+    m, ctx = _forecast_manager(
+        tmp_path, ["ged_sb_best", "ged_ns_best", "ged_os_best"], monkeypatch
+    )
 
-    This is the converse of the `lr_future_best` discriminator above: there, an
-    `lr_`-shaped name that is NOT mapped must be withheld; here, a name that does not
-    look like the current three but IS mapped must publish.
+    with pytest.raises(ValueError) as info:
+        m._forecast_ensemble(ctx)
+
+    message = str(info.value)
+    assert "3 of the 3" in message, message
+    # The remedy must name the file that holds the mapping, and must not present the
+    # mapping's KEYS as the served wire names — an operator following that would add
+    # `"ged_sb_best": "ged_sb_best"` and publish an internal name onto the partner wire.
+    assert "sampled_forecast_publisher.py" in message, message
+    assert "lr_ged_sb" in message, message
+    assert m._datastore.uploads == []
+
+
+def test_the_filter_follows_the_mapping_when_targets_are_renamed(tmp_path, monkeypatch):
+    """Rename-readiness: moving off the `lr_` prefix is a mapping entry, not a code change.
+
+    The converse of the `lr_future_best` discriminator: there, an `lr_`-shaped unmapped
+    name must be withheld; here, a mapped name that looks nothing like the current three
+    must publish.
     """
     import views_pipeline_core.managers.ensemble.sampled_forecast_publisher as sfp
 
-    monkeypatch.setattr(
-        sfp, "INTERNAL_TO_WIRE_TARGET", {"ged_sb_best": "lr_ged_sb"}
-    )
-    m, ctx = _forecast_manager(
-        tmp_path, ["ged_sb_best", "by_sb_best"], monkeypatch
-    )
+    monkeypatch.setattr(sfp, "INTERNAL_TO_WIRE_TARGET", {"ged_sb_best": "lr_ged_sb"})
+    m, ctx = _forecast_manager(tmp_path, ["ged_sb_best", "by_sb_best"], monkeypatch)
 
     m._forecast_ensemble(ctx)
 
-    committed = _manifests_committed(m._datastore)
-    assert len(committed) == 1, committed
-    assert "__lr_ged_sb__manifest.json" in committed[0], committed
+    assert _manifests_committed(m._datastore) == {
+        "rusty_bucket_forecasting_20260715_000000__lr_ged_sb__manifest.json"
+    }
+    assert _saved_target_dirs(tmp_path) == {"ged_sb_best", "by_sb_best"}

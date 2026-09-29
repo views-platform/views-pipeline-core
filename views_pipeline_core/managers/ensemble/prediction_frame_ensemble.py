@@ -680,38 +680,54 @@ class PredictionFrameEnsembleManager:
                 INTERNAL_TO_WIRE_TARGET,
             )
             publishable = frozenset(ctx.targets) & frozenset(INTERNAL_TO_WIRE_TARGET)
-            withheld = sorted(set(ctx.targets) - publishable)
-            if not publishable:
-                # Withholding SOME targets is the point of this filter; withholding
-                # ALL of them is never right. A run told to publish that publishes
-                # nothing is the views-models#320 shape — a partner receives silence
-                # while the pipeline reports success — so it fails here instead.
-                #
-                # The live case this guards: the wire vocabulary is keyed on internal
-                # target names, and those are not fixed forever. views-datafactory
-                # serves `ged_sb_best` / `ged_ns_best` / `ged_os_best`, with no `lr_`
-                # prefix. A roster that moves to those names while this mapping still
-                # reads `lr_*_best` matches nothing — and would otherwise complete
-                # green having delivered nothing to the UN.
+            # The set that matters is not what we CAN publish but what the wire EXPECTS
+            # and this roster fails to supply. Checking only `not publishable` caught the
+            # all-miss case and let the realistic migration shape through: a roster part
+            # way through a rename supplies two of three, publishes a short set, exits 0,
+            # and logs indistinguishably from intended withholding — views-models#320 in
+            # partial dress, one third quieter.
+            missing = sorted(frozenset(INTERNAL_TO_WIRE_TARGET) - publishable)
+            if missing:
+                # The live case: the mapping is keyed on INTERNAL target names, and
+                # those are not fixed forever. views-datafactory serves `ged_sb_best` /
+                # `ged_ns_best` / `ged_os_best`, with no `lr_` prefix. A roster that
+                # moves to those names while the mapping still reads `lr_*_best` would
+                # otherwise deliver a short set, or nothing, and report success.
+                wire_names = sorted(
+                    INTERNAL_TO_WIRE_TARGET[t] for t in missing
+                )
                 raise ValueError(
-                    f"Prediction store is enabled but NONE of this ensemble's targets "
-                    f"{sorted(ctx.targets)} is in the ADR-013 §7a wire vocabulary "
-                    f"{sorted(INTERNAL_TO_WIRE_TARGET)}. Publishing nothing to a "
-                    f"partner-visible store is not a valid outcome. If these targets "
-                    f"were renamed (e.g. the datafactory's `ged_*_best` in place of "
-                    f"`lr_*_best`), add the mapping entries — §7a Amendment A1: one "
-                    f"entry here plus views-postprocessing's expected-target-set. If "
-                    f"this ensemble is genuinely not for the wire, run it without "
+                    f"Prediction store is enabled, but this ensemble supplies no target "
+                    f"for {len(missing)} of the {len(INTERNAL_TO_WIRE_TARGET)} served "
+                    f"wire column(s): {wire_names} (expected from internal target(s) "
+                    f"{missing}). This roster declares {sorted(set(ctx.targets))}. "
+                    f"Delivering a short set to a partner-visible store is not a valid "
+                    f"outcome, so the run stops here rather than after publishing part "
+                    f"of it. If these targets were renamed — the datafactory's "
+                    f"`ged_*_best` in place of `lr_*_best` is the expected case — map "
+                    f"them in INTERNAL_TO_WIRE_TARGET "
+                    f"(managers/ensemble/sampled_forecast_publisher.py), whose keys are "
+                    f"internal names and whose values are the served wire names; the "
+                    f"served set must also move in views-postprocessing. If this "
+                    f"ensemble is not for the wire at all, run it without "
                     f"--prediction_store."
                 )
-            if withheld:
-                logger.info(
-                    "Prediction store: publishing %d of %d target(s) — %s. Withheld: "
-                    "%s, which the ADR-013 §7a wire vocabulary does not map. They are "
-                    "still aggregated and saved locally; adding one to the wire is a "
-                    "deliberate, FAO-facing change (§7a Amendment A1), not a config edit.",
-                    len(publishable), len(ctx.targets), sorted(publishable), withheld,
-                )
+            # Logged unconditionally, not only when something is withheld: #536's whole
+            # cost was not knowing what had already reached the UN when the run died.
+            # A nominal run must also leave a record of what it offered, otherwise a
+            # later refactor that silently widens `publishable` produces byte-identical
+            # log output. `sorted(set(...))` because `combined_targets()` does not
+            # de-duplicate and nothing upstream refuses a target named in both config
+            # keys — which would otherwise publish the same (run, target) twice.
+            withheld = sorted(set(ctx.targets) - publishable)
+            logger.info(
+                "Prediction store: publishing %s to the partner-visible store. "
+                "Withheld: %s — not in the served wire vocabulary; still aggregated "
+                "and saved locally. Adding one to the wire is a deliberate, FAO-facing "
+                "change (a mapping entry here plus views-postprocessing's served set), "
+                "not a config edit.",
+                sorted(publishable), withheld or "nothing",
+            )
 
         forecasts: Dict[str, PredictionFrame] = {}
         for target in ctx.targets:
@@ -737,11 +753,14 @@ class PredictionFrameEnsembleManager:
             )
             save_pf(agg_pf, save_dir)
             forecasts[target] = agg_pf
-            if target in publishable:
+            if self._use_prediction_store and target in publishable:
                 # #269 / ADR-013 §3: the Hop-A publish leg — Track A archives +
-                # manifest-last, per (run, target). `publishable` is empty unless
-                # `_use_prediction_store`, so this is still flag-gated; child runs
-                # never reach here with it set (prediction_store=False forcing).
+                # manifest-last, per (run, target). The flag is named HERE, at the
+                # irreversible act, and not left implicit in `publishable` being empty:
+                # a comment asserting that a condition means more than it says is the
+                # defect. Hoisting the `publishable` computation out of its `if` would
+                # otherwise publish on every run. Child runs never reach here with the
+                # flag set (prediction_store=False forcing).
                 self._publish_sampled_forecast(agg_pf, target, ctx)
 
         return forecasts
