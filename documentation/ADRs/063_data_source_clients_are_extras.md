@@ -134,3 +134,7 @@ happens, the job's module walk was incomplete, not the decision.
   datafactory is a platform-direction decision, Simon's, and not made here.
 - #511 is to be closed as superseded by this ADR, with the corrected map in its closing
   comment, when the PR that carries this ADR merges.
+- **2026-09-19, after 3.3.0:** views-r2darts2 0.2.3 pins `darts==0.40.0` (pandas `<2`), so
+  r2darts2 and viewser share an environment again without any change here. The "18 darts
+  models cannot leave viewser" constraint above was about darts 0.46; it returns the day
+  r2darts2 moves darts forward, and this ADR's mechanism is unchanged by the reprieve.

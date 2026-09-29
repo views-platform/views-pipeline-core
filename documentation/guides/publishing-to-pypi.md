@@ -4,7 +4,7 @@ A runbook for releasing this package, written to be followed **solo, cold, month
 Every command is copy-pasteable; the *why* is spelled out where getting it wrong is
 expensive.
 
-> **Last verified:** 2026-09-08, preparing `3.2.0` — the draft-Release note below was
+> **Last verified:** 2026-09-19, publishing `3.3.0` (one new lesson: the system `python3` was 3.10, below the `>=3.11` floor, so the first fresh-venv verify said "no matching distribution" — build the venv from a 3.11 interpreter). Previously 2026-09-08, preparing `3.2.0` — the draft-Release note below was
 > found stale and corrected then. Before that: 2026-08-03, preparing `3.0.0`. Mechanism confirmed against
 > views-evaluation 1.0.0, which shipped 2026-08-02 through a mechanism-identical workflow
 > file (it differs only in the package name inside the version-guard URL).

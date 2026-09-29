@@ -125,6 +125,7 @@ configuration to `ConfigurationManager`.
 | Return type mismatches `prediction_format` | `ValueError` (ADR-042 fail-loud guard) |
 | Prediction temporal coverage outside step window | `ValueError` from `_assert_predictions_in_step_window()` with diagnostic hints |
 | Wrong number of evaluation sequences | `ValueError` from `_assert_predictions_in_step_window()` |
+| A validate-and-save worker raises (DF path) | The **first** such failure re-raises as `ModelEvaluationException`; the "Evaluation Predictions Saved" alert is not sent (#529, C-333). Two limits, tracked as #537: later failures in the same run are not reported, and a **zero-sequence** run still alerts success — `_assert_predictions_in_step_window()` returns early on an empty list and skips the count check above |
 
 All failures are loud. No silent fallbacks, no boolean returns from validators.
 
@@ -229,9 +230,12 @@ def _evaluate_model_artifact(self, eval_type, artifact_name):
 - `tests/test_managers/test_evaluation_stage.py` -- 17 tests for
   `EvaluationStage` (ADR-045 E2): frozen context, DF/PF paths, ensemble
   actuals, step mappings, multiple targets, context contract compliance.
-- `tests/test_managers/test_execute_model_evaluation.py` -- 10 characterization
-  tests for `_execute_model_evaluation()`: DF validation+save, type enforcement,
+- `tests/test_managers/test_execute_model_evaluation.py` -- 18 tests for
+  `_execute_model_evaluation()`: DF validation+save, type enforcement,
   PF streaming, skip-metrics, no-metrics, WandB lifecycle, sequence count.
+  `TestWorkerFailuresFailTheRun` (4) pins the #529 contract below: a worker that
+  raises fails the run, one failing sequence out of thirteen is enough, and the
+  clean path still alerts.
   PF persistence tests mock `resolve_artifact_path` (and its delegate
   `get_latest_model_artifact_path`) to verify Track A+ saves use artifact
   timestamp, not runtime timestamp.

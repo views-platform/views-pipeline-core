@@ -1527,7 +1527,18 @@ class ForecastingModelManager(ModelManager):
                             )
                             for i, df in enumerate(raw_preds)
                         ]
-                        concurrent.futures.wait(futures)
+                        # #529: `wait()` returns when futures are DONE — and "done"
+                        # includes "raised". Reading each result re-raises the worker's
+                        # exception HERE, where the handler at the foot of this method
+                        # turns it into a ModelEvaluationException carrying the worker's
+                        # traceback. Without this the exception stayed in the Future and
+                        # the "Evaluation Predictions Saved" alert below announced work
+                        # that did not happen: dark_river's thirteen sequences were all
+                        # refused by CorePredictionSniffer, and the run reported PASS
+                        # having written nothing (views-models b2cd4a07, 2026-09-22).
+                        # A guard whose refusal is discarded is worse than no guard.
+                        for future in concurrent.futures.as_completed(futures):
+                            future.result()
 
                 self._wandb_module.send_alert(
                     title="Evaluation Predictions Saved",
