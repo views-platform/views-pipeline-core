@@ -10,7 +10,7 @@ The `AppWriteFileModule` provides a full-featured interface for interacting with
 
 - **File Operations**: Upload, download, list, and delete files in Appwrite storage
 - **Metadata Management**: Automatic database/collection creation and metadata tracking
-- **Hash-based Deduplication**: SHA-256 hashing to detect and handle duplicate files
+- **Deduplication by hash AND name**: SHA-256 hashing identifies candidate duplicates; the stored filename must match too, because every consumer of this store resolves an artefact by name (#551)
 - **Intelligent Caching**: Local file cache with TTL and timestamp validation
 - **Flexible Authentication**: Support for API key and user session authentication
 - **Dynamic Schema**: Automatic database attribute creation based on metadata structure
@@ -195,7 +195,7 @@ else:
 | `SAVED_FROM_REMOTE` | File downloaded from server |
 | `DELETED` | Resource deleted |
 | `NOT_FOUND` | Resource not found |
-| `FOUND_BY_HASH` | Duplicate found by file hash |
+| `FOUND_BY_HASH` | A metadata document matched. With `filename=` supplied this is the document for that name; without it, any document carrying the hash |
 | `FOUND_BY_NAME` | File found by filename |
 
 ## File Operations
@@ -362,7 +362,11 @@ import hashlib
 with open("/data/file.parquet", "rb") as f:
     file_hash = hashlib.sha256(f.read()).hexdigest()
 
-result = file_manager.metadata_manager.check_file_exists_by_hash(file_hash)
+# Pass `filename` when you need the record for a PARTICULAR artefact: a hash is not
+# unique here, so without it you get an arbitrary match (#551).
+result = file_manager.metadata_manager.check_file_exists_by_hash(
+    file_hash, filename="my_artefact.parquet"
+)
 
 if result.success and result.code == "FOUND_BY_HASH":
     print(f"File exists: {result.data['fileId']}")
