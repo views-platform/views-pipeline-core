@@ -342,6 +342,13 @@ class TestWorkerFailuresFailTheRun:
         assert not self._saved_alert_sent(manager), (
             "twelve good sequences and one refused still announced success"
         )
+        # The POSITIVE fact, which `pytest.raises` plus a no-alert assertion cannot
+        # express: the twelve healthy sequences were still written. A code review
+        # mutated the block to sniff all thirteen serially BEFORE the pool and save
+        # nothing — every sequence's output destroyed — and all eighteen tests passed.
+        # Deterministic: the `with` block's __exit__ is shutdown(wait=True), so every
+        # worker runs to completion even though the main thread has already raised.
+        assert manager._io.save_predictions.call_count == N_SEQUENCES - 1
 
     @patch("views_pipeline_core.files.utils.handle_single_log_creation")
     @patch("views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer")
