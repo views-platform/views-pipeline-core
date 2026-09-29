@@ -4,7 +4,17 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 334 concerns (206 resolved) + 41 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.3.2 — OPEN.** Prepared 2026-09-29, hours after 3.3.1.
+> **Release gate — pipeline-core 3.3.3 — OPEN.** Prepared 2026-09-29. **Content-identical
+> to 3.3.2, which is permanently incomplete on PyPI**: publishing it failed after the sdist
+> committed and before the wheel did (`Error connecting to repository`, both artefacts at
+> 100%). A PyPI filename can never be reused, and the publish workflow's version guard
+> correctly refuses to republish a version the index already reports — so 3.3.2 cannot be
+> completed and 3.3.3 carries its content. The workflow now publishes with
+> `--skip-existing`; making a partial upload recoverable *without* burning a version needs
+> the guard to tell "fully published" from "exists", which is **#548**. Everything in the
+> 3.3.2 gate below applies unchanged.
+
+> **Release gate — pipeline-core 3.3.2 — ~~OPEN~~ SUPERSEDED BY 3.3.3 (incomplete upload).** Prepared 2026-09-29, hours after 3.3.1.
 > **One defect fix and documentation corrections — no second behaviour change**, the same
 > discipline 3.3.1 kept, and for the same reason: C-334's cost was a partner-visible store
 > left holding half a delivery, and a release carrying two changes would reproduce that
