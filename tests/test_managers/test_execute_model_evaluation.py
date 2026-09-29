@@ -288,6 +288,63 @@ class TestWorkerFailuresFailTheRun:
 
     @patch("views_pipeline_core.files.utils.handle_single_log_creation")
     @patch("views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer")
+    def test_one_failing_sequence_among_many_still_fails_the_run(
+        self, mock_sniffer_cls, mock_log_creation,
+    ):
+        """ONE bad sequence out of thirteen must fail the run — the property, not the
+        incident.
+
+        Added after an independent guard audit rated the two tests above WEAK. Both of
+        them fail **all thirteen** workers, because the incident they were written from
+        was all-thirteen (dark_river). Four mutations survived that fixture, each
+        detecting *some* worker failures but not all, and each invisible to an all-fail
+        shape:
+
+          - read only ``futures[0].result()`` — green, because that one raised
+          - re-raise only ``ValueError``/``OSError``, log-and-continue otherwise —
+            green, because those were the only two types the fixtures produced
+          - raise only if **every** future failed ("quorum drain") — green, because
+            every future failed
+          - sniff only sequence 0 — green, because sequence 0 was enough
+
+        The quorum one is the one to fear. Under it, twelve good sequences plus one
+        refused announce "Evaluation Predictions Saved" for output that is silently
+        short by a sequence — C-333's defect in partial dress. A well-meant "don't fail
+        the whole run for one bad origin" change produces exactly that, and the other
+        guards would applaud it.
+
+        So: exactly one failure, at a position that is neither first nor last, raising a
+        third exception type. The cardinality kills the partial, quorum and
+        scope-narrowing mutations; the type kills the narrowed re-raise.
+
+        The failure is bound to a specific DataFrame rather than to call order, because
+        the workers are threads and the order in which they reach the sniffer is not
+        deterministic — a `side_effect` list would attach the failure to an arbitrary
+        sequence and make this test flaky against exactly the mutations it exists to
+        catch.
+        """
+        manager = _make_manager()
+        pred_dfs = _make_pred_dfs()
+        manager._evaluate_model_artifact = MagicMock(return_value=pred_dfs)
+
+        doomed = pred_dfs[N_SEQUENCES // 2]  # neither futures[0] nor futures[-1]
+
+        def sniff(df, **kwargs):
+            if df is doomed:
+                raise KeyError("priogrid_id")
+
+        mock_sniffer_cls.return_value.sniff_predictions.side_effect = sniff
+
+        with pytest.raises(ModelEvaluationException) as info:
+            manager._execute_model_evaluation()
+
+        assert "priogrid_id" in str(info.value), str(info.value)
+        assert not self._saved_alert_sent(manager), (
+            "twelve good sequences and one refused still announced success"
+        )
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    @patch("views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer")
     def test_the_clean_path_still_sends_the_alert(
         self, mock_sniffer_cls, mock_log_creation,
     ):
