@@ -178,6 +178,39 @@ def _classify_storage_presence(result: "OperationResult") -> _StoragePresence:
 
 
 # Enums
+#: How many metadata documents to read when resolving a content hash. A hash is NOT
+#: unique in this collection: a run-independent artefact has the same bytes every
+#: delivery, so matches accumulate one per run. Generous, because a short page costs a
+#: redundant upload while guessing costs #551.
+_HASH_MATCH_PAGE_SIZE = 100
+
+
+def _dedup_target_is_the_same_artefact(existing_doc: dict, filename: str) -> bool:
+    """Whether a content-hash match may be treated as "this file is already uploaded".
+
+    Deduplication exists so that re-uploading the SAME artefact is idempotent. It keys on
+    content hash alone, which is only half an identity: every consumer of this store — the
+    FAO resolver, views-postprocessing, the manifests this repo writes — resolves an
+    artefact **by name**. So a hash match under a DIFFERENT name is a different artefact
+    that happens to have identical bytes, and skipping it reports success for a name that
+    was never written (#551; register C-94's shape).
+
+    Not hypothetical. The gid->GAUL sidecar is run-independent by construction, so its
+    bytes are identical every month. On 2026-09-29 the first `rusty_bucket` FAO delivery
+    matched run-0's sidecar from August, skipped the upload, logged "uploaded
+    ..._20260929_..._sidecar.parquet", and wrote nothing. The manifest then named a file
+    that did not exist and views-faoapi refused the run — correctly.
+
+    Returns False when the stored name is MISSING as well as when it differs: a metadata
+    document with no `filename` cannot be shown to be the same artefact, and on a
+    partner-visible store the safe reading of "cannot tell" is to upload rather than to
+    skip. A redundant copy is recoverable; a manifest naming a file that does not exist
+    is not.
+    """
+    stored = existing_doc.get("filename")
+    return bool(stored) and stored == filename
+
+
 class AuthMethod(Enum):
     """Authentication methods supported by AppWriteFileModule.
 
@@ -1108,6 +1141,7 @@ class AppwriteMetadataHandler:
     collection_name: str = None,
     collection_id: str = None,
     database_id: str = None,
+    filename: Optional[str] = None,
 ) -> OperationResult:
         """Check if a file with the given hash exists in metadata.
 
@@ -1152,22 +1186,50 @@ class AppwriteMetadataHandler:
             # That sentence used to read "fails loud and says so", which was never true
             # of this method, and it mattered: two callers ignored the failure and
             # uploaded anyway (#473).
-            # limit(1): this reads `total` for existence and `documents[0]` for the
-            # answer, so one row is all it consumes. `total` is reported over the whole
-            # match regardless of page size, so bounding the page cannot hide a
-            # duplicate hash. Explicit because "the default happens to be enough" is
-            # what C-241 was.
+            # The page size was limit(1), which was sound while this method only had to
+            # answer "does a duplicate exist": `total` reports over the whole match
+            # regardless of page size. #551 made that false. The dedup decision now needs
+            # the document for a PARTICULAR filename, and one arbitrary row cannot supply
+            # it — a hash is not unique in this collection BY CONSTRUCTION, because a
+            # run-independent artefact (the gid->GAUL sidecar) has identical bytes every
+            # delivery. After N runs, N documents share one hash under N names.
             search_result = self.databases.list_documents(
                 db_id,
                 coll_id,
-                queries=[Query.equal("file_hash", file_hash), Query.limit(1)],
+                queries=[
+                    Query.equal("file_hash", file_hash),
+                    Query.limit(_HASH_MATCH_PAGE_SIZE),
+                ],
             )
 
-            if search_result["total"] > 0:
+            total = search_result.get("total", 0)
+            documents = search_result.get("documents", [])
+            if total <= 0:
+                return OperationResult(success=False, code="NOT_FOUND")
+
+            if filename is None:
+                # Existence-only callers keep the original contract.
                 return OperationResult(
-                    success=True, 
-                    data=search_result["documents"][0], 
-                    code="FOUND_BY_HASH"  # <-- CHANGED from "FOUND" to "FOUND_BY_HASH"
+                    success=True, data=documents[0], code="FOUND_BY_HASH"
+                )
+
+            # Filtered in Python rather than with `Query.equal("filename", ...)`: no index
+            # is declared on `filename` in provisioning.py, so that query is not
+            # dependable against this store. views-faoapi's resolver and
+            # views-postprocessing independently landed on the same in-process filter.
+            match = next((d for d in documents if d.get("filename") == filename), None)
+            if match is not None:
+                return OperationResult(success=True, data=match, code="FOUND_BY_HASH")
+
+            if total > len(documents):
+                # Absence cannot be proven from a truncated page. NOT_FOUND causes a
+                # redundant upload, which is recoverable; claiming a match we did not see
+                # would repeat #551. Say so rather than let it look like a clean miss.
+                logger.warning(
+                    "Hash %s has %d metadata documents but only %d were read; no match "
+                    "for '%s' among them. Treating as absent, which may upload a "
+                    "duplicate. Raise _HASH_MATCH_PAGE_SIZE if this recurs.",
+                    file_hash, total, len(documents), filename,
                 )
 
             return OperationResult(success=False, code="NOT_FOUND")
@@ -1963,7 +2025,10 @@ class AppWriteFileModule:
 
         # Check if file already exists by hash in metadata
         existing_metadata = self.metadata_manager.check_file_exists_by_hash(
-            file_hash, collection_name, collection_id, self.config.database_id
+            file_hash, collection_name, collection_id, self.config.database_id,
+            # #551: ask for the document that matches this NAME, not whichever row
+            # the store returns first. A hash is not unique in this collection.
+            filename=filename,
         )
 
         # C-232, at the two sites its original fix did not cover. A lookup that FAILED
@@ -1988,7 +2053,12 @@ class AppWriteFileModule:
         # that FAILED is not evidence of absence, and only evidence of absence may
         # authorise a delete (register C-231, þing-02 #329).
         should_update_metadata_only = False
-        if existing_metadata.success and existing_metadata.code == "FOUND_BY_HASH" and not file_id:
+        if (
+            existing_metadata.success
+            and existing_metadata.code == "FOUND_BY_HASH"
+            and not file_id
+            and _dedup_target_is_the_same_artefact(existing_metadata.data, filename)
+        ):
             existing_file_id = existing_metadata.data.get("fileId")
 
             if existing_file_id:
@@ -2243,7 +2313,10 @@ class AppWriteFileModule:
         
         # Check if file already exists by hash
         existing_metadata = self.metadata_manager.check_file_exists_by_hash(
-            file_hash, collection_name, collection_id, self.config.database_id
+            file_hash, collection_name, collection_id, self.config.database_id,
+            # #551: ask for the document that matches this NAME, not whichever row
+            # the store returns first. A hash is not unique in this collection.
+            filename=filename,
         )
 
         # C-232, at the two sites its original fix did not cover. A lookup that FAILED
@@ -2264,9 +2337,15 @@ class AppWriteFileModule:
             )
         
         # Use same logic as upload_file_with_metadata for consistency
-        should_update_metadata_only = (existing_metadata.success and 
-                                    not file_id and 
-                                    self.config.allow_metadata_only_updates)
+        should_update_metadata_only = (
+            existing_metadata.success
+            and not file_id
+            and self.config.allow_metadata_only_updates
+            # #551: a hash match under a different name is a different artefact. Skipping
+            # it reports success for a name that was never written, and every consumer of
+            # this store resolves by name.
+            and _dedup_target_is_the_same_artefact(existing_metadata.data, filename)
+        )
         
         if should_update_metadata_only:
             logger.info(f"File with hash {file_hash} already exists, updating metadata only")

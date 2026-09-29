@@ -23,6 +23,80 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.3.4] — unreleased
+
+### Fixed
+
+- **An Appwrite upload no longer reports success having written nothing**
+  (`modules/appwrite/file.py`; #551). Deduplication keyed on **content hash alone** and
+  never compared the **filename**, while every consumer of that store — views-faoapi's
+  resolver, views-postprocessing, and the manifests this repo writes — resolves an
+  artefact **by name**. On a hash hit the uploader returned `success=True` with the
+  *pre-existing* file's id, and the file the caller named was never written.
+
+  **It broke the first `rusty_bucket` FAO delivery** on 2026-09-29. The gid→GAUL sidecar
+  is run-independent by construction, so its bytes matched run-0's from August; the
+  upload was skipped, the log said
+  `uploaded rusty_bucket_forecasting_20260929_172325__sidecar.parquet`, and storage still
+  held only `..._20260727_095355__sidecar.parquet` — `createdAt == updatedAt` to the
+  millisecond. The manifest then named a file that did not exist and views-faoapi refused
+  the run, correctly. **Permanent, not a one-off:** that file's hash matches the previous
+  run's on every delivery, including the production run.
+
+  Both dedup sites now require the stored name to equal the requested one.
+  A hash match under a different name is a different artefact that happens to have
+  identical bytes; the other artefact's record is left untouched, since updating it moves
+  its provenance onto this run and deleting it makes it unfindable. A record with **no**
+  stored name is not treated as a match either — on a partner-visible store the safe
+  reading of "cannot tell" is to upload, because a redundant copy is recoverable and a
+  manifest naming a file that does not exist is not. That also covers every metadata
+  document written before this change.
+
+  Register **C-94**'s shape, new instance: *manifest-last protects against a run that
+  stops early; it does not protect against an upload that returns success having written
+  nothing.* A guard asking "did I get a file id back?" passes here.
+
+  **The lookup had to change too, and review found that — not the comparison.**
+  `check_file_exists_by_hash` asked for `Query.limit(1)` with no ordering, which was sound
+  while it only answered *does a duplicate exist* (`total` reports over the whole match).
+  Comparing names made it false: **a hash is not unique in this collection by
+  construction**, since a run-independent artefact has identical bytes every delivery, so
+  after N runs N documents share one hash under N names and one came back arbitrarily. A
+  correct comparison against the wrong document still gives the wrong answer — dedup would
+  have stayed dead for exactly the artefact that caused #551, silently, while the reported
+  symptom looked fixed. The lookup now reads a page of hash matches and selects by name,
+  filtered in Python because no index is declared on `filename` (views-faoapi and
+  views-postprocessing independently landed on the same approach). A truncated page logs
+  rather than asserting absence. The new `filename` parameter is **last** in the
+  signature: all three call sites pass the container arguments positionally.
+
+  **Mutation-checked, and two rounds of guards were insufficient.** A substring comparison
+  in place of equality passed all 40 tests, because the fixtures used names too dissimilar
+  to tell apart — while the real names share `rusty_bucket_forecasting_` and differ only in
+  a timestamp. Then, with the lookup fixed, *removing the wiring between the two layers*
+  passed all 45: the name comparison masks a regression in the query, leaving behaviour
+  safe and dedup dead. Both gaps now have a test — one at the production name shape, one
+  end-to-end with several documents on one hash.
+
+  **This fixes the defect in THIS repo, not on the platform.** views-faoapi carries its
+  own `check_file_exists_by_hash` (`managers/appwrite/metadata.py`) with the same
+  hash-only lookup and no name comparison — the two copies share an ancestor, down to the
+  same `# <-- CHANGED from "FOUND" to "FOUND_BY_HASH"` comment, and have drifted since.
+  Verified: `filename` appears there only as a schema attribute, never in a comparison.
+  It is behind on a second fix too — its lookup still calls
+  `create_metadata_collection_if_not_exists` before searching, the read-with-a-write's
+  side effect this repo removed in register C-233. Whether its upload paths are live, and
+  whether they can ever write an artefact whose bytes match an existing one under another
+  name, is theirs to judge. **Recorded so that nobody reads "uploads can no longer report
+  success having written nothing" as a statement about the platform** — that sentence is
+  true here and false one repository over, and assuming otherwise is the same mistake the
+  old `limit(1)` comment made: correct when written, silently falsified later.
+
+  **Deliberately not decided here:** ADR-013 §4.2 requires one sidecar *per run* for a
+  file that cannot vary by run, so this fix stores one copy per distinct name — obeying
+  the contract. Whether the contract should instead be a single sidecar versioned by GAUL
+  edition spans four repositories and is not this change's to settle.
+
 ## [3.3.3] — 2026-09-29
 
 **Identical in content to 3.3.2. Released only because 3.3.2 could not be completed on PyPI.**
