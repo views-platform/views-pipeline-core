@@ -37,6 +37,7 @@ from views_frames import (  # noqa: E402
     SpatioTemporalIndex,
 )
 from views_pipeline_core.managers.model.model import ForecastingModelManager  # noqa: E402
+from views_pipeline_core.exceptions.exceptions import ModelEvaluationException  # noqa: E402
 
 
 def _pf(y_pred, time, unit):
@@ -218,6 +219,87 @@ class TestDFPath:
 # ============================================================
 # PATH 2: No metrics in config
 # ============================================================
+
+
+class TestWorkerFailuresFailTheRun:
+    """#529 — a worker that raises must fail the run, not be discarded.
+
+    `validate_and_save` runs in a ThreadPoolExecutor. Until 2026-09-29 the pool was
+    drained with `concurrent.futures.wait(futures)`, which returns when futures are
+    *done* — and "done" includes "raised". Nothing read `.result()`, so every worker
+    exception stayed in its Future and control fell through to the "Evaluation
+    Predictions Saved" alert. dark_river's thirteen sequences were all refused by
+    CorePredictionSniffer and the run still reported PASS, having written nothing
+    (views-models b2cd4a07, fimbulthul 2026-09-22).
+
+    Nothing in this suite asserted that a worker failure fails the run, which is why
+    it shipped. The two failure sources below are the two the issue names, and they
+    reach the worker by different routes: the sniffer is constructed inside it, the
+    saver is passed into it.
+    """
+
+    ALERT = "Evaluation Predictions Saved"
+
+    def _saved_alert_sent(self, manager) -> bool:
+        return any(
+            call.kwargs.get("title") == self.ALERT
+            for call in manager._wandb_module.send_alert.call_args_list
+        )
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    @patch("views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer")
+    def test_a_sniffer_refusal_in_a_worker_fails_the_run(
+        self, mock_sniffer_cls, mock_log_creation,
+    ):
+        """The dark_river shape: the guard fires correctly and must not be discarded."""
+        manager = _make_manager()
+        manager._evaluate_model_artifact = MagicMock(return_value=_make_pred_dfs())
+        mock_sniffer_cls.return_value.sniff_predictions.side_effect = ValueError(
+            "CorePredictionSniffer: MultiIndex names do not match expected layout"
+        )
+
+        with pytest.raises(ModelEvaluationException) as info:
+            manager._execute_model_evaluation()
+
+        assert "do not match expected layout" in str(info.value), str(info.value)
+        assert not self._saved_alert_sent(manager), (
+            "the run announced 'Evaluation Predictions Saved' for work that raised"
+        )
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    @patch("views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer")
+    def test_a_save_failure_in_a_worker_fails_the_run(
+        self, mock_sniffer_cls, mock_log_creation,
+    ):
+        """The other source the issue names — a disk or prediction-store failure.
+
+        It enters the worker as the injected `save_predictions_func`, not as a
+        collaborator the worker constructs, so it is a separate path to the same pool.
+        """
+        manager = _make_manager()
+        manager._evaluate_model_artifact = MagicMock(return_value=_make_pred_dfs())
+        manager._io.save_predictions.side_effect = OSError("No space left on device")
+
+        with pytest.raises(ModelEvaluationException) as info:
+            manager._execute_model_evaluation()
+
+        assert "No space left on device" in str(info.value), str(info.value)
+        assert not self._saved_alert_sent(manager)
+
+    @patch("views_pipeline_core.files.utils.handle_single_log_creation")
+    @patch("views_pipeline_core.modules.validation.core_prediction_sniffer.CorePredictionSniffer")
+    def test_the_clean_path_still_sends_the_alert(
+        self, mock_sniffer_cls, mock_log_creation,
+    ):
+        """Control. Without it the two tests above would pass against a method that
+        always raises, and the guard would be decorative."""
+        manager = _make_manager()
+        manager._evaluate_model_artifact = MagicMock(return_value=_make_pred_dfs())
+
+        manager._execute_model_evaluation()
+
+        assert self._saved_alert_sent(manager)
+        assert manager._io.save_predictions.call_count == N_SEQUENCES
 
 
 class TestNoMetrics:

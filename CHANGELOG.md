@@ -23,6 +23,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.3.1] — unreleased
+
+### Fixed
+
+- **Evaluation no longer discards its workers' exceptions — a refusal that fires is no
+  longer thrown away** (`managers/model/model.py`, `_execute_model_evaluation`; #529).
+  The per-sequence validate-and-save step runs in a `ThreadPoolExecutor`, and the pool
+  was drained with `concurrent.futures.wait(futures)`. `wait()` returns when futures are
+  *done*, and **done includes raised**: nothing read `.result()` or `.exception()`, so
+  every exception inside a worker — the `CorePredictionSniffer` refusal and the
+  `save_predictions` failure alike — stayed in its Future and was dropped. Control then
+  fell through to `send_alert("Evaluation Predictions Saved", ...)` and the run exited 0.
+  Each result is now read, which re-raises the worker's exception where the method's own
+  handler turns it into a `ModelEvaluationException` carrying the worker's traceback; the
+  success alert is thereby unreachable when a save did not happen.
+
+  **Measured, not inferred** (views-models `b2cd4a07`, fimbulthul 2026-09-22): `dark_river`
+  had all thirteen evaluation sequences refused —
+  `MultiIndex names ('month_id', 'country_id') do not match expected layout for level='pgm'`
+  — logged the thirteen "Validating…" lines within **11 ms**, wrote **zero** prediction
+  files, and was recorded `PASS` by the integration runner. Days of GPU produced metric
+  frames and no predictions.
+
+  **The severity is not "predictions are lost".** It is that this disabled every guard
+  downstream of it on the evaluation path: the sniffer's refusal was correct and was
+  discarded. A guard whose refusal is thrown away is worse than no guard, because its
+  existence is what makes an operator trust the run. Register C-333.
+
+  **Scope.** `prediction_format: "dataframe"` only — 80 of the 117 views-models models
+  (42 views-r2darts2, 38 views-stepshifter). The `prediction_frame` path writes on the
+  main thread and always raised; a disk-full `OSError` there failed a run loudly on
+  2026-09-20, which is the control case. The pool sits inside `_execute_model_evaluation`,
+  so **forecasting is untouched** — `-f` never reached it. `model.py` was the only
+  unread-futures site on the platform: every pool in views-stepshifter, views-r2darts2 and
+  views-hydranet already called `.result()`.
+
+  **For operators: expect runs that were green to go red.** Anything that has been failing
+  silently on this path now says so. That is the fix working.
+
+  **Not fixed here, and stated so nobody assumes otherwise:** `managers/prediction/io.py`
+  catches Appwrite upload transport faults, logs them and returns, so a
+  `--prediction_store` run can still fail to publish and report success — same silence
+  class, different mechanism, its own fix. And this change catches only failures that
+  *raise*; a save that writes nothing without raising would still pass. The trigger for
+  revisiting that is the first such failure observed.
+
 ## [3.3.0] — 2026-09-19
 
 > **Measured after publishing (2026-09-19).** A fresh `pip install views-pipeline-core==3.3.0`
