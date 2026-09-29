@@ -37,7 +37,7 @@ from views_frames import (  # noqa: E402
     SpatioTemporalIndex,
 )
 from views_pipeline_core.managers.model.model import ForecastingModelManager  # noqa: E402
-from views_pipeline_core.exceptions.exceptions import ModelEvaluationException  # noqa: E402
+from views_pipeline_core.exceptions import ModelEvaluationException  # noqa: E402
 
 
 def _pf(y_pred, time, unit):
@@ -216,11 +216,6 @@ class TestDFPath:
             manager._execute_model_evaluation()
 
 
-# ============================================================
-# PATH 2: No metrics in config
-# ============================================================
-
-
 class TestWorkerFailuresFailTheRun:
     """#529 — a worker that raises must fail the run, not be discarded.
 
@@ -364,6 +359,11 @@ class TestWorkerFailuresFailTheRun:
 
         assert self._saved_alert_sent(manager)
         assert manager._io.save_predictions.call_count == N_SEQUENCES
+
+
+# ============================================================
+# PATH 2: No metrics in config
+# ============================================================
 
 
 class TestNoMetrics:
