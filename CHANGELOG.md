@@ -62,12 +62,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   **For operators: expect runs that were green to go red.** Anything that has been failing
   silently on this path now says so. That is the fix working.
 
-  **Not fixed here, and stated so nobody assumes otherwise:** `managers/prediction/io.py`
-  catches Appwrite upload transport faults, logs them and returns, so a
-  `--prediction_store` run can still fail to publish and report success — same silence
-  class, different mechanism, its own fix. And this change catches only failures that
-  *raise*; a save that writes nothing without raising would still pass. The trigger for
-  revisiting that is the first such failure observed.
+  **Not fixed here, and filed rather than described** — this release deliberately carries
+  one fix, so that if anything moves after it lands the cause is unambiguous:
+  **#532** (an Appwrite upload failure is logged and swallowed, so a `--prediction_store`
+  run can still fail to publish and report success — this change removed only the outer
+  layer), **#533** (nothing refuses a constituent whose `prediction_format` its ensemble
+  manager cannot read), **#534** (ADR-064 and C-323 are stale about views-r2darts2's
+  shipped entity fix; 0.2.3 is the only installable floor), and **#535** (make
+  `reference_entities` structurally hard to omit — the same defect class as this one).
+  Note also that this change catches only failures that *raise*; a save writing nothing
+  without raising would still pass.
 
 ## [3.3.0] — 2026-09-19
 

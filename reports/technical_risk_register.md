@@ -24,9 +24,36 @@
 >
 > **Carried into 3.3.1 knowingly:** C-322, C-330, C-331, C-332 — unchanged from 3.3.0, none
 > touched by this release. And one new: this fix catches only failures that **raise**. A
-> save that writes nothing without raising still passes, and `managers/prediction/io.py`'s
-> swallowed Appwrite upload is exactly that shape on the delivery path. Both are named in
-> the CHANGELOG rather than quietly deferred; the trigger is the first observed instance.
+> save that writes nothing without raising still passes.
+>
+> **The deferred work is FILED, not described.** This gate does not ship four intentions in
+> prose; each one has an issue, because "later" without a number is how a release inherits
+> an open question instead of a decision:
+>
+> - **#532** — an Appwrite upload failure is logged and swallowed, so a `--prediction_store`
+>   run can fail to publish and still report success. Same silence class as C-333 and
+>   views-models#320. C-333's fix removed the outer layer (the discarded Future) only; this
+>   handler is the inner one. Its first question is whether the swallow is deliberate under
+>   ADR-047, which makes Appwrite the secondary destination — the wrong fix here turns every
+>   Appwrite hiccup into a failed model run.
+> - **#533** — nothing refuses a constituent whose `prediction_format` its ensemble manager
+>   cannot read (#530's cause). **Carries a correction:** the config-time guard promised
+>   publicly on #530, views-models#492 and views-models#478 cannot work — the tier lives in
+>   generated `main.py`, not config, and the failing config is already valid by this repo's
+>   own sniffer. Not urgent: all 13 ensembles on views-models `development` are
+>   tier-homogeneous; the mixed roster is branch-local.
+> - **#534** — ADR-064 and C-323 still say r2darts2's entity fix is an unmerged branch. It
+>   shipped in 0.2.2 and 0.2.3, and **0.2.3 is the only installable floor** (0.2.2 pins
+>   `darts==0.46.1`, which cannot resolve beside viewser). We are publishing something
+>   untrue about another team's repo; cheapest of the four and the one owed to someone else.
+> - **#535** — make `reference_entities` structurally hard to omit. views-r2darts2 asked for
+>   this and will match whichever shape lands; their sweep override already lost the
+>   ADR-064 guarantee by forgetting the kwarg. Same defect class as C-333.
+>
+> **Why none of them is in 3.3.1:** attribution. C-333 is a defect whose entire cost was
+> that nobody could tell which step had failed. A release carrying five changes would
+> reproduce that property at the release level. #534 is docs-only and was the closest call;
+> it lands immediately after.
 
 > **Release gate — pipeline-core 3.3.0 — ~~OPEN~~ SHIPPED 2026-09-19.** Prepared 2026-09-16, the day the
 > train started (#512); version bumped and published 2026-09-19 (`1e25a1e`; PyPI verified from a fresh
