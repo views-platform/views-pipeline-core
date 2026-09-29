@@ -23,7 +23,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.3.2] — unreleased
+## [3.3.3] — 2026-09-29
+
+**Identical in content to 3.3.2. Released only because 3.3.2 could not be completed on PyPI.**
+
+Publishing 3.3.2 on 2026-09-29 failed part-way: PyPI returned `Error connecting to
+repository` after both artefacts had reached 100%. The sdist committed; **the wheel did
+not**, leaving 3.3.2 on the index as a source-only release. A PyPI filename can never be
+reused, so the missing wheel cannot be added to 3.3.2 — and the publish workflow's version
+guard (`assert new > latest`) correctly refuses to republish a version the index already
+reports. 3.3.2 is therefore permanent and incomplete.
+
+**Install 3.3.3, not 3.3.2.** 3.3.2 will install — pip builds it from source — but any
+environment that installs with `--only-binary` or without build tooling cannot use it.
+Everything below under **[3.3.2]** is what this release contains.
+
+Two things changed in the pipeline as a result, so the next flake costs nothing:
+
+- `publish_package.yml` now publishes with `--skip-existing`, so a re-run uploads exactly
+  what is missing instead of dying on the file that already uploaded.
+- That flag does not help when the *version guard* has already seen the partial version on
+  the index, which is what happened here. Recovering a partial upload without burning a
+  version number needs the guard to distinguish "this version is fully published" from
+  "this version exists" — recorded as **#548**.
+
+## [3.3.2] — 2026-09-29 (INCOMPLETE ON PyPI — sdist only; use 3.3.3)
 
 ### Fixed
 
