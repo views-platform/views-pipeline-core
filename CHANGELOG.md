@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [Unreleased]
+## [3.3.4] — unreleased
 
 ### Fixed
 
@@ -77,6 +77,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   passed all 45: the name comparison masks a regression in the query, leaving behaviour
   safe and dedup dead. Both gaps now have a test — one at the production name shape, one
   end-to-end with several documents on one hash.
+
+  **This fixes the defect in THIS repo, not on the platform.** views-faoapi carries its
+  own `check_file_exists_by_hash` (`managers/appwrite/metadata.py`) with the same
+  hash-only lookup and no name comparison — the two copies share an ancestor, down to the
+  same `# <-- CHANGED from "FOUND" to "FOUND_BY_HASH"` comment, and have drifted since.
+  Verified: `filename` appears there only as a schema attribute, never in a comparison.
+  It is behind on a second fix too — its lookup still calls
+  `create_metadata_collection_if_not_exists` before searching, the read-with-a-write's
+  side effect this repo removed in register C-233. Whether its upload paths are live, and
+  whether they can ever write an artefact whose bytes match an existing one under another
+  name, is theirs to judge. **Recorded so that nobody reads "uploads can no longer report
+  success having written nothing" as a statement about the platform** — that sentence is
+  true here and false one repository over, and assuming otherwise is the same mistake the
+  old `limit(1)` comment made: correct when written, silently falsified later.
 
   **Deliberately not decided here:** ADR-013 §4.2 requires one sidecar *per run* for a
   file that cannot vary by run, so this fix stores one copy per distinct name — obeying
