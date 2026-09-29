@@ -17,8 +17,16 @@ Contract obligations implemented here:
     step itself is covered by the round-trip test (#269 acceptance (e)).
   * §3.3 naming — templates are shared constants; the name is a locator only, identity is
     manifest content + the embedded header (the C-59/C-94 lesson).
-  * §7a — the single internal→wire target mapping (`lr_ged_sb/ns/os`); unmapped targets
-    fail loud rather than leak internal vocabulary onto the wire.
+  * §7a — the single internal→wire target mapping (`lr_ged_sb/ns/os`). `wire_target`
+    refuses an unmapped name rather than leak internal vocabulary onto the wire, and is
+    the last line of that defence rather than the first: since #536 the ensemble publish
+    loop offers this module only targets the mapping already covers, and refuses the run
+    outright when the roster cannot supply every served column. So on the production path
+    `wire_target`'s raise is now unreachable by construction. Do NOT read that as licence
+    to weaken the caller's filter or to add a second call site on the strength of this
+    raise — the filter is what keeps an internal name off the wire, and this is the
+    backstop. `INTERNAL_TO_WIRE_TARGET` is therefore load-bearing twice: as the naming
+    map, and as the publish allowlist.
   * §10.2 — `run_id`/`generated_at` are injectable for byte-stable fixture parity.
   * §3.2 note — the manifest's `sidecar_sha256` is ``null``: the §5 sidecar is produced
     downstream (views-postprocessing); the Hop-A producer has no sidecar artifact to hash.

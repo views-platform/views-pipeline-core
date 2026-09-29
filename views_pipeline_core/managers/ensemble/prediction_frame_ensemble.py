@@ -13,7 +13,7 @@ import subprocess
 import time
 import traceback
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, FrozenSet, List, Optional, Union
 
 import numpy as np
 import tqdm
@@ -656,6 +656,79 @@ class PredictionFrameEnsembleManager:
             ctx.expected_samples_per_model,
         )
 
+        # #536: which targets may be OFFERED to the partner-visible store. Every
+        # target is still aggregated, saved and returned — this filter is on
+        # publishing alone.
+        #
+        # Since PR #422 (C-132) `ctx.targets` is `combined_targets()`: regression AND
+        # classification. The FAO wire vocabulary (ADR-013 §7a) maps only the three
+        # regression targets, so a six-target ensemble published three (run, target)
+        # legs and then raised on the fourth — with three manifests already COMMITTED
+        # and nothing rolled back, by design (§3.2 is manifest-last, not two-phase).
+        #
+        # Filter on the declared NAMES, never on count or position. views-faoapi
+        # resolves a served name by tokenising (`series_of`, its schema.py), so
+        # `pred_lr_ged_sb` and `pred_cls_ged_sb` BOTH resolve to the stem `sb` and
+        # neither raises. A positional `[:3]` would be right only by luck of ordering;
+        # one upstream reorder would publish classification values to the UN under the
+        # fatality column names, silently. `INTERNAL_TO_WIRE_TARGET`'s keys ARE the
+        # declared vocabulary, so deriving from them keeps this in step with §7a's
+        # extension procedure instead of restating it.
+        publishable: FrozenSet[str] = frozenset()
+        if self._use_prediction_store:
+            from views_pipeline_core.managers.ensemble.sampled_forecast_publisher import (
+                INTERNAL_TO_WIRE_TARGET,
+            )
+            publishable = frozenset(ctx.targets) & frozenset(INTERNAL_TO_WIRE_TARGET)
+            # The set that matters is not what we CAN publish but what the wire EXPECTS
+            # and this roster fails to supply. Checking only `not publishable` caught the
+            # all-miss case and let the realistic migration shape through: a roster part
+            # way through a rename supplies two of three, publishes a short set, exits 0,
+            # and logs indistinguishably from intended withholding — views-models#320 in
+            # partial dress, one third quieter.
+            missing = sorted(frozenset(INTERNAL_TO_WIRE_TARGET) - publishable)
+            if missing:
+                # The live case: the mapping is keyed on INTERNAL target names, and
+                # those are not fixed forever. views-datafactory serves `ged_sb_best` /
+                # `ged_ns_best` / `ged_os_best`, with no `lr_` prefix. A roster that
+                # moves to those names while the mapping still reads `lr_*_best` would
+                # otherwise deliver a short set, or nothing, and report success.
+                wire_names = sorted(
+                    INTERNAL_TO_WIRE_TARGET[t] for t in missing
+                )
+                raise ValueError(
+                    f"Prediction store is enabled, but this ensemble supplies no target "
+                    f"for {len(missing)} of the {len(INTERNAL_TO_WIRE_TARGET)} served "
+                    f"wire column(s): {wire_names} (expected from internal target(s) "
+                    f"{missing}). This roster declares {sorted(set(ctx.targets))}. "
+                    f"Delivering a short set to a partner-visible store is not a valid "
+                    f"outcome, so the run stops here rather than after publishing part "
+                    f"of it. If these targets were renamed — the datafactory's "
+                    f"`ged_*_best` in place of `lr_*_best` is the expected case — map "
+                    f"them in INTERNAL_TO_WIRE_TARGET "
+                    f"(managers/ensemble/sampled_forecast_publisher.py), whose keys are "
+                    f"internal names and whose values are the served wire names; the "
+                    f"served set must also move in views-postprocessing. If this "
+                    f"ensemble is not for the wire at all, run it without "
+                    f"--prediction_store."
+                )
+            # Logged unconditionally, not only when something is withheld: #536's whole
+            # cost was not knowing what had already reached the UN when the run died.
+            # A nominal run must also leave a record of what it offered, otherwise a
+            # later refactor that silently widens `publishable` produces byte-identical
+            # log output. `sorted(set(...))` because `combined_targets()` does not
+            # de-duplicate and nothing upstream refuses a target named in both config
+            # keys — which would otherwise publish the same (run, target) twice.
+            withheld = sorted(set(ctx.targets) - publishable)
+            logger.info(
+                "Prediction store: publishing %s to the partner-visible store. "
+                "Withheld: %s — not in the served wire vocabulary; still aggregated "
+                "and saved locally. Adding one to the wire is a deliberate, FAO-facing "
+                "change (a mapping entry here plus views-postprocessing's served set), "
+                "not a config edit.",
+                sorted(publishable), withheld or "nothing",
+            )
+
         forecasts: Dict[str, PredictionFrame] = {}
         for target in ctx.targets:
             frames = []
@@ -680,10 +753,14 @@ class PredictionFrameEnsembleManager:
             )
             save_pf(agg_pf, save_dir)
             forecasts[target] = agg_pf
-            if self._use_prediction_store:
+            if self._use_prediction_store and target in publishable:
                 # #269 / ADR-013 §3: the Hop-A publish leg — Track A archives +
-                # manifest-last, per (run, target). Runs only under the flag; child
-                # runs never reach here with it set (prediction_store=False forcing).
+                # manifest-last, per (run, target). The flag is named HERE, at the
+                # irreversible act, and not left implicit in `publishable` being empty:
+                # a comment asserting that a condition means more than it says is the
+                # defect. Hoisting the `publishable` computation out of its `if` would
+                # otherwise publish on every run. Child runs never reach here with the
+                # flag set (prediction_store=False forcing).
                 self._publish_sampled_forecast(agg_pf, target, ctx)
 
         return forecasts

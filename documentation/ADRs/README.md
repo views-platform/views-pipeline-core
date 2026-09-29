@@ -84,6 +84,7 @@ Domain decisions specific to `views-pipeline-core`.
 | [065](065_model_governance_point_probabilistic_predictions.md) | Model governance protocol — point and probabilistic predictions | Proposed |
 | [066](066_including_models_in_ensembles.md) | Ensemble governance protocol — including models in shadow ensembles | Proposed |
 | [067](067_third_party_sdk_ceilings_move_on_measurement.md) | A third-party SDK ceiling moves on measurement; the surface the package uses is derived, not listed | Accepted |
+| [068](068_the_publish_set_is_derived_from_the_wire_vocabulary.md) | What may be published to a partner-visible store is derived from the wire vocabulary, and a short delivery refuses | Accepted |
 
 ---
 
