@@ -570,3 +570,134 @@ class TestHashMatchUnderADifferentName:
 
         assert result.code != "METADATA_UPDATED"
         manager.upload_file.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# #551, second layer. The comparison was right; the QUERY could not find the
+# document to compare against.
+#
+# `check_file_exists_by_hash` asked for `Query.limit(1)` with no ordering, which was
+# sound while it only had to answer "does a duplicate exist" — `total` reports over the
+# whole match regardless of page size. Comparing names made that false: a hash is not
+# unique in this collection BY CONSTRUCTION, because a run-independent artefact has the
+# same bytes every delivery. After N runs, N documents share one hash under N names and
+# one is returned arbitrarily.
+#
+# No fixture in this module had two documents on one hash, so `limit(1)` was invisible
+# to every test above.
+# ---------------------------------------------------------------------------
+
+
+class TestAHashWithSeveralDocuments:
+    @staticmethod
+    def _collection(manager, documents):
+        """A real list_documents page, so Query.limit is exercised rather than stubbed."""
+        manager.metadata_manager.databases = Mock()
+        manager.metadata_manager.databases.list_documents = Mock(
+            return_value={"total": len(documents), "documents": documents}
+        )
+        manager.metadata_manager._resolve_containers = Mock(
+            return_value=("db", "coll")
+        )
+
+    def test_the_document_for_THIS_name_is_the_one_returned(self, manager):
+        """Three runs' sidecars share a hash; the middle one must be findable.
+
+        With `limit(1)` the store returns whichever it likes — so a genuine idempotent
+        re-upload of run 2 could see run 3's document, read a name mismatch, and upload
+        a duplicate. Dedup would be dead for exactly the artefact class that caused #551.
+        """
+        docs = [
+            {"$id": f"doc{i}", "fileId": f"file{i}", "file_hash": "same",
+             "filename": f"rusty_bucket_forecasting_2026{m}__sidecar.parquet"}
+            for i, m in enumerate(("0727_095355", "0828_101010", "0929_172325"))
+        ]
+        self._collection(manager, docs)
+
+        result = manager.metadata_manager.check_file_exists_by_hash(
+            "same", filename="rusty_bucket_forecasting_20260828_101010__sidecar.parquet"
+        )
+
+        assert result.success and result.code == "FOUND_BY_HASH"
+        assert result.data["$id"] == "doc1", (
+            "returned an arbitrary document rather than the one for this name"
+        )
+
+    def test_a_name_with_no_document_is_absent_even_though_the_hash_matches(self, manager):
+        """The #551 case itself: the bytes are known, this artefact is not."""
+        docs = [{"$id": "doc0", "fileId": "file0", "file_hash": "same",
+                 "filename": "rusty_bucket_forecasting_20260727_095355__sidecar.parquet"}]
+        self._collection(manager, docs)
+
+        result = manager.metadata_manager.check_file_exists_by_hash(
+            "same", filename="rusty_bucket_forecasting_20260929_172325__sidecar.parquet"
+        )
+
+        assert not result.success and result.code == "NOT_FOUND"
+
+    def test_the_page_is_large_enough_to_hold_more_than_one_match(self, manager):
+        """Pins the property `limit(1)` violated, so a future narrowing is caught here
+        rather than in a delivery. Asserted on the query the store actually receives."""
+        from views_pipeline_core.modules.appwrite.file import _HASH_MATCH_PAGE_SIZE
+
+        self._collection(manager, [])
+        manager.metadata_manager.check_file_exists_by_hash("same", filename="x.parquet")
+
+        queries = manager.metadata_manager.databases.list_documents.call_args.kwargs["queries"]
+        assert _HASH_MATCH_PAGE_SIZE > 1, "a hash is not unique in this collection"
+        assert any(str(_HASH_MATCH_PAGE_SIZE) in str(q) for q in queries), queries
+
+    def test_existence_only_callers_keep_the_old_contract(self, manager):
+        """Two of the three callers ask only whether a hash is known; they must not
+        start getting NOT_FOUND because they passed no name."""
+        docs = [{"$id": "doc0", "fileId": "file0", "file_hash": "same",
+                 "filename": "anything.parquet"}]
+        self._collection(manager, docs)
+
+        result = manager.metadata_manager.check_file_exists_by_hash("same")
+
+        assert result.success and result.code == "FOUND_BY_HASH"
+
+
+class TestTheDedupSiteAsksTheLookupByName:
+    """The wiring between the two layers, which neither layer's tests can see.
+
+    The name comparison at the decision point and the name filter in the query are belt
+    and braces, and that is deliberate — but it means the comparison MASKS a regression
+    in the query. Drop `filename=filename` at both dedup sites and every other test here
+    still passes: the lookup returns an arbitrary document, the comparison rejects it as
+    a different artefact, and the upload proceeds. Safe, and dedup is dead again for the
+    one artefact class that produced #551.
+
+    So this pins the property only visible end to end: when the document for THIS name
+    exists among several sharing a hash, the upload is skipped.
+    """
+
+    def test_a_genuine_reupload_still_dedupes_when_the_hash_has_several_documents(
+        self, manager, payload,
+    ):
+        docs = [
+            {"$id": "doc_other", "fileId": "file_other", "file_hash": "same",
+             "filename": "rusty_bucket_forecasting_20260727_095355__sidecar.parquet"},
+            {"$id": "doc_mine", "fileId": "file_mine", "file_hash": "same",
+             "filename": payload.name},
+        ]
+        # The real lookup against a real page — not the _document_found stub, because the
+        # stub returns a single document and cannot express this shape.
+        manager.metadata_manager.databases = Mock()
+        manager.metadata_manager.databases.list_documents = Mock(
+            return_value={"total": len(docs), "documents": docs}
+        )
+        manager.metadata_manager._resolve_containers = Mock(return_value=("db", "coll"))
+        manager.metadata_manager.update_file_metadata = Mock(
+            return_value=OperationResult(success=True, data={}, code="UPDATED")
+        )
+        _storage_says(manager, OperationResult(success=True, data={"$id": "file_mine"}))
+
+        result = _run_dedup(manager, payload)
+
+        assert result.code == "METADATA_UPDATED", (
+            "did not dedupe a file that IS already stored under this name — the lookup "
+            "was not asked by name, so it returned the other run's document"
+        )
+        manager.upload_file.assert_not_called()

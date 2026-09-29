@@ -56,11 +56,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   stops early; it does not protect against an upload that returns success having written
   nothing.* A guard asking "did I get a file id back?" passes here.
 
-  **Mutation-checked, and the first set of guards was insufficient.** A substring
-  comparison in place of equality passed all 40 tests, because the fixtures used names too
-  dissimilar to tell the two apart — while the real names share
-  `rusty_bucket_forecasting_` and differ only in a timestamp. A test at the production
-  shape is now the discriminator.
+  **The lookup had to change too, and review found that — not the comparison.**
+  `check_file_exists_by_hash` asked for `Query.limit(1)` with no ordering, which was sound
+  while it only answered *does a duplicate exist* (`total` reports over the whole match).
+  Comparing names made it false: **a hash is not unique in this collection by
+  construction**, since a run-independent artefact has identical bytes every delivery, so
+  after N runs N documents share one hash under N names and one came back arbitrarily. A
+  correct comparison against the wrong document still gives the wrong answer — dedup would
+  have stayed dead for exactly the artefact that caused #551, silently, while the reported
+  symptom looked fixed. The lookup now reads a page of hash matches and selects by name,
+  filtered in Python because no index is declared on `filename` (views-faoapi and
+  views-postprocessing independently landed on the same approach). A truncated page logs
+  rather than asserting absence. The new `filename` parameter is **last** in the
+  signature: all three call sites pass the container arguments positionally.
+
+  **Mutation-checked, and two rounds of guards were insufficient.** A substring comparison
+  in place of equality passed all 40 tests, because the fixtures used names too dissimilar
+  to tell apart — while the real names share `rusty_bucket_forecasting_` and differ only in
+  a timestamp. Then, with the lookup fixed, *removing the wiring between the two layers*
+  passed all 45: the name comparison masks a regression in the query, leaving behaviour
+  safe and dedup dead. Both gaps now have a test — one at the production name shape, one
+  end-to-end with several documents on one hash.
 
   **Deliberately not decided here:** ADR-013 §4.2 requires one sidecar *per run* for a
   file that cannot vary by run, so this fix stores one copy per distinct name — obeying

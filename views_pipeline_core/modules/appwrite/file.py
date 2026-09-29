@@ -178,6 +178,13 @@ def _classify_storage_presence(result: "OperationResult") -> _StoragePresence:
 
 
 # Enums
+#: How many metadata documents to read when resolving a content hash. A hash is NOT
+#: unique in this collection: a run-independent artefact has the same bytes every
+#: delivery, so matches accumulate one per run. Generous, because a short page costs a
+#: redundant upload while guessing costs #551.
+_HASH_MATCH_PAGE_SIZE = 100
+
+
 def _dedup_target_is_the_same_artefact(existing_doc: dict, filename: str) -> bool:
     """Whether a content-hash match may be treated as "this file is already uploaded".
 
@@ -1134,6 +1141,7 @@ class AppwriteMetadataHandler:
     collection_name: str = None,
     collection_id: str = None,
     database_id: str = None,
+    filename: Optional[str] = None,
 ) -> OperationResult:
         """Check if a file with the given hash exists in metadata.
 
@@ -1178,22 +1186,50 @@ class AppwriteMetadataHandler:
             # That sentence used to read "fails loud and says so", which was never true
             # of this method, and it mattered: two callers ignored the failure and
             # uploaded anyway (#473).
-            # limit(1): this reads `total` for existence and `documents[0]` for the
-            # answer, so one row is all it consumes. `total` is reported over the whole
-            # match regardless of page size, so bounding the page cannot hide a
-            # duplicate hash. Explicit because "the default happens to be enough" is
-            # what C-241 was.
+            # The page size was limit(1), which was sound while this method only had to
+            # answer "does a duplicate exist": `total` reports over the whole match
+            # regardless of page size. #551 made that false. The dedup decision now needs
+            # the document for a PARTICULAR filename, and one arbitrary row cannot supply
+            # it — a hash is not unique in this collection BY CONSTRUCTION, because a
+            # run-independent artefact (the gid->GAUL sidecar) has identical bytes every
+            # delivery. After N runs, N documents share one hash under N names.
             search_result = self.databases.list_documents(
                 db_id,
                 coll_id,
-                queries=[Query.equal("file_hash", file_hash), Query.limit(1)],
+                queries=[
+                    Query.equal("file_hash", file_hash),
+                    Query.limit(_HASH_MATCH_PAGE_SIZE),
+                ],
             )
 
-            if search_result["total"] > 0:
+            total = search_result.get("total", 0)
+            documents = search_result.get("documents", [])
+            if total <= 0:
+                return OperationResult(success=False, code="NOT_FOUND")
+
+            if filename is None:
+                # Existence-only callers keep the original contract.
                 return OperationResult(
-                    success=True, 
-                    data=search_result["documents"][0], 
-                    code="FOUND_BY_HASH"  # <-- CHANGED from "FOUND" to "FOUND_BY_HASH"
+                    success=True, data=documents[0], code="FOUND_BY_HASH"
+                )
+
+            # Filtered in Python rather than with `Query.equal("filename", ...)`: no index
+            # is declared on `filename` in provisioning.py, so that query is not
+            # dependable against this store. views-faoapi's resolver and
+            # views-postprocessing independently landed on the same in-process filter.
+            match = next((d for d in documents if d.get("filename") == filename), None)
+            if match is not None:
+                return OperationResult(success=True, data=match, code="FOUND_BY_HASH")
+
+            if total > len(documents):
+                # Absence cannot be proven from a truncated page. NOT_FOUND causes a
+                # redundant upload, which is recoverable; claiming a match we did not see
+                # would repeat #551. Say so rather than let it look like a clean miss.
+                logger.warning(
+                    "Hash %s has %d metadata documents but only %d were read; no match "
+                    "for '%s' among them. Treating as absent, which may upload a "
+                    "duplicate. Raise _HASH_MATCH_PAGE_SIZE if this recurs.",
+                    file_hash, total, len(documents), filename,
                 )
 
             return OperationResult(success=False, code="NOT_FOUND")
@@ -1989,7 +2025,10 @@ class AppWriteFileModule:
 
         # Check if file already exists by hash in metadata
         existing_metadata = self.metadata_manager.check_file_exists_by_hash(
-            file_hash, collection_name, collection_id, self.config.database_id
+            file_hash, collection_name, collection_id, self.config.database_id,
+            # #551: ask for the document that matches this NAME, not whichever row
+            # the store returns first. A hash is not unique in this collection.
+            filename=filename,
         )
 
         # C-232, at the two sites its original fix did not cover. A lookup that FAILED
@@ -2274,7 +2313,10 @@ class AppWriteFileModule:
         
         # Check if file already exists by hash
         existing_metadata = self.metadata_manager.check_file_exists_by_hash(
-            file_hash, collection_name, collection_id, self.config.database_id
+            file_hash, collection_name, collection_id, self.config.database_id,
+            # #551: ask for the document that matches this NAME, not whichever row
+            # the store returns first. A hash is not unique in this collection.
+            filename=filename,
         )
 
         # C-232, at the two sites its original fix did not cover. A lookup that FAILED
