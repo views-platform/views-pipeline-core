@@ -23,6 +23,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **An Appwrite upload no longer reports success having written nothing**
+  (`modules/appwrite/file.py`; #551). Deduplication keyed on **content hash alone** and
+  never compared the **filename**, while every consumer of that store — views-faoapi's
+  resolver, views-postprocessing, and the manifests this repo writes — resolves an
+  artefact **by name**. On a hash hit the uploader returned `success=True` with the
+  *pre-existing* file's id, and the file the caller named was never written.
+
+  **It broke the first `rusty_bucket` FAO delivery** on 2026-09-29. The gid→GAUL sidecar
+  is run-independent by construction, so its bytes matched run-0's from August; the
+  upload was skipped, the log said
+  `uploaded rusty_bucket_forecasting_20260929_172325__sidecar.parquet`, and storage still
+  held only `..._20260727_095355__sidecar.parquet` — `createdAt == updatedAt` to the
+  millisecond. The manifest then named a file that did not exist and views-faoapi refused
+  the run, correctly. **Permanent, not a one-off:** that file's hash matches the previous
+  run's on every delivery, including the production run.
+
+  Both dedup sites now require the stored name to equal the requested one.
+  A hash match under a different name is a different artefact that happens to have
+  identical bytes; the other artefact's record is left untouched, since updating it moves
+  its provenance onto this run and deleting it makes it unfindable. A record with **no**
+  stored name is not treated as a match either — on a partner-visible store the safe
+  reading of "cannot tell" is to upload, because a redundant copy is recoverable and a
+  manifest naming a file that does not exist is not. That also covers every metadata
+  document written before this change.
+
+  Register **C-94**'s shape, new instance: *manifest-last protects against a run that
+  stops early; it does not protect against an upload that returns success having written
+  nothing.* A guard asking "did I get a file id back?" passes here.
+
+  **Mutation-checked, and the first set of guards was insufficient.** A substring
+  comparison in place of equality passed all 40 tests, because the fixtures used names too
+  dissimilar to tell the two apart — while the real names share
+  `rusty_bucket_forecasting_` and differ only in a timestamp. A test at the production
+  shape is now the discriminator.
+
+  **Deliberately not decided here:** ADR-013 §4.2 requires one sidecar *per run* for a
+  file that cannot vary by run, so this fix stores one copy per distinct name — obeying
+  the contract. Whether the contract should instead be a single sidecar versioned by GAUL
+  edition spans four repositories and is not this change's to settle.
+
 ## [3.3.3] — 2026-09-29
 
 **Identical in content to 3.3.2. Released only because 3.3.2 could not be completed on PyPI.**

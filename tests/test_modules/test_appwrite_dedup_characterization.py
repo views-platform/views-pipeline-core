@@ -82,12 +82,23 @@ def payload(tmp_path):
     return f
 
 
-def _document_found(manager, file_id="existing_file_id", doc_id="existing_doc_id"):
-    """The metadata lookup succeeds — i.e. this exact file was uploaded before."""
+def _document_found(
+    manager, file_id="existing_file_id", doc_id="existing_doc_id",
+    stored_filename="forecast.parquet",
+):
+    """The metadata lookup succeeds — i.e. this exact file was uploaded before.
+
+    `stored_filename` defaults to the payload's own name, because that is what "this
+    exact file was uploaded before" means and it is what every test in this module
+    intends. It became load-bearing in #551: the dedup decision now also compares the
+    stored name, since a hash match under a DIFFERENT name is a different artefact that
+    happens to have identical bytes. Before #551 this fixture modelled no filename at
+    all, which was fine while the name was not consulted.
+    """
     manager.metadata_manager.check_file_exists_by_hash = Mock(
         return_value=OperationResult(
             success=True,
-            data={"fileId": file_id, "$id": doc_id},
+            data={"fileId": file_id, "$id": doc_id, "filename": stored_filename},
             code="FOUND_BY_HASH",
         )
     )
@@ -457,3 +468,105 @@ def test_the_replace_path_proceeds_when_the_old_file_is_genuinely_gone(manager, 
         "a positive storage_file_not_found means the old file really is gone, so the "
         f"replace must proceed: {result.error}"
     )
+
+
+# ---------------------------------------------------------------------------
+# #551 — a hash match under a DIFFERENT name is a different artefact.
+#
+# Dedup keyed on content hash alone, so the first rusty_bucket FAO delivery
+# (2026-09-29) matched run-0's sidecar from August, skipped the upload, logged
+# "uploaded ..._20260929_..._sidecar.parquet" and wrote nothing. The manifest then
+# named a file that did not exist and views-faoapi refused the run — correctly.
+#
+# Permanent, not a one-off: the gid->GAUL sidecar is run-independent by construction,
+# so its bytes match the previous run's on EVERY delivery.
+# ---------------------------------------------------------------------------
+
+
+class TestHashMatchUnderADifferentName:
+    def test_the_upload_is_not_skipped(self, manager, payload):
+        """The bytes match, the name does not — so this artefact is not yet stored."""
+        _document_found(manager, stored_filename="sidecar_20260727_095355.parquet")
+        _storage_says(manager, OperationResult(success=True, data={"$id": "existing_file_id"}))
+
+        result = _run_dedup(manager, payload)
+
+        assert result.success
+        assert result.code != "METADATA_UPDATED", (
+            "reported an existing file as this upload's outcome; the requested name "
+            "was never written"
+        )
+        manager.upload_file.assert_called_once()
+
+    def test_the_other_artefacts_record_is_left_alone(self, manager, payload):
+        """The matched document describes a DIFFERENT file. Updating it would move that
+        file's provenance onto this run; deleting it would make it unfindable — the
+        production incident did the former, against run-0's August sidecar."""
+        _document_found(manager, stored_filename="sidecar_20260727_095355.parquet")
+        _storage_says(manager, OperationResult(success=True, data={"$id": "existing_file_id"}))
+        # Not a Mock on this fixture by default — the pre-#551 path never reached it
+        # with a mismatched name, which is precisely why nothing caught the incident.
+        manager.metadata_manager.update_file_metadata = Mock(
+            return_value=OperationResult(success=True, data={}, code="UPDATED")
+        )
+
+        _run_dedup(manager, payload)
+
+        manager.metadata_manager.update_file_metadata.assert_not_called()
+        manager.databases.delete_document.assert_not_called()
+
+    def test_a_matching_name_still_dedupes(self, manager, payload):
+        """The control. Dedup exists so re-uploading the SAME artefact is idempotent;
+        without this, 'never dedupe' would pass the two tests above."""
+        _document_found(manager, stored_filename=payload.name)
+        _storage_says(manager, OperationResult(success=True, data={"$id": "existing_file_id"}))
+
+        result = _run_dedup(manager, payload)
+
+        assert result.success
+        assert result.code == "METADATA_UPDATED"
+        manager.upload_file.assert_not_called()
+
+    def test_the_production_shape_two_names_differing_only_in_the_timestamp(
+        self, manager, payload, tmp_path,
+    ):
+        """The discriminator, and the actual incident.
+
+        The two sidecar names differ only in a timestamp inside a long shared prefix:
+
+            rusty_bucket_forecasting_20260727_095355__sidecar.parquet
+            rusty_bucket_forecasting_20260929_172325__sidecar.parquet
+
+        The other tests in this class use names so dissimilar that a PREFIX or SUBSTRING
+        comparison distinguishes them, and a mutation replacing equality with either
+        passed all of them. Against the real shape it does not: these two share
+        `rusty_bucket_forecasting_`, so anything short of equality reproduces #551
+        exactly — the August file is treated as this run's, the upload is skipped, and
+        the manifest names a file that does not exist.
+        """
+        f = tmp_path / "rusty_bucket_forecasting_20260929_172325__sidecar.parquet"
+        f.write_bytes(b"gid-to-gaul-lookup-identical-every-run")
+        _document_found(
+            manager,
+            stored_filename="rusty_bucket_forecasting_20260727_095355__sidecar.parquet",
+        )
+        _storage_says(manager, OperationResult(success=True, data={"$id": "existing_file_id"}))
+
+        result = _run_dedup(manager, f)
+
+        assert result.code != "METADATA_UPDATED", (
+            "August's sidecar was accepted as this run's — #551 reproduced"
+        )
+        manager.upload_file.assert_called_once()
+
+    def test_a_record_with_no_stored_name_is_not_treated_as_a_match(self, manager, payload):
+        """'Cannot tell' resolves to uploading, not to skipping. On a partner-visible
+        store a redundant copy is recoverable; a manifest naming a file that does not
+        exist is not. This is also the shape every pre-#551 metadata document has."""
+        _document_found(manager, stored_filename=None)
+        _storage_says(manager, OperationResult(success=True, data={"$id": "existing_file_id"}))
+
+        result = _run_dedup(manager, payload)
+
+        assert result.code != "METADATA_UPDATED"
+        manager.upload_file.assert_called_once()

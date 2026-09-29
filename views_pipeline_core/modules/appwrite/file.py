@@ -178,6 +178,32 @@ def _classify_storage_presence(result: "OperationResult") -> _StoragePresence:
 
 
 # Enums
+def _dedup_target_is_the_same_artefact(existing_doc: dict, filename: str) -> bool:
+    """Whether a content-hash match may be treated as "this file is already uploaded".
+
+    Deduplication exists so that re-uploading the SAME artefact is idempotent. It keys on
+    content hash alone, which is only half an identity: every consumer of this store — the
+    FAO resolver, views-postprocessing, the manifests this repo writes — resolves an
+    artefact **by name**. So a hash match under a DIFFERENT name is a different artefact
+    that happens to have identical bytes, and skipping it reports success for a name that
+    was never written (#551; register C-94's shape).
+
+    Not hypothetical. The gid->GAUL sidecar is run-independent by construction, so its
+    bytes are identical every month. On 2026-09-29 the first `rusty_bucket` FAO delivery
+    matched run-0's sidecar from August, skipped the upload, logged "uploaded
+    ..._20260929_..._sidecar.parquet", and wrote nothing. The manifest then named a file
+    that did not exist and views-faoapi refused the run — correctly.
+
+    Returns False when the stored name is MISSING as well as when it differs: a metadata
+    document with no `filename` cannot be shown to be the same artefact, and on a
+    partner-visible store the safe reading of "cannot tell" is to upload rather than to
+    skip. A redundant copy is recoverable; a manifest naming a file that does not exist
+    is not.
+    """
+    stored = existing_doc.get("filename")
+    return bool(stored) and stored == filename
+
+
 class AuthMethod(Enum):
     """Authentication methods supported by AppWriteFileModule.
 
@@ -1988,7 +2014,12 @@ class AppWriteFileModule:
         # that FAILED is not evidence of absence, and only evidence of absence may
         # authorise a delete (register C-231, þing-02 #329).
         should_update_metadata_only = False
-        if existing_metadata.success and existing_metadata.code == "FOUND_BY_HASH" and not file_id:
+        if (
+            existing_metadata.success
+            and existing_metadata.code == "FOUND_BY_HASH"
+            and not file_id
+            and _dedup_target_is_the_same_artefact(existing_metadata.data, filename)
+        ):
             existing_file_id = existing_metadata.data.get("fileId")
 
             if existing_file_id:
@@ -2264,9 +2295,15 @@ class AppWriteFileModule:
             )
         
         # Use same logic as upload_file_with_metadata for consistency
-        should_update_metadata_only = (existing_metadata.success and 
-                                    not file_id and 
-                                    self.config.allow_metadata_only_updates)
+        should_update_metadata_only = (
+            existing_metadata.success
+            and not file_id
+            and self.config.allow_metadata_only_updates
+            # #551: a hash match under a different name is a different artefact. Skipping
+            # it reports success for a name that was never written, and every consumer of
+            # this store resolves by name.
+            and _dedup_target_is_the_same_artefact(existing_metadata.data, filename)
+        )
         
         if should_update_metadata_only:
             logger.info(f"File with hash {file_hash} already exists, updating metadata only")
