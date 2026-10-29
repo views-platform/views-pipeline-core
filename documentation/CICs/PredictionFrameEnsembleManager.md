@@ -203,12 +203,18 @@ PredictionFrameEnsembleManager (composition, no inheritance)
 - **Depends on:** `EnsembleContext` and its `from_config()` factory
   (`managers/ensemble/context.py`).
 - **Depends on (reconciliation, #236):** the `Reconciler` port
-  (`domain.reconciliation_port`), `modules.reconciliation.reconcile_frames`, and
-  `cm_forecast_loader.load_cm_frame` — all frames-native.
+  (`domain.reconciliation_port`), `modules.reconciliation.reconcile_frames` — both
+  frames-native — and `cm_forecast_loader.load_cm_frame`, which is frames-native **only
+  when the country partner wrote frames**. The partner's tier is its own choice and is
+  not knowable from here, so the loader searches both layouts and bridges from pandas
+  when it finds a parquet (#562, ADR-069). Claiming otherwise is what let #562 survive:
+  this bullet previously read "all frames-native", which made the defect look impossible
+  to anyone who checked the contract instead of the code (register C-342).
 - **Does not depend on:** `ForecastingModelManager` instance state, `ViewsDataLoader`,
   `ForecastingStage`, `PredictionIOManager`, `AggregationModule`, the **concrete**
-  `views_frames_reconcile.ReconciliationModule` (injected via the port), the DataFrame
-  path's `reconcile_datasets` adapter, or any DataFrame conversion.
+  `views_frames_reconcile.ReconciliationModule` (injected via the port), or the DataFrame
+  path's `reconcile_datasets` adapter. **DataFrame conversion is not excluded** — see the
+  loader above; it is conditional on the country partner's tier, not absent.
 
 ---
 
