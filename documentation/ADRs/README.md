@@ -85,6 +85,7 @@ Domain decisions specific to `views-pipeline-core`.
 | [066](066_including_models_in_ensembles.md) | Ensemble governance protocol — including models in shadow ensembles | Proposed |
 | [067](067_third_party_sdk_ceilings_move_on_measurement.md) | A third-party SDK ceiling moves on measurement; the surface the package uses is derived, not listed | Accepted |
 | [068](068_the_publish_set_is_derived_from_the_wire_vocabulary.md) | What may be published to a partner-visible store is derived from the wire vocabulary, and a short delivery refuses | Accepted |
+| [069](069_locating_a_foreign_artefact_must_span_every_layout.md) | Locating a foreign model's artefact must span every layout that could have written it | Accepted |
 
 ---
 
