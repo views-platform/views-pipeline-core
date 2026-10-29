@@ -27,7 +27,10 @@ port, frames-in/frames-out. It is the frames-native orchestration the
 - Does **not** build geography (`(time, priogrid) -> country`) — baked into the injected reconciler.
 - Does **not** touch pandas, datasets, or the DataFrame path's `reconcile_datasets` adapter
   (`_stack_cells`/`_align_to_dataframe`). The frames path holds frames; no bridge is needed.
-- Does **not** load the country forecast (that is `cm_forecast_loader.load_cm_frame`).
+- Does **not** load the country forecast (that is `cm_forecast_loader.load_cm_frame`,
+  which accepts **either** on-disk layout the partner may have written:
+  `predictions_{run_type}_{ts}/{target}/` PredictionFrame directories, preferred, or
+  `predictions_{run_type}_{ts}*.parquet` DataFrame files — see ADR-069).
 - Does **not** persist anything; it returns a new frame.
 
 ---

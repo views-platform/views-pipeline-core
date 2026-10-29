@@ -23,7 +23,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.3.4] — unreleased
+## [3.3.5] — unreleased
+
+### Fixed
+
+- **A country partner's PredictionFrame forecast is no longer reported as missing** (#562).
+  `cm_forecast_loader.load_cm_frame` located the forecast with the DataFrame-tier finder only,
+  while its sole production caller is `PredictionFrameEnsembleManager` — so the wrong tier sat
+  at the one seam where only the PredictionFrame tier can arrive. **One defect, two symptoms:**
+  a PF *ensemble* partner writes `predictions_{run_type}_{ts}/{target}/` directories and no
+  parquet, so the census came back empty and reconciliation refused with "no local forecast
+  found" about a forecast that was on disk and readable; a PF *model* partner writes per-target
+  parquets, so the unfiltered `paths[0]` returned the alphabetically-last target's file and
+  reconciliation refused with "no `pred_X` column". Both were reproduced locally before the fix.
+
+  The loader now searches both layouts, prefers the PredictionFrame directory when present
+  (the only selection correct for both partner shapes), accepts a target with or without the
+  `pred_` prefix on either branch, logs the artefact and tier it actually read, and refuses by
+  naming the directory searched and both patterns rather than only its conclusion. When the
+  located run does not carry the requested target it lists the targets that run does carry and
+  refuses, rather than reaching back to an older run that happens to have it.
+
+  Standing rule recorded as **ADR-069** — *locating a foreign model's artefact must span every
+  layout that could have written it* — with the number collision flagged: #562's body cites
+  "ADR-025" meaning **views-models'** ADR-025, not this repo's (Input Drift Detection Logging).
+  Two CIC claims that asserted the invariant the code violated are corrected.
+
+  **Known limits, stated rather than implied.** Cross-tier recency is not handled: a partner
+  flipped from `prediction_frame` to `dataframe` and re-run will have its stale PF directory
+  preferred, mitigated only by the new INFO line naming the artefact read. The spatial level is
+  still supplied as the literal `"cm"` on both branches, because the on-disk layout does not
+  persist one — unchanged from before, and not verified.
+
+## [3.3.4] — 2026-09-29
 
 ### Fixed
 
