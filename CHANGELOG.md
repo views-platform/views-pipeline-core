@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.3.5] — unreleased
+## [3.3.5] — 2026-10-29
 
 ### Fixed
 
