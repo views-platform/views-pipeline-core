@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "views_pipeline_core"
-version = "3.3.5"
+version = "3.4.0"
 description = "Core orchestration, data and model-management library for the VIEWS conflict forecasting platform."
 authors = [
     "Borbála Farkas <borbala.farkas@pcr.uu.se>",
@@ -108,15 +108,27 @@ pyprojroot="^0.3.0"
 views-evaluation = ">=2.0.0,<3.0.0"
 art = "^6.4"
 polars = ">=1.34.0,<2.0.0"
-# views-frames: `^1.10.2` meant `<2.0.0`, and 2.0.0 has been on PyPI since 2026-08-18 with
-# views-postprocessing waiting behind this line (#488). What 2.0.0 changed (their ADR-028):
-# a frame's `index` must be a SpatioTemporalIndex (TypeError otherwise), `.values` is a
-# read-only view, and `map_estimate` refuses inf/NaN by name. Measured 2026-09-18, not
-# read: the full suite on 1.10.2 (conda dev env) and on 2.0.0 (fresh venv, wandb 0.30.0) —
-# one test failed on 2.0.0, an `is` identity assertion on `.values` in
-# tests/test_modules/test_feature_frame_path.py, now `np.shares_memory`; nothing in the
-# package mutates a frame's buffer or passes a non-index as an index. `<3` per ADR-067.
-views-frames = ">=1.10.2,<3.0.0"
+# views-frames: FLOORED at 3.0.0, not merely widened to admit it (#580, their ADR-030).
+# 3.0.0 fixes reconciliation silently dropping a country's fatalities when its grid is all
+# zeros in a draw — 2.9-7.3% of fatality mass on the first real chrome_box run
+# (views-frames#283, investigated here in #579). Empty draws now borrow a donor draw's
+# pattern from the same (time, country); a group with no donor anywhere raises ValueError.
+#
+# A FLOOR, not a `>=1.10.2,<4` range, and the distinction is the whole point. This package
+# is the one that RUNS the reconciliation, so a range admitting 1.x would resolve to 1.x in
+# exactly the environments that matter and bring the mass loss back with no signal —
+# register C-346, measured as a pip backtrack, not reasoned. Refusing to install beats
+# installing silently unfixed.
+#
+# ORDERING, which is load-bearing: views-baseline must be on PyPI admitting views-frames
+# `<4` BEFORE this ships. Measured 2026-11-02: `pip install views-baseline
+# 'views-frames>=3.0.0'` is ResolutionImpossible against baseline 1.0.2's `<2`, so a
+# premature release here makes pip backtrack to pipeline-core 3.3.5 — a healthy-looking
+# environment running the unfixed reconciliation.
+#
+# Measured, not read: the full suite on 3.0.0 in a fresh 3.11 venv (2908 passed, 43
+# skipped, 9 xfailed), no code or test changes required beyond the log line below.
+views-frames = ">=3.0.0,<4.0.0"
 
 # OPTIONAL (#345, register C-253). Appwrite is the SECONDARY EXTERNAL destination under
 # ADR-047 — local disk is authoritative and views-forecasts is the primary external

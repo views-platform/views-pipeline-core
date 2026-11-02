@@ -83,8 +83,9 @@ class _ReorderingReconciler:
     realign-by-index safety in reconcile_frames. Value correctness is covered by the
     real-substrate tests; this fake does no scaling. Reports a fixed mode."""
 
-    def __init__(self, mode=POINT_BROADCAST):
+    def __init__(self, mode=POINT_BROADCAST, filled_draws=0):
         self._mode = mode
+        self._filled_draws = filled_draws
 
     def reconcile_result(self, cm_frame, pgm_frame) -> ReconciliationResult:
         pg = np.asarray(pgm_frame.values, dtype=np.float32)
@@ -95,7 +96,12 @@ class _ReorderingReconciler:
             pgm_frame.index.level,
         )
         frame = PredictionFrame(pg[order].copy(), rev)
-        return ReconciliationResult(frame=frame, mode=self._mode, method=METHOD_PROPORTIONAL)
+        return ReconciliationResult(
+            frame=frame,
+            mode=self._mode,
+            method=METHOD_PROPORTIONAL,
+            filled_draws=self._filled_draws,
+        )
 
 
 def test_reconcile_frames_realigns_reordered_port_output():
@@ -144,6 +150,38 @@ def test_reconcile_frames_logs_mode_from_reconciler(monkeypatch):
     pgm, cm, _, _ = _build_case(times=[1], n_samples=4, cm_point=True, seed=4)
     reconcile_frames(_ReorderingReconciler(mode=ALIGNED_DRAWS), cm, pgm)
     assert any(ALIGNED_DRAWS in args for args in captured)
+
+
+def test_reconcile_frames_sums_filled_draws_across_time_chunks(monkeypatch):
+    """#580: the donor-fill count is summed over chunks, not overwritten by the last one.
+
+    `filled_draws` is per `reconcile_result` call and `reconcile_frames` makes one call
+    per time step, so a per-chunk count reported as-is would understate the fill by a
+    factor of the horizon. Two time steps, one filled draw each, must log 2 — the
+    assertion a `mode = result.mode`-shaped bug (overwrite instead of accumulate) fails.
+    """
+    import views_pipeline_core.modules.reconciliation.reconcile_frames as rf
+
+    captured: list[tuple] = []
+    monkeypatch.setattr(rf.logger, "info", lambda *args, **kwargs: captured.append(args))
+    pgm, cm, _, _ = _build_case(times=[1, 2], n_samples=4, cm_point=True, seed=11)
+    reconcile_frames(_ReorderingReconciler(filled_draws=1), cm, pgm)
+
+    assert captured, "reconcile_frames logged nothing"
+    assert "filled_draws=%d" in captured[0][0], "the log line lost its filled_draws field"
+    assert 2 in captured[0], f"expected 2 filled draws summed over 2 chunks, got {captured[0]}"
+
+
+def test_reconcile_frames_reports_filled_draws_without_chunking(monkeypatch):
+    """The `chunk_by_time=False` branch reports the count too, not only the chunked one."""
+    import views_pipeline_core.modules.reconciliation.reconcile_frames as rf
+
+    captured: list[tuple] = []
+    monkeypatch.setattr(rf.logger, "info", lambda *args, **kwargs: captured.append(args))
+    pgm, cm, _, _ = _build_case(times=[1, 2], n_samples=4, cm_point=True, seed=12)
+    reconcile_frames(_ReorderingReconciler(filled_draws=5), cm, pgm, chunk_by_time=False)
+
+    assert 5 in captured[0], f"expected the unchunked branch to report 5, got {captured[0]}"
 
 
 # --------------------------------------------------------------------------- real substrate

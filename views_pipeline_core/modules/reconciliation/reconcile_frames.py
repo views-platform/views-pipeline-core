@@ -19,7 +19,16 @@ the **mode** (#254/#255):
   * ``aligned-draws``   — a cm forecast that already carries ``S`` draws is scaled
     draw-for-draw. This is a **per-draw approximation** (register C-200b): the pairing of
     grid-draw ``s`` to country-draw ``s`` is only meaningful when the two share a draw
-    identity; the principled joint upgrade is tracked in views-frames#145.
+    identity. The principled joint upgrade is views-frames ADR-024 / their C-62
+    (views-frames#145 is closed and is no longer the live record).
+
+A draw whose grid is all zeros for a ``(time, country)`` cannot receive that country's
+value by scaling — ``0 x anything`` is ``0``. Before views-frames 3.0.0 the value was
+silently dropped: 2.9-7.3% of cm fatality mass on the first real chrome_box run
+(views-frames#283, investigated here in #579). Since 3.0.0 such a draw borrows a donor
+draw's spatial pattern from the same ``(time, country)`` (their ADR-030), the count is
+reported as ``filled_draws`` and logged below, and a group with **no** donor anywhere
+raises ``ValueError`` naming the time and country. That error is allowed to propagate.
 
 `reconcile_result()` returns the frame **and** the mode it applied, so the mode is sourced
 from views-frames, not re-derived here. An incompatible cm ``sample_count`` (neither 1 nor
@@ -86,23 +95,30 @@ def reconcile_frames(
         cm_time = np.asarray(cm_frame.index.time, dtype=np.int64)
         chunks: list[PredictionFrame] = []
         mode = None
+        filled_draws = 0
         for t in np.unique(pg_time):
             result = reconciler.reconcile_result(
                 cm_frame.select(cm_time == t), pgm_frame.select(pg_time == t)
             )
             chunks.append(result.frame)
             mode = result.mode  # consistent across chunks (same cm shape)
+            # Read as an attribute, with no getattr default: on a views-frames below
+            # 3.0.0 this raises rather than silently reporting 0 filled draws, which
+            # would be indistinguishable from "nothing needed filling" (ADR-030, #580).
+            filled_draws += result.filled_draws
         reconciled = _concat_frames(chunks)
     else:
         result = reconciler.reconcile_result(cm_frame, pgm_frame)
         reconciled = result.frame
         mode = result.mode
+        filled_draws = result.filled_draws
 
     logger.info(
-        "reconcile_frames: mode=%s (%d grid rows, %d draws)%s",
+        "reconcile_frames: mode=%s (%d grid rows, %d draws), filled_draws=%d%s",
         mode,
         pgm_frame.n_rows,
         pgm_frame.sample_count,
+        filled_draws,
         " — per-draw approximation (C-200b)" if mode == ALIGNED_DRAWS else "",
     )
 
