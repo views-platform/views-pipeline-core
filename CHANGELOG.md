@@ -23,6 +23,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.4.0] — unreleased
+
+### Changed
+
+- **`views-frames` is floored at 3.0.0** (`views-frames = ">=3.0.0,<4.0.0"`; #580, their
+  ADR-030). 3.0.0 fixes reconciliation **silently dropping a country's fatalities when its
+  grid is all zeros in a draw**. On the first real `chrome_box` run that was **4.023% /
+  7.321% / 2.943%** of cm fatality mass across the three targets (views-frames#283;
+  investigated here in #579, which found the cause was theirs and that this package neither
+  creates nor conceals it). Empty draws now borrow a donor draw's spatial pattern from the
+  same `(time, country)`.
+
+  **A floor, not a widened ceiling, and the distinction is the point.** This package runs
+  the reconciliation, so a permissive `>=1.10.2,<4` would resolve to 1.x in exactly the
+  environments that matter and return the mass loss with no signal — register **C-346**.
+  Refusing to install beats installing silently unfixed.
+
+  **For operators — ordering is load-bearing.** views-baseline must be on PyPI admitting
+  `views-frames<4` *before* this is installed anywhere. Measured 2026-11-02: `pip install
+  views-baseline 'views-frames>=3.0.0'` is `ResolutionImpossible` against baseline 1.0.2's
+  `<2`, so in a mixed environment pip does not error — it **backtracks to pipeline-core
+  3.3.5**, which still admits `views-frames<3`, and the environment looks healthy while
+  running the unfixed reconciliation. The same backtrack exists one level up: views-models'
+  ensembles declare `views-pipeline-core>=3.3.5,<4.0.0`, which admits either, so flooring
+  them at `>=3.4.0` is what makes the adoption loud there (views-models#659).
+
+  Measured, not read: the full suite on 3.0.0 in a fresh 3.11 venv —
+  **2908 passed, 43 skipped, 9 xfailed** on a clean checkout with no siblings — and no code
+  or test change was required beyond the log field below.
+  Neither `test_point_and_versions_sum_to_country_totals` nor `test_zeros_preserved` moved,
+  for the reason #579 documented: no fixture here can build an all-zero draw.
+
+- **`reconcile_frames` logs `filled_draws`** — the number of draws that needed a donor
+  pattern — on the line it already emits. Summed across the per-time chunks, because
+  `reconcile_result` reports per call and this function makes one call per time step; a
+  per-chunk count reported as-is would understate the fill by the length of the horizon.
+  Read as a plain attribute with no `getattr` default, so a views-frames below 3.0.0 raises
+  instead of reporting a zero indistinguishable from "nothing needed filling". #579 found
+  that nothing anywhere reported this; this is the cheapest place it becomes visible.
+
+### Note
+
+- **A new `ValueError` can now surface from a forecast run**, raised inside views-frames
+  when a `(time, country)` group has a positive country value and no draw has any grid mass
+  at all, so there is no donor to borrow from. It names the time and the country, and it is
+  deliberately **not** caught here. `_execute_model_forecasting` re-raises it as a
+  `PipelineException` carrying the full traceback, as it does every exception — so the
+  message survives, the type does not. It did not occur on the 2026-10-30 archive, where
+  every empty draw had at least ten donors.
+
 ## [3.3.5] — 2026-10-29
 
 ### Fixed
