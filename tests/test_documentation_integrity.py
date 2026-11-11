@@ -44,9 +44,7 @@ def test_the_placeholder_scan_excludes_no_governed_document():
         for path in docs.rglob("*.md")
         if "template" not in path.name.lower()
         and any(
-            line.lstrip("*# ").startswith("Status:")
-            or "**Status:**" in line
-            or "Status:" in line
+            "status:" in line.lower()
             for line in path.read_text().splitlines()[:40]
         )
     }
@@ -56,8 +54,13 @@ def test_the_placeholder_scan_excludes_no_governed_document():
     )
 
     script = (docs / "validate_docs.sh").read_text()
+    # Case-insensitive on BOTH halves. An earlier version of this line searched for
+    # "Status" to locate the selector, so making the selector lowercase broke the guard
+    # that exists to police it — the same case axis, one level up, within the same minute.
     selector = [
-        line for line in script.splitlines() if "--include='*.md'" in line and "Status" in line
+        line
+        for line in script.splitlines()
+        if "--include='*.md'" in line and "status:" in line.lower()
     ]
     assert len(selector) == 1, (
         f"expected exactly one Status-based file selector in validate_docs.sh, found "
@@ -67,6 +70,13 @@ def test_the_placeholder_scan_excludes_no_governed_document():
     assert "Accepted" not in selector[0] and "Active" not in selector[0], (
         f"the placeholder scan selects files by status VALUE again: {selector[0].strip()}. "
         f"Any status word not in that list is excluded silently, and the script reports "
-        f"OK either way. Select on the presence of `Status:` and let the filename check "
-        f"exclude templates."
+        f"OK either way. Select on the presence of a status line and let the filename "
+        f"check exclude templates."
+    )
+
+    assert "-ril" in selector[0] or "-irl" in selector[0], (
+        f"the selector is case-sensitive again: {selector[0].strip()}. The axis that "
+        f"defeated the original enumeration was CASE, not the missing word: "
+        f"views-appwrite's seam contract writes `**Status: ACCEPTED**`, which no amount "
+        f"of adding values to a case-sensitive list can reach."
     )

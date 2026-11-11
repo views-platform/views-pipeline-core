@@ -25,7 +25,15 @@ echo ""
 #    was `Deferred`) and fixed it by widening the list; the list is the defect, so this
 #    drops it. Matching prose to SELECT work fails quietly, which is why this had years to
 #    sit here unnoticed. `tests/test_documentation_integrity.py` now asserts that no
-#    document carrying a `Status:` line is excluded from this scan.
+#    document carrying a status line is excluded from this scan.
+#
+#    AND `-i`, because the axis was never the word. views-appwrite measured their own copy
+#    after dropping the list here: their seam contract writes `**Status: ACCEPTED**`, and
+#    `grep` is case-sensitive, so adding `Deferred` or `Superseded` to the old list could
+#    never have reached it. The enumeration was not one value short, it was one AXIS
+#    short — and nobody enumerating values finds that. This repo happens to have no
+#    case variant of the key today (74 files either way, measured), so `-i` buys nothing
+#    now and costs one letter; it is here so the axis cannot reopen.
 echo "--- Checking for template placeholders in governed documents ---"
 warnings=0
 while IFS= read -r file; do
@@ -43,7 +51,7 @@ while IFS= read -r file; do
         echo "  WARN: Unfilled ClassName placeholder in $file"
         warnings=$((warnings + 1))
     fi
-done < <(grep -rl 'Status:' --include='*.md' . 2>/dev/null || true)
+done < <(grep -ril 'status:' --include='*.md' . 2>/dev/null || true)
 if [ "$warnings" -eq 0 ]; then
     echo "  OK"
 fi
