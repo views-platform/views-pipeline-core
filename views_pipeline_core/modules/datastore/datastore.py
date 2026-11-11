@@ -44,7 +44,7 @@ Typical usage example:
     )
 
     # Download the latest prediction
-    latest = datastore.download_latest_file(filters={"loa": "pgm"})
+    latest = datastore.download_latest_file(filters={"category": "forecast"})
 """
 
 from typing import List, Optional, Dict, Any, Union
@@ -250,7 +250,7 @@ class DatastoreModule:
         >>>
         >>> # Search for predictions
         >>> predictions = datastore.get_predictions_by_metadata(
-        ...     filters={"loa": "pgm", "category": "forecast"}
+        ...     filters={"category": "forecast", "type": "ensemble"}
         ... )
         >>>
         >>> # Download the latest file
@@ -548,7 +548,7 @@ class DatastoreModule:
 
         Example:
             >>> file_id = datastore.get_latest_file_id(
-            ...     filters={"loa": "pgm", "category": "forecast"}
+            ...     filters={"category": "forecast", "type": "ensemble"}
             ... )
             >>> if file_id:
             ...     print(f"Latest file: {file_id}")
@@ -601,7 +601,7 @@ class DatastoreModule:
         Example:
             >>> # Download latest forecast to file
             >>> result = datastore.download_latest_file(
-            ...     filters={"loa": "pgm", "category": "forecast"},
+            ...     filters={"category": "forecast", "type": "ensemble"},
             ...     save_path="/tmp/latest_forecast.parquet"
             ... )
             >>> if result.success:

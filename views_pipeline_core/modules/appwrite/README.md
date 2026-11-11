@@ -328,7 +328,7 @@ if result.success:
 ```python
 # Equality filters
 result = file_manager.metadata_manager.search_files_by_metadata(
-    filters={"model": "ensemble", "loa": "pgm"},
+    filters={"name": "ensemble", "category": "forecast"},
     collection_name="Predictions"
 )
 
@@ -552,7 +552,7 @@ print(f"Uploaded: {upload.data['file_id']}")
 
 # Search for files
 search = file_manager.metadata_manager.search_files_by_metadata(
-    filters={"loa": "pgm", "category": "forecast"}
+    filters={"category": "forecast", "type": "ensemble"}
 )
 print(f"Found {search.data['total']} matching files")
 

@@ -974,7 +974,7 @@ class AppwriteMetadataHandler:
         >>>
         >>> # Search for files by metadata
         >>> results = handler.search_files_by_metadata(
-        ...     filters={"model": "test"},
+        ...     filters={"name": "test"},
         ...     array_filters={"targets": "ged_sb"}
         ... )
     """
@@ -1018,7 +1018,7 @@ class AppwriteMetadataHandler:
         Example:
             >>> # Find files by exact match
             >>> result = handler.search_files_by_metadata(
-            ...     filters={"model": "ensemble", "loa": "pgm"}
+            ...     filters={"name": "ensemble", "category": "forecast"}
             ... )
             >>>
             >>> # Find files where array contains value

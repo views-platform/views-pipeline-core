@@ -191,13 +191,20 @@ CREATABLE_ATTRIBUTE_TYPES = frozenset({"string", "integer", "datetime", "boolean
 # than our own. A test pins the value against whichever enum is installed; this is not a
 # claim resting on a comment.
 # `lengths` on the compound index is not a tuning knob, it is a ceiling. The three
-# attributes are `string(255)`, and InnoDB's index key limit is 3072 bytes: at utf8mb4's
-# 4 bytes per character, 3 x 255 x 4 = 3060. That fits with twelve bytes to spare, before
-# any column Appwrite adds to its own indexes — so an unbounded compound index on these
-# three is one schema change away from a bring-up that fails while creating an index,
-# which is the failure this whole module exists to stop. 64 characters is far longer than
-# any value these fields hold ("forecast", an artifact type, a model name) and leaves the
-# key at 768 bytes.
+# attributes are `string(255)`, so at utf8mb4's 4 bytes per character each column is 1020
+# bytes of index key.
+#
+# InnoDB's limit is 3072 bytes **at a 16K page size, and 1536 at 8K** — a precondition
+# the number is usually quoted without. On 16K pages three uncapped columns are 3060 and
+# fit by twelve bytes; on 8K pages even TWO uncapped columns (2040) do not. Nobody on this
+# platform has read Appwrite Cloud's page size (views-appwrite, 2026-11-11), so the cap is
+# sized for the smaller limit rather than the likelier one. 64 characters is far longer
+# than any value these fields hold ("forecast", an artifact type, a model name) and leaves
+# the whole key at 768 bytes, inside both.
+#
+# Without the cap this is one schema change away from a bring-up that dies while creating
+# an index — which is the failure this module exists to stop — and a fourth uncapped
+# column cannot fit under either limit.
 DECLARED_INDEXES: List[Dict[str, Any]] = [
     {"key": "idx_fileId", "type": "key", "attributes": ["fileId"]},
     {"key": "idx_file_hash", "type": "key", "attributes": ["file_hash"]},

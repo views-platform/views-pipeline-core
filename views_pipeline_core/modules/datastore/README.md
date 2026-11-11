@@ -146,12 +146,18 @@ result = datastore.upload_data(
 Search for predictions matching metadata filters.
 
 ```python
-# Find all PGM forecasts
+# Find all model forecasts
+#
+# `filters` keys must be attributes of the metadata collection, and the three that
+# carry an index are `category`, `type` and `name` — see DECLARED_INDEXES in
+# `modules/appwrite/provisioning.py`. `loa` is a real attribute but is not in the
+# platform seam contract's filterable set, carries no index, and is queried by no
+# consumer on the platform; it used to head this example.
 predictions = datastore.get_predictions_by_metadata(
     filters={
-        "loa": "pgm",
         "category": "forecast",
-        "type": "model"
+        "type": "model",
+        "name": "fatalities_ensemble"
     }
 )
 
@@ -191,7 +197,7 @@ Download the most recent file matching filters.
 
 ```python
 result = datastore.download_latest_file(
-    filters={"loa": "pgm", "category": "forecast"},
+    filters={"category": "forecast", "type": "ensemble"},
     save_path="/tmp/latest_forecast.parquet"
 )
 
@@ -208,7 +214,7 @@ Get the file ID of the most recent matching prediction.
 
 ```python
 file_id = datastore.get_latest_file_id(
-    filters={"loa": "pgm", "type": "ensemble"}
+    filters={"name": "fatalities_ensemble", "type": "ensemble"}
 )
 
 if file_id:
@@ -369,7 +375,7 @@ print(f"Uploaded: {upload_result.data['file_id']}")
 
 # Later: Download latest forecast
 download_result = datastore.download_latest_file(
-    filters={"loa": "pgm", "category": "forecast"},
+    filters={"category": "forecast", "type": "ensemble"},
     save_path="/tmp/latest.parquet"
 )
 

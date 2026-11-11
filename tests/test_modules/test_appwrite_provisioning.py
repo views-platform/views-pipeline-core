@@ -1012,8 +1012,16 @@ class TestTheBringUpIsCompleteNotJustTheAttributes:
             FIXED_METADATA_ATTRIBUTES,
         )
 
-        BYTES_PER_CHAR = 4           # utf8mb4
-        INNODB_MAX_KEY_BYTES = 3072
+        BYTES_PER_CHAR = 4  # utf8mb4
+        # 3072 is InnoDB's key limit at a 16K page size. **At 8K pages it halves to
+        # 1536**, and then even two uncapped `string(255)` columns (2040) exceed it.
+        # Nobody on this platform has read Appwrite Cloud's page size, so this asserts
+        # the CONSERVATIVE limit: a declaration that only fits on 16K pages is one
+        # hosting change away from a bring-up that dies while creating an index, and a
+        # documented limit that hides its own precondition is how `description <= 255`
+        # came to be learned from a production error instead of from a document
+        # (views-appwrite, 2026-11-11). Every index declared today is well inside 1536.
+        INNODB_MAX_KEY_BYTES = 1536
         sizes = {
             a["key"]: a.get("size")
             for a in FIXED_METADATA_ATTRIBUTES + DELIVERY_METADATA_ATTRIBUTES
