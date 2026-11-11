@@ -661,3 +661,64 @@ def test_an_explicit_bucket_grant_reaches_the_sdk_unchanged():
     )
 
     assert fm.storage.create_bucket.call_args.kwargs["permissions"] == ['read("users")']
+
+
+class TestEnsureBucketCreatesTheRightDatabase:
+    """C-238, measured against an empty project rather than reasoned about.
+
+    `ensure_bucket`'s follow-on database creation passed `(bucket_name, database_id)`
+    into a signature that reads `(database_id, database_name)`. It was reproduced
+    verbatim from `file.py` by the #331 relocation, under the rule that a relocation must
+    not change behaviour silently, and left for its own issue.
+
+    Against the shared production project it was invisible: the database already existed.
+    Against an **empty** one — which is what a new per-audience project is — `ensure-bucket`
+    creates a second, junk database whose id is the bucket's name, and the real database
+    is then created by `ensure-collection` alongside it. Whether the junk one lands at all
+    depends on whether the bucket's name happens to be a valid Appwrite id, which is not a
+    property anyone chose.
+    """
+
+    def test_the_metadata_database_is_the_one_the_config_names(self, provisioner):
+        provisioner.databases.list.return_value = {"databases": []}
+        provisioner.databases.create.return_value = {"$id": "test_database"}
+        provisioner.storage.create_bucket.return_value = {"$id": "test_bucket"}
+
+        result = provisioner.ensure_bucket(
+            bucket_id="test_bucket", name=provisioner.config.bucket_name
+        )
+
+        assert result.success
+        created = provisioner.databases.create.call_args.kwargs
+        assert created["database_id"] == provisioner.config.database_id, (
+            f"ensure_bucket created a database with id {created['database_id']!r}; "
+            f"the config names {provisioner.config.database_id!r}"
+        )
+        assert created["name"] == provisioner.config.database_name, (
+            f"ensure_bucket named the database {created['name']!r}; "
+            f"the config names {provisioner.config.database_name!r}"
+        )
+
+    def test_bucket_then_collection_leaves_exactly_one_database(self, provisioner):
+        """The order an operator bringing up a new project will actually use."""
+        databases = []
+        provisioner.databases.list.side_effect = lambda **_: {"databases": list(databases)}
+
+        def _create(database_id, name, enabled=True):
+            databases.append({"$id": database_id, "name": name})
+            return {"$id": database_id, "name": name}
+
+        provisioner.databases.create.side_effect = _create
+        provisioner.storage.create_bucket.return_value = {"$id": "test_bucket"}
+        provisioner.databases.list_collections.return_value = {"collections": []}
+        provisioner.databases.create_collection.return_value = {"$id": "test_collection"}
+        provisioner.databases.list_attributes.return_value = {"attributes": []}
+
+        assert provisioner.ensure_bucket(
+            bucket_id="test_bucket", name=provisioner.config.bucket_name
+        ).success
+        assert provisioner.ensure_collection(metadata={}).success
+
+        assert databases == [
+            {"$id": "test_database", "name": "Test Database"}
+        ], f"bring-up left {len(databases)} database(s): {databases}"

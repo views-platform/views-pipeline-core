@@ -21,10 +21,12 @@ Coordinates and credentials come from the process environment via
 ``PredictionStoreConfig.from_environment()``, which fails loud naming any missing
 variable. Nothing is defaulted here.
 
-**Known defect, preserved deliberately.** ``ensure_bucket``'s follow-on database creation
-passes its arguments in the wrong order (register C-238). It is reproduced verbatim from
-``file.py`` because a relocation must not change behaviour silently; fix it under its own
-issue, with a test.
+**C-238, fixed under þing-04 S17.** ``ensure_bucket``'s follow-on database creation
+passed its arguments in the wrong order, so it ensured a database whose id was the
+*bucket's name*. It had been reproduced verbatim from ``file.py`` because a relocation
+must not change behaviour silently, and it was invisible against the shared production
+project, where the real database already existed. The first bring-up against an **empty**
+project is where it stops being invisible, and that is this one.
 
 **Known limitation.** ``_create_dynamic_attributes`` derives the collection's schema from
 whatever payload it is handed, which contradicts ADR-040 (Authority of Declarations Over
@@ -563,11 +565,19 @@ class AppwriteProvisioner:
             )
 
             if create_metadata_db:
-                # C-238: the arguments are swapped — the signature is
-                # (database_id, database_name) and this passes (bucket_name, database_id).
-                # Reproduced verbatim from file.py: a relocation must not change
-                # behaviour silently. Fix under its own issue, with a test.
-                db_result = self.ensure_database(name, self.config.database_id)
+                # C-238, fixed. The signature is (database_id, database_name) and this
+                # passed (bucket_name, database_id), so `ensure-bucket` ensured a
+                # database whose id was the BUCKET'S NAME. Against the shared production
+                # project that was invisible, because the real database already existed.
+                # Against an empty one — a new per-audience project — it creates a second,
+                # junk database alongside the real one, and whether it lands at all
+                # depends on whether the bucket's name happens to be a valid Appwrite id.
+                # #331 carried the swap over verbatim under the rule that a relocation
+                # must not change behaviour silently; þing-04 S17 is the first bring-up
+                # against an empty project, which is where it stops being invisible.
+                db_result = self.ensure_database(
+                    self.config.database_id, self.config.database_name
+                )
                 if db_result.success:
                     result["metadata_database"] = db_result.data
 

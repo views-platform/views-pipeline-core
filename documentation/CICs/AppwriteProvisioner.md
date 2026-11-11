@@ -155,9 +155,14 @@ provisioner.ensure_collection(permissions=[])   # existing container keeps its g
 
 ## 11. Evolution Notes
 
-- **Known defect, preserved deliberately.** `ensure_bucket`'s follow-on database creation
-  passes its arguments in the wrong order (C-238). Reproduced verbatim from `file.py`
-  because a relocation must not change behaviour silently; fix under its own issue.
+- **C-238 is fixed (þing-04 S17).** `ensure_bucket`'s follow-on database creation passed
+  `(bucket_name, database_id)` into a signature reading `(database_id, database_name)`,
+  so it ensured a database whose id was the *bucket's name*. #331 carried the swap over
+  verbatim because a relocation must not change behaviour silently, and it was invisible
+  against the shared production project, where the real database already existed. The
+  first bring-up against an **empty** project is where it stops being invisible: it
+  leaves a junk database beside the real one, if the bucket's name happens to be a valid
+  Appwrite id at all.
 - **Known limitation.** `_create_dynamic_attributes` derives the schema from whatever
   payload it is handed, contradicting ADR-040 on a production database. Deferred behind a
   named trigger: a non-production Appwrite project existing (þing-02 Á-5 / G2(h)).
