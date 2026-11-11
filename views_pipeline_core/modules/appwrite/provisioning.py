@@ -33,7 +33,7 @@ schema from whatever payload it was handed, which contradicts ADR-040 (Authority
 Declarations Over Inference). It was deferred behind a named trigger — *a non-production
 Appwrite project existing, since nobody has ever run a first bring-up against an empty
 one* (þing-02 Á-5 / G2(h)). **That trigger fired** (þing-04 S17): a CRAF'd-only project
-is being created, and the rehearsal runs against `views-test`. The fields every delivery
+is being created, and it is rehearsed against a throwaway one first. The fields every delivery
 document carries are therefore declared in ``DELIVERY_METADATA_ATTRIBUTES`` below, and
 ``ensure_attributes`` creates them whatever payload it is given.
 
