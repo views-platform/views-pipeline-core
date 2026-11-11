@@ -43,7 +43,9 @@ can eventually be narrowed.
 | **Half a coordinate pair is refused** | `build_provisioner` raises `ConfigurationException` if given a collection id without a name or vice versa — the missing half would resolve from the environment, so a command meaning a partner's shelf could provision production. |
 | **An incomplete listing is a failure, not an absence** | Every listing here answers "does it already exist?", where NO means "create it". A short read produces a duplicate, not a smaller answer, so `_complete_listing` returns `LISTING_INCOMPLETE` rather than proceeding (Cluster J). |
 | **Both paths ensure the declared schema** | The existing-collection branch and the creation branch both call `ensure_attributes`. They disagreed until #473, and the existing-collection path returned OK after zero writes (C-291). |
-| **The declared schema covers the whole delivery document** | `DECLARED_METADATA_ATTRIBUTES` is `FIXED_METADATA_ATTRIBUTES` plus the fields `FileMetadata.to_dict()` contributes. It is created whatever payload is passed, so `ensure-collection` against an **empty project** produces a collection the first delivery can write to. Before þing-04 S17 only the seven fixed attributes were declared; the rest existed on production only because write-time inference had created them years earlier, so a new project's first delivery uploaded its file and then failed `Unknown attribute: loa` on the document. |
+| **The declared schema covers the whole delivery document** | `DECLARED_METADATA_ATTRIBUTES` is `FIXED_METADATA_ATTRIBUTES` plus the fields `FileMetadata.to_dict()` contributes, created whatever payload is passed. Before þing-04 S17 only the seven fixed attributes were declared; the rest existed on production only because write-time inference had created them years earlier, so a new project's first delivery uploaded its file and then failed `Unknown attribute: loa` on the document. |
+| **The declared indexes cover the delivery's own equality queries** | `DECLARED_INDEXES` creates key indexes on `fileId` and `file_hash`, which `_store_metadata_document` and `check_file_exists_by_hash` query by equality. Attributes alone were not a complete bring-up: this package's own comment at `file.py:1216` states an unindexed equality query "is not dependable against this store", and nothing in any sibling checkout created an index before S17 although the platform key has always carried `indexes.write`. **Scoped to the write path.** The read path accepts arbitrary metadata filters (`file.py:1046-1050`), so a partner query on `loa` or `category` wants an index this module does not create — a read-performance decision, registered rather than guessed at. |
+| **The schema is not reported ready until it is usable** | Appwrite creates attributes asynchronously; a document referencing one still `processing` is rejected. `ensure_attributes` polls until every declared attribute reports `available`, treating a missing `status` as available so it cannot invent a failure. This mattered only once the attributes started being created seconds before the first delivery rather than years before it. |
 | **Failure is returned, not raised** | Every public method returns an `OperationResult` carrying `success`, `error` and a `code`. Callers must inspect it. |
 | **Nothing is defaulted from thin air** | Coordinates and credentials come from the environment and fail loud naming any missing variable. |
 
@@ -172,6 +174,13 @@ provisioner.ensure_collection(permissions=[])   # existing container keeps its g
   must have the same shape as the production one, or two projects disagree about what a
   delivery document is. Widening `description`, or making `loa`/`category` required, are
   separate changes to the production schema.
+- **What the bring-up still does not prove (þing-04 S17 review).** Whether the deployed
+  Appwrite instance hard-rejects an unindexed `Query.equal` or merely degrades was not
+  established from here — that needs a live read, which is C-299's expensive half. The
+  indexes are created either way because the delivery queries by equality and this
+  package already treats such a query as undependable. Attribute `status` values are read
+  defensively for the same reason: the field was never confirmed against a live instance
+  from this seat.
 - **Payload inference is retained, narrowed.** `infer_attribute_type` and
   `_create_attribute_by_type` still cover metadata keys beyond the declared set, because
   removing a caller's only route to an attribute is a decision with its own blast radius.

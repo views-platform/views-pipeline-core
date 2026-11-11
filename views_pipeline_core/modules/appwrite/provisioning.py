@@ -146,6 +146,76 @@ DECLARED_METADATA_ATTRIBUTES: List[Dict[str, Any]] = (
     FIXED_METADATA_ATTRIBUTES + DELIVERY_METADATA_ATTRIBUTES
 )
 
+#: The attribute types this module can create. Declared so the declaration can be
+#: checked BEFORE anything is written — see `_validate_declarations`.
+CREATABLE_ATTRIBUTE_TYPES = frozenset({"string", "integer", "datetime", "boolean"})
+
+# The indexes the WRITE path needs. Attributes alone are not a complete bring-up:
+# `check_file_exists_by_hash` issues `Query.equal("file_hash", ...)` (`file.py:1200`) and
+# `_store_metadata_document` issues `Query.equal("fileId", ...)` (`file.py:1301`, `:1769`)
+# against this collection, and this package's own comment at `file.py:1216` already states
+# that an unindexed equality query "is not dependable against this store" — which is why
+# the filename match there is filtered in Python instead.
+#
+# Nothing in this repository, or in any sibling checkout, created an index before now,
+# while the platform key has carried `indexes.read`/`indexes.write` all along. On the
+# shared production collection the indexes exist, created outside this code. On an EMPTY
+# project they did not, so a bring-up that declared only attributes left the first
+# delivery to fail one step later than `Unknown attribute: loa`: the hash lookup returns
+# an error, which is not NOT_FOUND, so the upload refuses with "Could not determine
+# whether a duplicate exists".
+#
+# Scoped to the write path deliberately. The READ path accepts arbitrary metadata filters
+# (`file.py:1046-1050`), so a partner query on `loa` or `category` wants an index too —
+# that is a read-performance decision about a partner-facing store, it does not stop a
+# delivery landing, and it is registered rather than guessed at here.
+#
+# `"key"` rather than importing `appwrite.enums.index_type.IndexType.KEY`: checked
+# against the SDK this package actually pins (`appwrite>=13.4.1,<14.0.0`, 13.6.1 in the
+# dev env), where `create_index` assigns `api_params['type'] = type` with no
+# normalisation, and `IndexType.KEY.value == "key"`. So the literal and the enum produce
+# identical wire output, and the literal keeps this a declaration rather than an import.
+#
+# The enum's MODULE PATH differs between SDK majors — `appwrite.enums.index_type` on 13.x,
+# `appwrite.enums.databases_index_type` on 19.x, which is what other repos on this
+# platform pin — so importing it here would couple this constant to a version range wider
+# than our own. A test pins the value against whichever enum is installed; this is not a
+# claim resting on a comment.
+DECLARED_INDEXES: List[Dict[str, Any]] = [
+    {"key": "idx_fileId", "type": "key", "attributes": ["fileId"]},
+    {"key": "idx_file_hash", "type": "key", "attributes": ["file_hash"]},
+]
+
+
+def _validate_declarations() -> None:
+    """Fail at import if a declaration cannot be created, rather than part-way through.
+
+    An earlier version raised from inside the creation loop. That is fail-loud, but it
+    leaves every attribute before the bad one created and every one after it unattempted
+    — a half-built schema, which is the exact outcome `ensure_attributes` refuses to
+    report success over forty lines below. The declarations are module constants, so the
+    check belongs where they are, not where they are used.
+    """
+    for attr in DECLARED_METADATA_ATTRIBUTES:
+        if attr["type"] not in CREATABLE_ATTRIBUTE_TYPES:
+            raise ValueError(
+                f"declared attribute {attr['key']!r} has type {attr['type']!r}, which "
+                f"this module cannot create. Add a creator for it in "
+                f"`_create_declared_attribute` and to CREATABLE_ATTRIBUTE_TYPES."
+            )
+    declared_keys = {attr["key"] for attr in DECLARED_METADATA_ATTRIBUTES}
+    for index in DECLARED_INDEXES:
+        unknown = [a for a in index["attributes"] if a not in declared_keys]
+        if unknown:
+            raise ValueError(
+                f"declared index {index['key']!r} covers {unknown}, which no declared "
+                f"attribute provides. An index on an attribute that is never created "
+                f"fails at bring-up time against an empty project."
+            )
+
+
+_validate_declarations()
+
 
 def infer_attribute_type(value: Any) -> Tuple[str, bool]:
     """Infer an Appwrite attribute type from a sample value.
@@ -515,6 +585,172 @@ class AppwriteProvisioner:
                 code="ATTRIBUTES_INCOMPLETE",
             )
 
+        pending = self._await_declared_attributes(
+            database_id, collection_id, max_retries, initial_delay
+        )
+        if pending is not None:
+            return pending
+
+        return self.ensure_indexes(database_id, collection_id, max_retries, initial_delay)
+
+    def _await_declared_attributes(
+        self,
+        database_id: str,
+        collection_id: str,
+        max_retries: int,
+        initial_delay: float,
+    ) -> Optional[OperationResult]:
+        """Block until every declared attribute is usable. Returns a failure, or None.
+
+        Appwrite creates attributes asynchronously: the create call returns while the
+        attribute is still ``processing``, and a document referencing one that is not yet
+        ``available`` is rejected. Until now this module returned success the moment the
+        creates were accepted — harmless for years, because on the production collection
+        the attributes had existed since long before any delivery. The whole point of
+        this bring-up is that they now exist *seconds* before the first delivery, which
+        reintroduces `Unknown attribute: loa` by a different route.
+
+        A missing ``status`` field is treated as available, so this cannot invent a
+        failure against a server that does not report one. The field's presence was not
+        confirmed against a live instance from here; what is confirmed is that waiting
+        for it cannot be worse than not waiting.
+        """
+        declared = {attr["key"] for attr in DECLARED_METADATA_ATTRIBUTES}
+        delay = initial_delay
+        unusable: Dict[str, str] = {}
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                listing = self.databases.list_attributes(
+                    database_id, collection_id, queries=[Query.limit(_PROVISION_PAGE)]
+                )
+            except AppwriteException as e:
+                return OperationResult(
+                    success=False,
+                    error=(
+                        f"attributes were created in '{collection_id}' but their "
+                        f"readiness could not be confirmed: {e.message}. Do not deliver "
+                        f"into this collection until `audit` shows every attribute "
+                        f"available."
+                    ),
+                    code=e.type or "ATTRIBUTES_UNCONFIRMED",
+                )
+
+            attributes, truncated = _complete_listing(listing, "attributes")
+            seen = {attr["key"] for attr in attributes}
+
+            # Two ways an attribute is not yet usable, and BOTH are waited for rather
+            # than failed on. An attribute absent from the listing altogether is the
+            # propagation window — treating that as a hard failure would convert a
+            # normal delay into a refused bring-up. It is also what a truncated listing
+            # looks like, and a short read is not benign on this question: an attribute
+            # still `processing` that fell off the page is absent from `unusable` and so
+            # would read as ready. "Not seen" reported as "available" is Cluster J on
+            # the readiness question itself.
+            unseen = declared - seen
+            unusable = {
+                attr["key"]: attr["status"]
+                for attr in attributes
+                if attr["key"] in declared
+                and attr.get("status", "available") != "available"
+            }
+            if not unseen and not unusable:
+                return None
+            if attempt < max_retries:
+                logger.info(
+                    "waiting for %d attribute(s) to become usable (attempt %d/%d)",
+                    len(unseen) + len(unusable),
+                    attempt,
+                    max_retries,
+                )
+                time.sleep(delay)
+                delay *= 2
+
+        reasons = []
+        if unusable:
+            reasons.append(f"not available: {unusable}")
+        if unseen:
+            reasons.append(
+                f"created but absent from a listing of {len(seen)} attribute(s): "
+                f"{sorted(unseen)}"
+                + (f" — {truncated}" if truncated else "")
+            )
+        return OperationResult(
+            success=False,
+            error=(
+                f"attribute(s) in '{collection_id}' never became usable — "
+                + "; ".join(reasons)
+                + ". The schema exists but documents using these fields will be "
+                "rejected; re-run this command, and if a status is 'failed' or 'stuck' "
+                "the attribute must be deleted in the console before it can be "
+                "recreated."
+            ),
+            code="ATTRIBUTES_NOT_AVAILABLE",
+        )
+
+    def ensure_indexes(
+        self,
+        database_id: str,
+        collection_id: str,
+        max_retries: int = MAX_ATTRIBUTE_CREATION_RETRIES,
+        initial_delay: float = INITIAL_RETRY_DELAY,
+    ) -> OperationResult:
+        """Create the indexes the delivery's own queries need. See DECLARED_INDEXES."""
+        try:
+            listing = self.databases.list_indexes(
+                database_id, collection_id, queries=[Query.limit(_PROVISION_PAGE)]
+            )
+            indexes, truncated = _complete_listing(listing, "indexes")
+            if truncated:
+                # Logged rather than returned, and this is the one listing in this module
+                # where that is defensible: a missed index is re-created, the server
+                # answers "already exists", and the loop below tolerates it. Said out
+                # loud because every other listing here treats a short read as a failure.
+                logger.warning(
+                    "index listing for '%s' is incomplete (%s); an existing index may be "
+                    "re-created, which the server refuses harmlessly",
+                    collection_id,
+                    truncated,
+                )
+            existing = {index["key"] for index in indexes}
+        except AppwriteException as e:
+            return OperationResult(
+                success=False,
+                error=f"Failed to list indexes: {e.message}",
+                code=e.type or "INDEXES_UNREADABLE",
+            )
+
+        failed: List[str] = []
+        for index in DECLARED_INDEXES:
+            if index["key"] in existing:
+                continue
+            try:
+                self.databases.create_index(
+                    database_id,
+                    collection_id,
+                    index["key"],
+                    index["type"],
+                    index["attributes"],
+                )
+                logger.debug(f"Created index: {index['key']}")
+            except AppwriteException as e:
+                if "already exists" in exception_message(e).lower():
+                    continue
+                logger.error(f"Failed to create index {index['key']}: {e.message}")
+                failed.append(f"{index['key']} ({e.type or e.message})")
+
+        if failed:
+            return OperationResult(
+                success=False,
+                error=(
+                    f"{len(failed)} index(es) could not be created in collection "
+                    f"'{collection_id}': {', '.join(failed)}. The schema is complete but "
+                    f"the delivery's hash and fileId lookups are not dependable without "
+                    f"them — see DECLARED_INDEXES."
+                ),
+                code="INDEXES_INCOMPLETE",
+            )
+
         return OperationResult(success=True)
 
     def _create_declared_attribute(
@@ -548,15 +784,15 @@ class AppwriteProvisioner:
                 database_id, collection_id, attr["key"], attr["required"], array=array
             ),
         }
+        # Unreachable for the declared set: `_validate_declarations` has already run at
+        # import. Kept as the backstop for a hand-built `attr`, and deliberately a raise
+        # rather than a silent skip — a skipped declaration is a schema silently short of
+        # what the delivery writes. The pre-import check is what keeps a bad declaration
+        # from leaving half the attributes created.
         if attr["type"] not in attr_creators:
-            # Not an AppwriteException, so it escapes `ensure_attributes` rather than
-            # being folded into `failed`: a declaration this module cannot create is a
-            # defect in the declaration, not a server-side failure to report back.
             raise ValueError(
-                f"declared attribute {attr['key']!r} has type {attr['type']!r}, which "
-                f"this module cannot create. Add a creator for it rather than letting "
-                f"the attribute be skipped — a skipped declaration is a schema that is "
-                f"silently short of what the delivery writes."
+                f"attribute {attr['key']!r} has type {attr['type']!r}, which this module "
+                f"cannot create."
             )
         attr_creators[attr["type"]]()
         logger.debug(f"Created {attr['type']} attribute: {attr['key']}")
@@ -648,8 +884,26 @@ class AppwriteProvisioner:
                 db_result = self.ensure_database(
                     self.config.database_id, self.config.database_name
                 )
-                if db_result.success:
-                    result["metadata_database"] = db_result.data
+                if not db_result.success:
+                    # Returned, not discarded. `ensure_database` reports failure by
+                    # return value and never raises, so the enclosing
+                    # `except AppwriteException` cannot see it: without this the bucket
+                    # bring-up printed "OK (CREATED)" and exited 0 with no metadata
+                    # database behind it. Tolerable while the swapped arguments above
+                    # meant the lost failure was a JUNK database's; now that it is the
+                    # real one, discarding it is C-291's shape — "reported OK while
+                    # writing nothing" — which `ensure_attributes` refuses by name.
+                    return OperationResult(
+                        success=False,
+                        error=(
+                            f"bucket '{bucket_id}' was created, but its metadata "
+                            f"database could not be: {db_result.error}. The bucket "
+                            f"exists and the database does not, so a delivery into it "
+                            f"would upload a file and then fail to record it."
+                        ),
+                        code=db_result.code or "METADATA_DATABASE_FAILED",
+                    )
+                result["metadata_database"] = db_result.data
 
             return OperationResult(success=True, data=result, code="CREATED")
 
@@ -766,9 +1020,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         # path, which already passes `metadata or {}`. With the default, this command
         # returned OK(EXISTS) having written nothing, so a collection missing `file_hash`
         # stayed missing it while the operator was told it was provisioned (#473). Do NOT
-        # pass DECLARED_METADATA_ATTRIBUTES here: it is a list of dicts, and the dynamic
-        # pass would infer `string(255)` for each and create junk attributes named after
-        # them. The empty dict is now the COMPLETE bring-up, not a repair of seven fields
+        # pass DECLARED_METADATA_ATTRIBUTES here: it is a list, and the payload pass
+        # iterates `metadata.items()`, so it raises `AttributeError` before any write.
+        # (An earlier version of this comment said a list would be inferred as
+        # `string(255)` junk attributes. The advice was right and the mechanism was
+        # wrong — C-273's shape, in a comment written to prevent a mistake.) The empty
+        # dict is now the COMPLETE bring-up, not a repair of seven fields
         # (þing-04 S17): the declared set covers every key a delivery document carries.
         result = provisioner.ensure_collection(metadata={})
 

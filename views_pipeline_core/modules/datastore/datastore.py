@@ -85,6 +85,16 @@ class MetadataSearchIncomplete(RuntimeError):
     """
 
 
+#: The declared width of the metadata collection's `description` attribute.
+#:
+#: Duplicated from `modules/appwrite/provisioning.py`'s DELIVERY_METADATA_ATTRIBUTES
+#: rather than imported, because the delivery path must never import the provisioning
+#: module (#332, asserted in a subprocess by `tests/test_import_purity.py`). Two copies
+#: of one number is the cheaper of the two wrongs here; `test_datastore.py` asserts they
+#: agree, so a drift fails rather than silently truncating a partner's delivery.
+MAX_DESCRIPTION_LENGTH = 255
+
+
 class FileMetadata:
     """Metadata container for prediction files with validation.
 
@@ -153,6 +163,14 @@ class FileMetadata:
             raise TypeError("targets must be a list of strings")
         if description is not None and not isinstance(description, str):
             raise TypeError("description must be a string or None")
+        if description is not None and len(description) > MAX_DESCRIPTION_LENGTH:
+            raise ValueError(
+                f"description is {len(description)} characters; the metadata "
+                f"collection's `description` attribute holds "
+                f"{MAX_DESCRIPTION_LENGTH}. Refused here rather than at the document "
+                f"write, which happens AFTER the file has been uploaded and would "
+                f"leave an orphan in the bucket."
+            )
         if category not in ["forecast", "historical"]:
             raise ValueError(f"category must be either 'forecast' or 'historical'. Got: {category}")
 

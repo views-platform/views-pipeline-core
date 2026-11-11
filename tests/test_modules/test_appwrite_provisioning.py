@@ -60,6 +60,37 @@ def provisioner(manager):
     return AppwriteProvisioner(manager)
 
 
+def settle_attributes(databases, existing=(), status="available"):
+    """Make `list_attributes` behave like a server rather than a constant.
+
+    The first read is the presence check that drives creation, so it sees only
+    `existing`. Every later read is `ensure_attributes`' readiness poll, and a server
+    that has just accepted the creates reports the attributes — a mock that returns an
+    empty listing forever is a state no Appwrite can be in, and before S17 nothing
+    noticed because nothing read the listing twice.
+    """
+    from views_pipeline_core.modules.appwrite.provisioning import (
+        DECLARED_METADATA_ATTRIBUTES,
+    )
+
+    before = {"total": len(existing), "attributes": [{"key": k} for k in existing]}
+    after = {
+        "total": len(DECLARED_METADATA_ATTRIBUTES),
+        "attributes": [
+            {"key": a["key"], "status": status} for a in DECLARED_METADATA_ATTRIBUTES
+        ],
+    }
+
+    calls = {"n": 0}
+
+    def _listing(*_args, **_kwargs):
+        calls["n"] += 1
+        return before if calls["n"] == 1 else after
+
+    databases.list_attributes.side_effect = _listing
+    databases.list_indexes.return_value = {"total": 0, "indexes": []}
+
+
 class TestEnsureDatabase:
     """Moved from test_appwrite.py::TestMetadataManager when the method relocated."""
 
@@ -109,9 +140,7 @@ class TestEnsureAttributes:
     """
 
     def _ready(self, provisioner, existing=()):
-        provisioner.databases.list_attributes.return_value = {
-            "attributes": [{"key": k} for k in existing]
-        }
+        settle_attributes(provisioner.databases, existing)
 
     def test_reports_success_when_every_attribute_lands(self, provisioner):
         self._ready(provisioner)
@@ -505,7 +534,7 @@ def _provisioner_with_existing_collection():
     fm.databases.list_collections.return_value = {
         "total": 1, "collections": [{"$id": "crafd", "name": "crafd"}]
     }
-    fm.databases.list_attributes.return_value = {"total": 0, "attributes": []}
+    settle_attributes(fm.databases)
     return AppwriteProvisioner(fm), fm
 
 
@@ -526,7 +555,7 @@ def test_creating_a_collection_grants_nothing_by_default():
     fm.config.collection_name = "newshelf"
     fm.databases.list.return_value = {"total": 1, "databases": [{"$id": "db", "name": "Db"}]}
     fm.databases.list_collections.return_value = {"total": 0, "collections": []}
-    fm.databases.list_attributes.return_value = {"total": 0, "attributes": []}
+    settle_attributes(fm.databases)
 
     AppwriteProvisioner(fm).ensure_collection(metadata={})
 
@@ -550,7 +579,7 @@ def test_an_explicit_grant_reaches_the_sdk_unchanged():
     fm.config.collection_name = "newshelf"
     fm.databases.list.return_value = {"total": 1, "databases": [{"$id": "db", "name": "Db"}]}
     fm.databases.list_collections.return_value = {"total": 0, "collections": []}
-    fm.databases.list_attributes.return_value = {"total": 0, "attributes": []}
+    settle_attributes(fm.databases)
 
     AppwriteProvisioner(fm).ensure_collection(metadata={}, permissions=['read("users")'])
 
@@ -716,24 +745,84 @@ class TestABrandNewProjectsFirstDeliveryHasSomewhereToLand:
             f"document after the file has already been uploaded"
         )
 
-    def test_the_declared_schema_covers_the_whole_metadata_document(self, manager):
-        """Not just FileMetadata's half — the document the file module actually builds."""
-        document = manager._build_metadata_document(
+    def test_the_declared_schema_covers_both_document_builders(self, manager):
+        """Both, because they disagree — and the named one is not the delivery's.
+
+        `_build_metadata_document` has exactly one caller,
+        `upload_file_from_bytes_with_metadata`. The path every forecast takes —
+        `DatastoreModule.upload_data` -> `upload_file_with_metadata` — assembles its
+        document INLINE and sets neither `mime_type` nor `file_size`. That divergence is
+        register C-352.
+
+        An earlier version of this test derived its scope from `_build_metadata_document`
+        alone and said in its own docstring that this was "the document the file module
+        actually builds". It was green, and it was pointed at the wrong producer: a key
+        added to the inline dict would have passed it and failed the live write. Seven
+        guards in this repo have now been wrong about their own scope, so the delivery
+        document here is taken from the delivery path by RUNNING it, not by reading it.
+        """
+        metadata = {
+            k: (["pred_ged_sb"] if k == "targets" else "x")
+            for k in self._delivery_metadata_keys()
+        }
+
+        from_bytes_path = manager._build_metadata_document(
             file_id="abc",
             bucket_id="crafd_bucket",
             filename="pgm_forecast.parquet",
             upload_result={"data": {"sizeOriginal": 1234}},
-            metadata={
-                k: (["pred_ged_sb"] if k == "targets" else "x")
-                for k in self._delivery_metadata_keys()
-            },
+            metadata=dict(metadata),
             file_hash="deadbeef",
         )
-        missing = set(document) - self._declared_keys()
-        assert not missing, (
-            f"the metadata document carries {sorted(missing)}, which no declared "
-            f"attribute covers"
+
+        delivery_path = self._document_the_delivery_actually_writes(manager, metadata)
+
+        for label, document in (
+            ("upload_file_from_bytes_with_metadata", from_bytes_path),
+            ("upload_file_with_metadata (the delivery path)", delivery_path),
+        ):
+            missing = set(document) - self._declared_keys()
+            assert not missing, (
+                f"{label} writes {sorted(missing)}, which no declared attribute covers"
+            )
+
+    @staticmethod
+    def _document_the_delivery_actually_writes(manager, metadata, tmp=None):
+        """Run `upload_file_with_metadata` against mocks and return what it writes.
+
+        Every Appwrite call is a Mock, so nothing leaves the process. The point is that
+        the key set comes from executing the real method rather than from reading the
+        dict literal inside it.
+        """
+        import tempfile
+
+        manager.storage.get_bucket.return_value = {"$id": "crafd_bucket"}
+        manager.databases.list_collections.return_value = {
+            "collections": [{"$id": "test_collection", "name": "Test Collection"}]
+        }
+        manager.databases.list_documents.return_value = {"total": 0, "documents": []}
+        manager.storage.list_files.return_value = {"files": [], "total": 0}
+        manager.storage.create_file.return_value = {"$id": "file123", "sizeOriginal": 9}
+        manager.databases.create_document.return_value = {"$id": "doc123"}
+
+        with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as fh:
+            fh.write(b"not-really-parquet")
+            path = fh.name
+
+        manager.upload_file_with_metadata(
+            bucket_id="crafd_bucket",
+            file_path=path,
+            filename="pgm_forecast.parquet",
+            metadata=dict(metadata),
+            collection_id="test_collection",
+            collection_name="Test Collection",
         )
+
+        assert manager.databases.create_document.called, (
+            "the delivery path never reached create_document, so this test would pass "
+            "vacuously — the mocks no longer match the method"
+        )
+        return manager.databases.create_document.call_args.args[3]
 
     def test_ensure_collection_creates_them_in_an_empty_project(self, provisioner):
         """The constant is worthless if nothing iterates it.
@@ -745,7 +834,7 @@ class TestABrandNewProjectsFirstDeliveryHasSomewhereToLand:
         }
         provisioner.databases.list_collections.return_value = {"collections": []}
         provisioner.databases.create_collection.return_value = {"$id": "test_collection"}
-        provisioner.databases.list_attributes.return_value = {"attributes": []}
+        settle_attributes(provisioner.databases)
 
         result = provisioner.ensure_collection(metadata={})
 
@@ -767,7 +856,7 @@ class TestABrandNewProjectsFirstDeliveryHasSomewhereToLand:
 
     def test_targets_is_created_as_an_array(self, provisioner):
         """`targets` is a list of strings. A scalar attribute rejects the document."""
-        provisioner.databases.list_attributes.return_value = {"attributes": []}
+        settle_attributes(provisioner.databases)
 
         provisioner.ensure_attributes("db", "coll", {})
 
@@ -832,7 +921,7 @@ class TestEnsureBucketCreatesTheRightDatabase:
         provisioner.storage.create_bucket.return_value = {"$id": "test_bucket"}
         provisioner.databases.list_collections.return_value = {"collections": []}
         provisioner.databases.create_collection.return_value = {"$id": "test_collection"}
-        provisioner.databases.list_attributes.return_value = {"attributes": []}
+        settle_attributes(provisioner.databases)
 
         assert provisioner.ensure_bucket(
             bucket_id="test_bucket", name=provisioner.config.bucket_name
@@ -842,3 +931,177 @@ class TestEnsureBucketCreatesTheRightDatabase:
         assert databases == [
             {"$id": "test_database", "name": "Test Database"}
         ], f"bring-up left {len(databases)} database(s): {databases}"
+
+
+class TestTheBringUpIsCompleteNotJustTheAttributes:
+    """The review of #586 found three ways the "first delivery can land" claim was
+    narrower than it read. All three only bite on an EMPTY project, which is the one
+    case nobody had ever run."""
+
+    def _empty_project(self, provisioner):
+        provisioner.databases.list.return_value = {
+            "databases": [{"$id": "test_database", "name": "Test Database"}]
+        }
+        provisioner.databases.list_collections.return_value = {"collections": []}
+        provisioner.databases.create_collection.return_value = {"$id": "test_collection"}
+        settle_attributes(provisioner.databases)
+
+    def test_the_indexes_the_delivery_queries_by_are_created(self, provisioner):
+        """`Query.equal` on an unindexed attribute is not dependable against this store —
+        this package says so itself at `file.py:1216`, which is why the filename match
+        there is filtered in Python. Nothing in any sibling checkout created an index
+        before now, while the platform key has carried `indexes.write` all along."""
+        from views_pipeline_core.modules.appwrite.provisioning import DECLARED_INDEXES
+
+        self._empty_project(provisioner)
+
+        assert provisioner.ensure_collection(metadata={}).success
+
+        created = {
+            call.args[2]: call.args[4]
+            for call in provisioner.databases.create_index.call_args_list
+        }
+        for index in DECLARED_INDEXES:
+            assert index["key"] in created, f"{index['key']} was not created"
+            assert created[index["key"]] == index["attributes"]
+
+    def test_the_declared_index_type_is_what_the_sdk_enum_serialises_to(self):
+        """The constants use the literal "key" rather than importing the SDK enum. That
+        is only safe while the two produce identical wire output — pinned here rather
+        than asserted in a comment."""
+        from views_pipeline_core.modules.appwrite.provisioning import DECLARED_INDEXES
+
+        # The enum's module path moved between SDK majors: `index_type` on the 13.x this
+        # package pins, `databases_index_type` on the 19.x other platform repos pin.
+        # Derive it rather than importing one, so this test pins the VALUE and does not
+        # become a version assertion in disguise.
+        enum = pytest.importorskip("appwrite.enums.index_type").IndexType
+        valid = {member.value for member in enum}
+        for index in DECLARED_INDEXES:
+            assert index["type"] in valid, (
+                f"index {index['key']} declares type {index['type']!r}, which is not one "
+                f"of the SDK's {sorted(valid)}"
+            )
+
+    def test_an_index_on_an_undeclared_attribute_is_refused_at_import(self):
+        """An index covering an attribute nothing creates fails at bring-up time against
+        an empty project. The declarations are module constants, so the check runs where
+        they are, before anything is written."""
+        from views_pipeline_core.modules.appwrite import provisioning
+
+        original = provisioning.DECLARED_INDEXES
+        provisioning.DECLARED_INDEXES = [
+            {"key": "idx_nope", "type": "key", "attributes": ["not_declared"]}
+        ]
+        try:
+            with pytest.raises(ValueError, match="not_declared"):
+                provisioning._validate_declarations()
+        finally:
+            provisioning.DECLARED_INDEXES = original
+
+    def test_an_uncreatable_declared_type_is_refused_before_any_write(self):
+        """Previously this raised from inside the creation loop, leaving every attribute
+        before the bad one created and every one after it unattempted — the half-built
+        schema `ensure_attributes` refuses to report success over."""
+        from views_pipeline_core.modules.appwrite import provisioning
+
+        original = provisioning.DECLARED_METADATA_ATTRIBUTES
+        provisioning.DECLARED_METADATA_ATTRIBUTES = original + [
+            {"key": "ratio", "type": "double", "required": False}
+        ]
+        try:
+            with pytest.raises(ValueError, match="ratio"):
+                provisioning._validate_declarations()
+        finally:
+            provisioning.DECLARED_METADATA_ATTRIBUTES = original
+
+    def test_attributes_that_are_still_processing_are_waited_for(self, provisioner):
+        """Appwrite creates attributes asynchronously, and a document referencing one
+        that is not yet `available` is rejected. Harmless while the attributes predated
+        every delivery by years; this bring-up creates them seconds before the first one.
+        """
+        from views_pipeline_core.modules.appwrite.provisioning import (
+            DECLARED_METADATA_ATTRIBUTES,
+        )
+
+        every = [
+            {"key": a["key"], "status": "available"}
+            for a in DECLARED_METADATA_ATTRIBUTES
+        ]
+        processing = [dict(a, status="processing") for a in every[:1]] + every[1:]
+
+        provisioner.databases.list_attributes.side_effect = [
+            {"attributes": []},            # the pre-creation read
+            {"attributes": processing},    # first readiness poll
+            {"attributes": every},         # second poll
+        ]
+        provisioner.databases.list_indexes.return_value = {"indexes": []}
+
+        with patch(
+            "views_pipeline_core.modules.appwrite.provisioning.time.sleep"
+        ) as sleep:
+            result = provisioner.ensure_attributes("db", "coll", {})
+
+        assert result.success, result.error
+        assert sleep.called, "returned without waiting for a processing attribute"
+
+    def test_an_attribute_stuck_processing_fails_rather_than_reporting_success(
+        self, provisioner
+    ):
+        from views_pipeline_core.modules.appwrite.provisioning import (
+            DECLARED_METADATA_ATTRIBUTES,
+        )
+
+        stuck = [
+            dict(key=a["key"], status="stuck") for a in DECLARED_METADATA_ATTRIBUTES
+        ]
+        provisioner.databases.list_attributes.side_effect = [
+            {"attributes": []}
+        ] + [{"attributes": stuck}] * 20
+
+        with patch("views_pipeline_core.modules.appwrite.provisioning.time.sleep"):
+            result = provisioner.ensure_attributes("db", "coll", {})
+
+        assert not result.success
+        assert result.code == "ATTRIBUTES_NOT_AVAILABLE"
+        provisioner.databases.create_index.assert_not_called()
+
+    def test_a_missing_status_field_is_treated_as_available(self, provisioner):
+        """This must not invent a failure against a server that does not report status."""
+        from views_pipeline_core.modules.appwrite.provisioning import (
+            DECLARED_METADATA_ATTRIBUTES,
+        )
+
+        provisioner.databases.list_attributes.side_effect = [
+            {"attributes": []},
+            {"attributes": [{"key": a["key"]} for a in DECLARED_METADATA_ATTRIBUTES]},
+        ]
+        provisioner.databases.list_indexes.return_value = {"indexes": []}
+
+        assert provisioner.ensure_attributes("db", "coll", {}).success
+
+    def test_ensure_bucket_does_not_report_ok_without_its_metadata_database(
+        self, provisioner
+    ):
+        """`ensure_database` reports failure by RETURN VALUE and never raises, so the
+        enclosing `except AppwriteException` cannot see it. Discarding it printed
+        "ensure-bucket: OK (CREATED)" and exited 0 with no database behind the bucket.
+
+        Tolerable while C-238's swapped arguments meant the lost failure was a junk
+        database's. Now that it is the real one, discarding it is C-291's shape.
+        """
+        provisioner.storage.create_bucket.return_value = {"$id": "test_bucket"}
+        provisioner.databases.list.return_value = {"databases": []}
+        provisioner.databases.create.side_effect = AppwriteException(
+            "service unavailable", 503, "general_unknown"
+        )
+
+        result = provisioner.ensure_bucket(
+            bucket_id="test_bucket", name=provisioner.config.bucket_name
+        )
+
+        assert not result.success, (
+            "the bucket exists and its metadata database does not — a delivery would "
+            "upload a file and then fail to record it"
+        )
+        assert "metadata database" in result.error
