@@ -965,6 +965,73 @@ class TestTheBringUpIsCompleteNotJustTheAttributes:
             assert index["key"] in created, f"{index['key']} was not created"
             assert created[index["key"]] == index["attributes"]
 
+    def test_the_read_paths_measured_query_shapes_are_both_covered(self, provisioner):
+        """Derived from a consumer's MEASUREMENT, not from our own docstrings.
+
+        What the read path needs is not derivable from this repository: `file.py:1046-1050`
+        turns any caller-supplied `filters` dict into equality queries. views-crafdapi read
+        its own serving code and reported two shapes — `{category, type}` and
+        `{name, category, type}` — and that the `loa` filter in our DatastoreModule
+        docstrings is reached by nothing on their serving path.
+
+        Ordering is the whole point of this test. One compound index serves both shapes
+        only if the two-attribute query matches a leftmost prefix, so `category` and
+        `type` must come before `name`. A (name, category, type) ordering would leave the
+        two-attribute query unindexed while looking entirely reasonable.
+        """
+        from views_pipeline_core.modules.appwrite.provisioning import DECLARED_INDEXES
+
+        covering = [
+            index
+            for index in DECLARED_INDEXES
+            if {"category", "type", "name"} <= set(index["attributes"])
+        ]
+        assert covering, "no index covers the read path's three-attribute query"
+
+        for index in covering:
+            attributes = index["attributes"]
+            assert attributes[: 2] == ["category", "type"], (
+                f"{index['key']} is ordered {attributes}; the read path also queries "
+                f"{{category, type}} WITHOUT name, which can only use this index if "
+                f"those two are its leftmost prefix"
+            )
+
+    def test_a_compound_index_cannot_exceed_the_engine_key_limit(self):
+        """`lengths` here is a ceiling, not tuning.
+
+        The three covered attributes are `string(255)`. At utf8mb4's 4 bytes per
+        character a three-column key is 3060 bytes against InnoDB's 3072 — inside it,
+        with twelve bytes to spare and before any column Appwrite adds to its own
+        indexes. An unbounded compound index on these three is one schema change away
+        from a bring-up that fails while creating an index, which is the failure this
+        module exists to stop.
+        """
+        from views_pipeline_core.modules.appwrite.provisioning import (
+            DECLARED_INDEXES,
+            DELIVERY_METADATA_ATTRIBUTES,
+            FIXED_METADATA_ATTRIBUTES,
+        )
+
+        BYTES_PER_CHAR = 4           # utf8mb4
+        INNODB_MAX_KEY_BYTES = 3072
+        sizes = {
+            a["key"]: a.get("size")
+            for a in FIXED_METADATA_ATTRIBUTES + DELIVERY_METADATA_ATTRIBUTES
+        }
+
+        for index in DECLARED_INDEXES:
+            lengths = index.get("lengths")
+            widths = [
+                (lengths[i] if lengths else sizes.get(key) or 0)
+                for i, key in enumerate(index["attributes"])
+            ]
+            key_bytes = sum(w * BYTES_PER_CHAR for w in widths)
+            assert key_bytes < INNODB_MAX_KEY_BYTES, (
+                f"{index['key']} would need {key_bytes} bytes of index key, at or over "
+                f"the {INNODB_MAX_KEY_BYTES}-byte engine limit. Supply `lengths` to cap "
+                f"the columns rather than discovering this during a bring-up."
+            )
+
     def test_the_declared_index_type_is_what_the_sdk_enum_serialises_to(self):
         """The constants use the literal "key" rather than importing the SDK enum. That
         is only safe while the two produce identical wire output — pinned here rather

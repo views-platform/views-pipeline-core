@@ -165,10 +165,19 @@ CREATABLE_ATTRIBUTE_TYPES = frozenset({"string", "integer", "datetime", "boolean
 # an error, which is not NOT_FOUND, so the upload refuses with "Could not determine
 # whether a duplicate exists".
 #
-# Scoped to the write path deliberately. The READ path accepts arbitrary metadata filters
-# (`file.py:1046-1050`), so a partner query on `loa` or `category` wants an index too —
-# that is a read-performance decision about a partner-facing store, it does not stop a
-# delivery landing, and it is registered rather than guessed at here.
+# The read path is covered too, but only because a consumer MEASURED its own queries
+# rather than us guessing from our docstrings. `file.py:1046-1050` turns any
+# caller-supplied `filters` dict into equality queries, so "what the read path needs"
+# is not derivable from this repository at all. views-crafdapi read its serving code
+# (`views-crafdapi@feat/crafd-project`) and reported two shapes:
+#
+#   {category, type}          — prediction/manager.py ~:290, :343, :357
+#   {name, category, type}    — metadata.py:448
+#
+# and confirmed that the `loa` filter in our own DatastoreModule docstrings is
+# documentation only, reached by nothing on their serving path. One compound index serves
+# both shapes, ordered (category, type, name) so the two-attribute query matches a
+# leftmost prefix; a (name, …) ordering would serve only the three-attribute one.
 #
 # `"key"` rather than importing `appwrite.enums.index_type.IndexType.KEY`: checked
 # against the SDK this package actually pins (`appwrite>=13.4.1,<14.0.0`, 13.6.1 in the
@@ -181,9 +190,23 @@ CREATABLE_ATTRIBUTE_TYPES = frozenset({"string", "integer", "datetime", "boolean
 # platform pin — so importing it here would couple this constant to a version range wider
 # than our own. A test pins the value against whichever enum is installed; this is not a
 # claim resting on a comment.
+# `lengths` on the compound index is not a tuning knob, it is a ceiling. The three
+# attributes are `string(255)`, and InnoDB's index key limit is 3072 bytes: at utf8mb4's
+# 4 bytes per character, 3 x 255 x 4 = 3060. That fits with twelve bytes to spare, before
+# any column Appwrite adds to its own indexes — so an unbounded compound index on these
+# three is one schema change away from a bring-up that fails while creating an index,
+# which is the failure this whole module exists to stop. 64 characters is far longer than
+# any value these fields hold ("forecast", an artifact type, a model name) and leaves the
+# key at 768 bytes.
 DECLARED_INDEXES: List[Dict[str, Any]] = [
     {"key": "idx_fileId", "type": "key", "attributes": ["fileId"]},
     {"key": "idx_file_hash", "type": "key", "attributes": ["file_hash"]},
+    {
+        "key": "idx_category_type_name",
+        "type": "key",
+        "attributes": ["category", "type", "name"],
+        "lengths": [64, 64, 64],
+    },
 ]
 
 
@@ -211,6 +234,13 @@ def _validate_declarations() -> None:
                 f"declared index {index['key']!r} covers {unknown}, which no declared "
                 f"attribute provides. An index on an attribute that is never created "
                 f"fails at bring-up time against an empty project."
+            )
+        lengths = index.get("lengths")
+        if lengths is not None and len(lengths) != len(index["attributes"]):
+            raise ValueError(
+                f"declared index {index['key']!r} has {len(lengths)} length(s) for "
+                f"{len(index['attributes'])} attribute(s). Appwrite matches them "
+                f"positionally, so a short list silently caps the wrong column."
             )
 
 
@@ -731,6 +761,7 @@ class AppwriteProvisioner:
                     index["key"],
                     index["type"],
                     index["attributes"],
+                    lengths=index.get("lengths"),
                 )
                 logger.debug(f"Created index: {index['key']}")
             except AppwriteException as e:
