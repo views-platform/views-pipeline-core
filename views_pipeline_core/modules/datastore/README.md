@@ -35,7 +35,7 @@ from views_pipeline_core.modules.appwrite import AppwriteConfig
 
 # Configure connection to Appwrite
 config = AppwriteConfig(
-    endpoint="https://cloud.appwrite.io/v1",
+    endpoint="https://fra.cloud.appwrite.io/v1",
     project_id="your_project_id",
     credentials="your_api_key",
     bucket_id="forecasts",
@@ -67,7 +67,7 @@ if result.success:
 For convenience, you can configure Appwrite credentials via environment variables:
 
 ```bash
-APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
+APPWRITE_ENDPOINT=https://fra.cloud.appwrite.io/v1
 APPWRITE_DATASTORE_PROJECT_ID=your_project_id
 APPWRITE_DATASTORE_API_KEY=your_api_key
 ```
@@ -344,7 +344,7 @@ import pandas as pd
 
 # Setup
 config = AppwriteConfig(
-    endpoint="https://cloud.appwrite.io/v1",
+    endpoint="https://fra.cloud.appwrite.io/v1",
     project_id="views_project",
     credentials="api_key",
     bucket_id="production_forecasts"

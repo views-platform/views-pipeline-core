@@ -86,7 +86,7 @@ from views_pipeline_core.modules.datastore import DatastoreModule
 from views_pipeline_core.modules.appwrite import AppwriteConfig
 
 config = AppwriteConfig(
-    endpoint="https://cloud.appwrite.io/v1",
+    endpoint="https://fra.cloud.appwrite.io/v1",
     project_id="views_project",
     credentials="api_key",
     bucket_id="forecasts",

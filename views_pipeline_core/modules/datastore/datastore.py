@@ -25,7 +25,7 @@ Typical usage example:
     from views_pipeline_core.modules.appwrite import AppwriteConfig
 
     config = AppwriteConfig(
-        endpoint="https://cloud.appwrite.io/v1",
+        endpoint="https://fra.cloud.appwrite.io/v1",
         project_id="my_project",
         credentials="my_api_key",
         bucket_id="predictions"
@@ -211,7 +211,7 @@ class DatastoreModule:
     Example:
         >>> from views_pipeline_core.modules.appwrite import AppwriteConfig
         >>> config = AppwriteConfig(
-        ...     endpoint="https://cloud.appwrite.io/v1",
+        ...     endpoint="https://fra.cloud.appwrite.io/v1",
         ...     project_id="views_project",
         ...     credentials="api_key_here",
         ...     bucket_id="forecasts",
@@ -252,7 +252,7 @@ class DatastoreModule:
 
         Example:
             >>> config = AppwriteConfig(
-            ...     endpoint="https://cloud.appwrite.io/v1",
+            ...     endpoint="https://fra.cloud.appwrite.io/v1",
             ...     project_id="my_project",
             ...     credentials="my_api_key",
             ...     bucket_id="production_forecasts"
