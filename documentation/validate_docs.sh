@@ -12,11 +12,21 @@ errors=0
 echo "=== base_docs validation ==="
 echo ""
 
-# 1. Check for unfilled template placeholders in accepted/active files
+# 1. Check for unfilled template placeholders in every governed document
 #    (skip files whose names contain "template" — those are expected to have placeholders)
 #    These are warnings only (non-blocking) since in the template repo some
 #    files are legitimately Accepted with placeholder dates.
-echo "--- Checking for template placeholders in accepted/active files ---"
+#
+#    SELECTION IS `Status:` ALONE, not a list of status values. It read
+#    `Status:.*\(Accepted\|Active\)` until 2026-11-11, which silently excluded every
+#    `Implemented` and `Retired` document — eleven of them, including ADRs 054-061 — and
+#    reported OK in the same words as a run that had checked them. views-appwrite hit the
+#    identical defect in their copy of this script (their C-09, where the one missed status
+#    was `Deferred`) and fixed it by widening the list; the list is the defect, so this
+#    drops it. Matching prose to SELECT work fails quietly, which is why this had years to
+#    sit here unnoticed. `tests/test_documentation_integrity.py` now asserts that no
+#    document carrying a `Status:` line is excluded from this scan.
+echo "--- Checking for template placeholders in governed documents ---"
 warnings=0
 while IFS= read -r file; do
     [[ -z "$file" ]] && continue
@@ -33,7 +43,7 @@ while IFS= read -r file; do
         echo "  WARN: Unfilled ClassName placeholder in $file"
         warnings=$((warnings + 1))
     fi
-done < <(grep -rl 'Status:.*\(Accepted\|Active\)' --include='*.md' . 2>/dev/null || true)
+done < <(grep -rl 'Status:' --include='*.md' . 2>/dev/null || true)
 if [ "$warnings" -eq 0 ]; then
     echo "  OK"
 fi
