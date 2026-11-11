@@ -663,6 +663,126 @@ def test_an_explicit_bucket_grant_reaches_the_sdk_unchanged():
     assert fm.storage.create_bucket.call_args.kwargs["permissions"] == ['read("users")']
 
 
+class TestABrandNewProjectsFirstDeliveryHasSomewhereToLand:
+    """þing-04 S17. The trigger the module docstring named has fired.
+
+    Until now the collection's schema for the delivery's own fields was *inferred* from
+    whatever payload happened to be handed to `ensure_collection` — and the sanctioned
+    CLI hands it `{}`, deliberately (the comment at the call site explains why: a list of
+    attribute dicts would be inferred as junk string attributes named after them). So a
+    collection created by the CLI carries the seven FIXED attributes and nothing else,
+    while every delivery document also carries the fields `FileMetadata` puts in it.
+
+    On the shared production project this never fired, because those attributes were
+    created years ago by the write-time inference that #331 removed. On a **brand-new**
+    project — which is exactly what the CRAF'd-only project is — the first delivery
+    uploads the file, then fails `Unknown attribute: loa` on the document, leaving an
+    orphaned file in the bucket.
+
+    The scope of these tests is DERIVED from the producers (`FileMetadata.to_dict` and
+    `_build_metadata_document`), never hand-listed. A hand-listed scope is how six
+    previous guards in this repo ended up wrong about their own subject.
+    """
+
+    @staticmethod
+    def _delivery_metadata_keys():
+        """Every key `FileMetadata` can contribute, including the optional one."""
+        from views_pipeline_core.modules.datastore.datastore import FileMetadata
+
+        return set(
+            FileMetadata(
+                loa="pgm",
+                name="chrome_box",
+                type="ensemble",
+                targets=["pred_ged_sb"],
+                category="forecast",
+                description="first delivery",
+            ).to_dict()
+        )
+
+    @staticmethod
+    def _declared_keys():
+        from views_pipeline_core.modules.appwrite.provisioning import (
+            DECLARED_METADATA_ATTRIBUTES,
+        )
+
+        return {attr["key"] for attr in DECLARED_METADATA_ATTRIBUTES}
+
+    def test_the_declared_schema_covers_every_field_the_delivery_writes(self):
+        missing = self._delivery_metadata_keys() - self._declared_keys()
+        assert not missing, (
+            f"{sorted(missing)} are written by every delivery document but are not "
+            f"declared, so a collection provisioned into an empty project rejects the "
+            f"document after the file has already been uploaded"
+        )
+
+    def test_the_declared_schema_covers_the_whole_metadata_document(self, manager):
+        """Not just FileMetadata's half — the document the file module actually builds."""
+        document = manager._build_metadata_document(
+            file_id="abc",
+            bucket_id="crafd_bucket",
+            filename="pgm_forecast.parquet",
+            upload_result={"data": {"sizeOriginal": 1234}},
+            metadata={
+                k: (["pred_ged_sb"] if k == "targets" else "x")
+                for k in self._delivery_metadata_keys()
+            },
+            file_hash="deadbeef",
+        )
+        missing = set(document) - self._declared_keys()
+        assert not missing, (
+            f"the metadata document carries {sorted(missing)}, which no declared "
+            f"attribute covers"
+        )
+
+    def test_ensure_collection_creates_them_in_an_empty_project(self, provisioner):
+        """The constant is worthless if nothing iterates it.
+
+        An empty project: no collections, no attributes. This is the CLI's exact call.
+        """
+        provisioner.databases.list.return_value = {
+            "databases": [{"$id": "test_database", "name": "Test Database"}]
+        }
+        provisioner.databases.list_collections.return_value = {"collections": []}
+        provisioner.databases.create_collection.return_value = {"$id": "test_collection"}
+        provisioner.databases.list_attributes.return_value = {"attributes": []}
+
+        result = provisioner.ensure_collection(metadata={})
+
+        assert result.success, result.error
+        created = {
+            call.args[2] if len(call.args) > 2 else call.kwargs["key"]
+            for method in (
+                provisioner.databases.create_string_attribute,
+                provisioner.databases.create_integer_attribute,
+                provisioner.databases.create_datetime_attribute,
+                provisioner.databases.create_boolean_attribute,
+            )
+            for call in method.call_args_list
+        }
+        missing = self._delivery_metadata_keys() - created
+        assert not missing, (
+            f"`ensure-collection` against an empty project did not create {sorted(missing)}"
+        )
+
+    def test_targets_is_created_as_an_array(self, provisioner):
+        """`targets` is a list of strings. A scalar attribute rejects the document."""
+        provisioner.databases.list_attributes.return_value = {"attributes": []}
+
+        provisioner.ensure_attributes("db", "coll", {})
+
+        targets_calls = [
+            call
+            for call in provisioner.databases.create_string_attribute.call_args_list
+            if (call.args[2] if len(call.args) > 2 else call.kwargs.get("key")) == "targets"
+        ]
+        assert targets_calls, "`targets` was not created at all"
+        assert targets_calls[0].kwargs.get("array") is True, (
+            "`targets` must be an array attribute — the delivery writes a list of "
+            "target names into it"
+        )
+
+
 class TestEnsureBucketCreatesTheRightDatabase:
     """C-238, measured against an empty project rather than reasoned about.
 

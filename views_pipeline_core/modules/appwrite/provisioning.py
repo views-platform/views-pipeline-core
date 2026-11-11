@@ -28,11 +28,19 @@ must not change behaviour silently, and it was invisible against the shared prod
 project, where the real database already existed. The first bring-up against an **empty**
 project is where it stops being invisible, and that is this one.
 
-**Known limitation.** ``_create_dynamic_attributes`` derives the collection's schema from
-whatever payload it is handed, which contradicts ADR-040 (Authority of Declarations Over
-Inference) on a production database. Replacing it with a declared schema is deferred
-behind a named trigger: a non-production Appwrite project existing, since nobody has ever
-run a first bring-up against an empty one (þing-02 Á-5 / G2(h)).
+**The deferred schema, now declared.** This module used to derive the collection's
+schema from whatever payload it was handed, which contradicts ADR-040 (Authority of
+Declarations Over Inference). It was deferred behind a named trigger — *a non-production
+Appwrite project existing, since nobody has ever run a first bring-up against an empty
+one* (þing-02 Á-5 / G2(h)). **That trigger fired** (þing-04 S17): a CRAF'd-only project
+is being created, and the rehearsal runs against `views-test`. The fields every delivery
+document carries are therefore declared in ``DELIVERY_METADATA_ATTRIBUTES`` below, and
+``ensure_attributes`` creates them whatever payload it is given.
+
+Payload inference is **retained for anything beyond that set**, because callers may still
+pass extra metadata and removing their only route to an attribute is a separate decision
+with a separate blast radius. Against a brand-new project it no longer has anything to do
+for the delivery path.
 """
 
 from __future__ import annotations
@@ -106,6 +114,37 @@ FIXED_METADATA_ATTRIBUTES: List[Dict[str, Any]] = [
     {"key": "uploaded_at", "type": "datetime", "required": False},
     {"key": "file_hash", "type": "string", "size": 64, "required": False},
 ]
+
+
+# The fields every *delivery* document carries, from `FileMetadata.to_dict()`
+# (`modules/datastore/datastore.py:166-191`). Together with the fixed attributes above
+# these are the whole metadata document that `file.py` builds and writes.
+#
+# Before these were declared, they existed only on the shared production collection,
+# created years ago by the write-time inference #331 removed. A collection provisioned
+# by this module's CLI into an EMPTY project carried the seven fixed attributes and
+# nothing else — so the first delivery uploaded its file and then failed
+# `Unknown attribute: loa` on the document, leaving an orphaned file in the bucket.
+#
+# `required` is False and strings are 255 throughout, which is exactly what the inference
+# produced. That is deliberate: a collection provisioned today must have the same shape as
+# the production one provisioned by inference, or the two projects disagree about what a
+# delivery document is. Widening `description` past 255, or making `loa`/`category`
+# required, are both defensible and are both a change to the production schema — not
+# something to smuggle in under a bring-up fix.
+DELIVERY_METADATA_ATTRIBUTES: List[Dict[str, Any]] = [
+    {"key": "loa", "type": "string", "size": 255, "required": False},
+    {"key": "name", "type": "string", "size": 255, "required": False},
+    {"key": "type", "type": "string", "size": 255, "required": False},
+    {"key": "targets", "type": "string", "size": 255, "required": False, "array": True},
+    {"key": "category", "type": "string", "size": 255, "required": False},
+    {"key": "description", "type": "string", "size": 255, "required": False},
+]
+
+#: What `ensure_attributes` creates regardless of payload.
+DECLARED_METADATA_ATTRIBUTES: List[Dict[str, Any]] = (
+    FIXED_METADATA_ATTRIBUTES + DELIVERY_METADATA_ATTRIBUTES
+)
 
 
 def infer_attribute_type(value: Any) -> Tuple[str, bool]:
@@ -397,7 +436,12 @@ class AppwriteProvisioner:
         max_retries: int = MAX_ATTRIBUTE_CREATION_RETRIES,
         initial_delay: float = INITIAL_RETRY_DELAY,
     ) -> OperationResult:
-        """Create the fixed attributes, plus any inferred from ``metadata``."""
+        """Create the declared attributes, plus any inferred from ``metadata``.
+
+        The declared set is created whatever ``metadata`` holds — that is what makes an
+        empty dict a complete bring-up. Inference only reaches keys the declaration does
+        not already cover.
+        """
         delay = initial_delay
         existing_attribute_keys = set()
 
@@ -436,15 +480,15 @@ class AppwriteProvisioner:
         # class of lie the þing convened about (#322).
         failed: List[str] = []
 
-        for attr in FIXED_METADATA_ATTRIBUTES:
+        for attr in DECLARED_METADATA_ATTRIBUTES:
             if attr["key"] in existing_attribute_keys:
                 continue
             try:
-                self._create_fixed_attribute(database_id, collection_id, attr)
+                self._create_declared_attribute(database_id, collection_id, attr)
             except AppwriteException as e:
                 if "already exists" not in exception_message(e).lower():
                     logger.error(
-                        f"Failed to create fixed attribute {attr['key']}: {e.message}"
+                        f"Failed to create declared attribute {attr['key']}: {e.message}"
                     )
                     failed.append(f"{attr['key']} ({e.type or e.message})")
 
@@ -473,23 +517,49 @@ class AppwriteProvisioner:
 
         return OperationResult(success=True)
 
-    def _create_fixed_attribute(
+    def _create_declared_attribute(
         self, database_id: str, collection_id: str, attr: Dict[str, Any]
     ):
+        """Create one attribute exactly as declared, including its arity.
+
+        ``array`` is threaded through every type rather than only the one that needs it
+        today. A declaration that says `array` and a creator that silently drops it is
+        how `targets` would become a scalar and reject the list the delivery writes —
+        and the guard would have been right about the declaration and wrong about the
+        collection.
+        """
+        array = bool(attr.get("array", False))
         attr_creators = {
             "string": lambda: self.databases.create_string_attribute(
-                database_id, collection_id, attr["key"], attr["size"], attr["required"]
+                database_id,
+                collection_id,
+                attr["key"],
+                attr["size"],
+                attr["required"],
+                array=array,
             ),
             "integer": lambda: self.databases.create_integer_attribute(
-                database_id, collection_id, attr["key"], attr["required"]
+                database_id, collection_id, attr["key"], attr["required"], array=array
             ),
             "datetime": lambda: self.databases.create_datetime_attribute(
-                database_id, collection_id, attr["key"], attr["required"]
+                database_id, collection_id, attr["key"], attr["required"], array=array
+            ),
+            "boolean": lambda: self.databases.create_boolean_attribute(
+                database_id, collection_id, attr["key"], attr["required"], array=array
             ),
         }
-        if attr["type"] in attr_creators:
-            attr_creators[attr["type"]]()
-            logger.debug(f"Created {attr['type']} attribute: {attr['key']}")
+        if attr["type"] not in attr_creators:
+            # Not an AppwriteException, so it escapes `ensure_attributes` rather than
+            # being folded into `failed`: a declaration this module cannot create is a
+            # defect in the declaration, not a server-side failure to report back.
+            raise ValueError(
+                f"declared attribute {attr['key']!r} has type {attr['type']!r}, which "
+                f"this module cannot create. Add a creator for it rather than letting "
+                f"the attribute be skipped — a skipped declaration is a schema that is "
+                f"silently short of what the delivery writes."
+            )
+        attr_creators[attr["type"]]()
+        logger.debug(f"Created {attr['type']} attribute: {attr['key']}")
 
     def _create_attribute_by_type(
         self,
@@ -691,13 +761,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         result = provisioner.ensure_database()
     else:
         # `metadata={}` rather than the default None. `ensure_attributes` iterates
-        # FIXED_METADATA_ATTRIBUTES unconditionally, so an empty dict is what makes the
-        # existing-collection path ensure the declared schema — matching the creation
+        # DECLARED_METADATA_ATTRIBUTES unconditionally, so an empty dict is what makes
+        # the existing-collection path ensure the declared schema — matching the creation
         # path, which already passes `metadata or {}`. With the default, this command
         # returned OK(EXISTS) having written nothing, so a collection missing `file_hash`
         # stayed missing it while the operator was told it was provisioned (#473). Do NOT
-        # pass FIXED_METADATA_ATTRIBUTES here: it is a list of dicts, and the dynamic pass
-        # would infer `string(255)` for each and create junk attributes named after them.
+        # pass DECLARED_METADATA_ATTRIBUTES here: it is a list of dicts, and the dynamic
+        # pass would infer `string(255)` for each and create junk attributes named after
+        # them. The empty dict is now the COMPLETE bring-up, not a repair of seven fields
+        # (þing-04 S17): the declared set covers every key a delivery document carries.
         result = provisioner.ensure_collection(metadata={})
 
     if result.success:

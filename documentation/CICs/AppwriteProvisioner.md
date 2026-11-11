@@ -43,6 +43,7 @@ can eventually be narrowed.
 | **Half a coordinate pair is refused** | `build_provisioner` raises `ConfigurationException` if given a collection id without a name or vice versa — the missing half would resolve from the environment, so a command meaning a partner's shelf could provision production. |
 | **An incomplete listing is a failure, not an absence** | Every listing here answers "does it already exist?", where NO means "create it". A short read produces a duplicate, not a smaller answer, so `_complete_listing` returns `LISTING_INCOMPLETE` rather than proceeding (Cluster J). |
 | **Both paths ensure the declared schema** | The existing-collection branch and the creation branch both call `ensure_attributes`. They disagreed until #473, and the existing-collection path returned OK after zero writes (C-291). |
+| **The declared schema covers the whole delivery document** | `DECLARED_METADATA_ATTRIBUTES` is `FIXED_METADATA_ATTRIBUTES` plus the fields `FileMetadata.to_dict()` contributes. It is created whatever payload is passed, so `ensure-collection` against an **empty project** produces a collection the first delivery can write to. Before þing-04 S17 only the seven fixed attributes were declared; the rest existed on production only because write-time inference had created them years earlier, so a new project's first delivery uploaded its file and then failed `Unknown attribute: loa` on the document. |
 | **Failure is returned, not raised** | Every public method returns an `OperationResult` carrying `success`, `error` and a `code`. Callers must inspect it. |
 | **Nothing is defaulted from thin air** | Coordinates and credentials come from the environment and fail loud naming any missing variable. |
 
@@ -163,9 +164,18 @@ provisioner.ensure_collection(permissions=[])   # existing container keeps its g
   first bring-up against an **empty** project is where it stops being invisible: it
   leaves a junk database beside the real one, if the bucket's name happens to be a valid
   Appwrite id at all.
-- **Known limitation.** `_create_dynamic_attributes` derives the schema from whatever
-  payload it is handed, contradicting ADR-040 on a production database. Deferred behind a
-  named trigger: a non-production Appwrite project existing (þing-02 Á-5 / G2(h)).
+- **The deferred schema is now declared (þing-04 S17).** The named trigger — *a
+  non-production Appwrite project existing* (þing-02 Á-5 / G2(h)) — fired when the
+  CRAF'd-only project was commissioned. The delivery document's own fields are declared
+  in `DELIVERY_METADATA_ATTRIBUTES`, with `required=False` and `size=255` throughout
+  because that is exactly what the inference produced: a collection provisioned today
+  must have the same shape as the production one, or two projects disagree about what a
+  delivery document is. Widening `description`, or making `loa`/`category` required, are
+  separate changes to the production schema.
+- **Payload inference is retained, narrowed.** `infer_attribute_type` and
+  `_create_attribute_by_type` still cover metadata keys beyond the declared set, because
+  removing a caller's only route to an attribute is a decision with its own blast radius.
+  Against a brand-new project they have nothing left to do for the delivery path.
 - **Outstanding.** The key still carries 20 scopes. #331 was done so it *could* be
   narrowed; the narrowing has not happened.
 
