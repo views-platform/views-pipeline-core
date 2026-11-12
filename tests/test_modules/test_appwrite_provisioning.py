@@ -7,6 +7,7 @@ introduced: an upload that finds a missing container must fail BEFORE it writes 
 """
 
 import logging
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -1180,3 +1181,167 @@ class TestTheBringUpIsCompleteNotJustTheAttributes:
             "upload a file and then fail to record it"
         )
         assert "metadata database" in result.error
+
+
+class TestTheIndexesAreDerivedFromTheQueriesNotFromTheList:
+    """Closes the worst survivors of #586's guard audit (M07, M08, M15, M16).
+
+    An independent audit mutated `DECLARED_INDEXES` by deleting `idx_fileId`, then
+    `idx_file_hash`, and the whole suite stayed green both times. Every index test in
+    this file iterates `DECLARED_INDEXES`, so all of them assert "the code does whatever
+    the list says" and none asserts what the list must contain. Those two indexes are the
+    first-delivery failure this branch exists to fix, so the list was the one thing that
+    needed pinning and was the one thing unpinned.
+
+    The scope is therefore **derived from the production queries**, not restated here. A
+    hand-listed `{"fileId", "file_hash"}` would pass today and grow the same hole at the
+    next index, which is the failure recorded ten times in this repository.
+
+    Collection queries only: `file.py:1627` issues `Query.equal("name", ...)` against
+    `storage.list_files`, which is a bucket query and takes no collection index. The AST
+    walk below keeps only the keys inside `databases.list_documents` calls, so that
+    distinction is made by structure rather than by a list of exceptions.
+    """
+
+    @staticmethod
+    def _keys_the_delivery_queries_documents_by():
+        import ast
+
+        source = (
+            Path(__file__).resolve().parents[1].parent
+            / "views_pipeline_core"
+            / "modules"
+            / "appwrite"
+            / "file.py"
+        ).read_text()
+
+        keys = set()
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (
+                isinstance(func, ast.Attribute)
+                and func.attr == "list_documents"
+                and isinstance(func.value, ast.Attribute)
+                and func.value.attr == "databases"
+            ):
+                continue
+            for inner in ast.walk(node):
+                if (
+                    isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Attribute)
+                    and inner.func.attr == "equal"
+                    and inner.args
+                    and isinstance(inner.args[0], ast.Constant)
+                    and isinstance(inner.args[0].value, str)
+                ):
+                    keys.add(inner.args[0].value)
+        return keys
+
+    def test_the_derivation_finds_queries_at_all(self):
+        """A derived scope that derives nothing passes vacuously."""
+        keys = self._keys_the_delivery_queries_documents_by()
+        assert len(keys) >= 2, (
+            f"only {sorted(keys)} derived from `databases.list_documents` call sites in "
+            f"file.py — the call shape has changed and this guard is checking nothing"
+        )
+
+    def test_every_attribute_the_delivery_queries_by_has_an_index(self):
+        from views_pipeline_core.modules.appwrite.provisioning import DECLARED_INDEXES
+
+        indexed = {a for index in DECLARED_INDEXES for a in index["attributes"]}
+        missing = self._keys_the_delivery_queries_documents_by() - indexed
+        assert not missing, (
+            f"the delivery queries documents by {sorted(missing)} with no declared index "
+            f"covering it. An unindexed equality query is not dependable against this "
+            f"store — `file.py:1216` says so itself — so on a brand-new project the "
+            f"lookup errors, the error is not NOT_FOUND, and the upload refuses with "
+            f"'Could not determine whether a duplicate exists'."
+        )
+
+    def test_the_declared_lengths_reach_the_sdk(self, provisioner):
+        """M15: the ceiling was asserted against the declaration and never against the wire.
+
+        `lengths` could be deleted from the `create_index` call and the key-limit test
+        stayed green, because it reads `DECLARED_INDEXES`. A bring-up would then die
+        creating the index exactly as that test's docstring describes, with every guard
+        green.
+        """
+        from views_pipeline_core.modules.appwrite.provisioning import DECLARED_INDEXES
+
+        provisioner.databases.list_indexes.return_value = {"indexes": []}
+        assert provisioner.ensure_indexes("db", "coll").success
+
+        sent = {
+            (call.args[2] if len(call.args) > 2 else call.kwargs["key"]): call.kwargs.get(
+                "lengths"
+            )
+            for call in provisioner.databases.create_index.call_args_list
+        }
+        for index in DECLARED_INDEXES:
+            assert index["key"] in sent, f"{index['key']} never reached the SDK"
+            assert sent[index["key"]] == index.get("lengths"), (
+                f"{index['key']} declares lengths {index.get('lengths')} but the SDK was "
+                f"called with {sent[index['key']]}. The engine key limit is defended by "
+                f"the declaration and enforced only by what is sent."
+            )
+
+    def test_a_failed_index_creation_fails_the_collection(self, provisioner):
+        """M16: `ensure_indexes` could swallow every failure and report success.
+
+        Nothing had ever made `create_index` raise, so the `INDEXES_INCOMPLETE` branch
+        was unreached — `grep INDEXES_INCOMPLETE tests/` found nothing.
+        """
+        provisioner.databases.list.return_value = {
+            "databases": [{"$id": "test_database", "name": "Test Database"}]
+        }
+        provisioner.databases.list_collections.return_value = {"collections": []}
+        provisioner.databases.create_collection.return_value = {"$id": "test_collection"}
+        settle_attributes(provisioner.databases)
+        provisioner.databases.create_index.side_effect = AppwriteException(
+            "index limit reached", 400, "index_limit_exceeded"
+        )
+
+        result = provisioner.ensure_collection(metadata={})
+
+        assert not result.success, (
+            "the schema is complete but the delivery's hash and fileId lookups are not "
+            "dependable without their indexes — reporting success here is the same "
+            "'OK over a half-built container' this module refuses for attributes"
+        )
+        assert result.code == "INDEXES_INCOMPLETE"
+
+    def test_an_attribute_missing_from_the_listing_is_not_reported_ready(
+        self, provisioner
+    ):
+        """M14: the `unseen` half of the readiness poll was unguarded.
+
+        Every fixture listed all declared attributes, so dropping that half left all
+        three readiness tests green. The case removed is the one the production comment
+        calls Cluster J on the readiness question itself — an attribute still `processing`
+        that fell off a truncated page reads as ready.
+        """
+        from views_pipeline_core.modules.appwrite.provisioning import (
+            DECLARED_METADATA_ATTRIBUTES,
+        )
+
+        short = [
+            {"key": a["key"], "status": "available"}
+            for a in DECLARED_METADATA_ATTRIBUTES[:-1]
+        ]
+        provisioner.databases.list_attributes.side_effect = [
+            {"attributes": []}
+        ] + [{"attributes": short}] * 20
+        provisioner.databases.list_indexes.return_value = {"indexes": []}
+
+        with patch("views_pipeline_core.modules.appwrite.provisioning.time.sleep"):
+            result = provisioner.ensure_attributes("db", "coll", {})
+
+        omitted = DECLARED_METADATA_ATTRIBUTES[-1]["key"]
+        assert not result.success, (
+            f"{omitted} was created and does not appear in the listing, so its readiness "
+            f"is unknown — reporting success is 'not seen' recorded as 'available'"
+        )
+        assert omitted in result.error
+        provisioner.databases.create_index.assert_not_called()

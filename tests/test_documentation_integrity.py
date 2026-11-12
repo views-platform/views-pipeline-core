@@ -17,66 +17,86 @@ def test_validate_docs():
 
 
 def test_the_placeholder_scan_excludes_no_governed_document():
-    """A checker that selects its own work by matching prose can narrow silently.
+    """The script's selector must pick exactly the governed documents. Both sides run.
 
-    `validate_docs.sh` check 1 looks for unfilled template placeholders. It chose which
-    files to look at by matching `Status:.*\\(Accepted\\|Active\\)` until 2026-11-11 — so
-    every `Implemented` and `Retired` document was excluded, eleven of them including
-    ADRs 054 through 061, and the script printed OK in the same words as a run that had
-    actually checked them.
+    **This guard was WEAK and an audit said so.** Its first version asserted in its own
+    docstring that it was "a filesystem-to-filesystem comparison, not a prose matcher —
+    it asserts that the set the script scans is the set of governed documents, and
+    derives both sides". It did not. It computed `governed`, used it only in a
+    `len(governed) > 20` sanity check, never compared the two sides, and never ran the
+    script's selector — it matched the selector's SOURCE TEXT for two forbidden words and
+    a flag spelling. So it caught the two axes its author had thought of and nothing else.
+    Three mutations proved it: narrowing the scan's path to `./ADRs`, truncating the work
+    list with `| head -3`, and restoring case sensitivity while leaving the literal `-ril`
+    elsewhere on the line all left it green. A behaviour-identical reformat to
+    `grep -r -i -l` made it fail. Both symptoms of the same cause.
 
-    views-appwrite hit the identical defect in their copy of this script (their C-09,
-    where the single missed status was `Deferred`) and fixed it by adding that word to
-    the list. The list is the defect, so this repo's fix drops it: selection is now the
-    presence of a `Status:` line.
+    It now does what it claimed: it **executes** the selector the script actually uses and
+    requires the resulting set to EQUAL the governed set. That closes narrowing on any
+    axis — value, case, path, truncation, or one nobody has thought of — because it
+    compares outcomes rather than spellings, and it removes the false alarm on
+    reformatting at the same time.
 
-    **The asymmetry worth keeping** (views-appwrite's framing): matching prose to SELECT
-    work fails quietly, matching prose to DECIDE a verdict fails confidently. This was
-    the quiet kind, which is why it sat here for as long as it did and why a guard is
-    worth more than a careful pattern. The guard is a filesystem-to-filesystem
-    comparison, not a prose matcher — it asserts that the set the script scans is the set
-    of governed documents, and derives both sides.
+    **What the selection is still worth** (`reports/technical_risk_register.md` C-357):
+    check 1 increments a `warnings` counter that the script's verdict never reads, so a
+    placeholder it finds cannot change the exit code. Widening the input to a check whose
+    findings are discarded is lost coverage restored, not a defect caught, and nothing
+    here should be read as asserting otherwise. Making it gate needs the placeholder
+    patterns narrowed first — a document that legitimately shows `YYYY-MM-DD` as a format
+    is not a finding — and that is a decision, not a completion.
     """
+    import re
+    import subprocess
+
     docs = Path(__file__).resolve().parent.parent / "documentation"
+    script = (docs / "validate_docs.sh").read_text()
 
     governed = {
-        path
+        path.relative_to(docs).as_posix()
         for path in docs.rglob("*.md")
         if "template" not in path.name.lower()
-        and any(
-            "status:" in line.lower()
-            for line in path.read_text().splitlines()[:40]
-        )
+        # Whole file, not a header window. An earlier version of this line read only the
+        # first 40 lines while `grep` reads all of them, so two post-mortems carrying a
+        # `status:` further down appeared as "scanned but not governed" — my own
+        # derivation narrowing, inside the guard against narrowing. Both sides now mean
+        # the same thing, which is what makes an equality assertion legitimate.
+        and "status:" in path.read_text().lower()
     }
     assert len(governed) > 20, (
-        f"only {len(governed)} governed documents found — the `Status:` convention has "
+        f"only {len(governed)} governed documents found — the `status:` convention has "
         f"changed and this guard is no longer deriving anything"
     )
 
-    script = (docs / "validate_docs.sh").read_text()
-    # Case-insensitive on BOTH halves. An earlier version of this line searched for
-    # "Status" to locate the selector, so making the selector lowercase broke the guard
-    # that exists to police it — the same case axis, one level up, within the same minute.
-    selector = [
-        line
+    # The selector as the script runs it, lifted from the script and executed.
+    selectors = [
+        line.strip()
         for line in script.splitlines()
         if "--include='*.md'" in line and "status:" in line.lower()
     ]
-    assert len(selector) == 1, (
-        f"expected exactly one Status-based file selector in validate_docs.sh, found "
-        f"{len(selector)}: {selector}"
+    assert len(selectors) == 1, (
+        f"expected exactly one status-based file selector in validate_docs.sh, found "
+        f"{len(selectors)}: {selectors}"
     )
+    command = re.sub(r"^done < <\(", "", selectors[0]).rstrip(")")
 
-    assert "Accepted" not in selector[0] and "Active" not in selector[0], (
-        f"the placeholder scan selects files by status VALUE again: {selector[0].strip()}. "
-        f"Any status word not in that list is excluded silently, and the script reports "
-        f"OK either way. Select on the presence of a status line and let the filename "
-        f"check exclude templates."
+    completed = subprocess.run(
+        ["bash", "-c", command], cwd=docs, capture_output=True, text=True
     )
+    selected = {
+        line[2:] if line.startswith("./") else line
+        for line in completed.stdout.splitlines()
+        if line.strip() and "template" not in Path(line).name.lower()
+    }
 
-    assert "-ril" in selector[0] or "-irl" in selector[0], (
-        f"the selector is case-sensitive again: {selector[0].strip()}. The axis that "
-        f"defeated the original enumeration was CASE, not the missing word: "
-        f"views-appwrite's seam contract writes `**Status: ACCEPTED**`, which no amount "
-        f"of adding values to a case-sensitive list can reach."
+    assert selected == governed, (
+        "the script's placeholder scan does not look at the governed documents.\n"
+        f"  command: {command}\n"
+        f"  governed but NOT scanned ({len(governed - selected)}): "
+        f"{sorted(governed - selected)[:12]}\n"
+        f"  scanned but not governed ({len(selected - governed)}): "
+        f"{sorted(selected - governed)[:12]}\n"
+        "Narrowing on ANY axis — a status value, letter case, a path, a `head`, a flag — "
+        "excludes documents silently while the script still reports PASSED. That is the "
+        "defect this guard exists for, and the previous version of it checked the "
+        "selector's spelling instead of its outcome."
     )

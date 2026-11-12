@@ -27,17 +27,50 @@ from views_pipeline_core.modules.appwrite.provisioning import (
     DECLARED_METADATA_ATTRIBUTES,
 )
 
-PACKAGE = Path(__file__).resolve().parent.parent / "views_pipeline_core"
+_REPO = Path(__file__).resolve().parent.parent
+
+#: Everywhere a consumer reads a filter example. An audit planted
+#: `filters={"model": ...}` in `documentation/CICs/DatastoreModule.md` and in the root
+#: `README.md` and this guard stayed green both times — it scanned `views_pipeline_core/`
+#: only. A consumer reads the CIC and the root README BEFORE the package docstrings, and
+#: `DatastoreModule.md` was in fact already carrying two `loa` filter examples that the
+#: narrower scan never saw. Derived over the three roots a reader actually uses.
+_ROOTS = [_REPO / "views_pipeline_core", _REPO / "documentation", _REPO / "README.md"]
 
 #: Appwrite's own document fields, which are queryable without being declared by us.
 _SYSTEM_FIELDS = {"$id", "$createdAt", "$updatedAt", "$permissions"}
 
 #: `filters={...}` / `array_filters={...}`, in docstrings and in markdown alike. Matched
 #: textually on purpose: a docstring example is text, and `ast` will not see inside it.
-_FILTER_BLOCK = re.compile(
-    r"\b(?:array_)?filters\s*=\s*(\{[^{}]*\})", re.DOTALL
-)
+#:
+#: **Coverage is the keyword-literal form, and that is a limit rather than an oversight.**
+#: An audit showed this guard green against `download_latest_file({"model": ...})`
+#: (positional) and `filters=dict(model=...)`. Recognising those means deciding what an
+#: arbitrary expression denotes, which is the prose-parsing trade register C-355 declined
+#: after measuring it. Every example in this repository uses the keyword-literal form, so
+#: the guard covers what is written rather than what could be; if that changes, the fix is
+#: to normalise the examples, not to grow a parser here.
+_FILTER_START = re.compile(r"\b(?:array_)?filters\s*=\s*\{")
 _KEY = re.compile(r"""['"]([A-Za-z_$][A-Za-z0-9_]*)['"]\s*:""")
+
+
+def _balanced_block(text: str, open_brace: int) -> str:
+    """Return the `{...}` starting at `open_brace`, counting nested braces.
+
+    The first version used `\{[^{}]*\}`, which stops at the first inner `{`. An audit
+    planted `filters={"extra": {"name": "x"}, "model": "fatalities"}` and the guard saw
+    only the inner dict, so the offending key was never examined — the pattern was blind
+    to exactly the shape that hides a key from it.
+    """
+    depth = 0
+    for i in range(open_brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_brace : i + 1]
+    return text[open_brace:]
 
 
 def _declared() -> set:
@@ -45,18 +78,25 @@ def _declared() -> set:
 
 
 def _documented_filter_keys():
-    """Every attribute name any `filters=` example in the package mentions."""
+    """Every attribute name any `filters=` example mentions, across every reader-facing root."""
     found = {}
-    for path in sorted(PACKAGE.rglob("*")):
-        if path.suffix not in {".py", ".md"} or "__pycache__" in path.parts:
-            continue
+    paths = []
+    for root in _ROOTS:
+        if root.is_file():
+            paths.append(root)
+        else:
+            paths.extend(
+                p
+                for p in root.rglob("*")
+                if p.suffix in {".py", ".md"} and "__pycache__" not in p.parts
+            )
+    for path in sorted(set(paths)):
         text = path.read_text()
-        for block in _FILTER_BLOCK.finditer(text):
-            line = text[: block.start()].count("\n") + 1
-            for key in _KEY.findall(block.group(1)):
-                found.setdefault(key, []).append(
-                    f"{path.relative_to(PACKAGE.parent)}:{line}"
-                )
+        for match in _FILTER_START.finditer(text):
+            block = _balanced_block(text, match.end() - 1)
+            line = text[: match.start()].count("\n") + 1
+            for key in _KEY.findall(block):
+                found.setdefault(key, []).append(f"{path.relative_to(_REPO)}:{line}")
     return found
 
 
