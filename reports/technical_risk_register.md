@@ -4,7 +4,7 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 358 concerns (212 resolved) + 41 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.5.0 — OPEN.** Prepared 2026-11-12. **The Appwrite
+> **Release gate — pipeline-core 3.5.0 — ~~OPEN~~ SHIPPED.** Prepared 2026-11-12. Shipped 2026-11-12. **The Appwrite
 > bring-up for a per-audience project** (þing-04 S17, #480, PR #586).
 > *Dates written prepared-first, deliberately — see C-344. The guard takes the FIRST date
 > in this block, so a ship stamp written ahead of the prepared date silently narrows what
@@ -60,6 +60,8 @@
 > against the test project. Two facts could not be established from any repository and are
 > recorded as such in the CICs: whether an unindexed `Query.equal` rejects or degrades, and
 > whether the attribute `status` field exists on the deployed instance.
+>
+> **Shipped 2026-11-12, verified from outside.** Both artefacts reached PyPI — `views_pipeline_core-3.5.0.tar.gz` and `views_pipeline_core-3.5.0-py3-none-any.whl`, confirmed against the index's own JSON rather than against the workflow log, because 3.3.2 succeeded and uploaded only an sdist. A clean 3.11 venv installing `views-pipeline-core==3.5.0` imports it and reports the declared schema, the three declared indexes and the description ceiling, which is the consumer's view rather than this machine's. **One lesson for the guide:** the first fresh-venv install failed with *no matching distribution* while PyPI's JSON API already listed 3.5.0 with both files — pip reads the simple index, which lagged by minutes. The guide's step 4 should say to retry rather than to conclude, because a publish that has worked and an index that has not caught up are indistinguishable at that moment.
 
 > **Release gate — pipeline-core 3.4.0 — ~~OPEN~~ SHIPPED.** Prepared 2026-11-02. Shipped 2026-11-02. **One dependency floor.**
 > *Dates written prepared-first, deliberately — see C-344. The guard takes the FIRST date
