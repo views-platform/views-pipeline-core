@@ -4,6 +4,63 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 358 concerns (212 resolved) + 41 disagreements — 5 relocated to views-reporting
 
+> **Release gate — pipeline-core 3.5.0 — OPEN.** Prepared 2026-11-12. **The Appwrite
+> bring-up for a per-audience project** (þing-04 S17, #480, PR #586).
+> *Dates written prepared-first, deliberately — see C-344. The guard takes the FIRST date
+> in this block, so a ship stamp written ahead of the prepared date silently narrows what
+> it demands. When this gate ships, append `Shipped YYYY-MM-DD` AFTER the prepared date.*
+>
+> **Every concern registered since 3.4.0 shipped is dispositioned here, not only those the
+> guard demands.** 3.4.0 shipped 2026-11-02 and C-347 to C-358 were all found after it, so
+> the previous block could only name them for the guard's sake. This gate is the first that
+> can actually decide them.
+>
+> **Closed by this release (4):**
+> - **C-238** — `ensure_bucket`'s swapped database arguments. Fixed, two tests, the junk
+>   database measured against an empty project before the swap.
+> - **C-354** — the read path's unindexed equality filters. Closed on views-crafdapi's
+>   measurement of its own serving queries rather than our inference; the compound index
+>   covers both shapes they reported. **Residual, explicitly carried:** whether the deployed
+>   Appwrite hard-rejects an unindexed `Query.equal` or degrades to a scan is unanswerable
+>   from any repository — console custody is the operator's — and the rehearsal against the
+>   test project is the first opportunity to record it.
+> - **C-356** — `validate_docs.sh` selecting its own work by status word. Fixed here by
+>   dropping the value list and going case-insensitive; **the same defect exists in ten
+>   other repositories** (73 documents) where views-appwrite has filed an issue each, and
+>   propagating it is not this release's to do.
+> - **C-358** — the independent guard audit's five production survivors. All closed and
+>   each mutation-verified individually.
+>
+> **Consciously accepted, carried to the next gate (8).** The publishing guide is explicit
+> that accepting is legitimate and *not deciding* is not:
+> - **C-347** (no common output root or local commit marker), **C-348**
+>   (`EnsemblePathManager` raises on the method its docstring names), **C-349** (four
+>   `@abstractmethod`s with no `ABC`), **C-350** (the artifact-to-config timestamp
+>   copy-back), **C-351** (the private prediction-tier accessor) — all five predate this
+>   work, none is on the Appwrite path, and none is touched by this release. Carried
+>   unchanged.
+> - **C-352** — the two upload entrypoints build different metadata documents. The declared
+>   schema covers the union, so provisioning is correct for both; converging them changes
+>   what a delivery writes, which is a delivery-path decision and not a bring-up fix.
+>   views-models confirmed it does not bite them today.
+> - **C-353** — `AppwriteProvisioner` crossed the god-class threshold (633 lines).
+>   Allowlisted behind a named trigger with the extraction boundary recorded, rather than
+>   split inside the PR that was a precondition for a delivery that week.
+> - **C-357** — the placeholder check increments a counter the verdict never reads, so
+>   C-356's widening restored lost coverage into a check that cannot fail. **Accepted
+>   knowingly, and the reason is the order of operations**: making it gate requires
+>   narrowing the placeholder patterns first, because a document that legitimately shows
+>   `YYYY-MM-DD` as a format is not a finding — views-models measured exactly that false
+>   positive in their copy. Doing the second without the first turns noise into a red build
+>   across twelve repositories at once.
+>
+> **What this release leaves unproven, stated rather than discovered later:** the bring-up
+> has never been run against a live empty Appwrite project. Every behaviour above is
+> verified against mocks and the installed SDK, and the first real exercise is the rehearsal
+> against the test project. Two facts could not be established from any repository and are
+> recorded as such in the CICs: whether an unindexed `Query.equal` rejects or degrades, and
+> whether the attribute `status` field exists on the deployed instance.
+
 > **Release gate — pipeline-core 3.4.0 — ~~OPEN~~ SHIPPED.** Prepared 2026-11-02. Shipped 2026-11-02. **One dependency floor.**
 > *Dates written prepared-first, deliberately — see C-344. The guard takes the FIRST date
 > in this block, so a ship stamp written ahead of the prepared date silently narrows what
