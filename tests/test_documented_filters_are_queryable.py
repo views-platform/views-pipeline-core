@@ -18,7 +18,6 @@ filtered on. The scope is DERIVED by reading the files, because a hand-listed on
 eight guards in this repo came to be wrong about their own subject.
 """
 
-import ast
 import re
 from pathlib import Path
 
