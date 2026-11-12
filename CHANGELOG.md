@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.5.0] — unreleased
+## [3.5.0] — 2026-11-12
 
 Appwrite bring-up for a per-audience project. þing-04 S17 (#480, PR #586).
 
