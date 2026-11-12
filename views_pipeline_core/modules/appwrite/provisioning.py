@@ -21,16 +21,26 @@ Coordinates and credentials come from the process environment via
 ``PredictionStoreConfig.from_environment()``, which fails loud naming any missing
 variable. Nothing is defaulted here.
 
-**Known defect, preserved deliberately.** ``ensure_bucket``'s follow-on database creation
-passes its arguments in the wrong order (register C-238). It is reproduced verbatim from
-``file.py`` because a relocation must not change behaviour silently; fix it under its own
-issue, with a test.
+**C-238, fixed under þing-04 S17.** ``ensure_bucket``'s follow-on database creation
+passed its arguments in the wrong order, so it ensured a database whose id was the
+*bucket's name*. It had been reproduced verbatim from ``file.py`` because a relocation
+must not change behaviour silently, and it was invisible against the shared production
+project, where the real database already existed. The first bring-up against an **empty**
+project is where it stops being invisible, and that is this one.
 
-**Known limitation.** ``_create_dynamic_attributes`` derives the collection's schema from
-whatever payload it is handed, which contradicts ADR-040 (Authority of Declarations Over
-Inference) on a production database. Replacing it with a declared schema is deferred
-behind a named trigger: a non-production Appwrite project existing, since nobody has ever
-run a first bring-up against an empty one (þing-02 Á-5 / G2(h)).
+**The deferred schema, now declared.** This module used to derive the collection's
+schema from whatever payload it was handed, which contradicts ADR-040 (Authority of
+Declarations Over Inference). It was deferred behind a named trigger — *a non-production
+Appwrite project existing, since nobody has ever run a first bring-up against an empty
+one* (þing-02 Á-5 / G2(h)). **That trigger fired** (þing-04 S17): a CRAF'd-only project
+is being created, and it is rehearsed against a throwaway one first. The fields every delivery
+document carries are therefore declared in ``DELIVERY_METADATA_ATTRIBUTES`` below, and
+``ensure_attributes`` creates them whatever payload it is given.
+
+Payload inference is **retained for anything beyond that set**, because callers may still
+pass extra metadata and removing their only route to an attribute is a separate decision
+with a separate blast radius. Against a brand-new project it no longer has anything to do
+for the delivery path.
 """
 
 from __future__ import annotations
@@ -104,6 +114,144 @@ FIXED_METADATA_ATTRIBUTES: List[Dict[str, Any]] = [
     {"key": "uploaded_at", "type": "datetime", "required": False},
     {"key": "file_hash", "type": "string", "size": 64, "required": False},
 ]
+
+
+# The fields every *delivery* document carries, from `FileMetadata.to_dict()`
+# (`modules/datastore/datastore.py:166-191`). Together with the fixed attributes above
+# these are the whole metadata document that `file.py` builds and writes.
+#
+# Before these were declared, they existed only on the shared production collection,
+# created years ago by the write-time inference #331 removed. A collection provisioned
+# by this module's CLI into an EMPTY project carried the seven fixed attributes and
+# nothing else — so the first delivery uploaded its file and then failed
+# `Unknown attribute: loa` on the document, leaving an orphaned file in the bucket.
+#
+# `required` is False and strings are 255 throughout, which is exactly what the inference
+# produced. That is deliberate: a collection provisioned today must have the same shape as
+# the production one provisioned by inference, or the two projects disagree about what a
+# delivery document is. Widening `description` past 255, or making `loa`/`category`
+# required, are both defensible and are both a change to the production schema — not
+# something to smuggle in under a bring-up fix.
+DELIVERY_METADATA_ATTRIBUTES: List[Dict[str, Any]] = [
+    {"key": "loa", "type": "string", "size": 255, "required": False},
+    {"key": "name", "type": "string", "size": 255, "required": False},
+    {"key": "type", "type": "string", "size": 255, "required": False},
+    {"key": "targets", "type": "string", "size": 255, "required": False, "array": True},
+    {"key": "category", "type": "string", "size": 255, "required": False},
+    {"key": "description", "type": "string", "size": 255, "required": False},
+]
+
+#: What `ensure_attributes` creates regardless of payload.
+DECLARED_METADATA_ATTRIBUTES: List[Dict[str, Any]] = (
+    FIXED_METADATA_ATTRIBUTES + DELIVERY_METADATA_ATTRIBUTES
+)
+
+#: The attribute types this module can create. Declared so the declaration can be
+#: checked BEFORE anything is written — see `_validate_declarations`.
+CREATABLE_ATTRIBUTE_TYPES = frozenset({"string", "integer", "datetime", "boolean"})
+
+# The indexes the WRITE path needs. Attributes alone are not a complete bring-up:
+# `check_file_exists_by_hash` issues `Query.equal("file_hash", ...)` (`file.py:1200`) and
+# `_store_metadata_document` issues `Query.equal("fileId", ...)` (`file.py:1301`, `:1769`)
+# against this collection, and this package's own comment at `file.py:1216` already states
+# that an unindexed equality query "is not dependable against this store" — which is why
+# the filename match there is filtered in Python instead.
+#
+# Nothing in this repository, or in any sibling checkout, created an index before now,
+# while the platform key has carried `indexes.read`/`indexes.write` all along. On the
+# shared production collection the indexes exist, created outside this code. On an EMPTY
+# project they did not, so a bring-up that declared only attributes left the first
+# delivery to fail one step later than `Unknown attribute: loa`: the hash lookup returns
+# an error, which is not NOT_FOUND, so the upload refuses with "Could not determine
+# whether a duplicate exists".
+#
+# The read path is covered too, but only because a consumer MEASURED its own queries
+# rather than us guessing from our docstrings. `file.py:1046-1050` turns any
+# caller-supplied `filters` dict into equality queries, so "what the read path needs"
+# is not derivable from this repository at all. views-crafdapi read its serving code
+# (`views-crafdapi@feat/crafd-project`) and reported two shapes:
+#
+#   {category, type}          — prediction/manager.py ~:290, :343, :357
+#   {name, category, type}    — metadata.py:448
+#
+# and confirmed that the `loa` filter in our own DatastoreModule docstrings is
+# documentation only, reached by nothing on their serving path. One compound index serves
+# both shapes, ordered (category, type, name) so the two-attribute query matches a
+# leftmost prefix; a (name, …) ordering would serve only the three-attribute one.
+#
+# `"key"` rather than importing `appwrite.enums.index_type.IndexType.KEY`: checked
+# against the SDK this package actually pins (`appwrite>=13.4.1,<14.0.0`, 13.6.1 in the
+# dev env), where `create_index` assigns `api_params['type'] = type` with no
+# normalisation, and `IndexType.KEY.value == "key"`. So the literal and the enum produce
+# identical wire output, and the literal keeps this a declaration rather than an import.
+#
+# The enum's MODULE PATH differs between SDK majors — `appwrite.enums.index_type` on 13.x,
+# `appwrite.enums.databases_index_type` on 19.x, which is what other repos on this
+# platform pin — so importing it here would couple this constant to a version range wider
+# than our own. A test pins the value against whichever enum is installed; this is not a
+# claim resting on a comment.
+# `lengths` on the compound index is not a tuning knob, it is a ceiling. The three
+# attributes are `string(255)`, so at utf8mb4's 4 bytes per character each column is 1020
+# bytes of index key.
+#
+# InnoDB's limit is 3072 bytes **at a 16K page size, and 1536 at 8K** — a precondition
+# the number is usually quoted without. On 16K pages three uncapped columns are 3060 and
+# fit by twelve bytes; on 8K pages even TWO uncapped columns (2040) do not. Nobody on this
+# platform has read Appwrite Cloud's page size (views-appwrite, 2026-11-11), so the cap is
+# sized for the smaller limit rather than the likelier one. 64 characters is far longer
+# than any value these fields hold ("forecast", an artifact type, a model name) and leaves
+# the whole key at 768 bytes, inside both.
+#
+# Without the cap this is one schema change away from a bring-up that dies while creating
+# an index — which is the failure this module exists to stop — and a fourth uncapped
+# column cannot fit under either limit.
+DECLARED_INDEXES: List[Dict[str, Any]] = [
+    {"key": "idx_fileId", "type": "key", "attributes": ["fileId"]},
+    {"key": "idx_file_hash", "type": "key", "attributes": ["file_hash"]},
+    {
+        "key": "idx_category_type_name",
+        "type": "key",
+        "attributes": ["category", "type", "name"],
+        "lengths": [64, 64, 64],
+    },
+]
+
+
+def _validate_declarations() -> None:
+    """Fail at import if a declaration cannot be created, rather than part-way through.
+
+    An earlier version raised from inside the creation loop. That is fail-loud, but it
+    leaves every attribute before the bad one created and every one after it unattempted
+    — a half-built schema, which is the exact outcome `ensure_attributes` refuses to
+    report success over forty lines below. The declarations are module constants, so the
+    check belongs where they are, not where they are used.
+    """
+    for attr in DECLARED_METADATA_ATTRIBUTES:
+        if attr["type"] not in CREATABLE_ATTRIBUTE_TYPES:
+            raise ValueError(
+                f"declared attribute {attr['key']!r} has type {attr['type']!r}, which "
+                f"this module cannot create. Add a creator for it in "
+                f"`_create_declared_attribute` and to CREATABLE_ATTRIBUTE_TYPES."
+            )
+    declared_keys = {attr["key"] for attr in DECLARED_METADATA_ATTRIBUTES}
+    for index in DECLARED_INDEXES:
+        unknown = [a for a in index["attributes"] if a not in declared_keys]
+        if unknown:
+            raise ValueError(
+                f"declared index {index['key']!r} covers {unknown}, which no declared "
+                f"attribute provides. An index on an attribute that is never created "
+                f"fails at bring-up time against an empty project."
+            )
+        lengths = index.get("lengths")
+        if lengths is not None and len(lengths) != len(index["attributes"]):
+            raise ValueError(
+                f"declared index {index['key']!r} has {len(lengths)} length(s) for "
+                f"{len(index['attributes'])} attribute(s). Appwrite matches them "
+                f"positionally, so a short list silently caps the wrong column."
+            )
+
+
+_validate_declarations()
 
 
 def infer_attribute_type(value: Any) -> Tuple[str, bool]:
@@ -395,7 +543,12 @@ class AppwriteProvisioner:
         max_retries: int = MAX_ATTRIBUTE_CREATION_RETRIES,
         initial_delay: float = INITIAL_RETRY_DELAY,
     ) -> OperationResult:
-        """Create the fixed attributes, plus any inferred from ``metadata``."""
+        """Create the declared attributes, plus any inferred from ``metadata``.
+
+        The declared set is created whatever ``metadata`` holds — that is what makes an
+        empty dict a complete bring-up. Inference only reaches keys the declaration does
+        not already cover.
+        """
         delay = initial_delay
         existing_attribute_keys = set()
 
@@ -434,15 +587,15 @@ class AppwriteProvisioner:
         # class of lie the þing convened about (#322).
         failed: List[str] = []
 
-        for attr in FIXED_METADATA_ATTRIBUTES:
+        for attr in DECLARED_METADATA_ATTRIBUTES:
             if attr["key"] in existing_attribute_keys:
                 continue
             try:
-                self._create_fixed_attribute(database_id, collection_id, attr)
+                self._create_declared_attribute(database_id, collection_id, attr)
             except AppwriteException as e:
                 if "already exists" not in exception_message(e).lower():
                     logger.error(
-                        f"Failed to create fixed attribute {attr['key']}: {e.message}"
+                        f"Failed to create declared attribute {attr['key']}: {e.message}"
                     )
                     failed.append(f"{attr['key']} ({e.type or e.message})")
 
@@ -469,25 +622,218 @@ class AppwriteProvisioner:
                 code="ATTRIBUTES_INCOMPLETE",
             )
 
+        pending = self._await_declared_attributes(
+            database_id, collection_id, max_retries, initial_delay
+        )
+        if pending is not None:
+            return pending
+
+        return self.ensure_indexes(database_id, collection_id, max_retries, initial_delay)
+
+    def _await_declared_attributes(
+        self,
+        database_id: str,
+        collection_id: str,
+        max_retries: int,
+        initial_delay: float,
+    ) -> Optional[OperationResult]:
+        """Block until every declared attribute is usable. Returns a failure, or None.
+
+        Appwrite creates attributes asynchronously: the create call returns while the
+        attribute is still ``processing``, and a document referencing one that is not yet
+        ``available`` is rejected. Until now this module returned success the moment the
+        creates were accepted — harmless for years, because on the production collection
+        the attributes had existed since long before any delivery. The whole point of
+        this bring-up is that they now exist *seconds* before the first delivery, which
+        reintroduces `Unknown attribute: loa` by a different route.
+
+        A missing ``status`` field is treated as available, so this cannot invent a
+        failure against a server that does not report one. The field's presence was not
+        confirmed against a live instance from here; what is confirmed is that waiting
+        for it cannot be worse than not waiting.
+        """
+        declared = {attr["key"] for attr in DECLARED_METADATA_ATTRIBUTES}
+        delay = initial_delay
+        unusable: Dict[str, str] = {}
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                listing = self.databases.list_attributes(
+                    database_id, collection_id, queries=[Query.limit(_PROVISION_PAGE)]
+                )
+            except AppwriteException as e:
+                return OperationResult(
+                    success=False,
+                    error=(
+                        f"attributes were created in '{collection_id}' but their "
+                        f"readiness could not be confirmed: {e.message}. Do not deliver "
+                        f"into this collection until `audit` shows every attribute "
+                        f"available."
+                    ),
+                    code=e.type or "ATTRIBUTES_UNCONFIRMED",
+                )
+
+            attributes, truncated = _complete_listing(listing, "attributes")
+            seen = {attr["key"] for attr in attributes}
+
+            # Two ways an attribute is not yet usable, and BOTH are waited for rather
+            # than failed on. An attribute absent from the listing altogether is the
+            # propagation window — treating that as a hard failure would convert a
+            # normal delay into a refused bring-up. It is also what a truncated listing
+            # looks like, and a short read is not benign on this question: an attribute
+            # still `processing` that fell off the page is absent from `unusable` and so
+            # would read as ready. "Not seen" reported as "available" is Cluster J on
+            # the readiness question itself.
+            unseen = declared - seen
+            unusable = {
+                attr["key"]: attr["status"]
+                for attr in attributes
+                if attr["key"] in declared
+                and attr.get("status", "available") != "available"
+            }
+            if not unseen and not unusable:
+                return None
+            if attempt < max_retries:
+                logger.info(
+                    "waiting for %d attribute(s) to become usable (attempt %d/%d)",
+                    len(unseen) + len(unusable),
+                    attempt,
+                    max_retries,
+                )
+                time.sleep(delay)
+                delay *= 2
+
+        reasons = []
+        if unusable:
+            reasons.append(f"not available: {unusable}")
+        if unseen:
+            reasons.append(
+                f"created but absent from a listing of {len(seen)} attribute(s): "
+                f"{sorted(unseen)}"
+                + (f" — {truncated}" if truncated else "")
+            )
+        return OperationResult(
+            success=False,
+            error=(
+                f"attribute(s) in '{collection_id}' never became usable — "
+                + "; ".join(reasons)
+                + ". The schema exists but documents using these fields will be "
+                "rejected; re-run this command, and if a status is 'failed' or 'stuck' "
+                "the attribute must be deleted in the console before it can be "
+                "recreated."
+            ),
+            code="ATTRIBUTES_NOT_AVAILABLE",
+        )
+
+    def ensure_indexes(
+        self,
+        database_id: str,
+        collection_id: str,
+        max_retries: int = MAX_ATTRIBUTE_CREATION_RETRIES,
+        initial_delay: float = INITIAL_RETRY_DELAY,
+    ) -> OperationResult:
+        """Create the indexes the delivery's own queries need. See DECLARED_INDEXES."""
+        try:
+            listing = self.databases.list_indexes(
+                database_id, collection_id, queries=[Query.limit(_PROVISION_PAGE)]
+            )
+            indexes, truncated = _complete_listing(listing, "indexes")
+            if truncated:
+                # Logged rather than returned, and this is the one listing in this module
+                # where that is defensible: a missed index is re-created, the server
+                # answers "already exists", and the loop below tolerates it. Said out
+                # loud because every other listing here treats a short read as a failure.
+                logger.warning(
+                    "index listing for '%s' is incomplete (%s); an existing index may be "
+                    "re-created, which the server refuses harmlessly",
+                    collection_id,
+                    truncated,
+                )
+            existing = {index["key"] for index in indexes}
+        except AppwriteException as e:
+            return OperationResult(
+                success=False,
+                error=f"Failed to list indexes: {e.message}",
+                code=e.type or "INDEXES_UNREADABLE",
+            )
+
+        failed: List[str] = []
+        for index in DECLARED_INDEXES:
+            if index["key"] in existing:
+                continue
+            try:
+                self.databases.create_index(
+                    database_id,
+                    collection_id,
+                    index["key"],
+                    index["type"],
+                    index["attributes"],
+                    lengths=index.get("lengths"),
+                )
+                logger.debug(f"Created index: {index['key']}")
+            except AppwriteException as e:
+                if "already exists" in exception_message(e).lower():
+                    continue
+                logger.error(f"Failed to create index {index['key']}: {e.message}")
+                failed.append(f"{index['key']} ({e.type or e.message})")
+
+        if failed:
+            return OperationResult(
+                success=False,
+                error=(
+                    f"{len(failed)} index(es) could not be created in collection "
+                    f"'{collection_id}': {', '.join(failed)}. The schema is complete but "
+                    f"the delivery's hash and fileId lookups are not dependable without "
+                    f"them — see DECLARED_INDEXES."
+                ),
+                code="INDEXES_INCOMPLETE",
+            )
+
         return OperationResult(success=True)
 
-    def _create_fixed_attribute(
+    def _create_declared_attribute(
         self, database_id: str, collection_id: str, attr: Dict[str, Any]
     ):
+        """Create one attribute exactly as declared, including its arity.
+
+        ``array`` is threaded through every type rather than only the one that needs it
+        today. A declaration that says `array` and a creator that silently drops it is
+        how `targets` would become a scalar and reject the list the delivery writes —
+        and the guard would have been right about the declaration and wrong about the
+        collection.
+        """
+        array = bool(attr.get("array", False))
         attr_creators = {
             "string": lambda: self.databases.create_string_attribute(
-                database_id, collection_id, attr["key"], attr["size"], attr["required"]
+                database_id,
+                collection_id,
+                attr["key"],
+                attr["size"],
+                attr["required"],
+                array=array,
             ),
             "integer": lambda: self.databases.create_integer_attribute(
-                database_id, collection_id, attr["key"], attr["required"]
+                database_id, collection_id, attr["key"], attr["required"], array=array
             ),
             "datetime": lambda: self.databases.create_datetime_attribute(
-                database_id, collection_id, attr["key"], attr["required"]
+                database_id, collection_id, attr["key"], attr["required"], array=array
+            ),
+            "boolean": lambda: self.databases.create_boolean_attribute(
+                database_id, collection_id, attr["key"], attr["required"], array=array
             ),
         }
-        if attr["type"] in attr_creators:
-            attr_creators[attr["type"]]()
-            logger.debug(f"Created {attr['type']} attribute: {attr['key']}")
+        # Unreachable for the declared set: `_validate_declarations` has already run at
+        # import. Kept as the backstop for a hand-built `attr`, and deliberately a raise
+        # rather than a silent skip — a skipped declaration is a schema silently short of
+        # what the delivery writes. The pre-import check is what keeps a bad declaration
+        # from leaving half the attributes created.
+        if attr["type"] not in attr_creators:
+            raise ValueError(
+                f"attribute {attr['key']!r} has type {attr['type']!r}, which this module "
+                f"cannot create."
+            )
+        attr_creators[attr["type"]]()
+        logger.debug(f"Created {attr['type']} attribute: {attr['key']}")
 
     def _create_attribute_by_type(
         self,
@@ -563,13 +909,39 @@ class AppwriteProvisioner:
             )
 
             if create_metadata_db:
-                # C-238: the arguments are swapped — the signature is
-                # (database_id, database_name) and this passes (bucket_name, database_id).
-                # Reproduced verbatim from file.py: a relocation must not change
-                # behaviour silently. Fix under its own issue, with a test.
-                db_result = self.ensure_database(name, self.config.database_id)
-                if db_result.success:
-                    result["metadata_database"] = db_result.data
+                # C-238, fixed. The signature is (database_id, database_name) and this
+                # passed (bucket_name, database_id), so `ensure-bucket` ensured a
+                # database whose id was the BUCKET'S NAME. Against the shared production
+                # project that was invisible, because the real database already existed.
+                # Against an empty one — a new per-audience project — it creates a second,
+                # junk database alongside the real one, and whether it lands at all
+                # depends on whether the bucket's name happens to be a valid Appwrite id.
+                # #331 carried the swap over verbatim under the rule that a relocation
+                # must not change behaviour silently; þing-04 S17 is the first bring-up
+                # against an empty project, which is where it stops being invisible.
+                db_result = self.ensure_database(
+                    self.config.database_id, self.config.database_name
+                )
+                if not db_result.success:
+                    # Returned, not discarded. `ensure_database` reports failure by
+                    # return value and never raises, so the enclosing
+                    # `except AppwriteException` cannot see it: without this the bucket
+                    # bring-up printed "OK (CREATED)" and exited 0 with no metadata
+                    # database behind it. Tolerable while the swapped arguments above
+                    # meant the lost failure was a JUNK database's; now that it is the
+                    # real one, discarding it is C-291's shape — "reported OK while
+                    # writing nothing" — which `ensure_attributes` refuses by name.
+                    return OperationResult(
+                        success=False,
+                        error=(
+                            f"bucket '{bucket_id}' was created, but its metadata "
+                            f"database could not be: {db_result.error}. The bucket "
+                            f"exists and the database does not, so a delivery into it "
+                            f"would upload a file and then fail to record it."
+                        ),
+                        code=db_result.code or "METADATA_DATABASE_FAILED",
+                    )
+                result["metadata_database"] = db_result.data
 
             return OperationResult(success=True, data=result, code="CREATED")
 
@@ -681,13 +1053,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         result = provisioner.ensure_database()
     else:
         # `metadata={}` rather than the default None. `ensure_attributes` iterates
-        # FIXED_METADATA_ATTRIBUTES unconditionally, so an empty dict is what makes the
-        # existing-collection path ensure the declared schema — matching the creation
+        # DECLARED_METADATA_ATTRIBUTES unconditionally, so an empty dict is what makes
+        # the existing-collection path ensure the declared schema — matching the creation
         # path, which already passes `metadata or {}`. With the default, this command
         # returned OK(EXISTS) having written nothing, so a collection missing `file_hash`
         # stayed missing it while the operator was told it was provisioned (#473). Do NOT
-        # pass FIXED_METADATA_ATTRIBUTES here: it is a list of dicts, and the dynamic pass
-        # would infer `string(255)` for each and create junk attributes named after them.
+        # pass DECLARED_METADATA_ATTRIBUTES here: it is a list, and the payload pass
+        # iterates `metadata.items()`, so it raises `AttributeError` before any write.
+        # (An earlier version of this comment said a list would be inferred as
+        # `string(255)` junk attributes. The advice was right and the mechanism was
+        # wrong — C-273's shape, in a comment written to prevent a mistake.) The empty
+        # dict is now the COMPLETE bring-up, not a repair of seven fields
+        # (þing-04 S17): the declared set covers every key a delivery document carries.
         result = provisioner.ensure_collection(metadata={})
 
     if result.success:

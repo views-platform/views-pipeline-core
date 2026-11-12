@@ -46,6 +46,34 @@ fixture — but it does require proving that, the same way.
 equal the committed fixture (`203650fd…12c54`) — measured in an isolated environment at the
 pinned toolchain (pyarrow 16.1.0, numpy 1.26.4), where all 61 frames-dependent tests also
 pass at 2.0.0. So the views-frames 2.0.0 adoption (#286) is **not** a fixture re-vendor. It
-is blocked only by views-pipeline-core, every published release of which (through 3.1.1)
-pins `views-frames <2.0.0`. Recorded so the byte question is not re-opened when that
-constraint widens.
+was blocked only by views-pipeline-core, every release published at the time (through
+3.1.1) pinning `views-frames <2.0.0`. Recorded so the byte question is not re-opened when
+that constraint widens.
+
+**That constraint has since widened, and the byte question was re-opened and answered the
+same way (2026-11-02, #324).** Regenerating with `scripts/build_wire_fixture.py` under
+**views-frames 3.0.0** at the pinned toolchain (pyarrow 16.1.0) reproduces **all five
+artifacts byte-identically** — `SHA256SUMS` is unchanged and the arrow shard still hashes
+`203650fd…12c54`. Expected, because `views_frames/io/arrow.py` is byte-identical between
+`v2.0.0` and `v3.0.0`, and because the 3.0.0 MAJOR's behavioural change is confined to
+`views_frames_reconcile`, which this repo does not import. (The MAJOR does also touch
+`views_frames/conformance/__init__.py`, which moves its published `CONFORMANCE_FLOOR` to
+3.0.0 — inert here, since nothing in this repo reads that constant.) The full suite passes
+at that version on Python 3.11 — 527 passed, 3 skipped, 41 xfailed, 0 failed — with the
+lock also moving views-pipeline-core 3.3.0 -> 3.4.0, since 3.3.0 was the release that
+still capped `views-frames <3.0.0`. So 3.0.0 is not a fixture re-vendor either, and the
+pin is now `>=2.0.0,<4.0.0`.
+
+**If you are the next person raising this pin, run the check like this.** views-frames
+uses a **src layout**, so the pathspec needs `src/`:
+
+```
+git -C <views-frames> diff v2.0.0..v3.0.0 -- src/views_frames/io/     # empty  -> arrow.py is unchanged
+git -C <views-frames> diff v2.0.0..v3.0.0 -- src/views_frames/        # NOT empty -> the control
+```
+
+**Run the second one too.** `git diff` prints nothing and exits 0 for a pathspec that
+matches no file in either tree, so `-- views_frames/io/` (no `src/`) comes back empty
+whatever changed, and reads exactly like a pass. The first draft of this very paragraph
+quoted that form as its proof. The control line is what tells you the command can still
+speak — if it is also empty, your pathspec is wrong, not the tree.

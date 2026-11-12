@@ -86,7 +86,7 @@ from views_pipeline_core.modules.datastore import DatastoreModule
 from views_pipeline_core.modules.appwrite import AppwriteConfig
 
 config = AppwriteConfig(
-    endpoint="https://cloud.appwrite.io/v1",
+    endpoint="https://fra.cloud.appwrite.io/v1",
     project_id="views_project",
     credentials="api_key",
     bucket_id="forecasts",
@@ -109,14 +109,20 @@ if result.success:
     print(result.data["file_id"])
 
 # Download latest
+#
+# `filters` keys must be attributes of the metadata collection, and the three that
+# carry an index are `category`, `type` and `name` (DECLARED_INDEXES in
+# `modules/appwrite/provisioning.py`). Both examples below filtered on `loa` until
+# 2026-11-12: a real attribute, but absent from the platform seam contract's filterable
+# set, carrying no index, and queried by no consumer on the platform.
 result = datastore.download_latest_file(
-    filters={"loa": "pgm", "category": "forecast"},
+    filters={"category": "forecast", "type": "ensemble"},
     save_path="/tmp/latest.parquet",
 )
 
 # Search
 predictions = datastore.get_predictions_by_metadata(
-    filters={"loa": "pgm"}
+    filters={"category": "forecast", "name": "fatalities_ensemble"}
 )
 ```
 

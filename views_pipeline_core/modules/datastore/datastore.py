@@ -25,7 +25,7 @@ Typical usage example:
     from views_pipeline_core.modules.appwrite import AppwriteConfig
 
     config = AppwriteConfig(
-        endpoint="https://cloud.appwrite.io/v1",
+        endpoint="https://fra.cloud.appwrite.io/v1",
         project_id="my_project",
         credentials="my_api_key",
         bucket_id="predictions"
@@ -44,7 +44,7 @@ Typical usage example:
     )
 
     # Download the latest prediction
-    latest = datastore.download_latest_file(filters={"loa": "pgm"})
+    latest = datastore.download_latest_file(filters={"category": "forecast"})
 """
 
 from typing import List, Optional, Dict, Any, Union
@@ -83,6 +83,16 @@ class MetadataSearchIncomplete(RuntimeError):
     It subclasses ``RuntimeError`` so that existing broad handlers still catch it,
     while a caller that wants to retry the read specifically can.
     """
+
+
+#: The declared width of the metadata collection's `description` attribute.
+#:
+#: Duplicated from `modules/appwrite/provisioning.py`'s DELIVERY_METADATA_ATTRIBUTES
+#: rather than imported, because the delivery path must never import the provisioning
+#: module (#332, asserted in a subprocess by `tests/test_import_purity.py`). Two copies
+#: of one number is the cheaper of the two wrongs here; `test_datastore.py` asserts they
+#: agree, so a drift fails rather than silently truncating a partner's delivery.
+MAX_DESCRIPTION_LENGTH = 255
 
 
 class FileMetadata:
@@ -153,6 +163,14 @@ class FileMetadata:
             raise TypeError("targets must be a list of strings")
         if description is not None and not isinstance(description, str):
             raise TypeError("description must be a string or None")
+        if description is not None and len(description) > MAX_DESCRIPTION_LENGTH:
+            raise ValueError(
+                f"description is {len(description)} characters; the metadata "
+                f"collection's `description` attribute holds "
+                f"{MAX_DESCRIPTION_LENGTH}. Refused here rather than at the document "
+                f"write, which happens AFTER the file has been uploaded and would "
+                f"leave an orphan in the bucket."
+            )
         if category not in ["forecast", "historical"]:
             raise ValueError(f"category must be either 'forecast' or 'historical'. Got: {category}")
 
@@ -211,7 +229,7 @@ class DatastoreModule:
     Example:
         >>> from views_pipeline_core.modules.appwrite import AppwriteConfig
         >>> config = AppwriteConfig(
-        ...     endpoint="https://cloud.appwrite.io/v1",
+        ...     endpoint="https://fra.cloud.appwrite.io/v1",
         ...     project_id="views_project",
         ...     credentials="api_key_here",
         ...     bucket_id="forecasts",
@@ -232,7 +250,7 @@ class DatastoreModule:
         >>>
         >>> # Search for predictions
         >>> predictions = datastore.get_predictions_by_metadata(
-        ...     filters={"loa": "pgm", "category": "forecast"}
+        ...     filters={"category": "forecast", "type": "ensemble"}
         ... )
         >>>
         >>> # Download the latest file
@@ -252,7 +270,7 @@ class DatastoreModule:
 
         Example:
             >>> config = AppwriteConfig(
-            ...     endpoint="https://cloud.appwrite.io/v1",
+            ...     endpoint="https://fra.cloud.appwrite.io/v1",
             ...     project_id="my_project",
             ...     credentials="my_api_key",
             ...     bucket_id="production_forecasts"
@@ -530,7 +548,7 @@ class DatastoreModule:
 
         Example:
             >>> file_id = datastore.get_latest_file_id(
-            ...     filters={"loa": "pgm", "category": "forecast"}
+            ...     filters={"category": "forecast", "type": "ensemble"}
             ... )
             >>> if file_id:
             ...     print(f"Latest file: {file_id}")
@@ -583,7 +601,7 @@ class DatastoreModule:
         Example:
             >>> # Download latest forecast to file
             >>> result = datastore.download_latest_file(
-            ...     filters={"loa": "pgm", "category": "forecast"},
+            ...     filters={"category": "forecast", "type": "ensemble"},
             ...     save_path="/tmp/latest_forecast.parquet"
             ... )
             >>> if result.success:

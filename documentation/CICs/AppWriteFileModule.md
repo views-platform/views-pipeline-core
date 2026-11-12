@@ -176,7 +176,7 @@ from views_pipeline_core.modules.appwrite.file import (
 )
 
 config = AppwriteConfig(
-    endpoint="https://cloud.appwrite.io/v1",
+    endpoint="https://fra.cloud.appwrite.io/v1",
     project_id="my_project",
     credentials="my_api_key",
     auth_method=AuthMethod.API_KEY,

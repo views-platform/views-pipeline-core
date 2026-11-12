@@ -465,3 +465,58 @@ class TestSearchFailureIsNotAbsence:
 
         with pytest.raises(MetadataSearchIncomplete):
             prediction_store.list_all_predictions_unfiltered()
+
+
+def test_the_description_ceiling_agrees_with_the_declared_attribute():
+    """Two copies of one number, and a guard so they cannot drift.
+
+    `MAX_DESCRIPTION_LENGTH` is duplicated from the provisioning module's
+    DELIVERY_METADATA_ATTRIBUTES rather than imported, because the delivery path must
+    never import that module (#332, asserted in a subprocess by
+    `tests/test_import_purity.py`). A test may import both, so this is where the
+    duplication is held honest. If they drift, a partner's delivery uploads its file and
+    then fails the document write on a field this package said was fine.
+    """
+    from views_pipeline_core.modules.appwrite.provisioning import (
+        DELIVERY_METADATA_ATTRIBUTES,
+    )
+    from views_pipeline_core.modules.datastore.datastore import MAX_DESCRIPTION_LENGTH
+
+    declared = next(
+        a for a in DELIVERY_METADATA_ATTRIBUTES if a["key"] == "description"
+    )
+    assert MAX_DESCRIPTION_LENGTH == declared["size"], (
+        f"datastore allows {MAX_DESCRIPTION_LENGTH} characters of description while the "
+        f"provisioned attribute holds {declared['size']}"
+    )
+
+
+def test_an_over_long_description_is_refused_before_the_file_is_uploaded():
+    """The document write happens AFTER the upload, so a rejection there leaves an
+    orphaned file in the bucket — the same shape #586 fixed for a missing attribute."""
+    import pytest
+
+    from views_pipeline_core.modules.datastore.datastore import (
+        MAX_DESCRIPTION_LENGTH,
+        FileMetadata,
+    )
+
+    with pytest.raises(ValueError, match="description is"):
+        FileMetadata(
+            loa="pgm",
+            name="chrome_box",
+            type="ensemble",
+            targets=["pred_ged_sb"],
+            category="forecast",
+            description="x" * (MAX_DESCRIPTION_LENGTH + 1),
+        )
+
+    # The boundary itself is allowed.
+    assert FileMetadata(
+        loa="pgm",
+        name="chrome_box",
+        type="ensemble",
+        targets=["pred_ged_sb"],
+        category="forecast",
+        description="x" * MAX_DESCRIPTION_LENGTH,
+    ).to_dict()["description"]

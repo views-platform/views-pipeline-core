@@ -136,6 +136,16 @@ KNOWN_GOD_CLASSES = {
     "views_pipeline_core/managers/model/model.py::ForecastingModelManager",  # 1630 loc
     "views_pipeline_core/modules/aggregation/aggregator.py::AggregationModule",  # 867 loc
     "views_pipeline_core/modules/appwrite/file.py::AppWriteFileModule",  # 1534 loc
+    # 633 loc, crossed the threshold in þing-04 S17 (#586) when the bring-up grew a
+    # declared schema, a readiness poll and index creation. Deliberate, and deferred
+    # behind a NAMED TRIGGER rather than a vague later: the schema half
+    # (`ensure_attributes`, `_await_declared_attributes`, `ensure_indexes`,
+    # `_create_declared_attribute`, `_create_attribute_by_type` — about 300 loc) is one
+    # coherent responsibility and is what should be extracted. **Trigger: the next
+    # attribute- or index-level capability added to this class.** Not done inside #586
+    # because that PR is the precondition for a delivery this week and a class split
+    # would make it unreviewable. Registered as C-353.
+    "views_pipeline_core/modules/appwrite/provisioning.py::AppwriteProvisioner",  # 633 loc
     "views_pipeline_core/modules/dataloaders/dataloaders.py::ViewsDataLoader",  # 913 loc
     "views_pipeline_core/modules/datastore/datastore.py::DatastoreModule",  # 560 loc
     "views_pipeline_core/modules/validation/adapter.py::EvaluationAdapter",  # 517 loc

@@ -123,9 +123,20 @@ by anyone who could reach the endpoint.
 
 **Two things that sentence depends on, stated rather than assumed.**
 
-*Who can reach the endpoint.* Our default is `https://cloud.appwrite.io/v1`
-(`modules/appwrite/file.py:41`) — Appwrite's hosted service, on the public internet, with
-no network restriction of ours in front of it. So "anyone who could reach the endpoint"
+*Who can reach the endpoint.* There is no default — the endpoint is required from
+`APPWRITE_ENDPOINT` and nothing in this package supplies a fallback
+(`configs/prediction_store.py:13-23`). The platform's value is
+`https://fra.cloud.appwrite.io/v1`, from the coordinate registry in views-appwrite
+(`docs/ADRs/platform/coordinate_registry.toml:188-190`) — Appwrite's hosted service in
+Frankfurt, on the public internet, with no network restriction of ours in front of it.
+
+> **Corrected 2026-11-11.** This paragraph named `https://cloud.appwrite.io/v1` and cited
+> `modules/appwrite/file.py:41` for it. That line is a **docstring example**, not a
+> default, and the URL in it was wrong in nineteen places across this repository's
+> examples, READMEs and CICs. The argument below is unchanged — the real endpoint is
+> equally hosted and equally unrestricted — but the fact it rested on was not the one the
+> citation carried, which is C-273's shape, inside the document C-273 was first raised
+> against. So "anyone who could reach the endpoint"
 means anyone, from anywhere. If the platform ever moves to a self-hosted or
 network-restricted instance, this sentence needs re-checking rather than re-reading.
 
