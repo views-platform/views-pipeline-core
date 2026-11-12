@@ -38,7 +38,7 @@ Typical usage example:
 
     # Configure with API key authentication
     config = AppwriteConfig(
-        endpoint="https://cloud.appwrite.io/v1",
+        endpoint="https://fra.cloud.appwrite.io/v1",
         project_id="my_project",
         credentials="my_api_key",
         auth_method=AuthMethod.API_KEY,
@@ -350,7 +350,7 @@ class AppwriteConfig:
     a string.
 
     Attributes:
-        endpoint: Appwrite server endpoint URL (e.g., 'https://cloud.appwrite.io/v1').
+        endpoint: Appwrite server endpoint URL (e.g., 'https://fra.cloud.appwrite.io/v1').
         project_id: Appwrite project identifier.
         credentials: Authentication API key (a string). The dict form documented here
             belonged to SESSION auth, deleted in #344 — API_KEY is the only method.
@@ -370,7 +370,7 @@ class AppwriteConfig:
     Example:
         >>> # API key configuration
         >>> config = AppwriteConfig(
-        ...     endpoint="https://cloud.appwrite.io/v1",
+        ...     endpoint="https://fra.cloud.appwrite.io/v1",
         ...     project_id="my_project",
         ...     credentials="secret_api_key",
         ...     auth_method=AuthMethod.API_KEY,
@@ -380,7 +380,7 @@ class AppwriteConfig:
         >>>
         >>> # Session authentication configuration
         >>> config = AppwriteConfig(
-        ...     endpoint="https://cloud.appwrite.io/v1",
+        ...     endpoint="https://fra.cloud.appwrite.io/v1",
         ...     project_id="my_project",
         ...     credentials={"email": "user@example.com", "password": "secret"},
         ... )
@@ -974,7 +974,7 @@ class AppwriteMetadataHandler:
         >>>
         >>> # Search for files by metadata
         >>> results = handler.search_files_by_metadata(
-        ...     filters={"model": "test"},
+        ...     filters={"name": "test"},
         ...     array_filters={"targets": "ged_sb"}
         ... )
     """
@@ -1018,7 +1018,7 @@ class AppwriteMetadataHandler:
         Example:
             >>> # Find files by exact match
             >>> result = handler.search_files_by_metadata(
-            ...     filters={"model": "ensemble", "loa": "pgm"}
+            ...     filters={"name": "ensemble", "category": "forecast"}
             ... )
             >>>
             >>> # Find files where array contains value
@@ -1361,7 +1361,7 @@ class AppWriteFileModule:
         ... )
         >>>
         >>> config = AppwriteConfig(
-        ...     endpoint="https://cloud.appwrite.io/v1",
+        ...     endpoint="https://fra.cloud.appwrite.io/v1",
         ...     project_id="my_project",
         ...     credentials="my_api_key",
         ...     bucket_id="forecasts"
@@ -1398,7 +1398,7 @@ class AppWriteFileModule:
 
         Example:
             >>> config = AppwriteConfig(
-            ...     endpoint="https://cloud.appwrite.io/v1",
+            ...     endpoint="https://fra.cloud.appwrite.io/v1",
             ...     project_id="my_project",
             ...     credentials="api_key"
             ... )

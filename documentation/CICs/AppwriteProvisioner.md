@@ -43,6 +43,9 @@ can eventually be narrowed.
 | **Half a coordinate pair is refused** | `build_provisioner` raises `ConfigurationException` if given a collection id without a name or vice versa — the missing half would resolve from the environment, so a command meaning a partner's shelf could provision production. |
 | **An incomplete listing is a failure, not an absence** | Every listing here answers "does it already exist?", where NO means "create it". A short read produces a duplicate, not a smaller answer, so `_complete_listing` returns `LISTING_INCOMPLETE` rather than proceeding (Cluster J). |
 | **Both paths ensure the declared schema** | The existing-collection branch and the creation branch both call `ensure_attributes`. They disagreed until #473, and the existing-collection path returned OK after zero writes (C-291). |
+| **The declared schema covers the whole delivery document** | `DECLARED_METADATA_ATTRIBUTES` is `FIXED_METADATA_ATTRIBUTES` plus the fields `FileMetadata.to_dict()` contributes, created whatever payload is passed. Before þing-04 S17 only the seven fixed attributes were declared; the rest existed on production only because write-time inference had created them years earlier, so a new project's first delivery uploaded its file and then failed `Unknown attribute: loa` on the document. |
+| **The declared indexes cover the delivery's own equality queries** | `DECLARED_INDEXES` creates key indexes on `fileId` and `file_hash`, which `_store_metadata_document` and `check_file_exists_by_hash` query by equality. Attributes alone were not a complete bring-up: this package's own comment at `file.py:1216` states an unindexed equality query "is not dependable against this store", and nothing in any sibling checkout created an index before S17 although the platform key has always carried `indexes.write`. The read path is covered too, from a consumer's **measurement** rather than our own docstrings: what it needs is not derivable here, because `file.py:1046-1050` turns any caller-supplied `filters` dict into equality queries. views-crafdapi read its serving code and reported `{category, type}` and `{name, category, type}`, and that the `loa` filter in `DatastoreModule`'s docstrings is reached by nothing serving. One compound index covers both, ordered `(category, type, name)` so the two-attribute query matches a leftmost prefix — a `(name, …)` ordering would serve only the three-attribute one. Its `lengths` are a ceiling, not tuning: three `string(255)` columns are 3060 bytes of key against InnoDB's 3072. |
+| **The schema is not reported ready until it is usable** | Appwrite creates attributes asynchronously; a document referencing one still `processing` is rejected. `ensure_attributes` polls until every declared attribute reports `available`, treating a missing `status` as available so it cannot invent a failure. This mattered only once the attributes started being created seconds before the first delivery rather than years before it. |
 | **Failure is returned, not raised** | Every public method returns an `OperationResult` carrying `success`, `error` and a `code`. Callers must inspect it. |
 | **Nothing is defaulted from thin air** | Coordinates and credentials come from the environment and fail loud naming any missing variable. |
 
@@ -155,12 +158,33 @@ provisioner.ensure_collection(permissions=[])   # existing container keeps its g
 
 ## 11. Evolution Notes
 
-- **Known defect, preserved deliberately.** `ensure_bucket`'s follow-on database creation
-  passes its arguments in the wrong order (C-238). Reproduced verbatim from `file.py`
-  because a relocation must not change behaviour silently; fix under its own issue.
-- **Known limitation.** `_create_dynamic_attributes` derives the schema from whatever
-  payload it is handed, contradicting ADR-040 on a production database. Deferred behind a
-  named trigger: a non-production Appwrite project existing (þing-02 Á-5 / G2(h)).
+- **C-238 is fixed (þing-04 S17).** `ensure_bucket`'s follow-on database creation passed
+  `(bucket_name, database_id)` into a signature reading `(database_id, database_name)`,
+  so it ensured a database whose id was the *bucket's name*. #331 carried the swap over
+  verbatim because a relocation must not change behaviour silently, and it was invisible
+  against the shared production project, where the real database already existed. The
+  first bring-up against an **empty** project is where it stops being invisible: it
+  leaves a junk database beside the real one, if the bucket's name happens to be a valid
+  Appwrite id at all.
+- **The deferred schema is now declared (þing-04 S17).** The named trigger — *a
+  non-production Appwrite project existing* (þing-02 Á-5 / G2(h)) — fired when the
+  CRAF'd-only project was commissioned. The delivery document's own fields are declared
+  in `DELIVERY_METADATA_ATTRIBUTES`, with `required=False` and `size=255` throughout
+  because that is exactly what the inference produced: a collection provisioned today
+  must have the same shape as the production one, or two projects disagree about what a
+  delivery document is. Widening `description`, or making `loa`/`category` required, are
+  separate changes to the production schema.
+- **What the bring-up still does not prove (þing-04 S17 review).** Whether the deployed
+  Appwrite instance hard-rejects an unindexed `Query.equal` or merely degrades was not
+  established from here — that needs a live read, which is C-299's expensive half. The
+  indexes are created either way because the delivery queries by equality and this
+  package already treats such a query as undependable. Attribute `status` values are read
+  defensively for the same reason: the field was never confirmed against a live instance
+  from this seat.
+- **Payload inference is retained, narrowed.** `infer_attribute_type` and
+  `_create_attribute_by_type` still cover metadata keys beyond the declared set, because
+  removing a caller's only route to an attribute is a decision with its own blast radius.
+  Against a brand-new project they have nothing left to do for the delivery path.
 - **Outstanding.** The key still carries 20 scopes. #331 was done so it *could* be
   narrowed; the narrowing has not happened.
 

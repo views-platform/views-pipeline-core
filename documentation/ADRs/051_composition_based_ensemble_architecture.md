@@ -113,10 +113,18 @@ Phase 3 (optional): Legacy migration
 
 ### Positive
 
-- **C-55 fixed.** `CoreConfigSniffer` runs before execution, matching the
-  guarantee `ForecastingModelManager` provides for single models.
+- **C-55 addressed on this path (the register entry stays OPEN).**
+  `CoreConfigSniffer` runs before execution, matching the guarantee
+  `ForecastingModelManager` provides for single models. Until 2026-11-11 this
+  line claimed the concern itself was fixed, which the register contradicts and
+  always did: C-55's entry calls the `EnsembleManager` change a **bridge fix**
+  and names the permanent resolution as retiring that class (D-13), which has
+  not happened — and every production ensemble still runs through it. Corrected
+  to the same qualified form the line below already used, which is where the
+  right phrasing had been sitting all along.
 - **C-65 resolved (for new code).** No LSP violation because there is no
-  inheritance. The class stands on its own.
+  inheritance. The class stands on its own. The register entry stays open for
+  the inherited class this one does not replace yet.
 - **Testable in isolation.** All collaborators are injected at construction.
   Tests mock 7 dependencies with no inheritance chain to navigate.
 - **Clear composition surface.** ADR-045 stages are used via their public

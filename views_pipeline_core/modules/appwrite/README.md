@@ -37,7 +37,7 @@ from views_pipeline_core.modules.appwrite import (
 
 # Configure with API key authentication
 config = AppwriteConfig(
-    endpoint="https://cloud.appwrite.io/v1",
+    endpoint="https://fra.cloud.appwrite.io/v1",
     project_id="my_project",
     credentials="my_api_key",
     auth_method=AuthMethod.API_KEY,
@@ -88,7 +88,7 @@ from views_pipeline_core.modules.appwrite import AppwriteConfig, AuthMethod
 
 config = AppwriteConfig(
     # Required
-    endpoint="https://cloud.appwrite.io/v1",
+    endpoint="https://fra.cloud.appwrite.io/v1",
     project_id="your_project_id",
     credentials="your_api_key",  # or {"email": "...", "password": "..."}
     
@@ -138,7 +138,7 @@ For server-side applications and automated pipelines:
 
 ```python
 config = AppwriteConfig(
-    endpoint="https://cloud.appwrite.io/v1",
+    endpoint="https://fra.cloud.appwrite.io/v1",
     project_id="my_project",
     credentials="your_server_api_key",
     auth_method=AuthMethod.API_KEY
@@ -328,7 +328,7 @@ if result.success:
 ```python
 # Equality filters
 result = file_manager.metadata_manager.search_files_by_metadata(
-    filters={"model": "ensemble", "loa": "pgm"},
+    filters={"name": "ensemble", "category": "forecast"},
     collection_name="Predictions"
 )
 
@@ -517,7 +517,7 @@ import pandas as pd
 
 # Initialize
 config = AppwriteConfig(
-    endpoint="https://cloud.appwrite.io/v1",
+    endpoint="https://fra.cloud.appwrite.io/v1",
     project_id="views_project",
     credentials="api_key",
     bucket_id="forecasts"
@@ -552,7 +552,7 @@ print(f"Uploaded: {upload.data['file_id']}")
 
 # Search for files
 search = file_manager.metadata_manager.search_files_by_metadata(
-    filters={"loa": "pgm", "category": "forecast"}
+    filters={"category": "forecast", "type": "ensemble"}
 )
 print(f"Found {search.data['total']} matching files")
 

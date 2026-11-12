@@ -12,11 +12,29 @@ errors=0
 echo "=== base_docs validation ==="
 echo ""
 
-# 1. Check for unfilled template placeholders in accepted/active files
+# 1. Check for unfilled template placeholders in every governed document
 #    (skip files whose names contain "template" — those are expected to have placeholders)
 #    These are warnings only (non-blocking) since in the template repo some
 #    files are legitimately Accepted with placeholder dates.
-echo "--- Checking for template placeholders in accepted/active files ---"
+#
+#    SELECTION IS `Status:` ALONE, not a list of status values. It read
+#    `Status:.*\(Accepted\|Active\)` until 2026-11-11, which silently excluded every
+#    `Implemented` and `Retired` document — eleven of them, including ADRs 054-061 — and
+#    reported OK in the same words as a run that had checked them. views-appwrite hit the
+#    identical defect in their copy of this script (their C-09, where the one missed status
+#    was `Deferred`) and fixed it by widening the list; the list is the defect, so this
+#    drops it. Matching prose to SELECT work fails quietly, which is why this had years to
+#    sit here unnoticed. `tests/test_documentation_integrity.py` now asserts that no
+#    document carrying a status line is excluded from this scan.
+#
+#    AND `-i`, because the axis was never the word. views-appwrite measured their own copy
+#    after dropping the list here: their seam contract writes `**Status: ACCEPTED**`, and
+#    `grep` is case-sensitive, so adding `Deferred` or `Superseded` to the old list could
+#    never have reached it. The enumeration was not one value short, it was one AXIS
+#    short — and nobody enumerating values finds that. This repo happens to have no
+#    case variant of the key today (74 files either way, measured), so `-i` buys nothing
+#    now and costs one letter; it is here so the axis cannot reopen.
+echo "--- Checking for template placeholders in governed documents ---"
 warnings=0
 while IFS= read -r file; do
     [[ -z "$file" ]] && continue
@@ -33,7 +51,7 @@ while IFS= read -r file; do
         echo "  WARN: Unfilled ClassName placeholder in $file"
         warnings=$((warnings + 1))
     fi
-done < <(grep -rl 'Status:.*\(Accepted\|Active\)' --include='*.md' . 2>/dev/null || true)
+done < <(grep -ril 'status:' --include='*.md' . 2>/dev/null || true)
 if [ "$warnings" -eq 0 ]; then
     echo "  OK"
 fi
