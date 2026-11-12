@@ -23,6 +23,75 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.5.0] — unreleased
+
+Appwrite bring-up for a per-audience project. þing-04 S17 (#480, PR #586).
+
+### Added
+
+- **The provisioner declares the whole delivery document's schema.**
+  `DELIVERY_METADATA_ATTRIBUTES` adds the six fields `FileMetadata.to_dict()` contributes
+  — `loa`, `name`, `type`, `targets`, `category`, `description` — to the seven fixed ones,
+  and `ensure_attributes` creates the declared set whatever payload it is given. Before
+  this, `ensure-collection` against an **empty** project produced a collection carrying
+  seven attributes while every delivery document carries thirteen, so a new project's first
+  delivery uploaded its file and then failed `Unknown attribute: loa` on the document,
+  leaving an orphan in the bucket. On the shared production collection it never showed,
+  because the other six were created years ago by write-time inference that #331 removed.
+- **`DECLARED_INDEXES`** — key indexes on `fileId` and `file_hash`, which the delivery
+  queries by equality, plus a compound index on `(category, type, name)` from
+  views-crafdapi's measured serving queries. Nothing in this repository had ever created an
+  Appwrite index, while the platform key has carried `indexes.read`/`indexes.write` all
+  along. The column order is load-bearing: the consumer also queries `{category, type}`
+  without `name`, which can only use the index if those two are its leftmost prefix. Its
+  `lengths` are a ceiling rather than tuning — three `string(255)` columns are 3060 bytes
+  of key against InnoDB's limit, which is 3072 at a 16K page size and 1536 at 8K.
+- **`ensure_attributes` waits for the attributes to become usable.** Appwrite creates them
+  asynchronously and rejects a document referencing one still building. This module used to
+  report success as soon as the creates were accepted — harmless while every collection's
+  attributes predated every delivery by years, and a straight reintroduction of
+  `Unknown attribute: loa` now that they are created seconds before the first delivery. A
+  missing `status` field is treated as available, so the wait cannot invent a failure.
+
+### Changed
+
+- **`FileMetadata` refuses a `description` over 255 characters**, raising `ValueError` at
+  construction. The collection's attribute was already 255, so an over-long description
+  previously failed the document write **after** the file had been uploaded — the same
+  orphaned-file shape, from a different field. The refusal now happens before the upload.
+  **This is the only consumer-visible behaviour change in this release**: a caller passing
+  a longer description used to get a late `PARTIAL_SUCCESS`, and now gets an early
+  `ValueError`. views-models confirmed zero exposure (no `FileMetadata` construction, no
+  `upload_data` call sites).
+- `ensure_bucket` returns a failure when its metadata database cannot be created, instead
+  of reporting `OK (CREATED)` with no database behind the bucket.
+
+### Fixed
+
+- **C-238** — `ensure_bucket` passed `(bucket_name, database_id)` into a signature reading
+  `(database_id, database_name)`, so it ensured a database whose id was the *bucket's
+  name*. Invisible against the shared project where the real database already exists;
+  against an empty one it creates a junk database beside the real one.
+- **The endpoint in every example was wrong** — nineteen occurrences of
+  `https://cloud.appwrite.io/v1` where the platform coordinate registry says
+  `https://fra.cloud.appwrite.io/v1`. None was a code default. ADR-061 additionally cited a
+  docstring example as "our default" in a security argument; there is no default, the
+  endpoint is required from the environment.
+- **Documented `filters=` examples named attributes that do not exist.** Several used
+  `"model"`, which is not an attribute of the metadata collection — the field is `name` —
+  and `get_predictions_by_metadata` passes a filter key straight into `Query.equal`, so a
+  consumer copying the example queried a column that does not exist. Also removed `loa`
+  from filter examples: a real attribute, but absent from the platform seam contract's
+  filterable set, carrying no index, and queried by no consumer.
+
+### Notes for consumers
+
+- **No API was removed and no signature changed.** A caller that provisions with the
+  sanctioned CLI gets a usable collection where it previously got a half-built one; a
+  caller that does nothing is unaffected.
+- The new indexes and the readiness wait take effect only when `ensure-collection` is run.
+  Existing collections are not altered by installing this version.
+
 ## [3.4.0] — 2026-11-02
 
 ### Changed
