@@ -745,10 +745,12 @@
 
 | Tier | Severity | Response |
 |------|----------|----------|
-| 1 | Critical — correctness or data integrity at risk | Must be addressed before next release |
+| 1 | Critical — correctness or data integrity at risk, **including a published claim about either** (Cluster K) | Must be addressed before next release |
 | 2 | High — architectural degradation or silent failure | Should be addressed within current development cycle |
 | 3 | Medium — maintainability or operational risk | Track and address opportunistically |
 | 4 | Low — minor or cosmetic concern | Document and defer |
+
+*The property shared by every Tier 1 this register has carried is **no error signal**, not *data*: five of the seven all-time Tier 1s are Cluster J (a read that cannot see its subject reporting absence as fact) and C-300 is Cluster K (a conclusion the evidence made consistent, published where it outlives the session). Recorded 2026-11-12 because review-rr measured C-300 against the registration skill's narrower wording (*silent data corruption or model output incorrectness*) and read a miscalibration that this table does not contain. The tier is unchanged; the sentence is here so the next session does not re-open it.*
 
 ---
 
