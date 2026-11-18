@@ -148,7 +148,7 @@ def _unbounded_list_sites() -> list[str]:
     return sorted(hits)
 
 
-@pytest.mark.xfail(strict=True, reason="F2 (open): 7 unbounded list_* sites remain in this helper's set (13 across any list* call); C-256 — resolved across #341 and #343")
+@pytest.mark.xfail(strict=True, reason="F2 (open): 3 unbounded list_* sites remain in this helper's set (Storage only, measured 2026-11-18; were 7 after #341); C-256 — resolved across #341 and #343")
 def test_f2a_guard_worklist_is_larger_than_the_story_claims():
     """FAILS TODAY. #343 estimates ~12 sites; measure it before committing to S3's size."""
     sites = _unbounded_list_sites()
