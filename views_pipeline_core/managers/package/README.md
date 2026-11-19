@@ -89,14 +89,18 @@ RuntimeError("Cannot execute this method without a valid package path...")
 Walks path components from leaf upward until a valid package name (matching naming regex) is found.  
 Raises `ValueError` if none found.
 
-#### `get_latest_release_version_from_github(repository_name: str, organization_name: str = "views-platform") -> str`
-Two-phase strategy:
-1. Try `git ls-remote --tags` to avoid rate limits.
-2. Fallback to GitHub REST API: `https://api.github.com/repos/{organization}/{repository}/releases/latest`.
+#### `get_latest_release_version_from_github(repository_name: str, organization_name: str = "views-platform") -> Optional[str]`
+The rule is ADR-070: only an `X.Y.Z` tag (optional `v`, ASCII digits) is a release, and
+releases compare as numbers. Other tags (`backup/...`, `latest`, `1.0.0-rc1`) are ignored.
+1. Read the tags with `git ls-remote --tags --refs`; return the highest release, or `None`
+   (with a warning) if no tag is one.
+2. Only if `git` itself fails: GitHub REST API
+   `https://api.github.com/repos/{organization}/{repository}/releases/latest`, same rule on
+   `tag_name`, then `name`.
 
 Returns:
-- Latest tag or release name stripped of leading `v`.
-- `None` if not resolvable or no releases exist.
+- The version without a leading `v`, e.g. `"0.2.1"`.
+- `None` if no release version can be found.
 
 Handles:
 - Rate-limiting (logs an error with reset time).
@@ -210,7 +214,7 @@ print("Latest release:", remote_pm.latest_version)
 
 | Pitfall | Resolution |
 |---------|------------|
-| Latest version is None | Create a GitHub release or tag |
+| Latest version is None | Push a tag of the form `X.Y.Z` or `vX.Y.Z` (ADR-070) |
 | Poetry commands fail silently | Inspect logged stderr; enable strict raising if needed |
 | Wrong folder name normalization | Confirm `_replace_special_characters` logic results in expected module directory |
 | Subprocess commands on restricted environment | Ensure execution context has permissions and network access |
