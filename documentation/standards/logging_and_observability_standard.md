@@ -29,7 +29,7 @@ It does not redefine architectural principles.
 - Structural failures must:
   - be logged at `ERROR` or higher
   - be raised as exceptions
-- Logging is not a substitute for raising.
+- Logging is not a substitute for raising, except as ADR-047 allows (see the ADR-008 failure table and the ERROR rule in section 3).
 - Raising is not a substitute for logging.
 
 Silent degradation is prohibited.
@@ -83,7 +83,7 @@ Warnings must not be used to hide invariant violations.
 ### ERROR
 - Structural failure within a component.
 - Operation failed and cannot proceed correctly.
-- Must be raised and logged.
+- Must be raised and logged — except a failed upload to the secondary external destination (Appwrite) on the three-destination save path that ADR-047 governs (the DataFrame tier's `AppwriteSaver`): logged at `ERROR`, result inspected, run continues (ADR-008 table, register D-42). Two Appwrite failures still raise: a container or coordinate configuration error (`ConfigurationException` from `_require_containers`, which the saver does not catch), and the PredictionFrame sampled-forecast publish (`sampled_forecast_publisher._upload` raises so the manifest is withheld; views-postprocessing ADR-013 §3.2).
 - All sniffer failures raise at this level.
 
 ### CRITICAL
