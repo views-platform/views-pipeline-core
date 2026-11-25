@@ -119,7 +119,7 @@ def _permission_arguments(tree: ast.AST) -> list[tuple]:
                 if enclosing is None or fn.lineno > enclosing.lineno:
                     enclosing = fn
         # Any call whose name matches something the derived map knows, or any call on a
-        # `databases`/`storage` receiver. The previous gate was a four-suffix tuple —
+        # receiver in `_CONTAINER_RECEIVERS` (`databases`, `tables_db`, `storage`). The previous gate was a four-suffix tuple —
         # a hand-list one layer above the prefix hand-list it replaced, and
         # `create_documents` (the SDK's plural bulk API) and `createCollection` walked
         # through it.
@@ -146,8 +146,30 @@ def _permission_arguments(tree: ast.AST) -> list[tuple]:
         # calling convention invisible — a hand-list of one convention replacing the
         # hand-list of prefixes it had just removed.
         positional = _POSITIONAL_PERMISSIONS.get(name)
-        if positional is not None and len(node.args) > positional:
+        if positional is not None and len(node.args) > positional \
+                and not any(isinstance(a, ast.Starred) for a in node.args[:positional + 1]):
             found.append((name, node.args[positional], node.lineno, enclosing))
+        # `create_row(*args)` — the positional twin of `**opts`. A splat at or before the
+        # permissions slot hides whatever lands there, so the site is unknown, not absent.
+        # Found by the #602 guard audit (mutation T8), where it reported nothing at all.
+        starred = next(
+            (i for i, a in enumerate(node.args) if isinstance(a, ast.Starred)), None
+        )
+        # Only methods that take `permissions` positionally: a splat into a method that
+        # has no such parameter (`create_string_attribute(*args)`) cannot carry a grant.
+        # Nor can one when `permissions=` is also passed by keyword: Python then raises
+        # "multiple values for argument" rather than let the splat fill the slot.
+        #
+        # This is deliberately NARROWER than the `**opts` rule above, which reports any
+        # opaque mapping on a container receiver even when the method has no
+        # `permissions` parameter. That rule is kept on purpose: bulk APIs
+        # (`create_rows`, `create_documents`) carry grants inside their payload as
+        # `$permissions`, which no signature reveals (register entry for the guard's
+        # blind spots, #602 review).
+        passes_keyword = any(kw.arg == "permissions" for kw in node.keywords)
+        if starred is not None and positional is not None and starred <= positional \
+                and not passes_keyword:
+            found.append((name, node.args[starred], node.lineno, enclosing))
     return found
 
 
@@ -169,10 +191,14 @@ def _derive_positional_permissions() -> dict:
     try:
         from appwrite.services.databases import Databases
         from appwrite.services.storage import Storage
+        from appwrite.services.tables_db import TablesDB
     except ImportError:  # pragma: no cover - the appwrite extra is optional
         return found
 
-    services = [Databases, Storage]
+    # TablesDB is Appwrite 1.8's successor to Databases (`create_table`, `create_row`).
+    # Both stay in the list while epic #599 moves the calls, so a grant passed
+    # positionally to either generation is seen (#602).
+    services = [Databases, TablesDB, Storage]
 
     # This repo's own public API too. `AppwriteProvisioner.ensure_collection` takes
     # `permissions` at index 4, and an audit passed a wide grant to it positionally with
@@ -198,13 +224,13 @@ def _derive_positional_permissions() -> dict:
     return found
 
 
-#: Receivers whose methods address Appwrite containers. Two names, both from the SDK's
-#: own service objects, so a call on either is treated as container-shaped whatever the
-#: method is called.
-_CONTAINER_RECEIVERS = frozenset({"databases", "storage"})
+#: Receivers whose methods address Appwrite containers, named after the SDK's own service
+#: objects, so a call on any of them is treated as container-shaped whatever the method is
+#: called. `tables_db` is the TablesDB service (epic #599, #602).
+_CONTAINER_RECEIVERS = frozenset({"databases", "tables_db", "storage"})
 
 #: Derived at import from the installed SDK — see above. Empty only if the appwrite extra
-#: is absent, in which case `test_the_positional_map_is_derived_and_populated` fails
+#: is absent, in which case `test_the_positional_map_is_derived_and_matches_the_installed_sdk` fails
 #: rather than the guard quietly covering nothing.
 _POSITIONAL_PERMISSIONS = _derive_positional_permissions()
 
@@ -660,6 +686,64 @@ def test_a_positional_permissions_argument_is_seen_wherever_it_sits(tmp_path):
     assert len(reported) == 3, f"one per call; got {reported}"
 
 
+def test_a_tablesdb_grant_is_seen_positionally_and_through_opaque_kwargs(tmp_path):
+    """The TablesDB calls that replace `create_collection` / `create_document` (epic #599).
+
+    Before #602 the positional map was derived from `Databases` and `Storage` only, and the
+    receiver set did not name `tables_db`. A wide grant passed positionally to `create_row`,
+    or hidden in `**opts` on a `tables_db` receiver, walked through the guard.
+    """
+    planted = tmp_path / "tablesdb.py"
+    planted.write_text(
+        "class P:\n"
+        "    def a(self):\n"
+        "        return self.tables_db.create_row(d, t, 'i', data, ['read(\"any\")'])\n"
+        "    def b(self):\n"
+        "        return self.tables_db.create_table(d, t, 'n', ['read(\"any\")'])\n"
+        "    def c(self, opts):\n"
+        "        return self.tables_db.create_table(d, t, 'n', **opts)\n"
+        # `create_boolean_column` takes no `permissions`, so it is not in the derived
+        # map: only the `tables_db` receiver makes its opaque `**opts` reportable.
+        "    def d(self, opts):\n"
+        "        return self.tables_db.create_boolean_column(d, t, **opts)\n"
+        # A receiver outside `_CONTAINER_RECEIVERS` (crafdapi binds `self.tables`): only
+        # the method name, read off the SDK, makes this `**opts` reportable.
+        "    def f(self, opts):\n"
+        "        return client.create_table(d, t, 'n', **opts)\n"
+    )
+    reported = open_grants(planted) + unresolvable_grants(planted)
+    lines = sorted(int(r.split(":")[1].split(" ")[0]) for r in reported)
+    assert lines == [3, 5, 7, 9, 11], f"one per call; got {reported}"
+
+
+def test_a_star_args_call_to_a_permission_taking_method_is_unresolvable(tmp_path):
+    """`create_row(*args)` hides the permissions slot exactly as `**opts` hides the keyword.
+
+    Mutation T8 of the #602 guard audit: before this, the call reported nothing, neither
+    open nor unresolvable. A splat AFTER an explicit permissions argument hides nothing,
+    so it must not be reported twice.
+    """
+    planted = tmp_path / "splat.py"
+    planted.write_text(
+        "class P:\n"
+        "    def a(self, args):\n"
+        "        return self.tables_db.create_row(*args)\n"
+        "    def b(self, rest):\n"
+        "        return self.tables_db.create_row(d, t, 'i', data, ['read(\"any\")'], *rest)\n"
+        "    def c(self, perms):\n"
+        "        return self.tables_db.create_row(d, t, 'i', data, *perms)\n"
+        "    def e(self, coords):\n"
+        "        return self.tables_db.create_row(*coords, 'i', data, permissions=[])\n"
+    )
+    unresolvable = {int(r.split(":")[1].split(" ")[0]) for r in unresolvable_grants(planted)}
+    opened = {int(r.split(":")[1].split(" ")[0]) for r in open_grants(planted)}
+    # Line 3: splat before the slot. Line 7: splat exactly at the slot. Line 5: explicit
+    # wide grant, splat after it (open, not also unresolvable). Line 9: keyword `[]` with
+    # a splat that Python forbids from filling the slot (clean).
+    assert unresolvable == {3, 7}, unresolvable_grants(planted)
+    assert opened == {5}, open_grants(planted)
+
+
 def test_the_positional_map_is_derived_and_matches_the_installed_sdk():
     """The map is read off the SDK at import. Pinning it against the SDK again here is
     not circular — it proves the derivation ran and found something, which is what fails
@@ -668,6 +752,7 @@ def test_the_positional_map_is_derived_and_matches_the_installed_sdk():
 
     from appwrite.services.databases import Databases
     from appwrite.services.storage import Storage
+    from appwrite.services.tables_db import TablesDB
 
     assert _POSITIONAL_PERMISSIONS, (
         "the positional map derived to nothing — the guard would then see no positional "
@@ -675,6 +760,7 @@ def test_the_positional_map_is_derived_and_matches_the_installed_sdk():
     )
     for service, method in (
         (Databases, "create_collection"), (Databases, "create_document"),
+        (TablesDB, "create_table"), (TablesDB, "create_row"),
         (Storage, "create_bucket"), (Storage, "create_file"),
     ):
         params = list(inspect.signature(getattr(service, method)).parameters)[1:]
@@ -709,22 +795,28 @@ def test_the_collection_default_survives_reformatting(tmp_path):
     from views_pipeline_core.modules.appwrite.provisioning import AppwriteProvisioner
 
     tree = ast.parse(textwrap.dedent(inspect.getsource(AppwriteProvisioner.ensure_collection)))
+    # TablesDB (epic #599) renames the call to `create_table` and the flag to
+    # `row_security`. Every container-creating call in the method is checked, so a method
+    # holding both generations (the two-track plan, #601) cannot leave one unpinned (#602).
+    security_flag = {"create_collection": "document_security", "create_table": "row_security"}
     calls = [
         n for n in ast.walk(tree)
-        if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "create_collection"
+        if isinstance(n, ast.Call) and getattr(n.func, "attr", "") in security_flag
     ]
-    assert calls, "ensure_collection no longer calls create_collection"
-    kwargs = {k.arg: k.value for k in calls[0].keywords}
-    assert isinstance(kwargs["permissions"], ast.IfExp), (
-        "the sentinel default is gone; permissions is now "
-        f"{type(kwargs['permissions']).__name__} at "
-        "views_pipeline_core/modules/appwrite/provisioning.py"
-    )
-    assert isinstance(kwargs["document_security"], ast.Constant)
-    assert kwargs["document_security"].value is False, (
-        "document_security was flipped. With it True, per-item grants become additive "
-        "to the container's, which changes how every existing document is evaluated"
-    )
+    assert calls, "ensure_collection no longer calls create_collection or create_table"
+    for call in calls:
+        flag = security_flag[call.func.attr]
+        kwargs = {k.arg: k.value for k in call.keywords}
+        assert isinstance(kwargs.get("permissions"), ast.IfExp), (
+            f"{call.func.attr}: the sentinel default is gone; permissions is now "
+            f"{type(kwargs.get('permissions')).__name__} at "
+            "views_pipeline_core/modules/appwrite/provisioning.py"
+        )
+        assert isinstance(kwargs.get(flag), ast.Constant), f"{call.func.attr}: {flag} not a literal"
+        assert kwargs[flag].value is False, (
+            f"{flag} was flipped on {call.func.attr}. With it True, per-item grants become "
+            "additive to the container's, which changes how every existing item is evaluated"
+        )
 
 
 def test_nothing_is_silently_passed_over(tmp_path):

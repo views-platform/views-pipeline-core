@@ -12,7 +12,7 @@ Checking that, it turned out to be the smaller half. Several examples filtered o
 `name`. A consumer copying that example queries a column that does not exist.
 
 `get_predictions_by_metadata` turns any caller-supplied `filters` dict straight into
-`Query.equal(attribute, value)` (`modules/appwrite/file.py:1046-1050`), so an example is
+`Query.equal(attribute, value)` (`modules/appwrite/file.py::search_files_by_metadata`), so an example is
 not decoration here: it is the only specification a new consumer has of what may be
 filtered on. The scope is DERIVED by reading the files, because a hand-listed one is how
 eight guards in this repo came to be wrong about their own subject.

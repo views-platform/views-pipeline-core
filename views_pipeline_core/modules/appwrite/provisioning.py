@@ -71,6 +71,8 @@ from views_pipeline_core.modules.appwrite.file import (
     INITIAL_RETRY_DELAY,
     MAX_ATTRIBUTE_CREATION_RETRIES,
     OperationResult,
+    DB_CONTAINER_NOT_FOUND,
+    database_error_code,
     exception_message,
 )
 
@@ -151,9 +153,9 @@ DECLARED_METADATA_ATTRIBUTES: List[Dict[str, Any]] = (
 CREATABLE_ATTRIBUTE_TYPES = frozenset({"string", "integer", "datetime", "boolean"})
 
 # The indexes the WRITE path needs. Attributes alone are not a complete bring-up:
-# `check_file_exists_by_hash` issues `Query.equal("file_hash", ...)` (`file.py:1200`) and
-# `_store_metadata_document` issues `Query.equal("fileId", ...)` (`file.py:1301`, `:1769`)
-# against this collection, and this package's own comment at `file.py:1216` already states
+# `check_file_exists_by_hash` issues `Query.equal("file_hash", ...)` (`file.py::check_file_exists_by_hash`) and
+# `_store_metadata_document` issues `Query.equal("fileId", ...)` (`file.py::update_file_metadata`, `::_store_metadata_document`)
+# against this collection, and this package's own comment at `file.py::check_file_exists_by_hash` (the filename filter) already states
 # that an unindexed equality query "is not dependable against this store" — which is why
 # the filename match there is filtered in Python instead.
 #
@@ -166,7 +168,7 @@ CREATABLE_ATTRIBUTE_TYPES = frozenset({"string", "integer", "datetime", "boolean
 # whether a duplicate exists".
 #
 # The read path is covered too, but only because a consumer MEASURED its own queries
-# rather than us guessing from our docstrings. `file.py:1046-1050` turns any
+# rather than us guessing from our docstrings. `file.py::search_files_by_metadata` turns any
 # caller-supplied `filters` dict into equality queries, so "what the read path needs"
 # is not derivable from this repository at all. views-crafdapi read its serving code
 # (`views-crafdapi@feat/crafd-project`) and reported two shapes:
@@ -357,7 +359,7 @@ class AppwriteProvisioner:
             return OperationResult(
                 success=False,
                 error=f"Database operation failed: {e.message}",
-                code=e.type,
+                code=database_error_code(e),
             )
 
     # -- collections and attributes ----------------------------------------------
@@ -532,7 +534,7 @@ class AppwriteProvisioner:
             return OperationResult(
                 success=False,
                 error=f"Collection creation failed: {e.message}",
-                code=e.type,
+                code=database_error_code(e),
             )
 
     def ensure_attributes(
@@ -563,9 +565,9 @@ class AppwriteProvisioner:
                 logger.debug(f"Found {len(existing_attribute_keys)} existing attributes")
                 break
             except AppwriteException as e:
-                # NOTE: matches the human-readable message rather than e.type — same
-                # defect class as C-179, preserved by the relocation (register C-235).
-                if "collection_not_found" in exception_message(e) and attempt < max_retries:
+                # Keyed on the HTTP status via `database_error_code`, not on message
+                # text, so it survives the TablesDB rename (register C-235, #603).
+                if database_error_code(e) == DB_CONTAINER_NOT_FOUND and attempt < max_retries:
                     logger.warning(
                         f"Collection not ready (attempt {attempt}/{max_retries}), "
                         f"retrying in {delay}s"
@@ -577,7 +579,7 @@ class AppwriteProvisioner:
                     return OperationResult(
                         success=False,
                         error=f"Failed to list attributes: {e.message}",
-                        code=e.type,
+                        code=database_error_code(e),
                     )
 
         # Every attribute is attempted before reporting, so one bad field does not
@@ -670,7 +672,7 @@ class AppwriteProvisioner:
                         f"into this collection until `audit` shows every attribute "
                         f"available."
                     ),
-                    code=e.type or "ATTRIBUTES_UNCONFIRMED",
+                    code=database_error_code(e) or "ATTRIBUTES_UNCONFIRMED",
                 )
 
             attributes, truncated = _complete_listing(listing, "attributes")
@@ -754,7 +756,7 @@ class AppwriteProvisioner:
             return OperationResult(
                 success=False,
                 error=f"Failed to list indexes: {e.message}",
-                code=e.type or "INDEXES_UNREADABLE",
+                code=database_error_code(e) or "INDEXES_UNREADABLE",
             )
 
         failed: List[str] = []

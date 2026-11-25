@@ -307,10 +307,10 @@ class TestMetadataManager:
         # tests/test_modules/test_appwrite_pagination.py against a substrate double
         # built from the SDK's own query encoding.
         pages = [
-            {"documents": [{"fileId": "file123", "filename": "test.txt"}], "total": 1},
-            {"documents": [], "total": 1},
+            {"rows": [{"fileId": "file123", "filename": "test.txt"}], "total": 1},
+            {"rows": [], "total": 1},
         ]
-        mock_databases.list_documents.side_effect = pages
+        mock_databases.list_rows.side_effect = pages
 
         result = metadata_manager.search_files_by_metadata(
             filters={"filename": "test.txt"}
@@ -328,6 +328,7 @@ class TestAppWriteFileManager:
         with patch("views_pipeline_core.modules.appwrite.file.Client"), \
              patch("views_pipeline_core.modules.appwrite.file.Storage"), \
              patch("views_pipeline_core.modules.appwrite.file.Databases"), \
+             patch("views_pipeline_core.modules.appwrite.file.TablesDB"), \
              patch("views_pipeline_core.modules.appwrite.file.Users"):
             manager = AppWriteFileModule(api_key_config)
             yield manager
@@ -601,6 +602,7 @@ class TestErrorHandling:
         with patch("views_pipeline_core.modules.appwrite.file.Client"), \
              patch("views_pipeline_core.modules.appwrite.file.Storage") as mock_storage, \
              patch("views_pipeline_core.modules.appwrite.file.Databases"), \
+             patch("views_pipeline_core.modules.appwrite.file.TablesDB"), \
              patch("views_pipeline_core.modules.appwrite.file.Users"):
             
             manager = AppWriteFileModule(api_key_config)

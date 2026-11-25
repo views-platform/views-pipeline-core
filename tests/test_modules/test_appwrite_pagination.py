@@ -75,14 +75,14 @@ class _SubstrateFakeDatabases:
                 offset = parsed["values"][0]
         return limit, offset
 
-    def list_documents(self, database_id, collection_id, queries=None):
+    def list_rows(self, database_id, table_id, queries=None):
         limit, offset = self._parse(queries)
         if self._hard_cap is not None:
             limit = min(limit, self._hard_cap)
         self.calls.append({"limit": limit, "offset": offset})
         start = offset if self._honour_offset else 0
         return {
-            "documents": self._documents[start : start + limit],
+            "rows": self._documents[start : start + limit],
             "total": self._total if self._total is not None else len(self._documents),
         }
 

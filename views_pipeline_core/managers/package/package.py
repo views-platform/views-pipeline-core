@@ -6,9 +6,35 @@ from views_pipeline_core.configs.pipeline import PipelineConfig
 import requests
 import logging
 import time
-from typing import Union
+from typing import Iterable, Optional, Union
 
 logger = logging.getLogger(__name__)
+
+#: A release tag: `X.Y.Z` in ASCII digits, optionally prefixed `v`. Anything else on a
+#: repository (`backup/pre-sync-20260721`, `latest`, `v1.0-rc1`) is not a release (#612,
+#: ADR-070).
+_RELEASE_TAG = re.compile(r"^v?([0-9]+)\.([0-9]+)\.([0-9]+)$")
+
+
+def latest_release_version(tags: Iterable[str]) -> Optional[str]:
+    """The highest `X.Y.Z` among `tags`, compared as numbers, without the `v` prefix.
+
+    Tags that are not release versions are ignored. Returns None if none are. This is
+    the highest version TAG; a tag can exist without a GitHub Release or a PyPI upload.
+
+    This replaced a string sort, under which `backup/pre-sync-20260721` beat every
+    version (letters sort after digits) and `0.10.0` lost to `0.9.0`. The winner names
+    the views-forecasts run, so a wrong pick filed every `--prediction_store` run under
+    `vbackup/pre-sync-20260721_YYYY_MM` (#612, register C-366).
+    """
+    versions = []
+    for tag in tags:
+        match = _RELEASE_TAG.match(tag.strip())
+        if match:
+            versions.append(tuple(int(part) for part in match.groups()))
+    if not versions:
+        return None
+    return ".".join(str(part) for part in max(versions))
 
 
 class PackageManager:
@@ -111,7 +137,7 @@ class PackageManager:
     @staticmethod
     def get_latest_release_version_from_github(
         repository_name: str, organization_name: str = "views-platform"
-    ) -> str:
+    ) -> Optional[str]:
         """
         Fetches the latest release version of a given repository from GitHub.
 
@@ -120,27 +146,44 @@ class PackageManager:
             organization_name (str, optional): The name of the organization. Defaults to "views-platform".
 
         Returns:
-            str: The tag name of the latest release if found, otherwise None.
+            str: The highest version tag (`X.Y.Z`, no `v`) on the repository, read with
+            `git ls-remote`; None if git succeeds and no tag is a version. Only when git
+            itself fails is the GitHub releases API asked, under the same rule. Non-version
+            tags are ignored (#612, ADR-070).
 
         Raises:
             requests.exceptions.RequestException: If an error occurs while making the request to GitHub.
         """
 
-        # **Step 1: Try getting the latest version using `git ls-remote`**
+        # **Step 1: the repository's tags, via `git ls-remote`**
         repo_url = f"https://github.com/{organization_name}/{repository_name}"
         try:
-            cmd = f"git ls-remote --tags {repo_url}"
+            # `--refs` drops the `^{}` peel lines of annotated tags, so each tag is listed once.
+            cmd = f"git ls-remote --tags --refs {repo_url}"
             output = subprocess.check_output(cmd, shell=True).decode()
-            tags = [line.split("refs/tags/")[-1] for line in output.split("\n") if "refs/tags/" in line]
-            if tags:
-                latest_tag = sorted(tags, key=lambda v: v.lstrip("v"))[-1]
-                # logger.info(f"Latest tag found using `git ls-remote`: {latest_tag}")
-                return latest_tag.lstrip("v")
+            # Each line is `<sha>\trefs/tags/<name>`. Split on the tab, not on "refs/tags/":
+            # a tag NAMED `backup/refs/tags/9.9.9` must not be read as release 9.9.9.
+            tags = [
+                line.split("\t", 1)[1].removeprefix("refs/tags/")
+                for line in output.splitlines()
+                if "\t" in line
+            ]
+            latest = latest_release_version(tags)
+            ignored = sorted(tag for tag in tags if latest_release_version([tag]) is None)
+            if ignored:
+                logger.info(f"{repository_name}: ignoring non-release tags {ignored}")
+            if latest is None:
+                # Every GitHub release has a tag, and every tag was just listed and
+                # rejected, so the releases API cannot know a version git did not show.
+                logger.warning(
+                    f"{repository_name} has no release tag (X.Y.Z) among {len(tags)} tags."
+                )
+            return latest
 
         except subprocess.CalledProcessError as e:
             logger.warning(f"Failed to get latest version using `git ls-remote`: {e}. Falling back to GitHub API.")
-        
-        # **Step 2: If `git` fails, fallback to GitHub API**
+
+        # **Step 2: only if `git` itself failed, the GitHub releases API**
         # Define the GitHub URL for the package
         github_url = f"""https://api.github.com/repos/{organization_name}/{repository_name}/releases/latest"""
         # Get the latest release information from GitHub
@@ -150,38 +193,41 @@ class PackageManager:
 
             if response.status_code == 200:
                 data = response.json()
-                if "tag_name" in data and data["tag_name"] != "":
-                    return data["tag_name"].lstrip("v")
-                elif "name" in data and data["name"] != "":
-                    return data["name"].lstrip("v")
-                else:
-                    logging.error("No releases found for this repository.")
-                    return None
+                # The same rule as the tag path: only an X.Y.Z name counts as a version.
+                latest = (
+                    latest_release_version([data.get("tag_name") or ""])
+                    or latest_release_version([data.get("name") or ""])
+                )
+                if latest is None:
+                    logger.error(
+                        f"No release with an X.Y.Z version found for {repository_name}."
+                    )
+                return latest
 
             elif response.status_code == 403 and "X-RateLimit-Reset" in response.headers:
                 reset_time = int(response.headers["X-RateLimit-Reset"])
-                logging.error(
-                    f"API rate limit exceeded. Retry after {reset_time - int(time.time())} seconds.", exc_info=False
+                logger.error(
+                    f"API rate limit exceeded. Retry after {reset_time - int(time.time())} seconds."
                 )
                 return None
 
             else:
-                logging.error(
-                    f"Failed to get latest version from GitHub: {response.status_code}",
-                    f"Response: {response.text}",
-                    exc_info=False,
+                # One message string: a second positional argument with no `%s` made the
+                # logging call itself fail, so this error never reached a handler (#612).
+                logger.error(
+                    f"Failed to get latest version from GitHub: {response.status_code}. "
+                    f"Response: {response.text}"
                 )
                 return None
                 
         except requests.exceptions.RequestException as e:
-            logging.error(
-                f"An error occurred while getting the latest version from GitHub: {e}",
-                exc_info=False,
+            logger.error(
+                f"An error occurred while getting the latest version from GitHub: {e}"
             )
             raise
 
         except (KeyError, TypeError, ValueError) as e:
-            logging.error(
+            logger.error(
                 f"An unexpected error occurred while getting the latest version from GitHub: {type(e).__name__} - {e}",
                 exc_info=True,
             )

@@ -187,8 +187,8 @@ _BOUNDED_BY_REALITY: Dict[Tuple[str, str, str], str] = {
     (
         "file.py",
         "AppWriteFileModule.debug_collection_attributes",
-        "list_attributes",
-    ): "a debug helper that logs a collection's schema; attribute count is bounded by "
+        "list_columns",
+    ): "a debug helper that logs a table's schema; column count is bounded by "
     "the schema we author, and the result is printed rather than used for a decision",
     (
         "provisioning.py",
@@ -412,6 +412,12 @@ def _call_is_bounded(call: ast.Call, limited_names: Set[str]) -> bool:
 
 
 def _unbounded_list_calls() -> List[str]:
+    return [shown for _key, shown in _unbounded_list_sites(_BOUNDED_BY_REALITY)]
+
+
+def _unbounded_list_sites(allowlist) -> List[Tuple[Tuple[str, str, str], str]]:
+    """`((filename, owner, method), display)` for each unbounded `list*` call not excused
+    by `allowlist`. Passing an empty allowlist shows what every entry is excusing."""
     findings = []
     for path, tree in _iter_governed_files():
         functions = _enclosing_functions(tree)
@@ -423,7 +429,8 @@ def _unbounded_list_calls() -> List[str]:
             if not node.func.attr.startswith(_LIST_PREFIXES):
                 continue
             owner = _owner(functions, node.lineno, qualified)
-            if (path.name, owner, node.func.attr) in _BOUNDED_BY_REALITY:
+            key = (path.name, owner, node.func.attr)
+            if key in allowlist:
                 continue
             enclosing = [
                 fn for fn in functions if fn.lineno <= node.lineno <= (fn.end_lineno or 0)
@@ -433,9 +440,9 @@ def _unbounded_list_calls() -> List[str]:
                 limited |= limits_per_function[id(fn)]
             if not _call_is_bounded(node, limited):
                 findings.append(
-                    f"{_display(path)}:{node.lineno} {owner}() -> {node.func.attr}"
+                    (key, f"{_display(path)}:{node.lineno} {owner}() -> {node.func.attr}")
                 )
-    return sorted(findings)
+    return sorted(findings, key=lambda f: f[1])
 
 
 def _bare_exception_handlers() -> List[str]:
@@ -576,6 +583,16 @@ def _analyse(source: str, tmp_path, monkeypatch, finder):
 
 
 class TestTheGuardCanActuallyFail:
+    def test_an_unbounded_tablesdb_listing_is_caught(self, tmp_path, monkeypatch):
+        """TablesDB's listing calls (epic #599) are governed by the `list` prefix, not by
+        a list of names; this pins that, so narrowing the prefix fails here (#602)."""
+        for call in ("list_rows(a, b)", "list_columns(a, b)", "list_tables(a)"):
+            found = _analyse(
+                f"def fetch(self):\n    return self.tables_db.{call}\n",
+                tmp_path, monkeypatch, _unbounded_list_calls,
+            )
+            assert found and "fetch()" in found[0], call
+
     def test_an_unbounded_listing_is_caught(self, tmp_path, monkeypatch):
         found = _analyse(
             "def fetch(self):\n    return self.databases.list_documents(a, b)\n",
@@ -741,6 +758,28 @@ def test_every_broad_handler_allowlist_entry_excuses_something_that_exists():
         f"allowlist entries that excuse nothing: {sorted(stale)}. Either the handler was "
         f"removed and the entry should go with it, or the entry names the wrong function "
         f"and has never been doing anything."
+    )
+
+
+def test_every_bounded_listing_allowlist_entry_excuses_an_unbounded_call():
+    """The listing allowlist's twin of the broad-handler staleness test above.
+
+    An entry earns its place only while the call it names would otherwise be flagged.
+    Two ways it stops doing so, both of which must fail here (#602 review):
+
+    * the call is renamed, moved or removed. Epic #599 renames `list_attributes` to
+      TablesDB's `list_columns`; the old entry would stay behind, and the next
+      `list_attributes` call added to that function would inherit an exemption nobody
+      granted it;
+    * the call gains a limit. The entry then excuses nothing today and silently excuses
+      any unbounded call added to that function later (the `list_buckets` entry deleted
+      above is this case).
+    """
+    excused = {key for key, _shown in _unbounded_list_sites(allowlist={})}
+    stale = set(_BOUNDED_BY_REALITY) - excused
+    assert not stale, (
+        f"_BOUNDED_BY_REALITY entries that excuse nothing: {sorted(stale)}. The call was "
+        f"renamed, moved, removed or bounded; update or delete the entry with it."
     )
 
 

@@ -19,7 +19,7 @@ The project has logging infrastructure (`LoggingModule` with YAML config) but no
 
 ## Decision
 
-Structural failures must be both logged persistently and raised explicitly. The system must never silently degrade.
+Structural failures must be both logged persistently and raised explicitly. The system must never silently degrade. The one exception is the "Secondary-destination failure" row in the table below, which ADR-047 allows to log and continue on its save path only.
 
 ### Failure Classification
 
@@ -28,7 +28,8 @@ Structural failures must be both logged persistently and raised explicitly. The 
 | **Contract violation** | Raise exception immediately | Sniffer detecting invalid MultiIndex, PredictionFrame with 0 rows |
 | **Configuration error** | Raise exception before state mutation | Missing mandatory config key, invalid deployment status |
 | **Structural data error** | Raise exception | Empty DataFrame passed to evaluation, type mismatch |
-| **Infrastructure failure** | Log at ERROR + raise or propagate | Appwrite upload failure, WandB connection loss |
+| **Infrastructure failure** | Log at ERROR + raise or propagate | WandB connection loss |
+| **Secondary-destination failure** | Log at ERROR, inspect the returned result, continue — the run's authoritative outputs (local disk, views-forecasts) already landed. Governed by ADR-047, and scoped to what ADR-047 governs: the three-destination save path, where the DataFrame tier uploads a prediction file to Appwrite (`AppwriteSaver` in `managers/prediction/savers.py`, and the same handling in `managers/prediction/io.py`). A failed delivery must be made visible after the run, not by stopping it. Two Appwrite failures are outside this row and still raise: (a) a container or coordinate configuration error — `_require_containers` (`modules/appwrite/file.py`) raises `ConfigurationException`, which the saver does not catch because it catches only `upload_transport_faults()`; (b) the PredictionFrame sampled-forecast publish — `sampled_forecast_publisher._upload` raises so the manifest is withheld (views-postprocessing ADR-013 §3.2). | Appwrite upload failure on the three-destination save path (register D-42, decided 2026-11-12) |
 | **Degraded operation** | Log at WARNING + document scope of degradation | Partial reconciliation, missing shapefile for one region |
 
 ### Logging Levels
@@ -38,7 +39,7 @@ Structural failures must be both logged persistently and raised explicitly. The 
 | `DEBUG` | Internal state tracing (disabled in production) |
 | `INFO` | Successful completion of pipeline stages, sniffer passes |
 | `WARNING` | Degraded but continuing operation (must document what is degraded) |
-| `ERROR` | Failure that affects output correctness (must raise exception) |
+| `ERROR` | Failure that affects output correctness (must raise exception, except as ADR-047 allows — see the "Secondary-destination failure" row above) |
 | `CRITICAL` | Pipeline cannot continue (must raise exception + alert) |
 
 ### Existing Enforcement Points

@@ -70,6 +70,8 @@ def manager(config):
     with patch("views_pipeline_core.modules.appwrite.file.Client"), patch(
         "views_pipeline_core.modules.appwrite.file.Storage"
     ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
+        "views_pipeline_core.modules.appwrite.file.TablesDB"
+    ), patch(
         "views_pipeline_core.modules.appwrite.file.Users"
     ):
         yield AppWriteFileModule(config)
@@ -138,7 +140,7 @@ class TestDeleteDecision:
             manager, OperationResult(success=True, data={"$id": "existing_file_id"})
         )
         _run_dedup(manager, payload)
-        manager.databases.delete_document.assert_not_called()
+        manager.tables_db.delete_row.assert_not_called()
 
     def test_true_not_found_deletes_the_document(self, manager, payload):
         """Correct behaviour, and it must survive #329 unchanged."""
@@ -150,7 +152,13 @@ class TestDeleteDecision:
             ),
         )
         _run_dedup(manager, payload)
-        manager.databases.delete_document.assert_called_once()
+        manager.tables_db.delete_row.assert_called_once()
+        # the ROW id of the metadata row, never the file id it points at (#604)
+        assert manager.tables_db.delete_row.call_args.kwargs == {
+            "database_id": manager.config.database_id,
+            "table_id": manager.config.collection_id,
+            "row_id": "existing_doc_id",
+        }
 
     def test_wrong_bucket_keeps_the_document_and_fails(self, manager, payload):
         """FLIPPED BY #329 — a mistyped coordinate no longer destroys a valid card."""
@@ -163,7 +171,7 @@ class TestDeleteDecision:
         )
         result = _run_dedup(manager, payload)
 
-        manager.databases.delete_document.assert_not_called()
+        manager.tables_db.delete_row.assert_not_called()
         assert not result.success
         assert result.code == "storage_bucket_not_found"
         assert "Refusing to treat an unreadable file as an absent one" in result.error
@@ -186,7 +194,7 @@ class TestDeleteDecision:
         )
         result = _run_dedup(manager, payload)
 
-        manager.databases.delete_document.assert_not_called()
+        manager.tables_db.delete_row.assert_not_called()
         assert not result.success
         assert result.code == "general_unauthorized_scope"
         assert "read scope" in result.error
@@ -201,7 +209,7 @@ class TestDeleteDecision:
         )
         result = _run_dedup(manager, payload)
 
-        manager.databases.delete_document.assert_not_called()
+        manager.tables_db.delete_row.assert_not_called()
         assert not result.success
 
     def test_no_document_never_reaches_the_delete(self, manager, payload):
@@ -210,7 +218,7 @@ class TestDeleteDecision:
         )
         manager.get_file = Mock()
         _run_dedup(manager, payload)
-        manager.databases.delete_document.assert_not_called()
+        manager.tables_db.delete_row.assert_not_called()
         manager.get_file.assert_not_called()
 
 
@@ -282,7 +290,7 @@ class TestReplacePathOrphansTheOldFile:
         )
         result = _run_dedup(manager, payload)
 
-        manager.databases.delete_document.assert_not_called()
+        manager.tables_db.delete_row.assert_not_called()
         assert not result.success
         assert "would orphan it" in result.error
 
@@ -302,7 +310,12 @@ class TestReplacePathOrphansTheOldFile:
         )
         result = _run_dedup(manager, payload)
 
-        manager.databases.delete_document.assert_called_once()
+        manager.tables_db.delete_row.assert_called_once()
+        assert manager.tables_db.delete_row.call_args.kwargs == {
+            "database_id": manager.config.database_id,
+            "table_id": manager.config.collection_id,
+            "row_id": "old_doc_id",
+        }
         assert result.success
 
 
@@ -404,7 +417,7 @@ def test_the_replace_path_delete_is_classified_by_the_same_rule(manager, payload
     which stubs out the branch under test.
     """
     manager._require_containers = Mock(return_value=None)
-    manager.databases.list_documents = Mock(return_value={"total": 0, "documents": []})
+    manager.tables_db.list_rows = Mock(return_value={"total": 0, "rows": []})
     manager.metadata_manager.check_file_exists_by_hash = Mock(
         return_value=OperationResult(
             success=True,
@@ -436,7 +449,7 @@ def test_the_replace_path_delete_is_classified_by_the_same_rule(manager, payload
 def test_the_replace_path_proceeds_when_the_old_file_is_genuinely_gone(manager, payload):
     """The other half — the refusal must not be unconditional."""
     manager._require_containers = Mock(return_value=None)
-    manager.databases.list_documents = Mock(return_value={"total": 0, "documents": []})
+    manager.tables_db.list_rows = Mock(return_value={"total": 0, "rows": []})
     manager.metadata_manager.check_file_exists_by_hash = Mock(
         return_value=OperationResult(
             success=True,
@@ -455,7 +468,7 @@ def test_the_replace_path_proceeds_when_the_old_file_is_genuinely_gone(manager, 
     manager._store_metadata_document = Mock(
         return_value=OperationResult(success=True, data={"$id": "doc"}, code="CREATED")
     )
-    manager.databases.delete_document = Mock(return_value={})
+    manager.tables_db.delete_row = Mock(return_value={})
 
     result = manager.upload_file_with_metadata(
         bucket_id="test_bucket",
@@ -513,7 +526,7 @@ class TestHashMatchUnderADifferentName:
         _run_dedup(manager, payload)
 
         manager.metadata_manager.update_file_metadata.assert_not_called()
-        manager.databases.delete_document.assert_not_called()
+        manager.tables_db.delete_row.assert_not_called()
 
     def test_a_matching_name_still_dedupes(self, manager, payload):
         """The control. Dedup exists so re-uploading the SAME artefact is idempotent;
@@ -593,8 +606,8 @@ class TestAHashWithSeveralDocuments:
     def _collection(manager, documents):
         """A real list_documents page, so Query.limit is exercised rather than stubbed."""
         manager.metadata_manager.databases = Mock()
-        manager.metadata_manager.databases.list_documents = Mock(
-            return_value={"total": len(documents), "documents": documents}
+        manager.metadata_manager.tables_db.list_rows = Mock(
+            return_value={"total": len(documents), "rows": documents}
         )
         manager.metadata_manager._resolve_containers = Mock(
             return_value=("db", "coll")
@@ -643,7 +656,7 @@ class TestAHashWithSeveralDocuments:
         self._collection(manager, [])
         manager.metadata_manager.check_file_exists_by_hash("same", filename="x.parquet")
 
-        queries = manager.metadata_manager.databases.list_documents.call_args.kwargs["queries"]
+        queries = manager.metadata_manager.tables_db.list_rows.call_args.kwargs["queries"]
         assert _HASH_MATCH_PAGE_SIZE > 1, "a hash is not unique in this collection"
         assert any(str(_HASH_MATCH_PAGE_SIZE) in str(q) for q in queries), queries
 
@@ -685,8 +698,8 @@ class TestTheDedupSiteAsksTheLookupByName:
         # The real lookup against a real page — not the _document_found stub, because the
         # stub returns a single document and cannot express this shape.
         manager.metadata_manager.databases = Mock()
-        manager.metadata_manager.databases.list_documents = Mock(
-            return_value={"total": len(docs), "documents": docs}
+        manager.metadata_manager.tables_db.list_rows = Mock(
+            return_value={"total": len(docs), "rows": docs}
         )
         manager.metadata_manager._resolve_containers = Mock(return_value=("db", "coll"))
         manager.metadata_manager.update_file_metadata = Mock(

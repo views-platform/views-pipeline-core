@@ -23,6 +23,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [3.6.0] — unreleased
+
+The delivery moves to Appwrite's TablesDB API (epic #599). Needed for the CRAF'd launch: a key
+created in a per-audience Appwrite project after the TablesDB rename holds only `rows.*` /
+`tables.*` scopes, and the old `databases.*` API refuses it.
+
+### Changed
+- **The delivery's metadata calls use TablesDB** (#604): the metadata search, the hash
+  lookup, the metadata update and write, the orphan deletes, the upload preflight and the
+  debug listing (`list_rows`, `create_row`, `update_row`, `delete_row`, `list_tables`,
+  `list_columns`). **The written row is unchanged** (the same 13 columns), and so is
+  `DatastoreModule`'s `data={"documents", "total"}` envelope. Readers on the old API, such
+  as views-faoapi, read the same rows.
+- **A failed database call carries a classified code** (#603, ADR-071): HTTP 401/403 →
+  `UNAUTHORIZED`; a missing database, collection or table → `CONTAINER_NOT_FOUND`; anything
+  else → the server's own type. `NOT_FOUND` now means only "the listing matched nothing", so
+  a refused key can no longer read as "no duplicate" and upload a second copy. The log names
+  the database, collection, HTTP status and server type.
+- **The run name uses the highest `X.Y.Z` release tag**, compared as numbers (#612,
+  ADR-070). Before, a string sort picked views-models' `backup/...` tag.
+
+### Not in this release
+- The provisioner, the audit package and the FAO wipe tool still call `databases.*`
+  (#605, #606). **Creating or repairing a table with a post-rename key still needs them.**
+- The column-check preflight (#480) was left out; design notes are on #620.
+
 ## [3.5.0] — 2026-11-12
 
 Appwrite bring-up for a per-audience project. þing-04 S17 (#480, PR #586).
