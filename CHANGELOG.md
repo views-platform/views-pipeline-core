@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
-## [3.6.0] — unreleased
+## [3.6.0] — 2026-11-25
 
 The delivery moves to Appwrite's TablesDB API (epic #599). Needed for the CRAF'd launch: a key
 created in a per-audience Appwrite project after the TablesDB rename holds only `rows.*` /

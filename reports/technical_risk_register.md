@@ -4,7 +4,7 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 384 concerns (213 resolved) + 42 disagreements — 5 relocated to views-reporting
 
-> **Release gate — pipeline-core 3.6.0 — OPEN.** Prepared 2026-11-25. **The delivery's
+> **Release gate — pipeline-core 3.6.0 — ~~OPEN~~ SHIPPED.** Prepared 2026-11-25. Shipped 2026-11-25. **The delivery's
 > metadata calls move to TablesDB** (epic #599: #603, #604), so a key minted in a
 > per-audience Appwrite project after the rename can deliver; also the run-name fix (#612).
 > Release go: Simon, 2026-11-25. Published only after the FAO delivery
