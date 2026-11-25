@@ -121,7 +121,7 @@ until usage patterns stabilize.
 - **Primary outputs:** `OperationResult` from every public method.
 - **Side effects:**
   - Uploads files to Appwrite storage buckets.
-  - Creates/updates metadata rows through TablesDB (`list_rows`, `create_row`, `update_row`, `delete_row`; #604). Replies are read with `[...]`, so a reply in the old `databases.*` shape fails rather than reading as empty. The row's columns are `metadata_schema.DECLARED_METADATA_KEYS`; the preflight refuses a table missing any of them before uploading anything. `databases` is held only for the provisioner (#605).
+  - Creates/updates metadata rows through TablesDB (`list_rows`, `create_row`, `update_row`, `delete_row`; #604). Replies are read with `[...]`, so a reply in the old `databases.*` shape fails rather than reading as empty. The written row is unchanged by the switch. `databases` is still held for the provisioner (#605), the audit package and the FAO wipe tool (#606); the delivery does not call it.
   - Writes cached files and `cache_metadata.json` to the local cache directory.
   - Verifies (never creates) bucket and collection existence, once per instance.
   - Logs at `INFO` on successful operations, `WARNING` on fallbacks, `ERROR` on
@@ -163,7 +163,7 @@ until usage patterns stabilize.
 ## 7. Boundaries and Interactions
 
 - **Depends on:**
-  - `appwrite` SDK (`Client`, `Storage`, `Databases` (provisioner only), `TablesDB`, `Account`, `Users`, `InputFile`,
+  - `appwrite` SDK (`Client`, `Storage`, `TablesDB` (delivery), `Databases` (provisioner, audit, wipe tool), `Account`, `Users`, `InputFile`,
     `Query`, `Permission`, `Role`, `ID`).
   - `AuthFactory` / `AuthManager` hierarchy (internal) for pluggable auth.
   - `CacheManager` (internal) for local TTL cache.

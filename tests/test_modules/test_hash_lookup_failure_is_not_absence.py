@@ -131,9 +131,10 @@ def test_the_lookup_does_not_try_to_create_the_missing_attribute(manager):
 
     manager.metadata_manager.check_file_exists_by_hash("abc123")
 
-    manager.databases.create_string_attribute.assert_not_called()
-    manager.databases.create_collection.assert_not_called()
-    manager.databases.create.assert_not_called()
+    # Since #604 the lookup holds only `tables_db`; anything but a row listing on it is
+    # a write (a column or table create) and is forbidden here.
+    assert {c[0] for c in manager.tables_db.method_calls} == {"list_rows"}
+    assert manager.databases.method_calls == []
 
 
 # ----------------------------------------------------------------------------------
@@ -195,15 +196,9 @@ def test_a_genuine_absence_still_permits_the_upload(manager, tmp_path):
     above would pass while breaking every first upload to a healthy collection."""
     manager.tables_db.list_rows.return_value = {"total": 0, "rows": []}
     # `_require_containers` reads both before any write; give it a shelf that exists.
-    from views_pipeline_core.modules.appwrite.metadata_schema import DECLARED_METADATA_KEYS
-
     manager.tables_db.list_tables.return_value = {
         "total": 1,
         "tables": [{"$id": "crafd", "name": "crafd"}],
-    }
-    manager.tables_db.list_columns.return_value = {
-        "total": len(DECLARED_METADATA_KEYS),
-        "columns": [{"key": k} for k in DECLARED_METADATA_KEYS],
     }
     manager.storage = MagicMock()
     manager.storage.get_bucket.return_value = {"$id": "crafd_forecasts"}

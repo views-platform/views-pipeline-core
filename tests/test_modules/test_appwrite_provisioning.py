@@ -260,53 +260,18 @@ class TestDeliveryPathCannotProvision:
 
         manager.metadata_manager.check_file_exists_by_hash("abc123")
 
-        manager.databases.create.assert_not_called()
-        manager.databases.create_collection.assert_not_called()
+        assert {c[0] for c in manager.tables_db.method_calls} == {"list_rows"}
+        assert manager.databases.method_calls == []
 
 
 class TestRequireContainers:
     """Decision 1 — verify before writing, so a missing container cannot orphan a file."""
 
-    def _collections(self, manager, ids, columns=None):
-        from views_pipeline_core.modules.appwrite.metadata_schema import (
-            DECLARED_METADATA_KEYS,
-        )
-
+    def _collections(self, manager, ids):
         manager.tables_db.list_tables.return_value = {
             "total": len(ids),
             "tables": [{"$id": i, "name": i} for i in ids],
         }
-        keys = sorted(DECLARED_METADATA_KEYS) if columns is None else columns
-        manager.tables_db.list_columns.return_value = {
-            "total": len(keys),
-            "columns": [{"key": k} for k in keys],
-        }
-
-    def test_a_table_missing_a_declared_column_is_refused_naming_it(self, manager):
-        """#480: a missing column accepts the file and rejects its row, orphaning it."""
-        from views_pipeline_core.modules.appwrite.metadata_schema import (
-            DECLARED_METADATA_KEYS,
-        )
-
-        manager.get_bucket = Mock(return_value=OperationResult(success=True, data={}))
-        self._collections(
-            manager, ["test_collection"], sorted(DECLARED_METADATA_KEYS - {"loa"})
-        )
-
-        with pytest.raises(ConfigurationException) as exc:
-            manager._require_containers("test_bucket", "test_collection")
-
-        assert "['loa']" in str(exc.value)
-        assert "test_project" in str(exc.value)
-        assert "Nothing was uploaded" in str(exc.value)
-
-    def test_a_partial_column_listing_is_refused(self, manager):
-        manager.get_bucket = Mock(return_value=OperationResult(success=True, data={}))
-        self._collections(manager, ["test_collection"])
-        manager.tables_db.list_columns.return_value["total"] = 999
-
-        with pytest.raises(ConfigurationException, match="partial read"):
-            manager._require_containers("test_bucket", "test_collection")
 
     def test_passes_when_both_containers_exist(self, manager):
         manager.get_bucket = Mock(return_value=OperationResult(success=True, data={}))
@@ -836,17 +801,9 @@ class TestABrandNewProjectsFirstDeliveryHasSomewhereToLand:
         import tempfile
 
         manager.storage.get_bucket.return_value = {"$id": "crafd_bucket"}
-        from views_pipeline_core.modules.appwrite.metadata_schema import (
-            DECLARED_METADATA_KEYS,
-        )
-
         manager.tables_db.list_tables.return_value = {
             "total": 1,
             "tables": [{"$id": "test_collection", "name": "Test Collection"}],
-        }
-        manager.tables_db.list_columns.return_value = {
-            "total": len(DECLARED_METADATA_KEYS),
-            "columns": [{"key": k} for k in DECLARED_METADATA_KEYS],
         }
         manager.tables_db.list_rows.return_value = {"total": 0, "rows": []}
         manager.storage.list_files.return_value = {"files": [], "total": 0}
@@ -996,7 +953,7 @@ class TestTheBringUpIsCompleteNotJustTheAttributes:
 
     def test_the_indexes_the_delivery_queries_by_are_created(self, provisioner):
         """`Query.equal` on an unindexed attribute is not dependable against this store —
-        this package says so itself at `file.py:1279`, which is why the filename match
+        this package says so itself at `file.py::check_file_exists_by_hash` (the filename filter), which is why the filename match
         there is filtered in Python. Nothing in any sibling checkout created an index
         before now, while the platform key has carried `indexes.write` all along."""
         from views_pipeline_core.modules.appwrite.provisioning import DECLARED_INDEXES
@@ -1016,7 +973,7 @@ class TestTheBringUpIsCompleteNotJustTheAttributes:
     def test_the_read_paths_measured_query_shapes_are_both_covered(self, provisioner):
         """Derived from a consumer's MEASUREMENT, not from our own docstrings.
 
-        What the read path needs is not derivable from this repository: `file.py:1114-1118`
+        What the read path needs is not derivable from this repository: `file.py::search_files_by_metadata`
         turns any caller-supplied `filters` dict into equality queries. views-crafdapi read
         its own serving code and reported two shapes — `{category, type}` and
         `{name, category, type}` — and that the `loa` filter in our DatastoreModule
@@ -1244,7 +1201,7 @@ class TestTheIndexesAreDerivedFromTheQueriesNotFromTheList:
     hand-listed `{"fileId", "file_hash"}` would pass today and grow the same hole at the
     next index, which is the failure recorded ten times in this repository.
 
-    Collection queries only: `file.py:1683` issues `Query.equal("name", ...)` against
+    Collection queries only: `file.py::_file_exists_by_hash` issues `Query.equal("name", ...)` against
     `storage.list_files`, which is a bucket query and takes no collection index. The AST
     walk below keeps only the keys inside `tables_db.list_rows` calls, so that
     distinction is made by structure rather than by a list of exceptions.
@@ -1302,7 +1259,7 @@ class TestTheIndexesAreDerivedFromTheQueriesNotFromTheList:
         assert not missing, (
             f"the delivery queries documents by {sorted(missing)} with no declared index "
             f"covering it. An unindexed equality query is not dependable against this "
-            f"store — `file.py:1279` says so itself — so on a brand-new project the "
+            f"store — `file.py::check_file_exists_by_hash` (the filename filter) says so itself — so on a brand-new project the "
             f"lookup errors, the error is not NOT_FOUND, and the upload refuses with "
             f"'Could not determine whether a duplicate exists'."
         )

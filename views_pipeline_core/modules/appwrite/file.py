@@ -97,7 +97,6 @@ import shutil
 import logging
 import hashlib
 from views_pipeline_core.data.model_path import ModelPathManager
-from views_pipeline_core.modules.appwrite.metadata_schema import DECLARED_METADATA_KEYS
 from views_pipeline_core.exceptions.exceptions import ConfigurationException
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -530,7 +529,7 @@ def database_failure(
     if code == DB_UNAUTHORIZED:
         detail += (
             " — the key was refused: it has expired, been revoked, or lacks the scope "
-            "for this API (a key minted after the TablesDB rename cannot call databases.*)."
+            "this call needs (rows.read for a listing, rows.write for a write)."
         )
     logger.log(log_level, detail)
     return OperationResult(success=False, error=detail, code=code)
@@ -1034,11 +1033,11 @@ class AppwriteMetadataHandler:
     :meth:`AppWriteFileModule._require_containers`.
 
     Attributes:
-        databases: Appwrite Databases service instance.
+        tables_db: Appwrite TablesDB service instance (#604).
         config: AppwriteConfig with database/collection settings.
 
     Example:
-        >>> handler = AppwriteMetadataHandler(databases_service, config)
+        >>> handler = AppwriteMetadataHandler(tables_db_service, config)
         >>>
         >>> # Search for files by metadata
         >>> results = handler.search_files_by_metadata(
@@ -1051,7 +1050,7 @@ class AppwriteMetadataHandler:
         """Initialize metadata handler with database service and config.
 
         Args:
-            databases: Appwrite Databases service instance.
+            tables_db: Appwrite TablesDB service instance.
             config: AppwriteConfig with database/collection identifiers.
         """
         self.tables_db = tables_db
@@ -1409,7 +1408,8 @@ class AppWriteFileModule:
         config: AppwriteConfig with connection and storage settings.
         client: Appwrite Client instance.
         storage: Appwrite Storage service.
-        databases: Appwrite Databases service.
+        tables_db: Appwrite TablesDB service; every delivery metadata call (#604).
+        databases: Appwrite Databases service; the provisioner, audit and wipe tool only.
         users: Appwrite Users service.
         metadata_manager: AppwriteMetadataHandler for database operations.
         cache_manager: CacheManager for local file caching.
@@ -1488,8 +1488,8 @@ class AppWriteFileModule:
         self.users = Users(self.client)
         # The delivery's metadata calls go through TablesDB (#604): a key minted after
         # the rename holds only rows.*/tables.* scopes and is refused by `databases.*`.
-        # `databases` is kept for the provisioner alone (`provisioning.py` reuses it),
-        # until its own switch (#605).
+        # `databases` is kept, unused by the delivery, for the callers still on the old
+        # API: the provisioner (#605), the audit package and the FAO wipe tool (#606).
         self.tables_db = TablesDB(self.client)
         self.databases = Databases(self.client)
         
@@ -1511,11 +1511,9 @@ class AppWriteFileModule:
         in the bucket with no index card: an orphan, which is the corruption #329
         exists to remove.
 
-        It also checks the table's columns against ``DECLARED_METADATA_KEYS`` (#480,
-        #604): a missing column would accept the file and reject its row.
-
-        Read-only (``get_bucket`` + ``list_tables`` + ``list_columns``) and cached per
-        instance, so the cost is three calls per process rather than three per upload.
+        Read-only (``get_bucket`` + ``list_tables``) and cached per instance, so the
+        cost is two calls per process rather than two per upload. It does not check the
+        table's columns: that is #480, deliberately outside the TablesDB stories.
 
         **Scope: paired writes only.** The single-write methods (``upload_file``,
         ``update_file_metadata``) deliberately do not call this. They touch one
@@ -1559,55 +1557,21 @@ class AppWriteFileModule:
                     f"tables but only {len(listed)} were listed; this preflight "
                     f"cannot confirm a container's absence from a partial read."
                 )
-            table = next(
-                (t for t in listed if t.get("$id") == coll_id), None
-            ) or next(
-                (t for t in listed if t.get("name") == self.config.collection_name), None
-            )
-            if table is not None:
-                columns = self.tables_db.list_columns(
-                    self.config.database_id,
-                    table["$id"],
-                    queries=[Query.limit(_CONTAINER_PAGE)],
-                )
-                if columns["total"] > len(columns["columns"]):
-                    raise ConfigurationException(
-                        f"Table {table['$id']!r} reports {columns['total']} columns but "
-                        f"only {len(columns['columns'])} were listed; this preflight "
-                        f"cannot confirm the schema from a partial read."
-                    )
-                present = {c["key"] for c in columns["columns"]}
+            known = {t.get("$id") for t in listed} | {t.get("name") for t in listed}
         except AppwriteException as e:
             raise ConfigurationException(
                 f"Cannot verify the Appwrite metadata table in project "
                 f"{self.config.project_id!r}, database {self.config.database_id!r}: "
-                f"{exception_message(e)} (HTTP {e.code}, {e.type}, "
-                f"code={database_error_code(e)}). Check the coordinates and that this "
-                f"key holds tables.read in this project."
+                f"{exception_message(e)} (HTTP {e.code}, {e.type}). Check the "
+                f"coordinates and that this key holds tables.read in this project."
             ) from e
 
-        if table is None:
+        if coll_id not in known and self.config.collection_name not in known:
             raise ConfigurationException(
-                f"Appwrite metadata table {coll_id!r} does not exist in project "
-                f"{self.config.project_id!r}, database {self.config.database_id!r}. "
-                f"Create it deliberately:\n"
+                f"Appwrite metadata table '{coll_id}' does not exist in database "
+                f"'{self.config.database_id}'. Create it deliberately:\n"
                 f"    python -m views_pipeline_core.modules.appwrite.provisioning "
-                f"ensure-collection --collection {coll_id} "
-                f"--collection-name {self.config.collection_name}"
-            )
-
-        # A table missing a declared column accepts the file upload and then rejects
-        # the row, leaving an orphan in the bucket (#480). Refuse before any write.
-        missing = sorted(DECLARED_METADATA_KEYS - present)
-        if missing:
-            raise ConfigurationException(
-                f"Appwrite metadata table {table['$id']!r} in project "
-                f"{self.config.project_id!r}, database {self.config.database_id!r} "
-                f"lacks declared column(s) {missing}. Nothing was uploaded. Add them "
-                f"before delivering:\n"
-                f"    python -m views_pipeline_core.modules.appwrite.provisioning "
-                f"ensure-collection --collection {table['$id']} "
-                f"--collection-name {table.get('name', self.config.collection_name)}"
+                f"ensure-collection"
             )
 
         self._containers_verified = True

@@ -22,7 +22,7 @@ from views_pipeline_core.modules.appwrite.file import (
     AppWriteFileModule,
     AuthMethod,
 )
-from views_pipeline_core.modules.appwrite.metadata_schema import DECLARED_METADATA_KEYS
+from views_pipeline_core.modules.appwrite.provisioning import DECLARED_METADATA_ATTRIBUTES
 
 FILE_PY = Path(__file__).parents[2] / "views_pipeline_core" / "modules" / "appwrite" / "file.py"
 
@@ -61,20 +61,30 @@ def manager(tmp_path):
 
 
 def test_the_declared_row_is_unchanged():
-    assert DECLARED_METADATA_KEYS == THE_ROW
+    assert {a["key"] for a in DECLARED_METADATA_ATTRIBUTES} == THE_ROW
 
 
-def test_no_delivery_call_uses_the_old_databases_api():
-    """`self.databases` survives only as the provisioner's handle (#605 switches it)."""
-    calls = [
-        node
-        for node in ast.walk(ast.parse(FILE_PY.read_text()))
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Attribute)
-        and node.func.value.attr == "databases"
-    ]
-    assert not calls, [f"file.py:{c.lineno} databases.{c.func.attr}" for c in calls]
+DELIVERY_MODULES = [
+    FILE_PY,
+    FILE_PY.parents[1] / "datastore" / "datastore.py",
+]
+
+
+def test_no_delivery_code_reads_the_old_databases_handle():
+    """`self.databases` is still assigned for the provisioner, audit and wipe tool, but
+    nothing on the delivery path may READ it: not a call, not an alias, not a getattr."""
+    loads = []
+    for path in DELIVERY_MODULES:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr == "databases"
+                and isinstance(node.ctx, ast.Load)
+            ) or (
+                isinstance(node, ast.Constant) and node.value == "databases"
+            ):
+                loads.append(f"{path.name}:{node.lineno}")
+    assert not loads, loads
 
 
 def test_a_reply_in_the_old_shape_fails_loudly_rather_than_reading_as_absence(manager):
@@ -190,17 +200,22 @@ A_ROW = {
     "$id": "row1", "fileId": "file1", "bucketId": "crafd_bucket", "filename": "a.parquet",
     "file_hash": "h1", "name": "un_crafd", "category": "forecast", "loa": "pgm",
 }
+# A second row, listed FIRST, so "the first row" and "the row that matches" differ.
+OTHER_ROW = {
+    "$id": "row0", "fileId": "file0", "bucketId": "crafd_bucket", "filename": "z.parquet",
+    "file_hash": "h0", "name": "other", "category": "historical", "loa": "cm",
+}
 
 
 @pytest.fixture
 def strict(manager):
-    fake = StrictTablesDB([A_ROW])
+    fake = StrictTablesDB([OTHER_ROW, A_ROW])
     manager.tables_db = fake
     manager.metadata_manager.tables_db = fake
     return fake
 
 
-def test_search_reads_the_right_table(manager, strict):
+def test_search_reads_the_right_table_with_the_callers_filters(manager, strict):
     result = manager.metadata_manager.search_files_by_metadata(filters={"name": "un_crafd"})
     assert result.success, result.error
     assert [r["$id"] for r in result.data["documents"]] == ["row1"]
@@ -215,6 +230,7 @@ def test_metadata_update_changes_the_row_found_by_file_id(manager, strict):
     result = manager.metadata_manager.update_file_metadata("file1", {"category": "historical"})
     assert result.success, result.error
     assert strict.rows[(DB, TABLE)]["row1"]["category"] == "historical"
+    assert strict.rows[(DB, TABLE)]["row0"] == OTHER_ROW, "another file's row was changed"
 
 
 def test_metadata_write_updates_the_existing_row_with_the_whole_payload(manager, strict):
@@ -223,6 +239,7 @@ def test_metadata_write_updates_the_existing_row_with_the_whole_payload(manager,
     result = manager._store_metadata_document(DB, TABLE, "file1", payload)
     assert result.code == "UPDATED", result.error
     assert strict.rows[(DB, TABLE)]["row1"] == {"$id": "row1", **payload}
+    assert strict.rows[(DB, TABLE)]["row0"] == OTHER_ROW
 
 
 def test_metadata_write_creates_a_new_row_with_the_whole_payload(manager, strict):
@@ -240,8 +257,8 @@ def test_the_preflight_passes_against_a_complete_table(manager, strict):
     manager._require_containers("crafd_bucket", TABLE)
 
 
-def test_the_preflight_finds_the_table_by_name_and_checks_ITS_columns(manager, strict):
-    """The config may name the table by its display name; its columns are read by id."""
+def test_the_preflight_accepts_the_table_by_its_configured_name(manager, strict):
+    """Pre-existing behaviour, unchanged by the switch: id or configured name."""
     manager.get_bucket = lambda _b: type("R", (), {"success": True})()
     strict.list_tables = lambda database_id, queries=None: {
         "total": 1, "tables": [{"$id": TABLE, "name": "Shown Name"}]
@@ -299,12 +316,3 @@ def test_an_old_shape_reply_fails_at_every_reading_site(manager, call):
     manager.get_bucket = lambda _b: type("R", (), {"success": True})()
     with pytest.raises(KeyError):
         call(manager)
-
-
-def test_an_old_shape_column_listing_fails_the_preflight(manager):
-    fake = OldShapeTablesDB([A_ROW])
-    fake.list_tables = StrictTablesDB.list_tables.__get__(fake)
-    manager.tables_db = fake
-    manager.get_bucket = lambda _b: type("R", (), {"success": True})()
-    with pytest.raises(KeyError):
-        manager._require_containers("crafd_bucket", TABLE)
