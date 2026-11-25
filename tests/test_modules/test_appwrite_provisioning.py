@@ -949,7 +949,7 @@ class TestTheBringUpIsCompleteNotJustTheAttributes:
 
     def test_the_indexes_the_delivery_queries_by_are_created(self, provisioner):
         """`Query.equal` on an unindexed attribute is not dependable against this store —
-        this package says so itself at `file.py:1216`, which is why the filename match
+        this package says so itself at `file.py:1279`, which is why the filename match
         there is filtered in Python. Nothing in any sibling checkout created an index
         before now, while the platform key has carried `indexes.write` all along."""
         from views_pipeline_core.modules.appwrite.provisioning import DECLARED_INDEXES
@@ -969,7 +969,7 @@ class TestTheBringUpIsCompleteNotJustTheAttributes:
     def test_the_read_paths_measured_query_shapes_are_both_covered(self, provisioner):
         """Derived from a consumer's MEASUREMENT, not from our own docstrings.
 
-        What the read path needs is not derivable from this repository: `file.py:1046-1050`
+        What the read path needs is not derivable from this repository: `file.py:1114-1118`
         turns any caller-supplied `filters` dict into equality queries. views-crafdapi read
         its own serving code and reported two shapes — `{category, type}` and
         `{name, category, type}` — and that the `loa` filter in our DatastoreModule
@@ -1197,7 +1197,7 @@ class TestTheIndexesAreDerivedFromTheQueriesNotFromTheList:
     hand-listed `{"fileId", "file_hash"}` would pass today and grow the same hole at the
     next index, which is the failure recorded ten times in this repository.
 
-    Collection queries only: `file.py:1627` issues `Query.equal("name", ...)` against
+    Collection queries only: `file.py:1683` issues `Query.equal("name", ...)` against
     `storage.list_files`, which is a bucket query and takes no collection index. The AST
     walk below keeps only the keys inside `databases.list_documents` calls, so that
     distinction is made by structure rather than by a list of exceptions.
@@ -1255,7 +1255,7 @@ class TestTheIndexesAreDerivedFromTheQueriesNotFromTheList:
         assert not missing, (
             f"the delivery queries documents by {sorted(missing)} with no declared index "
             f"covering it. An unindexed equality query is not dependable against this "
-            f"store — `file.py:1216` says so itself — so on a brand-new project the "
+            f"store — `file.py:1279` says so itself — so on a brand-new project the "
             f"lookup errors, the error is not NOT_FOUND, and the upload refuses with "
             f"'Could not determine whether a duplicate exists'."
         )

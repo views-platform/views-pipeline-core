@@ -153,9 +153,9 @@ DECLARED_METADATA_ATTRIBUTES: List[Dict[str, Any]] = (
 CREATABLE_ATTRIBUTE_TYPES = frozenset({"string", "integer", "datetime", "boolean"})
 
 # The indexes the WRITE path needs. Attributes alone are not a complete bring-up:
-# `check_file_exists_by_hash` issues `Query.equal("file_hash", ...)` (`file.py:1200`) and
-# `_store_metadata_document` issues `Query.equal("fileId", ...)` (`file.py:1301`, `:1769`)
-# against this collection, and this package's own comment at `file.py:1216` already states
+# `check_file_exists_by_hash` issues `Query.equal("file_hash", ...)` (`file.py:1263`) and
+# `_store_metadata_document` issues `Query.equal("fileId", ...)` (`file.py:1361`, `:1825`)
+# against this collection, and this package's own comment at `file.py:1279` already states
 # that an unindexed equality query "is not dependable against this store" — which is why
 # the filename match there is filtered in Python instead.
 #
@@ -168,7 +168,7 @@ CREATABLE_ATTRIBUTE_TYPES = frozenset({"string", "integer", "datetime", "boolean
 # whether a duplicate exists".
 #
 # The read path is covered too, but only because a consumer MEASURED its own queries
-# rather than us guessing from our docstrings. `file.py:1046-1050` turns any
+# rather than us guessing from our docstrings. `file.py:1114-1118` turns any
 # caller-supplied `filters` dict into equality queries, so "what the read path needs"
 # is not derivable from this repository at all. views-crafdapi read its serving code
 # (`views-crafdapi@feat/crafd-project`) and reported two shapes:
@@ -948,7 +948,7 @@ class AppwriteProvisioner:
             return OperationResult(success=True, data=result, code="CREATED")
 
         except AppwriteException as e:
-            return OperationResult(success=False, error=e.message, code=database_error_code(e))
+            return OperationResult(success=False, error=e.message, code=e.type)
 
 
 def build_provisioner(

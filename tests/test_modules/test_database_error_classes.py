@@ -72,8 +72,11 @@ def manager(tmp_path):
         (FORBIDDEN, DB_UNAUTHORIZED),
         (NO_COLLECTION, DB_CONTAINER_NOT_FOUND),
         (NO_TABLE, DB_CONTAINER_NOT_FOUND),
-        # a 404 whose type the server renames still means a missing container
-        (AppwriteException("not found", 404, "some_future_type"), DB_CONTAINER_NOT_FOUND),
+        (AppwriteException("Database not found", 404, "database_not_found"), DB_CONTAINER_NOT_FOUND),
+        # a missing project or a retired route is NOT a missing container
+        (AppwriteException("Project not found", 404, "project_not_found"), "project_not_found"),
+        (AppwriteException("Route not found", 404, "general_route_not_found"), "general_route_not_found"),
+        (AppwriteException("<html>404</html>", 404, None), None),
         (NO_ROW, "row_not_found"),
         (NO_DOCUMENT, "document_not_found"),
         (SERVER_ERROR, "general_unknown"),
@@ -116,9 +119,18 @@ def test_a_refused_key_is_logged_with_the_coordinates_and_the_hint(manager, capl
     manager.databases.list_documents.side_effect = REFUSED
     with caplog.at_level(logging.ERROR):
         manager.metadata_manager.check_file_exists_by_hash("abc123")
-    assert "file_metadata" in caplog.text
-    assert "crafd" in caplog.text
-    assert "lacks the scope" in caplog.text
+    assert "database 'file_metadata', collection 'crafd'" in caplog.text
+    assert "general_unauthorized_scope" in caplog.text
+    assert "the key was refused" in caplog.text
+
+
+def test_an_expired_key_keeps_its_server_type_in_the_error(manager):
+    manager.databases.list_documents.side_effect = AppwriteException(
+        "The project key has expired", 401, "project_key_expired"
+    )
+    result = manager.metadata_manager.check_file_exists_by_hash("abc123")
+    assert result.code == DB_UNAUTHORIZED
+    assert "project_key_expired" in result.error
 
 
 # --- callers: a refused key is never "absent" ---------------------------------------
@@ -261,3 +273,44 @@ def test_metadata_store_routes_through_the_classifier(manager):
 def test_provisioning_routes_through_the_classifier(provisioner, call):
     result = call(provisioner)
     assert result.code == DB_UNAUTHORIZED
+
+
+def test_a_server_error_on_the_attribute_read_is_not_retried(provisioner):
+    """Only a missing container is "not ready yet"; a 500 or a timeout is a failure."""
+    provisioner.databases.list_attributes.side_effect = SERVER_ERROR
+    with patch("views_pipeline_core.modules.appwrite.provisioning.time.sleep") as sleep:
+        result = provisioner.ensure_attributes("file_metadata", "crafd", {}, max_retries=3, initial_delay=0)
+    sleep.assert_not_called()
+    assert result.code == "general_unknown"
+
+
+def test_a_failed_metadata_update_is_a_warning_not_an_error(manager, caplog):
+    """The delivery treats it as recoverable, so it must not log at ERROR."""
+    manager.databases.list_documents.return_value = {"total": 1, "documents": [{"$id": "d1"}]}
+    manager.databases.update_document.side_effect = SERVER_ERROR
+    with caplog.at_level(logging.WARNING):
+        manager.metadata_manager.update_file_metadata("f1", {"name": "y"})
+    levels = {r.levelno for r in caplog.records if "Metadata update failed" in r.getMessage()}
+    assert levels == {logging.WARNING}
+
+
+def test_a_refused_metadata_write_is_logged_with_its_coordinates(manager, caplog):
+    manager.databases.list_documents.side_effect = REFUSED
+    with caplog.at_level(logging.ERROR):
+        manager._store_metadata_document("file_metadata", "crafd", "f1", {"fileId": "f1"})
+    assert "database 'file_metadata', collection 'crafd'" in caplog.text
+
+
+def test_ensure_collection_routes_through_the_classifier(provisioner):
+    provisioner.databases.list.return_value = {"total": 1, "databases": [{"$id": "file_metadata", "name": "file_metadata"}]}
+    provisioner.databases.list_collections.side_effect = REFUSED
+    result = provisioner.ensure_collection("file_metadata", "crafd", "crafd", {})
+    assert result.code == DB_UNAUTHORIZED
+
+
+def test_a_storage_error_on_bucket_creation_keeps_its_own_type(provisioner):
+    """`ensure_bucket` fails on a storage call; the database classifier does not apply."""
+    provisioner.storage.list_buckets.return_value = {"total": 0, "buckets": []}
+    provisioner.storage.create_bucket.side_effect = REFUSED
+    result = provisioner.ensure_bucket("crafd_bucket", "crafd_bucket")
+    assert result.code == "general_unauthorized_scope"

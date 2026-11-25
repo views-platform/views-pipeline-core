@@ -87,6 +87,7 @@ Domain decisions specific to `views-pipeline-core`.
 | [068](068_the_publish_set_is_derived_from_the_wire_vocabulary.md) | What may be published to a partner-visible store is derived from the wire vocabulary, and a short delivery refuses | Accepted |
 | [069](069_locating_a_foreign_artefact_must_span_every_layout.md) | Locating a foreign model's artefact must span every layout that could have written it | Accepted |
 | [070](070_a_release_is_an_x_y_z_tag.md) | A repository's release version is its highest X.Y.Z tag, and nothing else | Accepted |
+| [071](071_database_failure_codes_are_classified.md) | A failed Appwrite database call carries a classified code, not the raw server type | Accepted |
 
 ---
 
