@@ -120,3 +120,191 @@ def test_the_search_envelope_keeps_its_documents_key(manager):
     result = manager.metadata_manager.search_files_by_metadata(filters={"name": "un_crafd"})
     assert result.success
     assert result.data["documents"] == [{"$id": "r1", "filename": "a.parquet"}]
+
+
+# --- a strict substrate (falsify guard, 2026-11-25) ---------------------------------
+#
+# A plain MagicMock accepts any database, table or row id, so a swapped argument or a
+# file id passed as a row id stays green. This fake holds real rows under
+# (database, table) and answers like the server: an unknown container or row is a 404.
+
+import json  # noqa: E402
+
+from appwrite.exception import AppwriteException  # noqa: E402
+
+DB, TABLE = "file_metadata", "crafd"
+
+
+class StrictTablesDB:
+    def __init__(self, rows, columns=THE_ROW):
+        self.rows = {(DB, TABLE): {r["$id"]: dict(r) for r in rows}}
+        self.columns = sorted(columns)
+
+    def _table(self, database_id, table_id):
+        if (database_id, table_id) not in self.rows:
+            raise AppwriteException("not found", 404, "table_not_found")
+        return self.rows[(database_id, table_id)]
+
+    def list_rows(self, database_id, table_id, queries=None):
+        rows = list(self._table(database_id, table_id).values())
+        limit, offset = 25, 0
+        for raw in queries or []:
+            q = json.loads(raw)
+            if q["method"] == "equal":
+                rows = [r for r in rows if r.get(q["attribute"]) in q["values"]]
+            elif q["method"] == "limit":
+                limit = q["values"][0]
+            elif q["method"] == "offset":
+                offset = q["values"][0]
+        return {"total": len(rows), "rows": rows[offset : offset + limit]}
+
+    def create_row(self, database_id, table_id, row_id, data, permissions=None):
+        table = self._table(database_id, table_id)
+        table[row_id] = {"$id": row_id, **data}
+        return table[row_id]
+
+    def update_row(self, database_id, table_id, row_id, data=None, permissions=None):
+        table = self._table(database_id, table_id)
+        if row_id not in table:
+            raise AppwriteException("row not found", 404, "row_not_found")
+        table[row_id].update(data or {})
+        return table[row_id]
+
+    def delete_row(self, database_id, table_id, row_id):
+        table = self._table(database_id, table_id)
+        if row_id not in table:
+            raise AppwriteException("row not found", 404, "row_not_found")
+        del table[row_id]
+
+    def list_tables(self, database_id, queries=None):
+        if database_id != DB:
+            raise AppwriteException("not found", 404, "database_not_found")
+        return {"total": 1, "tables": [{"$id": TABLE, "name": TABLE}]}
+
+    def list_columns(self, database_id, table_id, queries=None):
+        self._table(database_id, table_id)
+        return {"total": len(self.columns), "columns": [{"key": k} for k in self.columns]}
+
+
+A_ROW = {
+    "$id": "row1", "fileId": "file1", "bucketId": "crafd_bucket", "filename": "a.parquet",
+    "file_hash": "h1", "name": "un_crafd", "category": "forecast", "loa": "pgm",
+}
+
+
+@pytest.fixture
+def strict(manager):
+    fake = StrictTablesDB([A_ROW])
+    manager.tables_db = fake
+    manager.metadata_manager.tables_db = fake
+    return fake
+
+
+def test_search_reads_the_right_table(manager, strict):
+    result = manager.metadata_manager.search_files_by_metadata(filters={"name": "un_crafd"})
+    assert result.success, result.error
+    assert [r["$id"] for r in result.data["documents"]] == ["row1"]
+
+
+def test_hash_lookup_reads_the_right_table(manager, strict):
+    result = manager.metadata_manager.check_file_exists_by_hash("h1", filename="a.parquet")
+    assert result.code == "FOUND_BY_HASH"
+
+
+def test_metadata_update_changes_the_row_found_by_file_id(manager, strict):
+    result = manager.metadata_manager.update_file_metadata("file1", {"category": "historical"})
+    assert result.success, result.error
+    assert strict.rows[(DB, TABLE)]["row1"]["category"] == "historical"
+
+
+def test_metadata_write_updates_the_existing_row_with_the_whole_payload(manager, strict):
+    payload = {**A_ROW, "file_hash": "h2", "description": "d"}
+    payload.pop("$id")
+    result = manager._store_metadata_document(DB, TABLE, "file1", payload)
+    assert result.code == "UPDATED", result.error
+    assert strict.rows[(DB, TABLE)]["row1"] == {"$id": "row1", **payload}
+
+
+def test_metadata_write_creates_a_new_row_with_the_whole_payload(manager, strict):
+    payload = {"fileId": "file2", "filename": "b.parquet", "file_hash": "h3", "loa": "pgm"}
+    result = manager._store_metadata_document(DB, TABLE, "file2", payload)
+    assert result.code == "CREATED", result.error
+    created = [r for r in strict.rows[(DB, TABLE)].values() if r["fileId"] == "file2"]
+    assert len(created) == 1
+    assert created[0]["$id"] not in ("file2", "row1"), "a row id must be fresh, not the file id"
+    assert {k: v for k, v in created[0].items() if k != "$id"} == payload
+
+
+def test_the_preflight_passes_against_a_complete_table(manager, strict):
+    manager.get_bucket = lambda _b: type("R", (), {"success": True})()
+    manager._require_containers("crafd_bucket", TABLE)
+
+
+def test_the_preflight_finds_the_table_by_name_and_checks_ITS_columns(manager, strict):
+    """The config may name the table by its display name; its columns are read by id."""
+    manager.get_bucket = lambda _b: type("R", (), {"success": True})()
+    strict.list_tables = lambda database_id, queries=None: {
+        "total": 1, "tables": [{"$id": TABLE, "name": "Shown Name"}]
+    }
+    import dataclasses
+
+    manager.config = dataclasses.replace(manager.config, collection_name="Shown Name")
+    manager._require_containers("crafd_bucket", "not_the_id")
+
+
+def test_the_preflight_refuses_a_partial_table_listing(manager, strict):
+    from views_pipeline_core.exceptions.exceptions import ConfigurationException
+
+    manager.get_bucket = lambda _b: type("R", (), {"success": True})()
+    strict.list_tables = lambda database_id, queries=None: {
+        "total": 500, "tables": [{"$id": TABLE, "name": TABLE}]
+    }
+    with pytest.raises(ConfigurationException, match="partial read"):
+        manager._require_containers("crafd_bucket", TABLE)
+
+
+# Every site that reads a reply must fail on the old API's keys rather than read them as
+# empty. One old-shape substrate, every entrypoint.
+
+
+class OldShapeTablesDB(StrictTablesDB):
+    def list_rows(self, *a, **k):
+        reply = super().list_rows(*a, **k)
+        return {"total": reply["total"], "documents": reply["rows"]}
+
+    def list_tables(self, *a, **k):
+        reply = super().list_tables(*a, **k)
+        return {"total": reply["total"], "collections": reply["tables"]}
+
+    def list_columns(self, *a, **k):
+        reply = super().list_columns(*a, **k)
+        return {"total": reply["total"], "attributes": reply["columns"]}
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda m: m.metadata_manager.search_files_by_metadata(filters={"name": "un_crafd"}),
+        lambda m: m.metadata_manager.check_file_exists_by_hash("h1", filename="a.parquet"),
+        lambda m: m.metadata_manager.update_file_metadata("file1", {"category": "x"}),
+        lambda m: m._store_metadata_document(DB, TABLE, "file1", {"fileId": "file1"}),
+        lambda m: m._require_containers("crafd_bucket", TABLE),
+    ],
+    ids=["search", "hash", "update", "write", "preflight"],
+)
+def test_an_old_shape_reply_fails_at_every_reading_site(manager, call):
+    fake = OldShapeTablesDB([A_ROW])
+    manager.tables_db = fake
+    manager.metadata_manager.tables_db = fake
+    manager.get_bucket = lambda _b: type("R", (), {"success": True})()
+    with pytest.raises(KeyError):
+        call(manager)
+
+
+def test_an_old_shape_column_listing_fails_the_preflight(manager):
+    fake = OldShapeTablesDB([A_ROW])
+    fake.list_tables = StrictTablesDB.list_tables.__get__(fake)
+    manager.tables_db = fake
+    manager.get_bucket = lambda _b: type("R", (), {"success": True})()
+    with pytest.raises(KeyError):
+        manager._require_containers("crafd_bucket", TABLE)

@@ -153,6 +153,8 @@ class TestDeleteDecision:
         )
         _run_dedup(manager, payload)
         manager.tables_db.delete_row.assert_called_once()
+        # the ROW id of the metadata row, never the file id it points at (#604)
+        assert manager.tables_db.delete_row.call_args.kwargs["row_id"] == "existing_doc_id"
 
     def test_wrong_bucket_keeps_the_document_and_fails(self, manager, payload):
         """FLIPPED BY #329 — a mistyped coordinate no longer destroys a valid card."""
@@ -305,6 +307,7 @@ class TestReplacePathOrphansTheOldFile:
         result = _run_dedup(manager, payload)
 
         manager.tables_db.delete_row.assert_called_once()
+        assert manager.tables_db.delete_row.call_args.kwargs["row_id"] == "old_doc_id"
         assert result.success
 
 
