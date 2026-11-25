@@ -50,6 +50,7 @@ Typical usage example:
 from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
 from views_pipeline_core.modules.appwrite import AppwriteConfig, AppWriteFileModule, OperationResult
+from views_pipeline_core.modules.appwrite.file import APPWRITE_BUCKET_NOT_FOUND
 import logging
 import pandas as pd
 
@@ -410,7 +411,7 @@ class DatastoreModule:
         # þing-02 #331). Provisioning is now a deliberate act; a wrong coordinate
         # fails and says which one:
         #   python -m views_pipeline_core.modules.appwrite.provisioning ensure-bucket
-        if upload_result.get("code") == "storage_bucket_not_found":
+        if upload_result.get("code") == APPWRITE_BUCKET_NOT_FOUND:
             bucket_id = self.__appwrite_file_manager_config.bucket_id
             logger.error(
                 "Appwrite bucket '%s' does not exist. Refusing to create it from the "

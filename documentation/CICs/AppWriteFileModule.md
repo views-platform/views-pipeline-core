@@ -134,6 +134,16 @@ until usage patterns stabilize.
 - `ValueError` at construction if authentication fails.
 - `AppwriteException` propagated through `OperationResult.error` for storage and
   database failures (network, permissions, quota).
+- **A failed database call carries a classified code** (`database_error_code`, #603,
+  ADR-071): 401/403 → `UNAUTHORIZED`; a 404 typed `database_not_found`,
+  `collection_not_found` or `table_not_found` → `CONTAINER_NOT_FOUND`; anything else
+  (including a missing project, a retired route, a missing row) → the server's own type.
+  `NOT_FOUND` is reserved for a listing that answered with no match, so a refused key is
+  never read as absence by the hash lookup. The metadata search, hash lookup, metadata
+  update and metadata write log the database and collection ids and the server type
+  through `database_failure` (the update at WARNING, because the delivery recovers from
+  it). Known gaps, register C-382 to C-384: other upload entrypoints still act on a
+  failed lookup or a failed metadata write (`upload_file`, `upload_file_from_bytes*`).
 - `ValueError` from `_calculate_file_hash()` if neither `file_path` nor `file_bytes`
   is provided.
 - Cache failures (corrupt metadata JSON, missing files) are logged as warnings and

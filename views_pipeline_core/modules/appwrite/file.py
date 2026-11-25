@@ -462,10 +462,76 @@ def exception_message(exception: Exception) -> str:
     that sequencing was not optional.
 
     Six call sites compared against ``e.message`` directly. This is the coercion they all
-    needed; the deeper fix is to branch on ``e.type`` instead of prose (register C-235).
+    needed. For database calls, branch on `database_error_code` (ADR-071), never on prose.
     """
     message = getattr(exception, "message", None)
     return message if isinstance(message, str) else str(message if message is not None else exception)
+
+
+#: A database call the key is not allowed to make (HTTP 401/403). Under the TablesDB
+#: rename a key minted after the rename answers every old ``databases.*`` call this way
+#: (#599), so it must never be read as "nothing there".
+DB_UNAUTHORIZED = "UNAUTHORIZED"
+
+#: The database, collection or table addressed does not exist: a 404 whose server type
+#: names one of those containers. Distinct from ``NOT_FOUND``, which this module reserves
+#: for a listing that answered with no match.
+DB_CONTAINER_NOT_FOUND = "CONTAINER_NOT_FOUND"
+
+# The 404 types that name a missing CONTAINER, in both vocabularies (the TablesDB rename
+# turned collections into tables). Matched explicitly: a missing project, a retired route
+# or an untyped 404 is not a missing container and keeps its own type, so an operator is
+# not sent to `ensure-collection` for a mistyped project id.
+_MISSING_CONTAINER_TYPES = frozenset(
+    {"database_not_found", "collection_not_found", "table_not_found"}
+)
+
+
+def database_error_code(exception: Exception) -> Optional[str]:
+    """The ``OperationResult.code`` for a failed database call (#603).
+
+    A refused key (HTTP 401/403) is keyed on the status, which survives vendor renames;
+    a missing container on the explicit types above; anything else keeps the server's
+    own type. So a refused key, a missing container and an empty listing (``NOT_FOUND``)
+    are three different codes.
+    """
+    status = getattr(exception, "code", None)
+    error_type = getattr(exception, "type", None)
+    if status in (401, 403):
+        return DB_UNAUTHORIZED
+    if status == 404 and error_type in _MISSING_CONTAINER_TYPES:
+        return DB_CONTAINER_NOT_FOUND
+    return error_type
+
+
+def database_failure(
+    exception: Exception,
+    what: str,
+    database_id: Optional[str],
+    collection_id: Optional[str],
+    log_level: int = logging.ERROR,
+) -> "OperationResult":
+    """Log and return a failed database call, with the code from `database_error_code`.
+
+    The log and the error text both carry the database and collection ids and the
+    server's own type, so a refusal names what was refused and why (an expired key and
+    a missing scope are both HTTP 401). ``log_level`` lets a caller that treats the
+    failure as recoverable log it as a WARNING.
+    """
+    code = database_error_code(exception)
+    status = getattr(exception, "code", None)
+    server_type = getattr(exception, "type", None)
+    detail = (
+        f"{what} failed on database {database_id!r}, collection {collection_id!r} "
+        f"(HTTP {status}, {server_type}): {exception_message(exception)}"
+    )
+    if code == DB_UNAUTHORIZED:
+        detail += (
+            " — the key was refused: it has expired, been revoked, or lacks the scope "
+            "for this API (a key minted after the TablesDB rename cannot call databases.*)."
+        )
+    logger.log(log_level, detail)
+    return OperationResult(success=False, error=detail, code=code)
 
 
 # Authentication Classes
@@ -1130,10 +1196,7 @@ class AppwriteMetadataHandler:
             )
 
         except AppwriteException as e:
-            logger.error(f"Search failed: {e.message}")
-            return OperationResult(
-                success=False, error=f"Search failed: {e.message}", code=e.type
-            )
+            return database_failure(e, "Search", db_id, coll_id)
 
     def check_file_exists_by_hash(
     self,
@@ -1247,10 +1310,7 @@ class AppwriteMetadataHandler:
             #
             # A missing attribute now surfaces below as an ordinary failed read. Callers
             # must inspect it; the two that did not are guarded as of #473.
-            logger.error(f"Search failed: {e.message}")
-            return OperationResult(
-                success=False, error=f"Search failed: {e.message}", code=e.type
-            )
+            return database_failure(e, "Search", db_id, coll_id)
 
     def update_file_metadata(
         self,
@@ -1324,11 +1384,7 @@ class AppwriteMetadataHandler:
             )
         
         except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=f"Metadata update failed: {e.message}",
-                code=e.type
-            )
+            return database_failure(e, "Metadata update", db_id, coll_id, log_level=logging.WARNING)
 
 # Main File Manager
 class AppWriteFileModule:
@@ -1782,11 +1838,7 @@ class AppWriteFileModule:
                 return OperationResult(success=True, data=result, code="CREATED")
         
         except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=e.message,
-                code=e.type
-            )
+            return database_failure(e, "Metadata write", database_id, collection_id)
 
     def upload_file(
         self,
@@ -2089,7 +2141,7 @@ class AppWriteFileModule:
                                     f"Could not delete the orphaned metadata document "
                                     f"{existing_doc_id}: {e.message}"
                                 ),
-                                code=e.type,
+                                code=database_error_code(e),
                             )
 
                 else:

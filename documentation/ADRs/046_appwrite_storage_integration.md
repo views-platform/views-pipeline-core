@@ -62,7 +62,7 @@ constraints:
 >
 > **(b) Catching exceptions was never sufficient, because the failures that matter do not
 > raise.** `AppWriteFileModule` converts `AppwriteException` into
-> `OperationResult(success=False, code=e.type)` at the leaf, so nothing propagates to the
+> `OperationResult(success=False, code=...)` at the leaf (the code classified by `database_error_code` since #603, ADR-071), so nothing propagates to the
 > saver's `except` clause at all. Both call sites discarded that result and logged
 > *"Forecasts uploaded to Appwrite Datastore successfully."* unconditionally — for four
 > months, on the path that serves the FAO. **Callers must inspect the returned
