@@ -4,6 +4,25 @@
 **Governing ADR:** ADR-044 (Technical Risk Register)
 **Entry count:** 384 concerns (213 resolved) + 42 disagreements — 5 relocated to views-reporting
 
+> **Release gate — pipeline-core 3.6.0 — OPEN.** Prepared 2026-11-25. **The delivery's
+> metadata calls move to TablesDB** (epic #599: #603, #604), so a key minted in a
+> per-audience Appwrite project after the rename can deliver; also the run-name fix (#612).
+> Release go: Simon, 2026-11-25. Published only after the FAO delivery
+> `rusty_bucket_forecasting_20261125_114242` landed and was verified in faoapi, and after a
+> live read-only check passed (554 `unfao` rows read back through the new code with all 13
+> columns and real values).
+>
+> **Closed or narrowed by this release:** C-235 (the retry branches on the HTTP status, not
+> message text; the remaining 409 message matches are named on the entry); C-245 narrowed
+> (the delivery path is on TablesDB; the provisioner, audit package and wipe tool are not:
+> #605, #606); C-366 fixed in code (#612), still open on release ordering.
+>
+> **Registered this cycle and consciously carried — none is on the delivery path this
+> release changes: C-382, C-383, C-384** (pre-existing upload-path defects found by the
+> #603 review, #620). **Not unblocked by 3.6.0:** provisioning with a post-rename key —
+> the provisioner still calls `databases.*` (#605); CRAF'd does not need it, because its
+> table was measured complete on 2026-11-25.
+
 > **Release gate — pipeline-core 3.5.0 — ~~OPEN~~ SHIPPED.** Prepared 2026-11-12. Shipped 2026-11-12. **The Appwrite
 > bring-up for a per-audience project** (þing-04 S17, #480, PR #586).
 > *Dates written prepared-first, deliberately — see C-344. The guard takes the FIRST date
