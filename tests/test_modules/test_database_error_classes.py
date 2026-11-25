@@ -190,3 +190,74 @@ def test_a_refused_attribute_read_is_not_retried(provisioner):
     with patch("views_pipeline_core.modules.appwrite.provisioning.time.sleep") as sleep:
         provisioner.ensure_attributes("file_metadata", "crafd", {}, max_retries=3, initial_delay=0)
     sleep.assert_not_called()
+
+
+# --- survivors of the guard audit (falsify guard, 2026-11-25) ------------------------
+
+
+def test_a_404_on_every_attempt_is_reported_not_swallowed(provisioner):
+    """Exhausting the retries on a missing collection must fail, not carry on creating."""
+    provisioner.databases.list_attributes.side_effect = NO_TABLE
+    with patch("views_pipeline_core.modules.appwrite.provisioning.time.sleep"):
+        result = provisioner.ensure_attributes("file_metadata", "crafd", {}, max_retries=2, initial_delay=0)
+    assert (result.success, result.code) == (False, DB_CONTAINER_NOT_FOUND)
+    provisioner.databases.create_string_attribute.assert_not_called()
+
+
+def test_a_refused_hash_lookup_carries_its_code_out_of_the_upload(manager, tmp_path):
+    manager.databases.list_documents.side_effect = REFUSED
+    manager._require_containers = MagicMock()
+    path = tmp_path / "f.parquet"
+    path.write_bytes(b"payload")
+    result = manager.upload_file_with_metadata(
+        bucket_id="crafd_bucket", file_path=str(path), filename="f.parquet", metadata={"name": "x"}
+    )
+    assert result.code == DB_UNAUTHORIZED
+
+
+def test_a_refused_hash_lookup_stops_the_bytes_upload(manager):
+    manager.databases.list_documents.side_effect = REFUSED
+    manager._require_containers = MagicMock()
+    result = manager.upload_file_from_bytes_with_metadata(
+        bucket_id="crafd_bucket", file_bytes=b"payload", filename="f.parquet", metadata={"name": "x"}
+    )
+    assert result.success is False
+    manager.storage.create_file.assert_not_called()
+
+
+def test_a_refused_hash_lookup_is_not_absence_in_the_dedup_check(manager):
+    manager.databases.list_documents.side_effect = REFUSED
+    result = manager._file_exists_by_hash("crafd_bucket", "abc123", filename="f.parquet")
+    assert result.success is False
+    assert result.code == DB_UNAUTHORIZED
+    manager.storage.list_files.assert_not_called()
+
+
+# Every database call site routes its failure through the classifier. A refused key
+# is the probe: its server type is not UNAUTHORIZED, so only the classifier yields it.
+
+
+def test_metadata_update_routes_through_the_classifier(manager):
+    manager.databases.list_documents.return_value = {"total": 1, "documents": [{"$id": "d1"}]}
+    manager.databases.update_document.side_effect = REFUSED
+    result = manager.metadata_manager.update_file_metadata("f1", {"name": "y"})
+    assert result.code == DB_UNAUTHORIZED
+
+
+def test_metadata_store_routes_through_the_classifier(manager):
+    manager.databases.list_documents.side_effect = REFUSED
+    result = manager._store_metadata_document("file_metadata", "crafd", "f1", {"fileId": "f1"})
+    assert result.code == DB_UNAUTHORIZED
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda p: (setattr(p.databases.list, "side_effect", REFUSED), p.ensure_database("file_metadata", "file_metadata"))[1],
+        lambda p: (setattr(p.databases.list_indexes, "side_effect", REFUSED), p.ensure_indexes("file_metadata", "crafd", 1, 0))[1],
+    ],
+    ids=["ensure_database", "ensure_indexes"],
+)
+def test_provisioning_routes_through_the_classifier(provisioner, call):
+    result = call(provisioner)
+    assert result.code == DB_UNAUTHORIZED
