@@ -77,6 +77,7 @@ When adding a new SDK call, state its expected shape at the call site.
 from appwrite.client import Client
 from appwrite.services.storage import Storage
 from appwrite.services.databases import Databases
+from appwrite.services.tables_db import TablesDB
 from appwrite.services.users import Users
 from appwrite.input_file import InputFile
 from appwrite.id import ID
@@ -96,6 +97,7 @@ import shutil
 import logging
 import hashlib
 from views_pipeline_core.data.model_path import ModelPathManager
+from views_pipeline_core.modules.appwrite.metadata_schema import DECLARED_METADATA_KEYS
 from views_pipeline_core.exceptions.exceptions import ConfigurationException
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -1045,14 +1047,14 @@ class AppwriteMetadataHandler:
         ... )
     """
 
-    def __init__(self, databases: Databases, config: AppwriteConfig):
+    def __init__(self, tables_db: TablesDB, config: AppwriteConfig):
         """Initialize metadata handler with database service and config.
 
         Args:
             databases: Appwrite Databases service instance.
             config: AppwriteConfig with database/collection identifiers.
         """
-        self.databases = databases
+        self.tables_db = tables_db
         self.config = config
 
 
@@ -1138,15 +1140,17 @@ class AppwriteMetadataHandler:
             complete = False
 
             for _ in range(MAX_METADATA_PAGES):
-                page = self.databases.list_documents(
+                page = self.tables_db.list_rows(
                     db_id,
                     coll_id,
                     queries=queries
                     + [Query.limit(DEFAULT_PAGE_LIMIT), Query.offset(offset)],
                 )
-                batch = page.get("documents") or []
+                # `[...]`, not `.get`: a reply without `rows` must fail, not read as
+                # an empty page (#604 — the old API's key was `documents`).
+                batch = page["rows"]
                 if reported_total is None:
-                    reported_total = page.get("total")
+                    reported_total = page["total"]
                 documents.extend(batch)
                 if not batch:
                     complete = True
@@ -1256,7 +1260,7 @@ class AppwriteMetadataHandler:
             # it — a hash is not unique in this collection BY CONSTRUCTION, because a
             # run-independent artefact (the gid->GAUL sidecar) has identical bytes every
             # delivery. After N runs, N documents share one hash under N names.
-            search_result = self.databases.list_documents(
+            search_result = self.tables_db.list_rows(
                 db_id,
                 coll_id,
                 queries=[
@@ -1265,8 +1269,8 @@ class AppwriteMetadataHandler:
                 ],
             )
 
-            total = search_result.get("total", 0)
-            documents = search_result.get("documents", [])
+            total = search_result["total"]
+            documents = search_result["rows"]
             if total <= 0:
                 return OperationResult(success=False, code="NOT_FOUND")
 
@@ -1355,25 +1359,25 @@ class AppwriteMetadataHandler:
         try:
             # fileId is unique per document by construction, and only documents[0] is
             # used below.
-            search_result = self.databases.list_documents(
+            search_result = self.tables_db.list_rows(
                 database_id=db_id,
-                collection_id=coll_id,
+                table_id=coll_id,
                 queries=[Query.equal("fileId", file_id), Query.limit(1)],
             )
             
-            if not search_result["documents"]:
+            if not search_result["rows"]:
                 return OperationResult(
                     success=False,
                     error=f"No metadata found for file ID: {file_id}",
                     code="METADATA_NOT_FOUND"
                 )
             
-            document_id = search_result["documents"][0]["$id"]
+            row_id = search_result["rows"][0]["$id"]
             
-            result = self.databases.update_document(
+            result = self.tables_db.update_row(
                 database_id=db_id,
-                collection_id=coll_id,
-                document_id=document_id,
+                table_id=coll_id,
+                row_id=row_id,
                 data=metadata_updates
             )
             
@@ -1482,10 +1486,15 @@ class AppWriteFileModule:
         # Initialize services
         self.storage = Storage(self.client)
         self.users = Users(self.client)
+        # The delivery's metadata calls go through TablesDB (#604): a key minted after
+        # the rename holds only rows.*/tables.* scopes and is refused by `databases.*`.
+        # `databases` is kept for the provisioner alone (`provisioning.py` reuses it),
+        # until its own switch (#605).
+        self.tables_db = TablesDB(self.client)
         self.databases = Databases(self.client)
         
         # Initialize managers
-        self.metadata_manager = AppwriteMetadataHandler(self.databases, config)
+        self.metadata_manager = AppwriteMetadataHandler(self.tables_db, config)
         self.cache_manager = self._setup_cache()
 
         # Containers are verified once per process, before the first write.
@@ -1502,8 +1511,11 @@ class AppWriteFileModule:
         in the bucket with no index card: an orphan, which is the corruption #329
         exists to remove.
 
-        Read-only (``get_bucket`` + ``list_collections``) and cached per instance, so
-        the cost is two calls per process rather than two per upload.
+        It also checks the table's columns against ``DECLARED_METADATA_KEYS`` (#480,
+        #604): a missing column would accept the file and reject its row.
+
+        Read-only (``get_bucket`` + ``list_tables`` + ``list_columns``) and cached per
+        instance, so the cost is three calls per process rather than three per upload.
 
         **Scope: paired writes only.** The single-write methods (``upload_file``,
         ``update_file_metadata``) deliberately do not call this. They touch one
@@ -1536,31 +1548,66 @@ class AppWriteFileModule:
             # returns a WRONG answer: a collection that exists but falls past the page
             # boundary reads as missing and fails the preflight. The limit is stated,
             # and a total larger than the page is refused rather than guessed at.
-            collections = self.databases.list_collections(
+            tables = self.tables_db.list_tables(
                 self.config.database_id, queries=[Query.limit(_CONTAINER_PAGE)]
             )
-            listed = collections.get("collections", [])
-            reported = collections.get("total")
-            if reported is not None and reported > len(listed):
+            listed = tables["tables"]
+            reported = tables["total"]
+            if reported > len(listed):
                 raise ConfigurationException(
                     f"Database {self.config.database_id!r} reports {reported} "
-                    f"collections but only {len(listed)} were listed; this preflight "
+                    f"tables but only {len(listed)} were listed; this preflight "
                     f"cannot confirm a container's absence from a partial read."
                 )
-            known = {c.get("$id") for c in listed} | {c.get("name") for c in listed}
+            table = next(
+                (t for t in listed if t.get("$id") == coll_id), None
+            ) or next(
+                (t for t in listed if t.get("name") == self.config.collection_name), None
+            )
+            if table is not None:
+                columns = self.tables_db.list_columns(
+                    self.config.database_id,
+                    table["$id"],
+                    queries=[Query.limit(_CONTAINER_PAGE)],
+                )
+                if columns["total"] > len(columns["columns"]):
+                    raise ConfigurationException(
+                        f"Table {table['$id']!r} reports {columns['total']} columns but "
+                        f"only {len(columns['columns'])} were listed; this preflight "
+                        f"cannot confirm the schema from a partial read."
+                    )
+                present = {c["key"] for c in columns["columns"]}
         except AppwriteException as e:
             raise ConfigurationException(
-                f"Cannot verify the Appwrite metadata collection in database "
-                f"'{self.config.database_id}': {e.message} (type={e.type}). "
-                f"Check the coordinates and that this key may read the database."
+                f"Cannot verify the Appwrite metadata table in project "
+                f"{self.config.project_id!r}, database {self.config.database_id!r}: "
+                f"{exception_message(e)} (HTTP {e.code}, {e.type}, "
+                f"code={database_error_code(e)}). Check the coordinates and that this "
+                f"key holds tables.read in this project."
             ) from e
 
-        if coll_id not in known and self.config.collection_name not in known:
+        if table is None:
             raise ConfigurationException(
-                f"Appwrite metadata collection '{coll_id}' does not exist in database "
-                f"'{self.config.database_id}'. Create it deliberately:\n"
+                f"Appwrite metadata table {coll_id!r} does not exist in project "
+                f"{self.config.project_id!r}, database {self.config.database_id!r}. "
+                f"Create it deliberately:\n"
                 f"    python -m views_pipeline_core.modules.appwrite.provisioning "
-                f"ensure-collection"
+                f"ensure-collection --collection {coll_id} "
+                f"--collection-name {self.config.collection_name}"
+            )
+
+        # A table missing a declared column accepts the file upload and then rejects
+        # the row, leaving an orphan in the bucket (#480). Refuse before any write.
+        missing = sorted(DECLARED_METADATA_KEYS - present)
+        if missing:
+            raise ConfigurationException(
+                f"Appwrite metadata table {table['$id']!r} in project "
+                f"{self.config.project_id!r}, database {self.config.database_id!r} "
+                f"lacks declared column(s) {missing}. Nothing was uploaded. Add them "
+                f"before delivering:\n"
+                f"    python -m views_pipeline_core.modules.appwrite.provisioning "
+                f"ensure-collection --collection {table['$id']} "
+                f"--collection-name {table.get('name', self.config.collection_name)}"
             )
 
         self._containers_verified = True
@@ -1819,20 +1866,20 @@ class AppWriteFileModule:
         """
         try:
             # Existence check plus documents[0]; one row is all that is consumed.
-            existing_docs = self.databases.list_documents(
+            existing_rows = self.tables_db.list_rows(
                 database_id,
                 collection_id,
                 queries=[Query.equal("fileId", file_id), Query.limit(1)],
             )
             
-            if existing_docs["total"] > 0:
-                doc_id = existing_docs["documents"][0]["$id"]
-                result = self.databases.update_document(
-                    database_id, collection_id, doc_id, metadata_document
+            if existing_rows["total"] > 0:
+                row_id = existing_rows["rows"][0]["$id"]
+                result = self.tables_db.update_row(
+                    database_id, collection_id, row_id, metadata_document
                 )
                 return OperationResult(success=True, data=result, code="UPDATED")
             else:
-                result = self.databases.create_document(
+                result = self.tables_db.create_row(
                     database_id, collection_id, ID.unique(), metadata_document
                 )
                 return OperationResult(success=True, data=result, code="CREATED")
@@ -2128,10 +2175,10 @@ class AppWriteFileModule:
                     existing_doc_id = existing_metadata.data.get("$id")
                     if existing_doc_id:
                         try:
-                            self.databases.delete_document(
+                            self.tables_db.delete_row(
                                 database_id=self.config.database_id,
-                                collection_id=collection_id,
-                                document_id=existing_doc_id
+                                table_id=collection_id,
+                                row_id=existing_doc_id
                             )
                             logger.info(f"Deleted orphaned metadata document: {existing_doc_id}")
                         except AppwriteException as e:
@@ -2229,10 +2276,10 @@ class AppWriteFileModule:
             if old_doc_id:
                 # Delete the old metadata document
                 try:
-                    self.databases.delete_document(
+                    self.tables_db.delete_row(
                         database_id=self.config.database_id,
-                        collection_id=collection_id,
-                        document_id=old_doc_id
+                        table_id=collection_id,
+                        row_id=old_doc_id
                     )
                     logger.info(f"Deleted old metadata document: {old_doc_id}")
                 except Exception as e:
@@ -2963,9 +3010,9 @@ class AppWriteFileModule:
                 code="MISSING_CONFIG"
             )
         try:
-            attributes = self.databases.list_attributes(db_id, coll_id)
-            logger.info("Existing attributes:")
-            for attr in attributes["attributes"]:
+            attributes = self.tables_db.list_columns(db_id, coll_id)
+            logger.info("Existing columns:")
+            for attr in attributes["columns"]:
                 logger.info(f"  - {attr['key']} ({attr['type']})")
             return OperationResult(success=True, data=attributes)
         

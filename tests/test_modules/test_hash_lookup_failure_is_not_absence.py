@@ -86,6 +86,8 @@ def manager(config):
     with patch("views_pipeline_core.modules.appwrite.file.Client"), patch(
         "views_pipeline_core.modules.appwrite.file.Storage"
     ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
+        "views_pipeline_core.modules.appwrite.file.TablesDB"
+    ), patch(
         "views_pipeline_core.modules.appwrite.file.Users"
     ):
         yield AppWriteFileModule(config)
@@ -106,7 +108,7 @@ def test_a_missing_attribute_is_reported_as_a_failed_read(manager):
     Before #473 this raised `AttributeError` from a call to a method that had not existed
     on this class since #331. It now returns an ordinary in-band failure.
     """
-    manager.databases.list_documents.side_effect = _raise_schema_error
+    manager.tables_db.list_rows.side_effect = _raise_schema_error
 
     result = manager.metadata_manager.check_file_exists_by_hash("abc123")
 
@@ -125,7 +127,7 @@ def test_the_lookup_does_not_try_to_create_the_missing_attribute(manager):
     attribute at `size=255` where the declared schema says 64, diverging silently per
     partner.
     """
-    manager.databases.list_documents.side_effect = _raise_schema_error
+    manager.tables_db.list_rows.side_effect = _raise_schema_error
 
     manager.metadata_manager.check_file_exists_by_hash("abc123")
 
@@ -145,7 +147,7 @@ def test_upload_file_with_metadata_refuses_when_the_lookup_failed(manager, tmp_p
     If this fails, an operator delivering to a partner whose collection lacks `file_hash`
     uploads with duplicate-checking silently disabled.
     """
-    manager.databases.list_documents.side_effect = _raise_schema_error
+    manager.tables_db.list_rows.side_effect = _raise_schema_error
     manager.storage = MagicMock()
 
     target = tmp_path / "shard.parquet"
@@ -168,7 +170,7 @@ def test_upload_file_with_metadata_refuses_when_the_lookup_failed(manager, tmp_p
 def test_upload_from_bytes_with_metadata_refuses_when_the_lookup_failed(manager):
     """The same, on the bytes path. It had the weaker check of the two — it read
     `.success` alone, with no code check at all."""
-    manager.databases.list_documents.side_effect = _raise_schema_error
+    manager.tables_db.list_rows.side_effect = _raise_schema_error
     manager.storage = MagicMock()
 
     result = manager.upload_file_from_bytes_with_metadata(
@@ -191,11 +193,17 @@ def test_upload_from_bytes_with_metadata_refuses_when_the_lookup_failed(manager)
 def test_a_genuine_absence_still_permits_the_upload(manager, tmp_path):
     """The control. If a failed lookup and an empty one were both refused, the guards
     above would pass while breaking every first upload to a healthy collection."""
-    manager.databases.list_documents.return_value = {"total": 0, "documents": []}
+    manager.tables_db.list_rows.return_value = {"total": 0, "rows": []}
     # `_require_containers` reads both before any write; give it a shelf that exists.
-    manager.databases.list_collections.return_value = {
+    from views_pipeline_core.modules.appwrite.metadata_schema import DECLARED_METADATA_KEYS
+
+    manager.tables_db.list_tables.return_value = {
         "total": 1,
-        "collections": [{"$id": "crafd", "name": "crafd"}],
+        "tables": [{"$id": "crafd", "name": "crafd"}],
+    }
+    manager.tables_db.list_columns.return_value = {
+        "total": len(DECLARED_METADATA_KEYS),
+        "columns": [{"key": k} for k in DECLARED_METADATA_KEYS],
     }
     manager.storage = MagicMock()
     manager.storage.get_bucket.return_value = {"$id": "crafd_forecasts"}

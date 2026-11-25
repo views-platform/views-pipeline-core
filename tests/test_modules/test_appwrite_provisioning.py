@@ -51,6 +51,8 @@ def manager(config):
     with patch("views_pipeline_core.modules.appwrite.file.Client"), patch(
         "views_pipeline_core.modules.appwrite.file.Storage"
     ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
+        "views_pipeline_core.modules.appwrite.file.TablesDB"
+    ), patch(
         "views_pipeline_core.modules.appwrite.file.Users"
     ):
         yield AppWriteFileModule(config)
@@ -254,7 +256,7 @@ class TestDeliveryPathCannotProvision:
 
     def test_hash_lookup_is_a_pure_read(self, manager):
         """C-233: this query used to create the database and collection first."""
-        manager.databases.list_documents.return_value = {"total": 0, "documents": []}
+        manager.tables_db.list_rows.return_value = {"total": 0, "rows": []}
 
         manager.metadata_manager.check_file_exists_by_hash("abc123")
 
@@ -265,10 +267,46 @@ class TestDeliveryPathCannotProvision:
 class TestRequireContainers:
     """Decision 1 — verify before writing, so a missing container cannot orphan a file."""
 
-    def _collections(self, manager, ids):
-        manager.databases.list_collections.return_value = {
-            "collections": [{"$id": i, "name": i} for i in ids]
+    def _collections(self, manager, ids, columns=None):
+        from views_pipeline_core.modules.appwrite.metadata_schema import (
+            DECLARED_METADATA_KEYS,
+        )
+
+        manager.tables_db.list_tables.return_value = {
+            "total": len(ids),
+            "tables": [{"$id": i, "name": i} for i in ids],
         }
+        keys = sorted(DECLARED_METADATA_KEYS) if columns is None else columns
+        manager.tables_db.list_columns.return_value = {
+            "total": len(keys),
+            "columns": [{"key": k} for k in keys],
+        }
+
+    def test_a_table_missing_a_declared_column_is_refused_naming_it(self, manager):
+        """#480: a missing column accepts the file and rejects its row, orphaning it."""
+        from views_pipeline_core.modules.appwrite.metadata_schema import (
+            DECLARED_METADATA_KEYS,
+        )
+
+        manager.get_bucket = Mock(return_value=OperationResult(success=True, data={}))
+        self._collections(
+            manager, ["test_collection"], sorted(DECLARED_METADATA_KEYS - {"loa"})
+        )
+
+        with pytest.raises(ConfigurationException) as exc:
+            manager._require_containers("test_bucket", "test_collection")
+
+        assert "['loa']" in str(exc.value)
+        assert "test_project" in str(exc.value)
+        assert "Nothing was uploaded" in str(exc.value)
+
+    def test_a_partial_column_listing_is_refused(self, manager):
+        manager.get_bucket = Mock(return_value=OperationResult(success=True, data={}))
+        self._collections(manager, ["test_collection"])
+        manager.tables_db.list_columns.return_value["total"] = 999
+
+        with pytest.raises(ConfigurationException, match="partial read"):
+            manager._require_containers("test_bucket", "test_collection")
 
     def test_passes_when_both_containers_exist(self, manager):
         manager.get_bucket = Mock(return_value=OperationResult(success=True, data={}))
@@ -302,7 +340,7 @@ class TestRequireContainers:
     def test_unreadable_database_raises_rather_than_assuming_absence(self, manager):
         """Same rule as C-231: a failed read is not evidence that nothing is there."""
         manager.get_bucket = Mock(return_value=OperationResult(success=True, data={}))
-        manager.databases.list_collections.side_effect = AppwriteException(
+        manager.tables_db.list_tables.side_effect = AppwriteException(
             "missing scope", 401, "general_unauthorized_scope"
         )
 
@@ -321,7 +359,7 @@ class TestRequireContainers:
             manager._require_containers("test_bucket", "test_collection")
 
         assert manager.get_bucket.call_count == 1
-        assert manager.databases.list_collections.call_count == 1
+        assert manager.tables_db.list_tables.call_count == 1
 
     def test_upload_fails_before_writing_when_a_container_is_missing(
         self, manager, tmp_path
@@ -798,13 +836,22 @@ class TestABrandNewProjectsFirstDeliveryHasSomewhereToLand:
         import tempfile
 
         manager.storage.get_bucket.return_value = {"$id": "crafd_bucket"}
-        manager.databases.list_collections.return_value = {
-            "collections": [{"$id": "test_collection", "name": "Test Collection"}]
+        from views_pipeline_core.modules.appwrite.metadata_schema import (
+            DECLARED_METADATA_KEYS,
+        )
+
+        manager.tables_db.list_tables.return_value = {
+            "total": 1,
+            "tables": [{"$id": "test_collection", "name": "Test Collection"}],
         }
-        manager.databases.list_documents.return_value = {"total": 0, "documents": []}
+        manager.tables_db.list_columns.return_value = {
+            "total": len(DECLARED_METADATA_KEYS),
+            "columns": [{"key": k} for k in DECLARED_METADATA_KEYS],
+        }
+        manager.tables_db.list_rows.return_value = {"total": 0, "rows": []}
         manager.storage.list_files.return_value = {"files": [], "total": 0}
         manager.storage.create_file.return_value = {"$id": "file123", "sizeOriginal": 9}
-        manager.databases.create_document.return_value = {"$id": "doc123"}
+        manager.tables_db.create_row.return_value = {"$id": "doc123"}
 
         with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as fh:
             fh.write(b"not-really-parquet")
@@ -819,11 +866,11 @@ class TestABrandNewProjectsFirstDeliveryHasSomewhereToLand:
             collection_name="Test Collection",
         )
 
-        assert manager.databases.create_document.called, (
+        assert manager.tables_db.create_row.called, (
             "the delivery path never reached create_document, so this test would pass "
             "vacuously — the mocks no longer match the method"
         )
-        return manager.databases.create_document.call_args.args[3]
+        return manager.tables_db.create_row.call_args.args[3]
 
     def test_ensure_collection_creates_them_in_an_empty_project(self, provisioner):
         """The constant is worthless if nothing iterates it.
@@ -1199,7 +1246,7 @@ class TestTheIndexesAreDerivedFromTheQueriesNotFromTheList:
 
     Collection queries only: `file.py:1683` issues `Query.equal("name", ...)` against
     `storage.list_files`, which is a bucket query and takes no collection index. The AST
-    walk below keeps only the keys inside `databases.list_documents` calls, so that
+    walk below keeps only the keys inside `tables_db.list_rows` calls, so that
     distinction is made by structure rather than by a list of exceptions.
     """
 
@@ -1222,9 +1269,9 @@ class TestTheIndexesAreDerivedFromTheQueriesNotFromTheList:
             func = node.func
             if not (
                 isinstance(func, ast.Attribute)
-                and func.attr == "list_documents"
+                and func.attr == "list_rows"
                 and isinstance(func.value, ast.Attribute)
-                and func.value.attr == "databases"
+                and func.value.attr == "tables_db"
             ):
                 continue
             for inner in ast.walk(node):
@@ -1243,7 +1290,7 @@ class TestTheIndexesAreDerivedFromTheQueriesNotFromTheList:
         """A derived scope that derives nothing passes vacuously."""
         keys = self._keys_the_delivery_queries_documents_by()
         assert len(keys) >= 2, (
-            f"only {sorted(keys)} derived from `databases.list_documents` call sites in "
+            f"only {sorted(keys)} derived from `tables_db.list_rows` call sites in "
             f"file.py — the call shape has changed and this guard is checking nothing"
         )
 
