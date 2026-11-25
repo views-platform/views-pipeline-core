@@ -468,6 +468,56 @@ def exception_message(exception: Exception) -> str:
     return message if isinstance(message, str) else str(message if message is not None else exception)
 
 
+#: A database call the key is not allowed to make (HTTP 401/403). Under the TablesDB
+#: rename a key minted after the rename answers every old ``databases.*`` call this way
+#: (#599), so it must never be read as "nothing there".
+DB_UNAUTHORIZED = "UNAUTHORIZED"
+
+#: The database, collection or table addressed does not exist (HTTP 404 that is not a
+#: missing row). Distinct from ``NOT_FOUND``, which this module reserves for a listing
+#: that answered with no match.
+DB_CONTAINER_NOT_FOUND = "CONTAINER_NOT_FOUND"
+
+# A 404 that names a missing ROW (by id) rather than a missing container. The server's
+# type string changed with the rename, so both spellings are listed.
+_MISSING_ROW_TYPES = frozenset({"document_not_found", "row_not_found"})
+
+
+def database_error_code(exception: Exception) -> Optional[str]:
+    """The ``OperationResult.code`` for a failed database call (#603).
+
+    Keyed on the HTTP status, which survives vendor renames, before the server's
+    ``type`` string, which does not (register C-235). A refused key, a missing
+    container and a missing row become three different codes; anything else keeps the
+    server's own type.
+    """
+    status = getattr(exception, "code", None)
+    error_type = getattr(exception, "type", None)
+    if status in (401, 403):
+        return DB_UNAUTHORIZED
+    if status == 404 and error_type not in _MISSING_ROW_TYPES:
+        return DB_CONTAINER_NOT_FOUND
+    return error_type
+
+
+def _database_failure(
+    exception: Exception, what: str, database_id: Optional[str], collection_id: Optional[str]
+) -> "OperationResult":
+    """Log and return a failed database call, with the code from `database_error_code`."""
+    code = database_error_code(exception)
+    if code == DB_UNAUTHORIZED:
+        logger.error(
+            f"{what} refused (HTTP {getattr(exception, 'code', '?')}) on database "
+            f"{database_id!r}, collection {collection_id!r}: the key lacks the scope "
+            f"for this API. {exception_message(exception)}"
+        )
+    else:
+        logger.error(f"{what} failed: {exception_message(exception)}")
+    return OperationResult(
+        success=False, error=f"{what} failed: {exception_message(exception)}", code=code
+    )
+
+
 # Authentication Classes
 class AuthManager(ABC):
     """Abstract base class for Appwrite authentication handlers.
@@ -1130,10 +1180,7 @@ class AppwriteMetadataHandler:
             )
 
         except AppwriteException as e:
-            logger.error(f"Search failed: {e.message}")
-            return OperationResult(
-                success=False, error=f"Search failed: {e.message}", code=e.type
-            )
+            return _database_failure(e, "Search", db_id, coll_id)
 
     def check_file_exists_by_hash(
     self,
@@ -1247,10 +1294,7 @@ class AppwriteMetadataHandler:
             #
             # A missing attribute now surfaces below as an ordinary failed read. Callers
             # must inspect it; the two that did not are guarded as of #473.
-            logger.error(f"Search failed: {e.message}")
-            return OperationResult(
-                success=False, error=f"Search failed: {e.message}", code=e.type
-            )
+            return _database_failure(e, "Search", db_id, coll_id)
 
     def update_file_metadata(
         self,
@@ -1324,11 +1368,7 @@ class AppwriteMetadataHandler:
             )
         
         except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=f"Metadata update failed: {e.message}",
-                code=e.type
-            )
+            return _database_failure(e, "Metadata update", db_id, coll_id)
 
 # Main File Manager
 class AppWriteFileModule:
@@ -1785,7 +1825,7 @@ class AppWriteFileModule:
             return OperationResult(
                 success=False,
                 error=e.message,
-                code=e.type
+                code=database_error_code(e)
             )
 
     def upload_file(
@@ -2089,7 +2129,7 @@ class AppWriteFileModule:
                                     f"Could not delete the orphaned metadata document "
                                     f"{existing_doc_id}: {e.message}"
                                 ),
-                                code=e.type,
+                                code=database_error_code(e),
                             )
 
                 else:

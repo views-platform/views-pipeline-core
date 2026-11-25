@@ -134,6 +134,12 @@ until usage patterns stabilize.
 - `ValueError` at construction if authentication fails.
 - `AppwriteException` propagated through `OperationResult.error` for storage and
   database failures (network, permissions, quota).
+- **A failed database call carries a classified code** (`database_error_code`, #603), keyed
+  on the HTTP status before the server's type string: 401/403 → `UNAUTHORIZED` (the key
+  lacks the scope for this API; logged at ERROR with the database and collection ids),
+  404 on a container → `CONTAINER_NOT_FOUND`, 404 on a row → the server's type, anything
+  else → the server's type. `NOT_FOUND` is reserved for a listing that answered with no
+  match. A refused key is therefore never read as absence.
 - `ValueError` from `_calculate_file_hash()` if neither `file_path` nor `file_bytes`
   is provided.
 - Cache failures (corrupt metadata JSON, missing files) are logged as warnings and
