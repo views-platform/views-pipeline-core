@@ -187,8 +187,8 @@ _BOUNDED_BY_REALITY: Dict[Tuple[str, str, str], str] = {
     (
         "file.py",
         "AppWriteFileModule.debug_collection_attributes",
-        "list_attributes",
-    ): "a debug helper that logs a collection's schema; attribute count is bounded by "
+        "list_columns",
+    ): "a debug helper that logs a table's schema; column count is bounded by "
     "the schema we author, and the result is printed rather than used for a decision",
     (
         "provisioning.py",

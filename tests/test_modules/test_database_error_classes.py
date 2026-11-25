@@ -57,6 +57,8 @@ def manager(tmp_path):
     with patch("views_pipeline_core.modules.appwrite.file.Client"), patch(
         "views_pipeline_core.modules.appwrite.file.Storage"
     ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
+        "views_pipeline_core.modules.appwrite.file.TablesDB"
+    ), patch(
         "views_pipeline_core.modules.appwrite.file.Users"
     ):
         yield AppWriteFileModule(config)
@@ -90,7 +92,7 @@ def test_the_status_code_decides_before_the_type_string(exception, expected):
 
 
 def _empty(*_a, **_k):
-    return {"total": 0, "documents": []}
+    return {"total": 0, "rows": []}
 
 
 @pytest.mark.parametrize("call", ["hash", "search"])
@@ -102,7 +104,7 @@ def test_refused_missing_and_empty_give_three_different_codes(manager, call):
 
     results = []
     for side_effect in (REFUSED, NO_COLLECTION, _empty):
-        manager.databases.list_documents.side_effect = side_effect
+        manager.tables_db.list_rows.side_effect = side_effect
         results.append(run())
 
     refused, missing, empty = results
@@ -116,7 +118,7 @@ def test_refused_missing_and_empty_give_three_different_codes(manager, call):
 
 
 def test_a_refused_key_is_logged_with_the_coordinates_and_the_hint(manager, caplog):
-    manager.databases.list_documents.side_effect = REFUSED
+    manager.tables_db.list_rows.side_effect = REFUSED
     with caplog.at_level(logging.ERROR):
         manager.metadata_manager.check_file_exists_by_hash("abc123")
     assert "database 'file_metadata', collection 'crafd'" in caplog.text
@@ -125,7 +127,7 @@ def test_a_refused_key_is_logged_with_the_coordinates_and_the_hint(manager, capl
 
 
 def test_an_expired_key_keeps_its_server_type_in_the_error(manager):
-    manager.databases.list_documents.side_effect = AppwriteException(
+    manager.tables_db.list_rows.side_effect = AppwriteException(
         "The project key has expired", 401, "project_key_expired"
     )
     result = manager.metadata_manager.check_file_exists_by_hash("abc123")
@@ -138,7 +140,7 @@ def test_an_expired_key_keeps_its_server_type_in_the_error(manager):
 
 def test_a_refused_hash_lookup_stops_the_upload(manager, tmp_path):
     """`upload_file_with_metadata` treats any code but NOT_FOUND as a failed read."""
-    manager.databases.list_documents.side_effect = REFUSED
+    manager.tables_db.list_rows.side_effect = REFUSED
     manager._containers_verified = True
     manager._require_containers = MagicMock()
     path = tmp_path / "f.parquet"
@@ -153,7 +155,7 @@ def test_a_refused_hash_lookup_stops_the_upload(manager, tmp_path):
 
 
 def test_an_empty_hash_lookup_still_reads_as_absent(manager):
-    manager.databases.list_documents.side_effect = _empty
+    manager.tables_db.list_rows.side_effect = _empty
     assert manager.metadata_manager.check_file_exists_by_hash("abc123").code == "NOT_FOUND"
 
 
@@ -217,7 +219,7 @@ def test_a_404_on_every_attempt_is_reported_not_swallowed(provisioner):
 
 
 def test_a_refused_hash_lookup_carries_its_code_out_of_the_upload(manager, tmp_path):
-    manager.databases.list_documents.side_effect = REFUSED
+    manager.tables_db.list_rows.side_effect = REFUSED
     manager._require_containers = MagicMock()
     path = tmp_path / "f.parquet"
     path.write_bytes(b"payload")
@@ -228,7 +230,7 @@ def test_a_refused_hash_lookup_carries_its_code_out_of_the_upload(manager, tmp_p
 
 
 def test_a_refused_hash_lookup_stops_the_bytes_upload(manager):
-    manager.databases.list_documents.side_effect = REFUSED
+    manager.tables_db.list_rows.side_effect = REFUSED
     manager._require_containers = MagicMock()
     result = manager.upload_file_from_bytes_with_metadata(
         bucket_id="crafd_bucket", file_bytes=b"payload", filename="f.parquet", metadata={"name": "x"}
@@ -238,7 +240,7 @@ def test_a_refused_hash_lookup_stops_the_bytes_upload(manager):
 
 
 def test_a_refused_hash_lookup_is_not_absence_in_the_dedup_check(manager):
-    manager.databases.list_documents.side_effect = REFUSED
+    manager.tables_db.list_rows.side_effect = REFUSED
     result = manager._file_exists_by_hash("crafd_bucket", "abc123", filename="f.parquet")
     assert result.success is False
     assert result.code == DB_UNAUTHORIZED
@@ -250,14 +252,14 @@ def test_a_refused_hash_lookup_is_not_absence_in_the_dedup_check(manager):
 
 
 def test_metadata_update_routes_through_the_classifier(manager):
-    manager.databases.list_documents.return_value = {"total": 1, "documents": [{"$id": "d1"}]}
-    manager.databases.update_document.side_effect = REFUSED
+    manager.tables_db.list_rows.return_value = {"total": 1, "rows": [{"$id": "d1"}]}
+    manager.tables_db.update_row.side_effect = REFUSED
     result = manager.metadata_manager.update_file_metadata("f1", {"name": "y"})
     assert result.code == DB_UNAUTHORIZED
 
 
 def test_metadata_store_routes_through_the_classifier(manager):
-    manager.databases.list_documents.side_effect = REFUSED
+    manager.tables_db.list_rows.side_effect = REFUSED
     result = manager._store_metadata_document("file_metadata", "crafd", "f1", {"fileId": "f1"})
     assert result.code == DB_UNAUTHORIZED
 
@@ -286,8 +288,8 @@ def test_a_server_error_on_the_attribute_read_is_not_retried(provisioner):
 
 def test_a_failed_metadata_update_is_a_warning_not_an_error(manager, caplog):
     """The delivery treats it as recoverable, so it must not log at ERROR."""
-    manager.databases.list_documents.return_value = {"total": 1, "documents": [{"$id": "d1"}]}
-    manager.databases.update_document.side_effect = SERVER_ERROR
+    manager.tables_db.list_rows.return_value = {"total": 1, "rows": [{"$id": "d1"}]}
+    manager.tables_db.update_row.side_effect = SERVER_ERROR
     with caplog.at_level(logging.WARNING):
         manager.metadata_manager.update_file_metadata("f1", {"name": "y"})
     levels = {r.levelno for r in caplog.records if "Metadata update failed" in r.getMessage()}
@@ -295,7 +297,7 @@ def test_a_failed_metadata_update_is_a_warning_not_an_error(manager, caplog):
 
 
 def test_a_refused_metadata_write_is_logged_with_its_coordinates(manager, caplog):
-    manager.databases.list_documents.side_effect = REFUSED
+    manager.tables_db.list_rows.side_effect = REFUSED
     with caplog.at_level(logging.ERROR):
         manager._store_metadata_document("file_metadata", "crafd", "f1", {"fileId": "f1"})
     assert "database 'file_metadata', collection 'crafd'" in caplog.text
