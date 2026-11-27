@@ -147,7 +147,6 @@ KNOWN_GOD_CLASSES = {
     # would make it unreviewable. Registered as C-353.
     "views_pipeline_core/modules/appwrite/provisioning.py::AppwriteProvisioner",  # 633 loc
     "views_pipeline_core/modules/dataloaders/dataloaders.py::ViewsDataLoader",  # 913 loc
-    "views_pipeline_core/modules/datastore/datastore.py::DatastoreModule",  # 560 loc
     "views_pipeline_core/modules/validation/adapter.py::EvaluationAdapter",  # 517 loc
 }
 

@@ -148,7 +148,7 @@ def _unbounded_list_sites() -> list[str]:
     return sorted(hits)
 
 
-@pytest.mark.xfail(strict=True, reason="F2: the naive helper reports 3 sites (measured 2026-11-19; were 7 after #341), all false positives of its known naivety: each is bounded (audit/walk.py:63 passes limit=PAGE_SIZE; file.py:2647 and :2797 append Query.limit to a list passed as a variable). The production guard, test_read_completeness, reports 0 unbounded. C-256 — resolved across #341 and #343")
+@pytest.mark.xfail(strict=True, reason="F2: the naive helper reports 2 sites (measured 2026-11-27 after #635; 3 on 2026-11-19; 7 after #341), all false positives of its known naivety: each is bounded (audit/walk.py:63 passes limit=PAGE_SIZE; file.py:2647 and :2797 append Query.limit to a list passed as a variable). The production guard, test_read_completeness, reports 0 unbounded. C-256 — resolved across #341 and #343")
 def test_f2a_guard_worklist_is_larger_than_the_story_claims():
     """FAILS TODAY. #343 estimates ~12 sites; measure it before committing to S3's size."""
     sites = _unbounded_list_sites()

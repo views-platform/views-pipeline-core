@@ -58,8 +58,6 @@ def manager(tmp_path):
         "views_pipeline_core.modules.appwrite.file.Storage"
     ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
         "views_pipeline_core.modules.appwrite.file.TablesDB"
-    ), patch(
-        "views_pipeline_core.modules.appwrite.file.Users"
     ):
         yield AppWriteFileModule(config)
 
@@ -227,16 +225,6 @@ def test_a_refused_hash_lookup_carries_its_code_out_of_the_upload(manager, tmp_p
         bucket_id="crafd_bucket", file_path=str(path), filename="f.parquet", metadata={"name": "x"}
     )
     assert result.code == DB_UNAUTHORIZED
-
-
-def test_a_refused_hash_lookup_stops_the_bytes_upload(manager):
-    manager.tables_db.list_rows.side_effect = REFUSED
-    manager._require_containers = MagicMock()
-    result = manager.upload_file_from_bytes_with_metadata(
-        bucket_id="crafd_bucket", file_bytes=b"payload", filename="f.parquet", metadata={"name": "x"}
-    )
-    assert result.success is False
-    manager.storage.create_file.assert_not_called()
 
 
 def test_a_refused_hash_lookup_is_not_absence_in_the_dedup_check(manager):

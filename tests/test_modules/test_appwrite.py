@@ -328,8 +328,7 @@ class TestAppWriteFileManager:
         with patch("views_pipeline_core.modules.appwrite.file.Client"), \
              patch("views_pipeline_core.modules.appwrite.file.Storage"), \
              patch("views_pipeline_core.modules.appwrite.file.Databases"), \
-             patch("views_pipeline_core.modules.appwrite.file.TablesDB"), \
-             patch("views_pipeline_core.modules.appwrite.file.Users"):
+             patch("views_pipeline_core.modules.appwrite.file.TablesDB"):
             manager = AppWriteFileModule(api_key_config)
             yield manager
 
@@ -339,14 +338,6 @@ class TestAppWriteFileManager:
         test_file.write_bytes(test_content)
         
         file_hash = file_manager._calculate_file_hash(file_path=str(test_file))
-        expected_hash = hashlib.sha256(test_content).hexdigest()
-        
-        assert file_hash == expected_hash
-
-    def test_calculate_file_hash_from_bytes(self, file_manager):
-        test_content = b"test content"
-        
-        file_hash = file_manager._calculate_file_hash(file_bytes=test_content)
         expected_hash = hashlib.sha256(test_content).hexdigest()
         
         assert file_hash == expected_hash
@@ -393,26 +384,6 @@ class TestAppWriteFileManager:
         
         assert result.success
         assert result.code == "EXISTS"
-
-    def test_upload_file_from_bytes(self, file_manager):
-        test_content = b"test content"
-        
-        file_manager.storage.create_file.return_value = {
-            "$id": "file123",
-            "name": "test.txt",
-            "sizeOriginal": len(test_content),
-        }
-        
-        with patch("views_pipeline_core.modules.appwrite.file.InputFile"):
-            result = file_manager.upload_file_from_bytes(
-                "bucket1",
-                test_content,
-                "test.txt",
-                check_duplicates=False
-            )
-        
-        assert result.success
-        assert result.data["$id"] == "file123"
 
     def test_download_file_from_cache(self, file_manager, temp_cache_dir):
         # Setup cache
@@ -602,8 +573,7 @@ class TestErrorHandling:
         with patch("views_pipeline_core.modules.appwrite.file.Client"), \
              patch("views_pipeline_core.modules.appwrite.file.Storage") as mock_storage, \
              patch("views_pipeline_core.modules.appwrite.file.Databases"), \
-             patch("views_pipeline_core.modules.appwrite.file.TablesDB"), \
-             patch("views_pipeline_core.modules.appwrite.file.Users"):
+             patch("views_pipeline_core.modules.appwrite.file.TablesDB"):
             
             manager = AppWriteFileModule(api_key_config)
             mock_storage.return_value.get_file.side_effect = AppwriteException(

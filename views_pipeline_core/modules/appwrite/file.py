@@ -78,7 +78,6 @@ from appwrite.client import Client
 from appwrite.services.storage import Storage
 from appwrite.services.databases import Databases
 from appwrite.services.tables_db import TablesDB
-from appwrite.services.users import Users
 from appwrite.input_file import InputFile
 from appwrite.id import ID
 from appwrite.exception import AppwriteException
@@ -1410,7 +1409,6 @@ class AppWriteFileModule:
         storage: Appwrite Storage service.
         tables_db: Appwrite TablesDB service; every delivery metadata call (#604).
         databases: Appwrite Databases service; the provisioner, audit and wipe tool only.
-        users: Appwrite Users service.
         metadata_manager: AppwriteMetadataHandler for database operations.
         cache_manager: CacheManager for local file caching.
         auth_manager: AuthManager instance handling authentication.
@@ -1485,7 +1483,6 @@ class AppWriteFileModule:
         
         # Initialize services
         self.storage = Storage(self.client)
-        self.users = Users(self.client)
         # The delivery's metadata calls go through TablesDB (#604): a key minted after
         # the rename holds only rows.*/tables.* scopes and is refused by `databases.*`.
         # `databases` is kept, unused by the delivery, for the callers still on the old
@@ -1519,7 +1516,7 @@ class AppWriteFileModule:
         ``update_file_metadata``) deliberately do not call this. They touch one
         container, so a missing one surfaces as a loud Appwrite error with nothing
         half-written behind it — there is no pair to leave inconsistent. Add the
-        precondition here if a third paired write is ever introduced.
+        precondition here if another paired write is ever introduced.
 
         Raises:
             ConfigurationException: naming the missing container and the exact command
@@ -1602,34 +1599,13 @@ class AppWriteFileModule:
             cache_dir.mkdir(exist_ok=True)
             return CacheManager(cache_dir, timedelta(hours=DEFAULT_CACHE_TTL_HOURS))
 
-    def _calculate_file_hash(self, file_path: str = None, file_bytes: bytes = None) -> str:
-        """Calculate SHA-256 hash of a file for deduplication.
-
-        Args:
-            file_path: Path to file on disk. Reads in 4KB chunks.
-            file_bytes: Raw file bytes. Use for in-memory data.
-
-        Returns:
-            Hexadecimal SHA-256 hash string.
-
-        Raises:
-            ValueError: If neither file_path nor file_bytes is provided.
-
-        Example:
-            >>> hash1 = manager._calculate_file_hash(file_path="/data/file.parquet")
-            >>> hash2 = manager._calculate_file_hash(file_bytes=b"file content")
-        """
+    def _calculate_file_hash(self, file_path: str) -> str:
+        """SHA-256 of a file on disk, read in 4 KB chunks, as a hex string."""
         sha256_hash = hashlib.sha256()
-        
-        if file_path:
-            with open(file_path, "rb") as f:
-                for byte_block in iter(lambda: f.read(4096), b""):
-                    sha256_hash.update(byte_block)
-        elif file_bytes:
-            sha256_hash.update(file_bytes)
-        else:
-            raise ValueError("Either file_path or file_bytes must be provided")
-        
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+
         return sha256_hash.hexdigest()
     
     def _file_exists_by_hash(
@@ -1766,47 +1742,6 @@ class AppWriteFileModule:
                 code=e.type
             )
 
-    def _build_metadata_document(
-        self,
-        file_id: str,
-        bucket_id: str,
-        filename: str,
-        upload_result: Dict[str, Any],
-        metadata: Dict[str, Any],
-        file_hash: str = None
-    ) -> Dict[str, Any]:
-        """Build a metadata document for database storage.
-
-        Combines fixed fields (fileId, bucketId, etc.) with custom metadata
-        to create a complete document for the metadata collection.
-
-        Args:
-            file_id: Appwrite file ID.
-            bucket_id: Storage bucket ID.
-            filename: Original filename.
-            upload_result: Result from file upload containing size info.
-            metadata: Custom metadata fields to include.
-            file_hash: Optional SHA-256 hash of file contents.
-
-        Returns:
-            Dictionary suitable for storing in Appwrite database.
-            None values are filtered out.
-        """
-        base_document = {
-            "fileId": file_id,
-            "bucketId": bucket_id,
-            "filename": filename,
-            "mime_type": metadata.get("mime_type", "application/octet-stream"),
-            "uploaded_at": datetime.now().isoformat(),
-            "file_hash": file_hash,
-            **metadata
-        }
-        
-        if "data" in upload_result and "sizeOriginal" in upload_result["data"]:
-            base_document["file_size"] = upload_result["data"]["sizeOriginal"]
-        
-        return {k: v for k, v in base_document.items() if v is not None}
-
     def _store_metadata_document(
         self,
         database_id: str,
@@ -1942,88 +1877,6 @@ class AppWriteFileModule:
                 success=False,
                 error=f"Unexpected error: {str(e)}",
                 code="UNKNOWN_ERROR"
-            )
-
-    def upload_file_from_bytes(
-        self,
-        bucket_id: str,
-        file_bytes: bytes,
-        filename: str,
-        file_id: str = None,
-        permissions: List[str] = None,
-        check_duplicates: bool = True,
-        overwrite: bool = False
-    ) -> OperationResult:
-        """Upload a file from bytes to Appwrite storage.
-
-        Uploads in-memory file data with optional duplicate checking.
-        Does NOT store metadata - use upload_file_from_bytes_with_metadata.
-
-        Args:
-            bucket_id: Target storage bucket ID.
-            file_bytes: Raw file content as bytes.
-            filename: Name to give the file in storage.
-            file_id: Optional custom file ID. Auto-generated if not provided.
-            permissions: Optional list of Appwrite permission strings.
-            check_duplicates: Whether to check for existing files by hash/name.
-            overwrite: If True and duplicate found, delete and re-upload.
-
-        Returns:
-            OperationResult with file data on success.
-
-        Example:
-            >>> import pandas as pd
-            >>> df = pd.DataFrame({"col": [1, 2, 3]})
-            >>> parquet_bytes = df.to_parquet()
-            >>> result = manager.upload_file_from_bytes(
-            ...     bucket_id="my_bucket",
-            ...     file_bytes=parquet_bytes,
-            ...     filename="data.parquet"
-            ... )
-        """
-        try:
-            file_hash = None
-            
-            if check_duplicates:
-                file_hash = self._calculate_file_hash(file_bytes=file_bytes)
-                duplicate_check = self._file_exists_by_hash(bucket_id, file_hash, filename)
-                
-                if duplicate_check.success:
-                    existing_file = duplicate_check.data
-                    
-                    if overwrite:
-                        delete_result = self.delete_file(bucket_id, existing_file["$id"])
-                        if not delete_result.success:
-                            return delete_result
-                    else:
-                        return OperationResult(
-                            success=True,
-                            data=existing_file,
-                            code="EXISTS"
-                        )
-            
-            file_id = file_id or ID.unique()
-            permissions = permissions or []
-            
-            input_file = InputFile.from_bytes(file_bytes, filename=filename)
-            result = self.storage.create_file(
-                bucket_id=bucket_id,
-                file_id=file_id,
-                file=input_file,
-                permissions=permissions
-            )
-            
-            return OperationResult(
-                success=True,
-                data=result,
-                code="CREATED"
-            )
-        
-        except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=f"Upload from bytes failed: {e.message}",
-                code=e.type
             )
 
     def upload_file_with_metadata(
@@ -2322,205 +2175,6 @@ class AppWriteFileModule:
             },
             code="UPLOAD_SUCCESS"
         )
-
-    def upload_file_from_bytes_with_metadata(
-        self,
-        bucket_id: str,
-        file_bytes: bytes,
-        filename: str,
-        metadata: Dict[str, Any],
-        file_id: str = None,
-        permissions: List[str] = None,
-        collection_name: str = None,
-        collection_id: str = None
-    ) -> OperationResult:
-        """Upload file bytes and store metadata in the database.
-
-        Same as upload_file_with_metadata but accepts raw bytes instead
-        of a file path. Useful for uploading in-memory data.
-
-        Args:
-            bucket_id: Target storage bucket ID.
-            file_bytes: Raw file content as bytes.
-            filename: Name to give the file in storage.
-            metadata: Custom metadata dict to store with the file.
-            file_id: Optional custom file ID.
-            permissions: Optional Appwrite permission strings.
-            collection_name: Metadata collection name. Defaults to config.
-            collection_id: Metadata collection ID. Defaults to config.
-
-        Returns:
-            OperationResult with:
-                - success=True, code='CREATED_WITH_METADATA' on new upload
-                - success=True, code='EXISTS_METADATA_UPDATED' if metadata updated
-                - success=False with error on failure
-
-        Example:
-            >>> import pandas as pd
-            >>> df = pd.DataFrame({"predictions": [0.1, 0.5, 0.9]})
-            >>> result = manager.upload_file_from_bytes_with_metadata(
-            ...     bucket_id="forecasts",
-            ...     file_bytes=df.to_parquet(),
-            ...     filename="predictions.parquet",
-            ...     metadata={"model": "test", "loa": "pgm"}
-            ... )
-        """
-        # Use defaults from config if not provided
-        if collection_name is None:
-            collection_name = self.config.collection_name
-        if collection_id is None:
-            collection_id = self.config.collection_id
-        
-        # Calculate file hash for metadata
-        file_hash = self._calculate_file_hash(file_bytes=file_bytes)
-        
-        # Check if file already exists by hash
-        existing_metadata = self.metadata_manager.check_file_exists_by_hash(
-            file_hash, collection_name, collection_id, self.config.database_id,
-            # #551: ask for the document that matches this NAME, not whichever row
-            # the store returns first. A hash is not unique in this collection.
-            filename=filename,
-        )
-
-        # C-232, at the two sites its original fix did not cover. A lookup that FAILED
-        # is not evidence that no duplicate exists, and the branches below only ask
-        # whether it SUCCEEDED with a particular code — so a failure fell through to an
-        # unconditional upload with duplicate-checking effectively off. Until #473 the
-        # only thing preventing that was an AttributeError from a dead branch inside the
-        # lookup; removing that branch without this guard would have turned a loud crash
-        # into a silent second copy.
-        if not existing_metadata.success and existing_metadata.code != "NOT_FOUND":
-            return OperationResult(
-                success=False,
-                error=(
-                    f"Could not determine whether a duplicate exists: "
-                    f"{existing_metadata.error}"
-                ),
-                code=existing_metadata.code,
-            )
-        
-        # Use same logic as upload_file_with_metadata for consistency
-        should_update_metadata_only = (
-            existing_metadata.success
-            and not file_id
-            and self.config.allow_metadata_only_updates
-            # #551: a hash match under a different name is a different artefact. Skipping
-            # it reports success for a name that was never written, and every consumer of
-            # this store resolves by name.
-            and _dedup_target_is_the_same_artefact(existing_metadata.data, filename)
-        )
-        
-        if should_update_metadata_only:
-            logger.info(f"File with hash {file_hash} already exists, updating metadata only")
-            
-            existing_file_id = existing_metadata.data.get("fileId")
-            
-            # Containers must already exist — provisioning is deliberate (#331).
-            self._require_containers(bucket_id, collection_id)
-
-
-            # Update the metadata
-            metadata_update = metadata.copy()
-            metadata_update["file_hash"] = file_hash
-            metadata_update["filename"] = filename
-            metadata_update["uploaded_at"] = datetime.now().isoformat()
-            
-            update_result = self.metadata_manager.update_file_metadata(
-                file_id=existing_file_id,
-                metadata_updates=metadata_update,
-                collection_name=collection_name,
-                collection_id=collection_id,
-                database_id=self.config.database_id
-            )
-            
-            if update_result.success:
-                # Get the full file info to return
-                file_info = self.get_file(bucket_id, existing_file_id)
-                return OperationResult(
-                    success=True,
-                    data={
-                        **(file_info.data if file_info.success else {}),
-                        "metadata": update_result.data,
-                        "metadata_action": "UPDATED"
-                    },
-                    code="EXISTS_METADATA_UPDATED"
-                )
-            else:
-                return OperationResult(
-                    success=False,
-                    error=f"Failed to update metadata: {update_result.error}",
-                    code="METADATA_UPDATE_FAILED"
-                )
-        
-        # Ensure metadata infrastructure exists
-        self._require_containers(bucket_id, collection_id)
-
-        # Add file_hash to metadata
-        metadata["file_hash"] = file_hash
-        
-        # Upload file (this will handle duplicates based on check_duplicates parameter)
-        upload_result = self.upload_file_from_bytes(
-            bucket_id, 
-            file_bytes, 
-            filename, 
-            file_id, 
-            permissions, 
-            check_duplicates=True,  # Let the base method handle duplicates
-            overwrite=False  # Don't overwrite by default in metadata flow
-        )
-        
-        if not upload_result.success:
-            return upload_result
-        
-        file_id = upload_result.data["$id"]
-        database_id = self.config.database_id
-        coll_id = collection_id or self.config.collection_id
-        
-        # Create and store metadata
-        try:
-            metadata_document = self._build_metadata_document(
-                file_id, bucket_id, filename, {"data": upload_result.data}, metadata, file_hash
-            )
-            
-            metadata_result = self._store_metadata_document(
-                database_id, coll_id, file_id, metadata_document
-            )
-            
-            if metadata_result.success:
-                upload_result.data["metadata"] = metadata_result.data
-                upload_result.data["metadata_action"] = metadata_result.code
-            
-            return OperationResult(
-                success=True,
-                data=upload_result.data,
-                code="CREATED_WITH_METADATA"
-            )
-        
-        except AppwriteException as e:
-            logger.error(f"Metadata handling failed: {e.message}")
-            # Rollback: delete the uploaded file if metadata fails. `delete_file`
-            # reports failure by RETURN VALUE, so the `except` below never sees one —
-            # inspect the result, or a failed rollback leaves an orphaned file in the
-            # bucket and says nothing (the fourth route to the state the
-            # `modules/appwrite/audit/` package exists to detect; register C-227's
-            # disease at this site).
-            try:
-                rollback = self.delete_file(bucket_id, file_id)
-                if not rollback.success:
-                    logger.error(
-                        "Rollback FAILED: file %s remains in bucket '%s' with no "
-                        "metadata document (code=%s, %s). Run `python -m "
-                        "views_pipeline_core.modules.appwrite.audit` to confirm.",
-                        file_id, bucket_id, rollback.code, rollback.error,
-                    )
-            except Exception as delete_error:
-                logger.error(f"Failed to rollback file upload after metadata error: {delete_error}")
-
-            return OperationResult(
-                success=False,
-                error=f"Metadata handling failed: {e.message}",
-                code="METADATA_ERROR"
-            )
 
     def download_file(
         self,
@@ -2828,82 +2482,6 @@ class AppWriteFileModule:
                 code=e.type
             )
 
-    def list_buckets(
-        self,
-        search: str = None,
-        limit: int = DEFAULT_PAGE_LIMIT,
-        offset: int = 0
-    ) -> OperationResult:
-        """List storage buckets with optional search.
-
-        Args:
-            search: Optional search string to filter buckets by name.
-            limit: Maximum number of buckets to return. Defaults to 100.
-            offset: Number of buckets to skip for pagination.
-
-        Returns:
-            OperationResult with data containing:
-                - 'buckets': List of bucket objects
-                - 'total': Total count of matching buckets
-
-        Example:
-            >>> result = manager.list_buckets(search="forecast")
-            >>> for bucket in result.data['buckets']:
-            ...     print(f"{bucket['name']}: {bucket['$id']}")
-        """
-        try:
-            queries = []
-            if search:
-                queries.append(Query.search("name", search))
-            queries.extend([Query.limit(limit), Query.offset(offset)])
-            
-            result = self.storage.list_buckets(queries)
-            return OperationResult(
-                success=True,
-                data={
-                    "buckets": result.get("buckets", []),
-                    "total": result.get("total", 0)
-                }
-            )
-        
-        except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=f"List buckets failed: {e.message}",
-                code=e.type
-            )
-
-
-
-    def get_user_preferences(self, user_id: str) -> OperationResult:
-        """Get a user's preferences from Appwrite. Requires API-key authentication.
-
-        `user_id` became required when session auth was deleted (#344): it was optional
-        only because a session could supply the current user implicitly. There is no
-        implicit user any more, so a caller that omits it is asking a question this
-        method cannot answer.
-
-        Args:
-            user_id: The user whose preferences to read.
-
-        Returns:
-            OperationResult with the preferences, code='API_KEY'.
-        """
-        try:
-            user_prefs = self.users.get_prefs(user_id)
-            return OperationResult(
-                success=True,
-                data=user_prefs,
-                code="API_KEY"
-            )
-
-        except AppwriteException as e:
-            return OperationResult(
-                success=False,
-                error=e.message,
-                code=e.type
-            )
-
     def clear_cache(
         self,
         bucket_id: str = None,
@@ -2943,47 +2521,3 @@ class AppWriteFileModule:
             >>> print(f"Cache: {stats['total_files']} files, {stats['total_size_mb']}MB")
         """
         return self.cache_manager.get_stats()
-
-    def debug_collection_attributes(
-        self,
-        collection_id: str = None,
-        database_id: str = None
-    ) -> OperationResult:
-        """Debug helper to list all attributes in a metadata collection.
-
-        Useful for troubleshooting schema issues or verifying attribute creation.
-
-        Args:
-            collection_id: Collection to inspect. Defaults to config.collection_id.
-            database_id: Database containing collection. Defaults to config.database_id.
-
-        Returns:
-            OperationResult with list of attributes on success.
-
-        Example:
-            >>> result = manager.debug_collection_attributes()
-            >>> # Attributes are also logged at INFO level
-        """
-        db_id = database_id or self.config.database_id
-        coll_id = collection_id or self.config.collection_id
-        
-        if not db_id or not coll_id:
-            return OperationResult(
-                success=False,
-                error="Database ID and collection ID must be provided in config or as parameters",
-                code="MISSING_CONFIG"
-            )
-        try:
-            attributes = self.tables_db.list_columns(db_id, coll_id)
-            logger.info("Existing columns:")
-            for attr in attributes["columns"]:
-                logger.info(f"  - {attr['key']} ({attr['type']})")
-            return OperationResult(success=True, data=attributes)
-        
-        except AppwriteException as e:
-            logger.error(f"Error listing attributes: {e.message}")
-            return OperationResult(
-                success=False,
-                error=e.message,
-                code=e.type
-            )

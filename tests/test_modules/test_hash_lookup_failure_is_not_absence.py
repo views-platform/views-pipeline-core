@@ -4,7 +4,7 @@ Run: `conda run -n views_pipeline pytest tests/test_modules/test_hash_lookup_fai
 
 ## What this is about
 
-`check_file_exists_by_hash` has three callers. Until #473 only one of them checked whether
+`check_file_exists_by_hash` had three callers (two since #635 removed the bytes upload). Until #473 only one of them checked whether
 the lookup had actually succeeded:
 
 | caller | before #473 |
@@ -87,8 +87,6 @@ def manager(config):
         "views_pipeline_core.modules.appwrite.file.Storage"
     ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
         "views_pipeline_core.modules.appwrite.file.TablesDB"
-    ), patch(
-        "views_pipeline_core.modules.appwrite.file.Users"
     ):
         yield AppWriteFileModule(config)
 
@@ -165,24 +163,6 @@ def test_upload_file_with_metadata_refuses_when_the_lookup_failed(manager, tmp_p
     assert "duplicate" in (result.error or "").lower(), (
         f"expected the C-232 wording naming an undetermined duplicate; got {result.error!r}"
     )
-    manager.storage.create_file.assert_not_called()
-
-
-def test_upload_from_bytes_with_metadata_refuses_when_the_lookup_failed(manager):
-    """The same, on the bytes path. It had the weaker check of the two — it read
-    `.success` alone, with no code check at all."""
-    manager.tables_db.list_rows.side_effect = _raise_schema_error
-    manager.storage = MagicMock()
-
-    result = manager.upload_file_from_bytes_with_metadata(
-        bucket_id="crafd_forecasts",
-        file_bytes=b"payload",
-        filename="shard.parquet",
-        metadata={},
-    )
-
-    assert result.success is False
-    assert "duplicate" in (result.error or "").lower()
     manager.storage.create_file.assert_not_called()
 
 

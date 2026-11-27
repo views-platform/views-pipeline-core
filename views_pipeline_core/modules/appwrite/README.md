@@ -71,9 +71,9 @@ if result.success:
 │  └─────────────────┘  └──────────────────┘  └───────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Appwrite SDK Services                        │
-│  ┌─────────┐  ┌───────────┐  ┌─────────┐  ┌─────────┐         │
-│  │ Storage │  │ Databases │  │ Account │  │  Users  │         │
-│  └─────────┘  └───────────┘  └─────────┘  └─────────┘         │
+│  ┌─────────┐  ┌───────────┐  ┌──────────┐                       │
+│  │ Storage │  │ Databases │  │ TablesDB │                       │
+│  └─────────┘  └───────────┘  └──────────┘                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -239,24 +239,6 @@ if result.success:
     print(f"Document ID: {result.data['document_id']}")
 ```
 
-### Upload from Bytes
-
-Upload in-memory data:
-
-```python
-import pandas as pd
-
-df = pd.DataFrame({"col": [1, 2, 3]})
-parquet_bytes = df.to_parquet()
-
-result = file_manager.upload_file_from_bytes_with_metadata(
-    bucket_id="my_bucket",
-    file_bytes=parquet_bytes,
-    filename="data.parquet",
-    metadata={"type": "test"}
-)
-```
-
 ### Download File
 
 Download with caching support:
@@ -389,19 +371,6 @@ result = file_manager.create_bucket(
     antivirus=True,
     create_metadata_db=True  # Auto-create metadata database
 )
-```
-
-### List Buckets
-
-```python
-result = file_manager.list_buckets(
-    search="forecast",  # Optional name search
-    limit=100,
-    offset=0
-)
-
-for bucket in result.data['buckets']:
-    print(f"{bucket['name']}: {bucket['$id']}")
 ```
 
 ### Get Bucket Info
@@ -570,16 +539,6 @@ print(f"Cache: {stats['total_size_mb']}MB")
 ```
 
 ## Debugging
-
-### List Collection Attributes
-
-```python
-result = file_manager.debug_collection_attributes(
-    collection_id="metadata",
-    database_id="file_metadata"
-)
-# Attributes are logged at INFO level
-```
 
 ### Check File Hash
 

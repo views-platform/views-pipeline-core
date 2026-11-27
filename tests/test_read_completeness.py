@@ -86,7 +86,7 @@ Getting this wrong is itself a documented failure (C-256): the sizing in issue #
 **Those figures are from a naive substring sweep, and this guard's own numbers differ
 because its analysis is better** — it recognises a `limit=` keyword and a limit bound to
 a variable before the call, both of which the sweep counted as unbounded. Of the 17
-`list*` calls in the governed directories the guard reports 0 unbounded, 2 allowlisted as
+`list*` calls in the governed directories the guard reports 0 unbounded, 1 allowlisted as (2 until #635)
 bounded-in-reality, and 1 suppressed as a tracked defect; the rest it can see are
 correctly bounded. Two right answers to two different questions — spelled out because the
 history of this particular population is three wrong counts in two days.
@@ -185,20 +185,14 @@ def _result_returning_names() -> Set[str]:
 # ---------------------------------------------------------------------------
 _BOUNDED_BY_REALITY: Dict[Tuple[str, str, str], str] = {
     (
-        "file.py",
-        "AppWriteFileModule.debug_collection_attributes",
-        "list_columns",
-    ): "a debug helper that logs a table's schema; column count is bounded by "
-    "the schema we author, and the result is printed rather than used for a decision",
-    (
         "provisioning.py",
         "AppwriteProvisioner.ensure_attributes",
         "list_attributes",
     ): "same schema bound — the attributes are the ones this function is creating, and "
     "the list is a presence check against a fixed set defined in this repo",
 }
-# An entry for `AppWriteFileModule.list_buckets` was written here and then DELETED: that
-# method extends its `queries` list with `Query.limit(limit)` before the call, so it was
+# An entry for `AppWriteFileModule.list_buckets` (removed in #635) was written here and then DELETED: that
+# method extended its `queries` list with `Query.limit(limit)` before the call, so it was
 # already correct and the guard sees it. Allowlisting correct code is the exact failure
 # mode C-256 records — a check that flags the innocent gets exempted into uselessness —
 # and it was committed here, in the allowlist written to prevent it. Caught only because
@@ -246,11 +240,6 @@ _RECORDED_NOT_SWALLOWED: Dict[Tuple[str, str], str] = {
     ): "returns OperationResult(success=False) carrying the error — converting an "
     "unpredictable substrate failure into a value the caller must inspect is the shape "
     "this guard is FOR, not one it should ban",
-    (
-        "file.py",
-        "AppWriteFileModule.upload_file_from_bytes_with_metadata",
-    ): "logs at error level that a rollback failed. The rollback is already the failure "
-    "path; there is no further action available, and the log is the record",
     (
         "file.py",
         "AppWriteFileModule._setup_cache",

@@ -23,6 +23,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 
 ---
 
+## [Unreleased]
+
+### Removed
+- **Nine Appwrite and datastore methods that nothing on the platform called** (#635), and the
+  unused Appwrite `Users` service handle. On `AppWriteFileModule`: `upload_file_from_bytes`,
+  `upload_file_from_bytes_with_metadata`, `list_buckets`, `debug_collection_attributes`,
+  `get_user_preferences`. On `DatastoreModule`: `upload_predictions` (deprecated; use
+  `upload_data`, same arguments), `update_prediction_metadata`, `delete_prediction`,
+  `list_all_predictions`. Checked against every repository in the organisation; views-faoapi
+  and views-crafdapi confirmed they use their own copies.
+  With them went code only they used: `_build_metadata_document` (closing #587: one
+  metadata document builder remains) and the `file_bytes` argument of the private hash
+  helper. **Not a major:** none of these names is in the public-surface snapshot, and no
+  caller exists in any repository of the organisation; same reasoning as the 3.3.0 removal
+  (#512). Removed without a deprecation cycle, on the maintainer's decision (2026-11-27).
+
 ## [3.6.0] — 2026-11-25
 
 The delivery moves to Appwrite's TablesDB API (epic #599). Needed for the CRAF'd launch: a key
