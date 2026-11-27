@@ -185,12 +185,6 @@ def _result_returning_names() -> Set[str]:
 # ---------------------------------------------------------------------------
 _BOUNDED_BY_REALITY: Dict[Tuple[str, str, str], str] = {
     (
-        "file.py",
-        "AppWriteFileModule.debug_collection_attributes",
-        "list_columns",
-    ): "a debug helper that logs a table's schema; column count is bounded by "
-    "the schema we author, and the result is printed rather than used for a decision",
-    (
         "provisioning.py",
         "AppwriteProvisioner.ensure_attributes",
         "list_attributes",
@@ -246,11 +240,6 @@ _RECORDED_NOT_SWALLOWED: Dict[Tuple[str, str], str] = {
     ): "returns OperationResult(success=False) carrying the error — converting an "
     "unpredictable substrate failure into a value the caller must inspect is the shape "
     "this guard is FOR, not one it should ban",
-    (
-        "file.py",
-        "AppWriteFileModule.upload_file_from_bytes_with_metadata",
-    ): "logs at error level that a rollback failed. The rollback is already the failure "
-    "path; there is no further action available, and the log is the record",
     (
         "file.py",
         "AppWriteFileModule._setup_cache",

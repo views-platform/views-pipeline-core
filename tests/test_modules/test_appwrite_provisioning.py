@@ -52,8 +52,6 @@ def manager(config):
         "views_pipeline_core.modules.appwrite.file.Storage"
     ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
         "views_pipeline_core.modules.appwrite.file.TablesDB"
-    ), patch(
-        "views_pipeline_core.modules.appwrite.file.Users"
     ):
         yield AppWriteFileModule(config)
 

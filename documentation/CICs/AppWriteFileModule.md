@@ -143,7 +143,8 @@ until usage patterns stabilize.
   update and metadata write log the database and collection ids and the server type
   through `database_failure` (the update at WARNING, because the delivery recovers from
   it). Known gaps, register C-382 to C-384: other upload entrypoints still act on a
-  failed lookup or a failed metadata write (`upload_file`, `upload_file_from_bytes*`).
+  failed lookup (`upload_file` with `check_duplicates=True`). The bytes upload variants
+  were removed in #635: nothing called them.
 - `ValueError` from `_calculate_file_hash()` if neither `file_path` nor `file_bytes`
   is provided.
 - Cache failures (corrupt metadata JSON, missing files) are logged as warnings and
@@ -280,9 +281,6 @@ cover writes.
   it into separate upload, download, and metadata facades.
 - Download-side hash verification is not currently implemented; adding it would
   close the integrity loop.
-- The `upload_file_from_bytes()` and `upload_file_from_bytes_with_metadata()` paths
-  mirror the file-path equivalents; consolidation into a single polymorphic upload
-  method may reduce surface area.
 
 ---
 

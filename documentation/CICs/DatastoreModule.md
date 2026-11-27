@@ -31,9 +31,6 @@ Provides a high-level interface for uploading, downloading, searching, and manag
 - **`download_prediction()`**: Downloads a file by ID with optional caching (`use_cache`, `validate_cache`, `save_path`). The `validate_cache` parameter (default `True`) controls whether cached files are checked against their TTL before reuse. Supports saving to disk (`save_path`) or returning bytes in-memory.
 - **`download_latest_file()`**: Convenience method combining `get_latest_file_id()` and `download_prediction()`. Raises `FileNotFoundError` if no files match.
 - **`get_file_metadata()`**: Retrieves metadata for a single file ID. Returns `OperationResult` with code `"FOUND"` or `"NOT_FOUND"`.
-- **`update_prediction_metadata()`**: Delegates metadata updates to `metadata_manager.update_file_metadata()`.
-- **`delete_prediction()`**: Deletes a file from storage by ID.
-- **`list_all_predictions()`**: Lists all predictions filtered by `model_path.model_name`.
 - **`list_all_predictions_unfiltered()`**: Debug method that lists all predictions without filters.
 
 ---
@@ -50,7 +47,7 @@ Provides a high-level interface for uploading, downloading, searching, and manag
 
 ## 5. Outputs and Side Effects
 
-- All mutating operations (`upload_data`, `delete_prediction`, `update_prediction_metadata`) return `OperationResult` with `.success`, `.data`, `.code`, and `.error` fields.
+- All mutating operations (`upload_data`) return `OperationResult` with `.success`, `.data`, `.code`, and `.error` fields.
 - `get_predictions_by_metadata()` and `list_all_*` methods return `List[Dict[str, Any]]`.
 - `download_prediction()` and `download_latest_file()` return `OperationResult` with either `file_bytes` or `save_path` in `.data`.
 - Side effects: **creates no Appwrite infrastructure.** Writes files to local disk when `save_path` is provided. Logs extensively via `logging.getLogger(__name__)`.
@@ -74,8 +71,6 @@ Provides a high-level interface for uploading, downloading, searching, and manag
 
 - **Delegates to**: `AppWriteFileModule` (file operations), `AppWriteFileModule.metadata_manager` (metadata CRUD), `AppwriteConfig` (connection settings).
 - **Used by**: Model managers and pipeline orchestration code that need to persist and retrieve prediction files.
-- **`FileMetadata`** is a standalone validation container; it is instantiated inside `upload_data()` and `upload_predictions()` and converted to dict via `to_dict()`.
-- `upload_predictions()` is deprecated and delegates entirely to `upload_data()`.
 
 ---
 
@@ -162,7 +157,6 @@ All tests use mocked `AppWriteFileModule` via `unittest.mock.patch` to avoid rea
 
 ## 11. Evolution Notes
 
-- `upload_predictions()` is deprecated; all new code should use `upload_data()`.
 - DataFrame upload support (`NotImplementedError`) is a known gap that may be implemented in a future version.
 - The `download_latest_file()` default `filters={}` uses a mutable default argument, which is a Python anti-pattern but is safe here since it is never mutated.
 
@@ -171,7 +165,6 @@ All tests use mocked `AppWriteFileModule` via `unittest.mock.patch` to avoid rea
 ## 12. Known Deviations
 
 - **`OperationResult` pattern**: Most methods return `OperationResult` instead of raising exceptions on failure. This means callers must explicitly check `.success` -- silent failure is possible if callers ignore the return value.
-- **`upload_predictions()` deprecation**: Still exists and is tested. Delegates entirely to `upload_data()` with a `logger.warning()`.
 - **Mutable default argument**: `download_latest_file(filters={})` uses a mutable default dict. Safe in practice but flagged by linters.
 
 ---

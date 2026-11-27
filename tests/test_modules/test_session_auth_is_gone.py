@@ -121,18 +121,15 @@ def test_the_api_key_path_is_untouched():
     assert isinstance(AuthFactory.create_auth(AuthMethod.API_KEY), ApiKeyAuth)
 
 
-def test_get_user_preferences_survives_on_the_api_key_path():
-    """Only the SESSION BRANCH of this method dies.
+def test_get_current_user_is_gone():
+    """`get_current_user` had no non-session path, so it went with session auth.
 
-    Its `else` branch calls `self.users.get_prefs(user_id)` under API-key auth and is
-    live — deleting the whole method because it mentioned SessionAuth would have removed
-    working functionality. `get_current_user`, by contrast, had no non-session path at
-    all and is gone entirely.
+    `get_user_preferences` did have a working API-key branch and was kept in August. It
+    was removed in #635 for a different reason: nothing on the platform called it.
     """
     tree = ast.parse(FILE_PY.read_text())
     names = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
 
-    assert "get_user_preferences" in names
     assert "get_current_user" not in names, (
         "get_current_user returned AUTH_METHOD_ERROR for every non-session caller, so "
         "with session auth gone it can only ever fail"

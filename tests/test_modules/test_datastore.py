@@ -274,7 +274,7 @@ class TestPredictionStoreManager:
             code="CREATED"
         )
         
-        result = prediction_store.upload_predictions(
+        result = prediction_store.upload_data(
             file=test_file,
             filename="test.parquet",
             loa="country",
@@ -308,7 +308,7 @@ class TestPredictionStoreManager:
             code="CREATED"
         )
         
-        result = prediction_store.upload_predictions(
+        result = prediction_store.upload_data(
             file=str(test_file),
             filename="test.parquet",
             loa="country",
@@ -325,7 +325,7 @@ class TestPredictionStoreManager:
         df = pd.DataFrame({"col": [1, 2, 3]})
         
         with pytest.raises(NotImplementedError, match="Uploading a DataFrame directly is not implemented"):
-            prediction_store.upload_predictions(
+            prediction_store.upload_data(
                 file=df,
                 filename="test.parquet",
                 loa="country",
@@ -338,7 +338,7 @@ class TestPredictionStoreManager:
     def test_upload_predictions_invalid_file_type(self, prediction_store):
         """Test that invalid file type raises TypeError"""
         with pytest.raises(TypeError, match="file must be a Path, str, or pd.DataFrame"):
-            prediction_store.upload_predictions(
+            prediction_store.upload_data(
                 file=123,
                 filename="test.parquet",
                 loa="country",
@@ -365,7 +365,7 @@ class TestPredictionStoreManager:
             code="storage_bucket_not_found",
         )
 
-        result = prediction_store.upload_predictions(
+        result = prediction_store.upload_data(
             file=test_file,
             filename="test.parquet",
             loa="country",
@@ -395,7 +395,7 @@ class TestPredictionStoreManager:
         )
 
         with caplog.at_level(logging.ERROR):
-            prediction_store.upload_predictions(
+            prediction_store.upload_data(
                 file=test_file,
                 filename="test.parquet",
                 loa="country",

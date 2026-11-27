@@ -71,8 +71,6 @@ def manager(config):
         "views_pipeline_core.modules.appwrite.file.Storage"
     ), patch("views_pipeline_core.modules.appwrite.file.Databases"), patch(
         "views_pipeline_core.modules.appwrite.file.TablesDB"
-    ), patch(
-        "views_pipeline_core.modules.appwrite.file.Users"
     ):
         yield AppWriteFileModule(config)
 
@@ -327,7 +325,7 @@ class TestErrorTypePropagation:
             "views_pipeline_core.modules.appwrite.file.Storage"
         ) as storage, patch(
             "views_pipeline_core.modules.appwrite.file.Databases"
-        ), patch("views_pipeline_core.modules.appwrite.file.Users"):
+        ):
             mgr = AppWriteFileModule(config)
             storage.return_value.get_file.side_effect = AppwriteException(
                 "missing scope", 401, "general_unauthorized_scope"

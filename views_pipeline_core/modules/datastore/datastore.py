@@ -284,52 +284,6 @@ class DatastoreModule:
             self.__appwrite_file_manager_config
         )
 
-    def upload_predictions(
-        self,
-        file: Union[Path, str, pd.DataFrame],
-        filename: str,
-        loa: str,
-        name: Optional[str],
-        type: str,
-        targets: List[str],
-        category: str,
-        description: Optional[str] = None,
-    ) -> OperationResult:
-        """Upload a prediction file with metadata (DEPRECATED).
-
-        .. deprecated::
-            Use :meth:`upload_data` instead. This method is maintained for
-            backward compatibility and simply delegates to upload_data.
-
-        Args:
-            file: Path to the file or DataFrame to upload.
-            filename: Name to give the file in storage.
-            loa: Level of analysis (e.g., 'pgm', 'cm').
-            name: Model name. If None, uses model_path.model_name.
-            type: Type of model (e.g., 'model', 'postprocessor', 'ensemble').
-            targets: List of target variable names.
-            category: Either 'forecast' or 'historical'.
-            description: Optional description of the prediction.
-
-        Returns:
-            OperationResult with success status and uploaded file data.
-
-        Raises:
-            NotImplementedError: If file is a DataFrame (not yet supported).
-            TypeError: If file is not a Path, str, or DataFrame.
-        """
-        logger.warning("upload_predictions is deprecated. Use upload_data instead.")
-        return self.upload_data(
-            file=file,
-            filename=filename,
-            loa=loa,
-            name=name,
-            type=type,
-            targets=targets,
-            category=category,
-            description=description,
-        )
-    
     def upload_data(
         self,
         file: Union[Path, str, pd.DataFrame],
@@ -674,62 +628,6 @@ class DatastoreModule:
                 error=str(e),
                 code="UNKNOWN_ERROR"
             )
-    
-    def update_prediction_metadata(
-        self,
-        file_id: str,
-        metadata_updates: Dict[str, Any]
-    ) -> OperationResult:
-        """
-        Update metadata for a specific prediction file.
-        
-        Args:
-            file_id: The ID of the file to update
-            metadata_updates: Dictionary of metadata fields to update
-            
-        Returns:
-            OperationResult with the update status
-        """
-        return self.__appwrite_file_manager.metadata_manager.update_file_metadata(
-            file_id=file_id,
-            metadata_updates=metadata_updates,
-            collection_name=self.__appwrite_file_manager_config.collection_name,
-            collection_id=self.__appwrite_file_manager_config.collection_id,
-            database_id=self.__appwrite_file_manager_config.database_id,
-        )
-    
-    def delete_prediction(self, file_id: str) -> OperationResult:
-        """
-        Delete a prediction file and its metadata.
-        
-        Args:
-            file_id: The ID of the file to delete
-            
-        Returns:
-            OperationResult with the deletion status
-        """
-        # Delete the file from storage
-        delete_result = self.__appwrite_file_manager.delete_file(
-            bucket_id=self.__appwrite_file_manager_config.bucket_id,
-            file_id=file_id
-        )
-        
-        if not delete_result.success:
-            logger.error(f"Failed to delete file {file_id}: {delete_result.error}")
-        
-        return delete_result
-    
-    def list_all_predictions(
-        self,
-    ) -> List[Dict[str, Any]]:
-        """
-        List all predictions for the current model.
-        
-        Returns:
-            List of prediction metadata documents
-        """
-        filters = {"name": self.model_path.model_name}
-        return self.get_predictions_by_metadata(filters=filters)
     
     # Debug
     def list_all_predictions_unfiltered(self) -> List[Dict[str, Any]]:

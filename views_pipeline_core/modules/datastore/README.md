@@ -236,40 +236,6 @@ if result.success:
     print(f"Targets: {metadata['targets']}")
 ```
 
-### update_prediction_metadata()
-
-Update metadata for an existing file.
-
-```python
-result = datastore.update_prediction_metadata(
-    file_id="abc123",
-    metadata_updates={
-        "description": "Updated description",
-        "validated": True
-    }
-)
-```
-
-### delete_prediction()
-
-Delete a file from storage.
-
-```python
-result = datastore.delete_prediction(file_id="abc123")
-
-if result.success:
-    print("File deleted successfully")
-```
-
-### list_all_predictions()
-
-List all predictions for the current model.
-
-```python
-predictions = datastore.list_all_predictions()
-print(f"Found {len(predictions)} predictions for this model")
-```
-
 ### list_all_predictions_unfiltered()
 
 List all predictions without filters (useful for debugging).
