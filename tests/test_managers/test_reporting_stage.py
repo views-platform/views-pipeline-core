@@ -468,13 +468,17 @@ class TestEvaluationReport:
         mock_template_cls.assert_not_called()
         stage._wandb_module.send_alert.assert_not_called()
 
-    @patch("views_pipeline_core.modules.wandb.get_latest_run")
+    @patch("wandb.Api")
     @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
     @patch("views_reporting.sources.MetricFrameFileSource")
     def test_no_wandb_scrape_on_eval_path(
-        self, mock_source_cls, mock_template_cls, mock_get_run,
+        self, mock_source_cls, mock_template_cls, mock_wandb_api,
     ):
-        """The render-time get_latest_run scrape is retired (C-48/C-110)."""
+        """Rendering the evaluation report asks wandb nothing (C-48/C-110).
+
+        Until #632 this patched the `get_latest_run` helper. That helper is gone, so the
+        check is now on the wandb API itself: a render-time lookup under any name fails here.
+        """
         stage = _make_stage()
         ctx = _make_context()
         mock_source_cls.return_value.metric_frame.return_value = MagicMock()
@@ -482,7 +486,7 @@ class TestEvaluationReport:
 
         stage.generate_evaluation_report(ctx)
 
-        mock_get_run.assert_not_called()
+        mock_wandb_api.assert_not_called()
 
     @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
     @patch("views_reporting.sources.MetricFrameFileSource")

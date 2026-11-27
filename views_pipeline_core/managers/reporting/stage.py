@@ -124,7 +124,7 @@ class ReportingContext(BaseStageContext):
     reporting-specific fields.
     """
     entity: str  # WandB entity; set at wandb.init() upstream. No stage method reads it now
-    # (the eval path retired get_latest_run); retained for call-site/back-compat.
+    # (the run lookups that took it were removed in #632); retained for call-site/back-compat.
     prediction_format: str = "dataframe"
 
 

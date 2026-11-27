@@ -77,8 +77,8 @@ ingester3 = "=2.1.1"
 # Widened 2026-09-18 after MEASURING, not reading: the full suite and an offline end-to-end
 # WandBModule run (init, define_metric, scalars, tables, save, image, summary._as_dict,
 # alert, artifact, finish) pass on 0.18.7 (the conda dev env) and on 0.30.0 (fresh venv). The
-# `get_latest_run` project-not-found text (C-179) is unchanged between the two (read from
-# the SDK source, not a live call). A sweep cannot run offline, so that path is covered only
+# helper `get_latest_run`, which matched on wandb's project-not-found text, was removed in
+# #632. A sweep cannot run offline, so that path is covered only
 # by the guard: tests/test_wandb_names_exist_on_the_installed_wandb.py derives from the
 # source every `wandb.*` name the package evaluates and every call on one, resolves the
 # names on the installed wandb and binds the calls against its signatures — the next wandb

@@ -26,6 +26,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 ## [Unreleased]
 
 ### Removed
+- **Eight wandb helper functions that nothing called** (#632), from
+  `views_pipeline_core.modules.wandb`: `add_wandb_metrics`, `wandb_alert`,
+  `timestamp_to_date`, `format_evaluation_dict`, `format_metadata_dict`, `get_latest_run`,
+  `get_run_by_timestamp` and the private `_fetch_qualifying_runs`. `WandBModule` has its own
+  alert and metric methods; the run lookups were for a report path that now reads the saved
+  evaluation frame. `log_wandb_log_dict` and the four functions it uses stay: the evaluation
+  step calls them. Not in the public-surface snapshot; no caller in the organisation.
 - **Nine Appwrite and datastore methods that nothing on the platform called** (#635), and the
   unused Appwrite `Users` service handle. On `AppWriteFileModule`: `upload_file_from_bytes`,
   `upload_file_from_bytes_with_metadata`, `list_buckets`, `debug_collection_attributes`,

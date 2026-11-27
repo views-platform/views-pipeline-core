@@ -205,7 +205,7 @@ Specialized subclass configuring the full forecasting lifecycle: data ingestion,
 - Uses `ForecastReportTemplate` for HTML generation.
 
 ### Evaluation Reporting
-- Resolves latest run (`get_latest_run`) for model and run type.
+- Reads the persisted evaluation frame for the model and run type (no lookup in wandb).
 - Builds per-target evaluation report using `EvaluationReportTemplate`.
 - Saves report locally and triggers WandB alert.
 
