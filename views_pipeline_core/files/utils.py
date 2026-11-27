@@ -265,25 +265,6 @@ def save_dataframe(dataframe: pd.DataFrame, save_path: Union[str, Path]):
         logger.exception(f"Error saving the DataFrame to {save_path}: {e}")
         raise
 
-def save_arrow_parquet(table, path: Union[str, Path]) -> None:
-    """
-    Write a pa.Table to parquet without Python object intermediary (Fix A).
-
-    Unlike save_dataframe(), this function accepts a pyarrow Table directly,
-    preserving the Arrow-native List<float32> column type and avoiding the
-    Python-list materialisation that occurs in pd.DataFrame.to_parquet().
-
-    Args:
-        table: pyarrow.Table to write.
-        path:  Destination path (parent directories are created if needed).
-    """
-    import pyarrow.parquet as pq
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, path)
-
-
 def read_dataframe(file_path: Union[str, Path]) -> pd.DataFrame:
     """
     Reads a pandas DataFrame from a specified file path in various formats.
@@ -379,23 +360,3 @@ def generate_output_file_name(
         parts.append(str(sequence_number).zfill(2))
     return "_".join(parts) + file_extension
     
-
-def generate_evaluation_report_name(
-    run_type: str,
-    target_identifier: str,
-    timestamp: str,
-    file_extension: str,
-) -> str:
-    """
-    Generates an evaluation report file name.
-
-    Args:
-        run_type (str): The type of run (e.g., calibration, validation).
-        target_identifier (str): The target variable identifier (e.g., ged_sb_dep, water_scarcity).
-        timestamp (str): The timestamp of the generated file.
-        file_extension (str): The file extension (e.g., .parquet, .pkl).
-
-    Returns:
-        str: The generated evaluation report file name.
-    """
-    return f"eval_{run_type}_{target_identifier}_{timestamp}{file_extension}"
