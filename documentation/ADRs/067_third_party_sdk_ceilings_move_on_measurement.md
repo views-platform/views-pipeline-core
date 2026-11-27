@@ -38,7 +38,8 @@ installed — every time the suite runs, not once at the bump.** Concretely, for
    `WandBModule` run (init, define_metric, scalars, tables, save, image, `summary._as_dict`,
    alert, artifact, finish) on 0.18.7 in the conda dev env and on 0.30.0 in a fresh venv.
    The one text this package matches on (`get_latest_run`'s project-not-found `ValueError`,
-   C-179) was read from the SDK source at both versions and is unchanged. What was *not*
+   C-179) was read from the SDK source at both versions and is unchanged. *(Since #632, 2026-11-27,
+   `get_latest_run` no longer exists, and the package matches on no wandb message text.)* What was *not*
    measured, stated: a sweep (`wandb.sweep`/`wandb.agent`) needs a server and cannot run
    offline; the suite mocks `_execute_model_sweeping` out before it reaches wandb.
 3. **The guard derives its scope.** The test walks every module's AST for attribute chains
