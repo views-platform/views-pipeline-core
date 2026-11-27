@@ -262,8 +262,8 @@ df, alerts = loader.get_data(
   (ADR-045).
 - Drift detection is viewser-only. A source-agnostic drift detection interface
   should be defined when views-datafactory supports equivalent functionality (C-52).
-- The `DataFetchStrategy` protocol in `types.py` exists but is not yet wired into
-  `_fetch_data()`. Future work (C-48) should make the dispatch protocol-based.
+- `_fetch_data()` dispatches on the configured source by name. A `DataFetchStrategy`
+  protocol for this was declared in `types.py` and never wired in; it was removed in #633.
 
 ---
 

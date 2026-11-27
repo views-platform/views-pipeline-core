@@ -26,6 +26,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
 ## [Unreleased]
 
 ### Removed
+- **Three unused pieces** (#633): the `DataFetchStrategy` protocol in `types.py`, which was
+  declared and never wired in, and the file helpers `save_arrow_parquet` and
+  `generate_evaluation_report_name`. No caller in the organisation; not in the
+  public-surface snapshot.
 - **Eight wandb helper functions that nothing called** (#632), from
   `views_pipeline_core.modules.wandb`: `add_wandb_metrics`, `wandb_alert`,
   `timestamp_to_date`, `format_evaluation_dict`, `format_metadata_dict`, `get_latest_run`,

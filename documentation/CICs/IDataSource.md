@@ -85,10 +85,9 @@ here promises that, and nothing implements it.
 - **Implemented by:** `ViewsDataLoader` (`modules/dataloaders/dataloaders.py`).
 - **Consumed by:** engine repositories. `ForecastingModelManager` constructs the loader and
   passes it on; it does not require engines to import the concrete class.
-- **Sits above:** `DataFetchStrategy` (`types.py`), which is the *source-side* seam —
-  viewser vs datafactory. `IDataSource` is the *consumer-side* seam. They are different
-  boundaries and neither replaces the other, which is why `IDataSource` did not already
-  exist despite `DataFetchStrategy` being present.
+- **The consumer-side seam.** The *source-side* choice (viewser vs datafactory) is made
+  inside `ViewsDataLoader._fetch_data()`. A `DataFetchStrategy` protocol was once declared
+  for that side and never wired in; it was removed in #633.
 - **Kept pandas-free.** `types.py` is asserted to import without pandas
   (`tests/test_import_purity.py`), so `get_data`'s return is annotated `Any` rather than
   `tuple[pd.DataFrame, list]`. That is a deliberate trade, recorded in the Protocol's
