@@ -468,21 +468,13 @@ class TestEvaluationReport:
         mock_template_cls.assert_not_called()
         stage._wandb_module.send_alert.assert_not_called()
 
-    @patch("views_pipeline_core.modules.wandb.get_latest_run")
-    @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
-    @patch("views_reporting.sources.MetricFrameFileSource")
-    def test_no_wandb_scrape_on_eval_path(
-        self, mock_source_cls, mock_template_cls, mock_get_run,
-    ):
-        """The render-time get_latest_run scrape is retired (C-48/C-110)."""
-        stage = _make_stage()
-        ctx = _make_context()
-        mock_source_cls.return_value.metric_frame.return_value = MagicMock()
-        mock_template_cls.return_value.generate.return_value = Path("/tmp/eval_report.html")
+    def test_no_wandb_scrape_exists_to_call(self):
+        """The render-time get_latest_run scrape is retired (C-48/C-110), and since #632
+        the helper itself is gone, so no path can reach it."""
+        import views_pipeline_core.modules.wandb as wandb_module
 
-        stage.generate_evaluation_report(ctx)
-
-        mock_get_run.assert_not_called()
+        assert not hasattr(wandb_module, "get_latest_run")
+        assert not hasattr(wandb_module, "get_run_by_timestamp")
 
     @patch("views_reporting.templates.reports.evaluation.EvaluationReportTemplate")
     @patch("views_reporting.sources.MetricFrameFileSource")
