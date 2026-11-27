@@ -69,8 +69,9 @@ Provides a high-level interface for uploading, downloading, searching, and manag
 
 ## 7. Boundaries and Interactions
 
-- **Delegates to**: `AppWriteFileModule` (file operations), `AppWriteFileModule.metadata_manager` (metadata CRUD), `AppwriteConfig` (connection settings).
+- **Delegates to**: `AppWriteFileModule` (file operations), `AppWriteFileModule.metadata_manager` (metadata search), `AppwriteConfig` (connection settings).
 - **Used by**: Model managers and pipeline orchestration code that need to persist and retrieve prediction files.
+- **`FileMetadata`** is a standalone validation container; it is instantiated inside `upload_data()` and converted to dict via `to_dict()`.
 
 ---
 

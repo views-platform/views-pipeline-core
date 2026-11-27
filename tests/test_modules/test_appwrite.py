@@ -342,14 +342,6 @@ class TestAppWriteFileManager:
         
         assert file_hash == expected_hash
 
-    def test_calculate_file_hash_from_bytes(self, file_manager):
-        test_content = b"test content"
-        
-        file_hash = file_manager._calculate_file_hash(file_bytes=test_content)
-        expected_hash = hashlib.sha256(test_content).hexdigest()
-        
-        assert file_hash == expected_hash
-
     def test_upload_file_success(self, file_manager, tmp_path):
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")

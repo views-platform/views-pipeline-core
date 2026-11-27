@@ -22,8 +22,8 @@ REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 FILE_PY = REPO / "views_pipeline_core" / "modules" / "appwrite" / "file.py"
 PKG_INIT = REPO / "views_pipeline_core" / "modules" / "appwrite" / "__init__.py"
 
-# The three operations that leave with SessionAuth. `users.get_prefs` is deliberately
-# NOT here: it is reached on the API-key path and survives.
+# The three operations that left with SessionAuth. `users.get_prefs` survived that
+# removal on its API-key path and left in #635, when nothing was found to call it.
 _RETIRED_OPERATIONS = (
     "create_email_password_session",
     "account.get()",
@@ -134,6 +134,22 @@ def test_get_current_user_is_gone():
         "get_current_user returned AUTH_METHOD_ERROR for every non-session caller, so "
         "with session auth gone it can only ever fail"
     )
+
+
+def test_the_users_service_and_the_uncalled_store_methods_stay_gone():
+    """#635 removed these because nothing on the platform called them. A re-import or a
+    restored method would bring back vendor surface with no user."""
+    source = FILE_PY.read_text()
+    tree = ast.parse(source)
+    names = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    gone = {
+        "get_user_preferences", "list_buckets", "debug_collection_attributes",
+        "upload_file_from_bytes", "upload_file_from_bytes_with_metadata",
+        "_build_metadata_document",
+    }
+    assert not (names & gone), sorted(names & gone)
+    assert "appwrite.services.users" not in source
+    assert "self.users" not in source
 
 
 def test_email_password_credentials_have_no_supported_auth_mode():

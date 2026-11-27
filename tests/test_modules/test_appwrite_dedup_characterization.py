@@ -659,7 +659,7 @@ class TestAHashWithSeveralDocuments:
         assert any(str(_HASH_MATCH_PAGE_SIZE) in str(q) for q in queries), queries
 
     def test_existence_only_callers_keep_the_old_contract(self, manager):
-        """Two of the three callers ask only whether a hash is known; they must not
+        """A caller that passes no filename asks only whether a hash is known; it must not
         start getting NOT_FOUND because they passed no name."""
         docs = [{"$id": "doc0", "fileId": "file0", "file_hash": "same",
                  "filename": "anything.parquet"}]

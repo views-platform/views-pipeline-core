@@ -83,7 +83,7 @@ until usage patterns stabilize.
   derives, per class, that no `self.X()` resolves to nothing, replacing a hand-listed
   `not hasattr` check that had omitted the very method involved.
 - Guarantees that a duplicate lookup which **failed** is never treated as a duplicate
-  lookup that **found nothing**. All three callers of `check_file_exists_by_hash` now
+  lookup that **found nothing**. Every caller of `check_file_exists_by_hash` (two since #635; three before) now
   refuse to proceed on an undetermined result; until #473 only one did, and the other two
   fell through to an upload with duplicate-checking effectively disabled (C-232's
   pathology, at the two sites its original fix did not reach).
@@ -142,11 +142,10 @@ until usage patterns stabilize.
   never read as absence by the hash lookup. The metadata search, hash lookup, metadata
   update and metadata write log the database and collection ids and the server type
   through `database_failure` (the update at WARNING, because the delivery recovers from
-  it). Known gaps, register C-382 to C-384: other upload entrypoints still act on a
-  failed lookup (`upload_file` with `check_duplicates=True`). The bytes upload variants
-  were removed in #635: nothing called them.
-- `ValueError` from `_calculate_file_hash()` if neither `file_path` nor `file_bytes`
-  is provided.
+  it). Known gaps, tracked in #620: a failed metadata-only update on the delivery path
+  falls through to a second upload; a missing bucket raises out of the saver; and
+  `upload_file` with `check_duplicates=True` (no production caller) uploads after a
+  failed lookup. The bytes upload variants were removed in #635: nothing called them.
 - Cache failures (corrupt metadata JSON, missing files) are logged as warnings and
   fall back to fresh downloads; they do **not** raise.
 - Metadata storage failures after a successful upload are returned as
@@ -164,7 +163,7 @@ until usage patterns stabilize.
 ## 7. Boundaries and Interactions
 
 - **Depends on:**
-  - `appwrite` SDK (`Client`, `Storage`, `TablesDB` (delivery), `Databases` (provisioner, audit, wipe tool), `Account`, `Users`, `InputFile`,
+  - `appwrite` SDK (`Client`, `Storage`, `TablesDB` (delivery), `Databases` (provisioner, audit, wipe tool), `InputFile`,
     `Query`, `Permission`, `Role`, `ID`).
   - `AuthFactory` / `AuthManager` hierarchy (internal) for pluggable auth.
   - `CacheManager` (internal) for local TTL cache.

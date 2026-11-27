@@ -33,6 +33,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); this project use
   `upload_data`, same arguments), `update_prediction_metadata`, `delete_prediction`,
   `list_all_predictions`. Checked against every repository in the organisation; views-faoapi
   and views-crafdapi confirmed they use their own copies.
+  With them went code only they used: `_build_metadata_document` (closing #587: one
+  metadata document builder remains) and the `file_bytes` argument of the private hash
+  helper. **Not a major:** none of these names is in the public-surface snapshot, and no
+  caller exists in any repository of the organisation; same reasoning as the 3.3.0 removal
+  (#512). Removed without a deprecation cycle, on the maintainer's decision (2026-11-27).
 
 ## [3.6.0] — 2026-11-25
 

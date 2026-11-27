@@ -4,7 +4,7 @@ Run: `conda run -n views_pipeline pytest tests/test_modules/test_hash_lookup_fai
 
 ## What this is about
 
-`check_file_exists_by_hash` has three callers. Until #473 only one of them checked whether
+`check_file_exists_by_hash` had three callers (two since #635 removed the bytes upload). Until #473 only one of them checked whether
 the lookup had actually succeeded:
 
 | caller | before #473 |

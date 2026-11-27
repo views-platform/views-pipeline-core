@@ -1516,7 +1516,7 @@ class AppWriteFileModule:
         ``update_file_metadata``) deliberately do not call this. They touch one
         container, so a missing one surfaces as a loud Appwrite error with nothing
         half-written behind it — there is no pair to leave inconsistent. Add the
-        precondition here if a third paired write is ever introduced.
+        precondition here if another paired write is ever introduced.
 
         Raises:
             ConfigurationException: naming the missing container and the exact command
@@ -1599,34 +1599,13 @@ class AppWriteFileModule:
             cache_dir.mkdir(exist_ok=True)
             return CacheManager(cache_dir, timedelta(hours=DEFAULT_CACHE_TTL_HOURS))
 
-    def _calculate_file_hash(self, file_path: str = None, file_bytes: bytes = None) -> str:
-        """Calculate SHA-256 hash of a file for deduplication.
-
-        Args:
-            file_path: Path to file on disk. Reads in 4KB chunks.
-            file_bytes: Raw file bytes. Use for in-memory data.
-
-        Returns:
-            Hexadecimal SHA-256 hash string.
-
-        Raises:
-            ValueError: If neither file_path nor file_bytes is provided.
-
-        Example:
-            >>> hash1 = manager._calculate_file_hash(file_path="/data/file.parquet")
-            >>> hash2 = manager._calculate_file_hash(file_bytes=b"file content")
-        """
+    def _calculate_file_hash(self, file_path: str) -> str:
+        """SHA-256 of a file on disk, read in 4 KB chunks, as a hex string."""
         sha256_hash = hashlib.sha256()
-        
-        if file_path:
-            with open(file_path, "rb") as f:
-                for byte_block in iter(lambda: f.read(4096), b""):
-                    sha256_hash.update(byte_block)
-        elif file_bytes:
-            sha256_hash.update(file_bytes)
-        else:
-            raise ValueError("Either file_path or file_bytes must be provided")
-        
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+
         return sha256_hash.hexdigest()
     
     def _file_exists_by_hash(
@@ -1762,47 +1741,6 @@ class AppWriteFileModule:
                 error=e.message,
                 code=e.type
             )
-
-    def _build_metadata_document(
-        self,
-        file_id: str,
-        bucket_id: str,
-        filename: str,
-        upload_result: Dict[str, Any],
-        metadata: Dict[str, Any],
-        file_hash: str = None
-    ) -> Dict[str, Any]:
-        """Build a metadata document for database storage.
-
-        Combines fixed fields (fileId, bucketId, etc.) with custom metadata
-        to create a complete document for the metadata collection.
-
-        Args:
-            file_id: Appwrite file ID.
-            bucket_id: Storage bucket ID.
-            filename: Original filename.
-            upload_result: Result from file upload containing size info.
-            metadata: Custom metadata fields to include.
-            file_hash: Optional SHA-256 hash of file contents.
-
-        Returns:
-            Dictionary suitable for storing in Appwrite database.
-            None values are filtered out.
-        """
-        base_document = {
-            "fileId": file_id,
-            "bucketId": bucket_id,
-            "filename": filename,
-            "mime_type": metadata.get("mime_type", "application/octet-stream"),
-            "uploaded_at": datetime.now().isoformat(),
-            "file_hash": file_hash,
-            **metadata
-        }
-        
-        if "data" in upload_result and "sizeOriginal" in upload_result["data"]:
-            base_document["file_size"] = upload_result["data"]["sizeOriginal"]
-        
-        return {k: v for k, v in base_document.items() if v is not None}
 
     def _store_metadata_document(
         self,

@@ -261,7 +261,7 @@ class TestPredictionStoreManager:
             assert store._DatastoreModule__appwrite_file_manager_config == mock_config
             assert store._DatastoreModule__appwrite_file_manager == mock_appwrite_manager
 
-    def test_upload_predictions_from_path_success(self, prediction_store, mock_appwrite_manager, tmp_path):
+    def test_upload_data_from_path_success(self, prediction_store, mock_appwrite_manager, tmp_path):
         """Test successful upload from file path"""
         # Create a test file
         test_file = tmp_path / "test.parquet"
@@ -297,7 +297,7 @@ class TestPredictionStoreManager:
         assert call_args[1]["metadata"]["targets"] == ["target1", "target2"]
         assert call_args[1]["metadata"]["category"] == "forecast"
 
-    def test_upload_predictions_from_string_path(self, prediction_store, mock_appwrite_manager, tmp_path):
+    def test_upload_data_from_string_path(self, prediction_store, mock_appwrite_manager, tmp_path):
         """Test upload from string path"""
         test_file = tmp_path / "test.parquet"
         test_file.write_text("test content")
@@ -320,7 +320,7 @@ class TestPredictionStoreManager:
         
         assert result.success
 
-    def test_upload_predictions_dataframe_not_implemented(self, prediction_store):
+    def test_upload_data_dataframe_not_implemented(self, prediction_store):
         """Test that uploading DataFrame raises NotImplementedError"""
         df = pd.DataFrame({"col": [1, 2, 3]})
         
@@ -335,7 +335,7 @@ class TestPredictionStoreManager:
                 category="forecast"
             )
 
-    def test_upload_predictions_invalid_file_type(self, prediction_store):
+    def test_upload_data_invalid_file_type(self, prediction_store):
         """Test that invalid file type raises TypeError"""
         with pytest.raises(TypeError, match="file must be a Path, str, or pd.DataFrame"):
             prediction_store.upload_data(

@@ -747,46 +747,27 @@ class TestABrandNewProjectsFirstDeliveryHasSomewhereToLand:
             f"document after the file has already been uploaded"
         )
 
-    def test_the_declared_schema_covers_both_document_builders(self, manager):
-        """Both, because they disagree — and the named one is not the delivery's.
+    def test_the_declared_schema_covers_the_document_the_delivery_writes(self, manager):
+        """The document is taken from the delivery path by RUNNING it, not by reading it.
 
-        `_build_metadata_document` has exactly one caller,
-        `upload_file_from_bytes_with_metadata`. The path every forecast takes —
-        `DatastoreModule.upload_data` -> `upload_file_with_metadata` — assembles its
-        document INLINE and sets neither `mime_type` nor `file_size`. That divergence is
-        register C-352.
-
-        An earlier version of this test derived its scope from `_build_metadata_document`
-        alone and said in its own docstring that this was "the document the file module
-        actually builds". It was green, and it was pointed at the wrong producer: a key
-        added to the inline dict would have passed it and failed the live write. Seven
-        guards in this repo have now been wrong about their own scope, so the delivery
-        document here is taken from the delivery path by RUNNING it, not by reading it.
+        `DatastoreModule.upload_data` -> `upload_file_with_metadata` assembles its
+        document inline. Until #635 a second builder, `_build_metadata_document`, existed
+        for the bytes upload and disagreed with it (#587); an earlier version of this test
+        checked only that second builder and was green while pointed at the wrong
+        producer. Both the bytes upload and its builder are gone, so one document remains.
         """
         metadata = {
             k: (["pred_ged_sb"] if k == "targets" else "x")
             for k in self._delivery_metadata_keys()
         }
 
-        from_bytes_path = manager._build_metadata_document(
-            file_id="abc",
-            bucket_id="crafd_bucket",
-            filename="pgm_forecast.parquet",
-            upload_result={"data": {"sizeOriginal": 1234}},
-            metadata=dict(metadata),
-            file_hash="deadbeef",
+        document = self._document_the_delivery_actually_writes(manager, metadata)
+
+        missing = set(document) - self._declared_keys()
+        assert not missing, (
+            f"upload_file_with_metadata writes {sorted(missing)}, which no declared "
+            f"attribute covers"
         )
-
-        delivery_path = self._document_the_delivery_actually_writes(manager, metadata)
-
-        for label, document in (
-            ("upload_file_from_bytes_with_metadata", from_bytes_path),
-            ("upload_file_with_metadata (the delivery path)", delivery_path),
-        ):
-            missing = set(document) - self._declared_keys()
-            assert not missing, (
-                f"{label} writes {sorted(missing)}, which no declared attribute covers"
-            )
 
     @staticmethod
     def _document_the_delivery_actually_writes(manager, metadata, tmp=None):

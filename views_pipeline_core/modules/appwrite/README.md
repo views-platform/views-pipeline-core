@@ -71,9 +71,9 @@ if result.success:
 │  └─────────────────┘  └──────────────────┘  └───────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Appwrite SDK Services                        │
-│  ┌─────────┐  ┌───────────┐  ┌─────────┐  ┌─────────┐         │
-│  │ Storage │  │ Databases │  │ Account │  │  Users  │         │
-│  └─────────┘  └───────────┘  └─────────┘  └─────────┘         │
+│  ┌─────────┐  ┌───────────┐  ┌──────────┐                       │
+│  │ Storage │  │ Databases │  │ TablesDB │                       │
+│  └─────────┘  └───────────┘  └──────────┘                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -239,8 +239,6 @@ if result.success:
     print(f"Document ID: {result.data['document_id']}")
 ```
 
-### Upload from Bytes
-
 ### Download File
 
 Download with caching support:
@@ -373,6 +371,171 @@ result = file_manager.create_bucket(
     antivirus=True,
     create_metadata_db=True  # Auto-create metadata database
 )
+```
+
+### Get Bucket Info
+
+```python
+result = file_manager.get_bucket(bucket_id="my_bucket")
+```
+
+## Caching
+
+### How Caching Works
+
+1. **Cache Key**: Generated as `{bucket_id}_{file_id}`
+2. **Storage**: Files stored in `{cache_dir}/{bucket_id}/{filename}`
+3. **Validation**: Checks TTL expiration and remote file timestamps
+4. **Metadata**: Stored in `cache_metadata.json` for persistence
+
+### Cache Validation Results
+
+| Result | Description |
+|--------|-------------|
+| `VALID` | Cache is fresh and usable |
+| `INVALID_TTL` | Cache has expired (exceeded TTL) |
+| `INVALID_TIMESTAMP` | Remote file is newer than cache |
+| `NOT_FOUND` | File not in cache |
+
+### Cache Management
+
+```python
+# Clear all cache
+result = file_manager.clear_cache()
+
+# Clear cache for specific bucket
+result = file_manager.clear_cache(bucket_id="my_bucket")
+
+# Clear old cache entries
+result = file_manager.clear_cache(older_than_hours=48)
+
+print(f"Freed {result.data['deleted_bytes']} bytes")
+
+# Get cache statistics
+stats = file_manager.get_cache_stats()
+print(f"Total: {stats['total_files']} files, {stats['total_size_mb']}MB")
+
+for bucket, info in stats['by_bucket'].items():
+    print(f"  {bucket}: {info['files']} files")
+```
+
+## Dynamic Schema
+
+The module automatically creates database attributes based on metadata structure:
+
+```python
+# First upload with new metadata field
+result = file_manager.upload_file_with_metadata(
+    bucket_id="my_bucket",
+    file_path="/data/file.parquet",
+    filename="file.parquet",
+    metadata={
+        "model": "test",           # Creates string attribute
+        "score": 0.95,             # Creates double attribute
+        "targets": ["a", "b"],     # Creates string array attribute
+        "validated": True          # Creates boolean attribute
+    }
+)
+```
+
+### Supported Attribute Types
+
+| Python Type | Appwrite Type |
+|-------------|---------------|
+| str | string |
+| int | integer |
+| float | double |
+| bool | boolean |
+| datetime/ISO string | datetime |
+| List[str] | string array |
+| List[int] | integer array |
+
+## Error Handling
+
+```python
+from appwrite.exception import AppwriteException
+
+try:
+    result = file_manager.upload_file_with_metadata(...)
+    
+    if result.success:
+        print("Success!")
+    else:
+        if result.code == "storage_bucket_not_found":
+            print("Bucket doesn't exist")
+        elif result.code == "METADATA_ERROR":
+            print("File uploaded but metadata failed")
+        else:
+            print(f"Error: {result.error}")
+            
+except AppwriteException as e:
+    print(f"Appwrite error: {e.message}")
+except ValueError as e:
+    print(f"Configuration error: {e}")
+```
+
+## Example: Complete Workflow
+
+```python
+from views_pipeline_core.modules.appwrite import (
+    AppWriteFileModule,
+    AppwriteConfig,
+    AuthMethod
+)
+import pandas as pd
+
+# Initialize
+config = AppwriteConfig(
+    endpoint="https://fra.cloud.appwrite.io/v1",
+    project_id="views_project",
+    credentials="api_key",
+    bucket_id="forecasts"
+)
+file_manager = AppWriteFileModule(config)
+
+# Create bucket if needed
+bucket = file_manager.get_bucket("forecasts")
+if not bucket.success:
+    file_manager.create_bucket(
+        bucket_id="forecasts",
+        name="Forecasts",
+        maximum_file_size=500 * 1024 * 1024
+    )
+
+# Upload prediction file
+df = pd.read_parquet("/output/predictions.parquet")
+df.to_parquet("/tmp/upload.parquet")
+
+upload = file_manager.upload_file_with_metadata(
+    bucket_id="forecasts",
+    file_path="/tmp/upload.parquet",
+    filename="pgm_forecast_202501.parquet",
+    metadata={
+        "model": "ensemble_v2",
+        "loa": "pgm",
+        "targets": ["pred_ged_sb", "pred_ged_ns"],
+        "category": "forecast"
+    }
+)
+print(f"Uploaded: {upload.data['file_id']}")
+
+# Search for files
+search = file_manager.metadata_manager.search_files_by_metadata(
+    filters={"category": "forecast", "type": "ensemble"}
+)
+print(f"Found {search.data['total']} matching files")
+
+# Download with caching
+download = file_manager.download_file(
+    bucket_id="forecasts",
+    file_id=upload.data['file_id'],
+    save_path="/tmp/downloaded.parquet"
+)
+print(f"Downloaded (from cache: {download.data['from_cache']})")
+
+# Check cache stats
+stats = file_manager.get_cache_stats()
+print(f"Cache: {stats['total_size_mb']}MB")
 ```
 
 ## Debugging
